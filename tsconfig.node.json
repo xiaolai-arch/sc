@@ -19,6 +19,7 @@
     "vitest.config.mts",
     "src/main/**/*",
     "src/preload/**/*",
+    "src/shared/**/*",
     "tests/main/**/*",
     "tests/shared/**/*"
   ]
