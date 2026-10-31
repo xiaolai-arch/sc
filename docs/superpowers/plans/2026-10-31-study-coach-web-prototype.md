@@ -511,7 +511,7 @@ Expected: FAIL，模块不存在。
 
 `ReviewDialog`：
 - 用 Task 1 的 `Dialog`，标题 `晚间复盘`，副标题日期。
-- 三个 textarea，标签精确：`今天完成了什么？`、`卡在哪里？`、`明天想怎么调整？`。
+- 三个 textarea，标签精确：`今天完成了什么？`、`卡在哪里？`、`明天想怎么调整？`。先渲染这三个 textarea，再渲染按钮；Dialog 打开时会把焦点移到第一个可聚焦元素，键盘测试要求它是 `今天完成了什么？`。
 - `保存复盘` primary；`跳过` ghost；`取消` ghost。
 - 保存：`submitReview({ date, answers: { completed, stuck, tomorrow } })`；成功 `onClose()`；失败红色错误。
 - 跳过：`submitReview({ date, answers: { skipped: true, completed: '', stuck: '', tomorrow: '' } })` 后 `onClose()`。
