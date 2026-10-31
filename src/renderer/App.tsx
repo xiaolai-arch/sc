@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { formatLocalDate } from '../shared/date';
 import type { Bootstrap } from '../shared/ipc';
 import { Onboarding } from './onboarding/Onboarding';
+import { SettingsPage } from './settings/SettingsPage';
 import { TodayPage } from './today/TodayPage';
-import { Card } from './ui/Card';
 import { Nav } from './ui/Nav';
 import type { AppView } from './ui/Nav';
 import { PageShell } from './ui/PageShell';
@@ -53,9 +53,12 @@ export function App() {
                 onOpenSettings={() => setView('settings')}
               />
             ) : (
-              <Card>
-                <p className="text-gray-600">设置页即将到来。</p>
-              </Card>
+              <SettingsPage
+                onClose={() => {
+                  setView('today');
+                  void refresh();
+                }}
+              />
             )}
           </main>
         </PageShell>
