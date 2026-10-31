@@ -2,10 +2,14 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import { join } from 'node:path';
 import { createAppContext } from './context';
 import { registerIpcHandlers, serializeError } from './ipc';
+import { createContextScheduler } from './scheduler';
 import { DEFAULT_VAULT_DIRECTORY } from './settings/defaults';
+import { createElectronNotificationSink, createElectronTray } from './tray';
 
-function createWindow(): void {
-  const mainWindow = new BrowserWindow({
+let mainWindow: BrowserWindow | null = null;
+
+function createWindow(): BrowserWindow {
+  const window = new BrowserWindow({
     width: 900,
     height: 680,
     show: false,
@@ -15,15 +19,33 @@ function createWindow(): void {
     }
   });
 
-  mainWindow.on('ready-to-show', () => {
-    mainWindow.show();
+  window.on('ready-to-show', () => {
+    window.show();
+  });
+  window.on('closed', () => {
+    if (mainWindow === window) mainWindow = null;
   });
 
-  if (process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL']);
-  } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'));
+  const rendererUrl = process.env['ELECTRON_RENDERER_URL'];
+  const loading = rendererUrl
+    ? window.loadURL(rendererUrl)
+    : window.loadFile(join(__dirname, '../renderer/index.html'));
+  void loading.catch((error: unknown) => {
+    console.error('Study Coach renderer failed to load:', serializeError(error).message);
+  });
+
+  mainWindow = window;
+  return window;
+}
+
+function showWindow(): void {
+  if (mainWindow === null) {
+    createWindow();
+    return;
   }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
 }
 
 app.whenReady().then(async () => {
@@ -32,12 +54,56 @@ app.whenReady().then(async () => {
     defaultVaultPath: join(app.getPath('documents'), DEFAULT_VAULT_DIRECTORY)
   });
   registerIpcHandlers(context.api, ipcMain);
-
   createWindow();
+
+  let scheduler: ReturnType<typeof createContextScheduler> | null = null;
+  let trayController: { destroy(): void } | null = null;
+
+  try {
+    const notify = await createElectronNotificationSink();
+    scheduler = createContextScheduler({
+      context,
+      notify,
+      onError: (error) => {
+        console.error('Study Coach scheduler error:', serializeError(error).message);
+      }
+    });
+    scheduler.start();
+
+    const { controller } = await createElectronTray({
+      getPlan: () => context.api.getTodayPlan(),
+      getSettings: () => context.settings.get(),
+      actions: {
+        onOpen: showWindow,
+        onGeneratePlan: () => {
+          void context.api.generateTodayPlan().catch((error: unknown) => {
+            console.error('Study Coach tray plan failed:', serializeError(error).message);
+          });
+        },
+        onEveningReview: showWindow,
+        onOpenSettings: showWindow,
+        onQuit: () => app.quit()
+      }
+    });
+    trayController = controller;
+    controller.start();
+  } catch (error) {
+    // Background services are optional; the window and IPC stay usable.
+    console.error('Study Coach background services failed:', serializeError(error).message);
+  }
+
+  app.on('before-quit', () => {
+    scheduler?.stop();
+    trayController?.destroy();
+    scheduler = null;
+    trayController = null;
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
+    } else {
+      showWindow();
     }
   });
 }).catch((error: unknown) => {
