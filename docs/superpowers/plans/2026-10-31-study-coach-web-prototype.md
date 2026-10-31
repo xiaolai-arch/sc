@@ -36,15 +36,15 @@
 
 ## Review Focus
 
-1. **响应式溢出**：375px、768px、1280px 下页面不能横向滚动；任务卡按钮在窄屏换行而不是挤出容器。由 W3 的 `today` 测试与最终人工检查覆盖。
-2. **焦点与键盘**：所有按钮/输入有可见焦点；复盘对话框 Escape 关闭、打开时焦点进入第一个 textarea。由 W3 的 `review` 测试覆盖。
-3. **对比度**：正文在 `#f5f5f7` 和白色卡片上都达到 AA；不得用 `text-gray-400` 承载正文。由 W1 的样式测试与人工检查覆盖。
-4. **API Key 不回显**：保存后输入框清空；原型不把 key 写入 localStorage。由 W4 的 `settings` 测试覆盖。
-5. **样式禁令**：渲染出的组件不得包含 `bg-gradient-*`、`shadow-2xl`、`shadow-inner`、`border-2`、`border-4`。由 W1 的 `ui` 测试覆盖。
+1. **响应式溢出**：375px、768px、1280px 下页面不能横向滚动；任务卡按钮在窄屏换行而不是挤出容器。由 Task 3 的 `today` 测试与最终人工检查覆盖。
+2. **焦点与键盘**：所有按钮/输入有可见焦点；复盘对话框 Escape 关闭、打开时焦点进入第一个 textarea。由 Task 3 的 `review` 测试覆盖。
+3. **对比度**：正文在 `#f5f5f7` 和白色卡片上都达到 AA；不得用 `text-gray-400` 承载正文。由 Task 1 的样式测试与人工检查覆盖。
+4. **API Key 不回显**：保存后输入框清空；原型不把 key 写入 localStorage。由 Task 4 的 `settings` 测试覆盖。
+5. **样式禁令**：渲染出的组件不得包含 `bg-gradient-*`、`shadow-2xl`、`shadow-inner`、`border-2`、`border-4`。由 Task 1 的 `ui` 测试覆盖。
 
 ---
 
-## Task W1: Tailwind、Apple 设计系统与浏览器入口
+## Task 1: Tailwind、Apple 设计系统与浏览器入口
 
 **Files:**
 - Modify: `package.json`, `electron.vite.config.ts`, `tsconfig.node.json`, `tsconfig.web.json`, `src/renderer/styles.css`
@@ -174,7 +174,7 @@ body {
 }
 ```
 
-`web/index.html` 与 `web/main.tsx` 复制 renderer 的最小入口；`main.tsx` import `../src/renderer/styles.css` 并渲染 `<App />`。`web/main.tsx` 暂时不安装 mock；W2 再补。
+`web/index.html` 与 `web/main.tsx` 复制 renderer 的最小入口；`main.tsx` import `../src/renderer/styles.css` 并渲染 `<App />`。`web/main.tsx` 暂时不安装 mock；Task 2 再补。
 
 组件实现要点：
 - `Button` 的 `className` 用 `cn(base, variants[variant], sizes[size], className)`；`base` 包含所有必选 token、`inline-flex items-center justify-center gap-2`、`min-h-11`、`motion-reduce:transition-none`、`disabled:opacity-40 disabled:pointer-events-none`。
@@ -200,7 +200,7 @@ git commit -m "feat: add apple style design system and web entry"
 
 ---
 
-## Task W2: 共享 API、mock 数据、App 外壳与 Onboarding
+## Task 2: 共享 API、mock 数据、App 外壳与 Onboarding
 
 **Files:**
 - Create: `src/shared/ipc.ts`, `src/shared/profile.ts`, `src/renderer/global.d.ts`, `web/mock-api.ts`, `src/renderer/onboarding/Onboarding.tsx`, `src/renderer/ui/Nav.tsx`
@@ -364,8 +364,8 @@ Expected: FAIL，模块不存在。
 - 挂载时调 `window.studyCoach?.getBootstrap()`；不存在或失败时退化为 `{ needsOnboarding: true, today: formatLocalDate(new Date()), hasApiKey: false }`。
 - `bootstrap === null` 时显示 `PageShell` + `正在准备…`。
 - `needsOnboarding` 时渲染 `<Onboarding onComplete={refresh} />`。
-- 否则渲染 `PageShell` + `Nav` + 主区域；主区域暂时显示占位卡 `今日计划即将到来。`（W3 替换）。
-- `view` 状态：`'today' | 'settings'`，默认 `'today'`；W2 的 `Nav` 只渲染“今日”，W4 再加“设置”。
+- 否则渲染 `PageShell` + `Nav` + 主区域；主区域暂时显示占位卡 `今日计划即将到来。`（Task 3 替换）。
+- `view` 状态：`'today' | 'settings'`，默认 `'today'`；Task 2 的 `Nav` 只渲染“今日”，Task 4 再加“设置”。
 
 - [ ] **Step 4: 运行测试确认通过**
 
@@ -381,7 +381,7 @@ git commit -m "feat: add web mock api and apple style onboarding"
 
 ---
 
-## Task W3: 今日页、计时器与晚间复盘
+## Task 3: 今日页、计时器与晚间复盘
 
 **Files:**
 - Create: `src/renderer/today/TodayPage.tsx`, `src/renderer/today/TaskCard.tsx`, `src/renderer/today/Timer.tsx`, `src/renderer/today/timer-logic.ts`, `src/renderer/review/ReviewDialog.tsx`
@@ -501,7 +501,7 @@ Expected: FAIL，模块不存在。
 - `elapsedMinutes`：`Math.max(0, Math.floor((end.getTime() - start.getTime()) / 60000))`。
 
 `ReviewDialog`：
-- 用 W1 的 `Dialog`，标题 `晚间复盘`，副标题日期。
+- 用 Task 1 的 `Dialog`，标题 `晚间复盘`，副标题日期。
 - 三个 textarea，标签精确：`今天完成了什么？`、`卡在哪里？`、`明天想怎么调整？`。
 - `保存复盘` primary；`跳过` ghost；`取消` ghost。
 - 保存：`submitReview({ date, answers: { completed, stuck, tomorrow } })`；成功 `onClose()`；失败红色错误。
@@ -510,7 +510,7 @@ Expected: FAIL，模块不存在。
 
 `App`：
 - 把占位主区域替换为 `<TodayPage hasApiKey={bootstrap.hasApiKey} onOpenSettings={() => setView('settings')} />`。
-- `view === 'settings'` 时暂时显示占位卡 `设置页即将到来。`；W4 替换。
+- `view === 'settings'` 时暂时显示占位卡 `设置页即将到来。`；Task 4 替换。
 - `Nav` 同时显示“今日”和“设置”。
 
 - [ ] **Step 4: 运行测试确认通过**
@@ -527,7 +527,7 @@ git commit -m "feat: add today page timer and evening review"
 
 ---
 
-## Task W4: 设置页、应用导航、README 与视觉验收
+## Task 4: 设置页、应用导航、README 与视觉验收
 
 **Files:**
 - Create: `src/renderer/settings/SettingsPage.tsx`
@@ -620,15 +620,15 @@ git commit -m "feat: add settings page and web prototype polish"
 ## Self-Review
 
 **Spec coverage:**
-- Onboarding（原 M1 Task 7）→ W2。
-- 今日计划与任务状态（原 M1 Task 10）→ W3。
-- 晚间复盘（原 M1 Task 11）→ W3。
-- 设置（原 M1 Task 8.5）→ W4。
-- Apple Style（三份设计文件）→ W1 的令牌、组件与 W2–W4 的页面。
+- Onboarding（原 M1 Task 7）→ Task 2。
+- 今日计划与任务状态（原 M1 Task 10）→ Task 3。
+- 晚间复盘（原 M1 Task 11）→ Task 3。
+- 设置（原 M1 Task 8.5）→ Task 4。
+- Apple Style（三份设计文件）→ Task 1 的令牌、组件与 Task 2–Task 4 的页面。
 - 本地优先/无网络 → mock API 不发请求；API Key 仅内存。
 
-**Type consistency:** `StudyCoachApi` 的九个方法与 W2 mock、W3/W4 组件调用一致；`UpdateTaskInput` 与 `updateTask` 一致；`Bootstrap` 与 App 一致；`ExamProfile`/`AppSettings`/`DailyPlan`/`ReviewAnswers` 复用 Task 2 已实现的 `src/shared/types.ts`。
+**Type consistency:** `StudyCoachApi` 的九个方法与 Task 2 mock、Task 3/Task 4 组件调用一致；`UpdateTaskInput` 与 `updateTask` 一致；`Bootstrap` 与 App 一致；`ExamProfile`/`AppSettings`/`DailyPlan`/`ReviewAnswers` 复用 Task 2 已实现的 `src/shared/types.ts`。
 
-**Review Focus 对应测试:** 对比度/样式禁令 → W1 `ui.test.tsx`；焦点/Escape → W3 `review.test.tsx` 与 Dialog 实现；API Key 不回显 → W4 `settings.test.tsx`；响应式 → W4 人工检查；任务按钮换行 → W3 组件类 `flex-wrap`。
+**Review Focus 对应测试:** 对比度/样式禁令 → Task 1 `ui.test.tsx`；焦点/Escape → Task 3 `review.test.tsx` 与 Dialog 实现；API Key 不回显 → Task 4 `settings.test.tsx`；响应式 → Task 4 人工检查；任务按钮换行 → Task 3 组件类 `flex-wrap`。
 
-**已知后续工作:** 真实 Electron IPC、vault、模型调用、调度器、托盘仍按原 M1 计划执行；W1–W4 的组件和 `StudyCoachApi` 将直接复用，不重写。
+**已知后续工作:** 真实 Electron IPC、vault、模型调用、调度器、托盘仍按原 M1 计划执行；Task 1–Task 4 的组件和 `StudyCoachApi` 将直接复用，不重写。
