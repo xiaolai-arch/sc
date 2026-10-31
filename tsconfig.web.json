@@ -15,5 +15,5 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["vite/client", "vitest/globals"]
   },
-  "include": ["src/renderer/**/*", "src/shared/**/*", "tests/renderer/**/*", "tests/setup.ts"]
+  "include": ["src/renderer/**/*", "src/shared/**/*", "web/**/*", "tests/renderer/**/*", "tests/web/**/*", "tests/setup.ts"]
 }
