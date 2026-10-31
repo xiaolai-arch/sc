@@ -141,10 +141,31 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
           <h2 className="text-3xl font-semibold tracking-tight text-black md:text-4xl">设置</h2>
           <p className="mt-2 text-gray-600">管理模型、预算与提醒。</p>
         </div>
-        <Button variant="secondary" size="sm" onClick={onClose}>
-          返回今日
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="secondary" size="sm" onClick={onClose}>
+            返回今日
+          </Button>
+          <Button size="sm" disabled={saving} onClick={() => void save()}>
+            {saving ? '正在保存…' : '保存设置'}
+          </Button>
+        </div>
       </header>
+
+      {status || error ? (
+        <div className="mt-4 flex flex-wrap items-center gap-4">
+          {status ? (
+            <p role="status" className="inline-flex items-center gap-2 text-sm text-[#1d1d1f]">
+              <CheckIcon className="h-4 w-4 text-[#34c759]" />
+              {status}
+            </p>
+          ) : null}
+          {error ? (
+            <p role="alert" className="text-sm text-[#d70015]">
+              {error}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {loadError ? (
         <div className="mt-8">
@@ -321,24 +342,6 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
             </div>
           ) : null}
 
-          <div className="sticky bottom-0 z-10 -mx-6 border-t border-gray-200 bg-white px-6 py-4 shadow-[0_-4px_12px_rgba(0,0,0,0.04)] md:-mx-8 md:px-8">
-            <div className="flex flex-wrap items-center gap-4">
-              <Button disabled={saving} onClick={() => void save()}>
-                {saving ? '正在保存…' : '保存设置'}
-              </Button>
-              {status ? (
-                <p role="status" className="inline-flex items-center gap-2 text-sm text-[#1d1d1f]">
-                  <CheckIcon className="h-4 w-4 text-[#34c759]" />
-                  {status}
-                </p>
-              ) : null}
-              {error ? (
-                <p role="alert" className="text-sm text-[#d70015]">
-                  {error}
-                </p>
-              ) : null}
-            </div>
-          </div>
         </div>
       )}
     </div>
