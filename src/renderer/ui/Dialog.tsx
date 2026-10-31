@@ -43,6 +43,12 @@ export function Dialog({ open, onClose, title, children }: DialogProps) {
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
 
+      if (!panel.contains(document.activeElement)) {
+        event.preventDefault();
+        first.focus();
+        return;
+      }
+
       if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
         last.focus();

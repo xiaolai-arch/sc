@@ -44,6 +44,17 @@ test('traps tab focus inside the dialog', async () => {
   expect(screen.getByLabelText('今天完成了什么？')).toHaveFocus();
 });
 
+test('pulls focus back into the dialog when tabbing from outside', async () => {
+  render(<ReviewDialog date="2026-10-31" onClose={() => {}} />);
+  const outside = document.createElement('button');
+  outside.textContent = '外部按钮';
+  document.body.appendChild(outside);
+  outside.focus();
+  await userEvent.tab();
+  expect(screen.getByLabelText('今天完成了什么？')).toHaveFocus();
+  outside.remove();
+});
+
 test('restores focus and body scroll after closing from the today page', async () => {
   window.studyCoach = {
     getTodayPlan: vi.fn().mockResolvedValue({ date: '2026-10-31', generatedBy: 'template', tasks: [] }),
