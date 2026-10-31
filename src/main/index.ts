@@ -1,5 +1,8 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import { join } from 'node:path';
+import { createAppContext } from './context';
+import { registerIpcHandlers, serializeError } from './ipc';
+import { DEFAULT_VAULT_DIRECTORY } from './settings/defaults';
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -23,7 +26,13 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  const context = await createAppContext({
+    userDataPath: app.getPath('userData'),
+    defaultVaultPath: join(app.getPath('documents'), DEFAULT_VAULT_DIRECTORY)
+  });
+  registerIpcHandlers(context.api, ipcMain);
+
   createWindow();
 
   app.on('activate', () => {
@@ -31,6 +40,10 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+}).catch((error: unknown) => {
+  // Only the sanitized message is logged; API keys never reach this path.
+  console.error('Study Coach failed to start:', serializeError(error).message);
+  app.quit();
 });
 
 app.on('window-all-closed', () => {
