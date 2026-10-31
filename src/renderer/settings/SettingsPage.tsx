@@ -79,6 +79,20 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       setError('应用桥接不可用，请刷新页面重试。');
       return;
     }
+    const sessionsNumber = Number(sessions);
+    const tokensNumber = Number(tokens);
+    if (!model.trim()) {
+      setError('请填写模型名称。');
+      return;
+    }
+    if (!Number.isInteger(sessionsNumber) || sessionsNumber < 0) {
+      setError('每日主动会话次数需为非负整数。');
+      return;
+    }
+    if (!Number.isInteger(tokensNumber) || tokensNumber < 0) {
+      setError('每日 token 上限需为非负整数。');
+      return;
+    }
     setSaving(true);
     setError(null);
     setStatus(null);
@@ -88,8 +102,8 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       await api.updateSettings({
         provider,
         budget: {
-          proactiveSessionsPerDay: Number(sessions),
-          dailyTokens: Number(tokens)
+          proactiveSessionsPerDay: sessionsNumber,
+          dailyTokens: tokensNumber
         },
         notifications,
         launchAtLogin

@@ -45,7 +45,13 @@ export function App() {
         />
       ) : (
         <PageShell>
-          <Nav view={view} onChange={setView} />
+          <Nav
+            view={view}
+            onChange={(next) => {
+              setView(next);
+              if (next === 'today') void refresh();
+            }}
+          />
           <main className="mx-auto max-w-[980px] px-6 py-12 md:px-8 md:py-20">
             {view === 'today' ? (
               <TodayPage
