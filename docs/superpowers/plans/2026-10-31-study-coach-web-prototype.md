@@ -20,7 +20,7 @@
 ## Global Constraints
 
 - 所有 UI 文案中文；代码标识符英文。
-- Apple Style：背景 `#f5f5f7`；主文字 `#1d1d1f` / 黑色；强调色 `#0071e3`；语义绿 `#34c759`；语义红 `#ff3b30`。
+- Apple Style：背景 `#f5f5f7`；主文字 `#1d1d1f` / 黑色；强调色 `#0071e3`；语义绿 `#34c759`；语义红 `#ff3b30`（仅图标/浅色底装饰）；错误文本与危险按钮用 `#d70015`，以满足 WCAG AA。
 - 字体栈：`-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif`。
 - 标题：`font-semibold tracking-tight text-black`；正文：`text-gray-600`；链接：`text-[#0071e3] hover:underline`。
 - 每个按钮必须包含：`rounded-full font-medium transition-all duration-300`；主按钮 `bg-[#0071e3] text-white`；所有按钮 `active:scale-[0.98]`、`hover:opacity-80`、可见 focus ring、`min-h-11`。
@@ -37,7 +37,7 @@
 ## Review Focus
 
 1. **响应式溢出**：375px、768px、1280px 下页面不能横向滚动；任务卡按钮在窄屏换行而不是挤出容器。由 Task 3 的 `today` 测试与最终人工检查覆盖。
-2. **焦点与键盘**：所有按钮/输入有可见焦点；复盘对话框 Escape 关闭、打开时焦点进入第一个 textarea。由 Task 3 的 `review` 测试覆盖。
+2. **焦点与键盘**：所有按钮/输入有可见焦点；复盘对话框 Escape 关闭、打开时焦点进入第一个 textarea；Tab/Shift+Tab 在对话框内循环，打开时锁定背景滚动，关闭后焦点回到触发按钮。由 Task 3 的 `review` 测试覆盖。
 3. **对比度**：正文在 `#f5f5f7` 和白色卡片上都达到 AA；不得用 `text-gray-400` 承载正文。由 Task 1 的样式测试与人工检查覆盖。
 4. **API Key 不回显**：保存后输入框清空；原型不把 key 写入 localStorage。由 Task 4 的 `settings` 测试覆盖。
 5. **样式禁令**：渲染出的组件不得包含 `bg-gradient-*`、`shadow-2xl`、`shadow-inner`、`border-2`、`border-4`。由 Task 1 的 `ui` 测试覆盖。
@@ -60,7 +60,7 @@
 - `Badge`：`{ tone?: 'gray' | 'blue' | 'green' | 'red'; children: React.ReactNode }`。
 - `Progress`：`{ value: number; max: number; label?: string }`；`role="progressbar"` + `aria-valuenow/min/max`。
 - `PageShell`：`React.ComponentPropsWithoutRef<'div'>`；类 `min-h-screen bg-[#f5f5f7] text-[#1d1d1f] font-sans`。
-- `Dialog`：`{ open: boolean; onClose: () => void; title: string; children: React.ReactNode }`；遮罩 `bg-black/20`，卡片 `bg-white rounded-2xl shadow-sm w-full max-w-lg p-8`；Escape 关闭；打开时聚焦第一个可聚焦元素。
+- `Dialog`：`{ open: boolean; onClose: () => void; title: string; children: React.ReactNode }`；遮罩 `bg-black/20`，卡片 `bg-white rounded-2xl shadow-sm w-full max-w-lg p-8`；Escape 关闭；打开时聚焦第一个可聚焦元素；Tab/Shift+Tab 在面板内循环；打开时锁定 body 滚动，关闭时恢复并把焦点还给触发元素。
 - `EmptyState`：`{ title: string; description?: string; action?: React.ReactNode }`。
 - 图标：`CheckIcon`、`PlayIcon`、`SkipIcon`、`ClockIcon`、`CalendarIcon`、`SettingsIcon`、`ChevronRightIcon`，均为内联 SVG，`aria-hidden="true"`，`stroke="currentColor"`，`strokeWidth={1.5}`。
 - npm scripts：`dev:web`（`vite --config vite.web.config.ts`）、`build:web`（`vite build --config vite.web.config.ts`）、`preview:web`（`vite preview --config vite.web.config.ts`）。
@@ -212,7 +212,7 @@ git commit -m "feat: add apple style design system and web entry"
 - `UpdateTaskInput { taskId: string; status: TaskStatus; actualMin?: number }`
 - `StudyCoachApi`：`getBootstrap()`、`completeOnboarding(profile)`、`getSettings()`、`updateSettings(patch)`、`setApiKey(key)`、`getTodayPlan()`、`generateTodayPlan()`、`updateTask(input)`、`submitReview(input)`（完整签名见下）。
 - `validateExamProfile(input: unknown): ExamProfile`：zod；错误 message 包含字段路径（`dailyMinutes`、`subjects` 等）。
-- `createMockApi(storage?: Storage): StudyCoachApi`；`DEMO_PROFILE: ExamProfile`；`DEMO_PLAN: () => DailyPlan`。
+- `createMockApi(storage?: Storage): StudyCoachApi`；`DEMO_PROFILE: ExamProfile`（定义在 `src/shared/demo.ts`，供 renderer 与 mock 共用）；`DEMO_PLAN: () => DailyPlan`（由 `web/mock-api.ts` 导出）。
 - `Onboarding({ onComplete }: { onComplete?: () => void })`。
 - `Nav({ view, onChange }: { view: 'today' | 'settings'; onChange: (view: 'today' | 'settings') => void })`。
 
@@ -345,7 +345,7 @@ Expected: FAIL，模块不存在。
 - `updateTask`：找 task，更新 `status`/`actualMin`，持久化，返回 plan。
 - `submitReview`：写入 `reviews[date]`，持久化。
 - `createMockApi` 每次从 storage 读取；没有 storage 时用内存对象。
-- `DEMO_PROFILE`：`examDate: '2027-12-18'`、`subjects: [{name:'数学'}, {name:'英语'}, {name:'政治'}]`、`dailyMinutes: 300`、`currentLevel: '基础一般'`、`targetSchool: '示例大学'`、`targetMajor: '计算机'`。
+- `DEMO_PROFILE`（定义在 `src/shared/demo.ts`，mock 再导出）：`examDate: '2027-12-18'`、`subjects: [{name:'数学'}, {name:'英语'}, {name:'政治'}]`、`dailyMinutes: 300`、`currentLevel: '基础一般'`、`targetSchool: '示例大学'`、`targetMajor: '计算机'`。
 - `DEMO_PLAN`：3 个任务（数学 45 分钟、英语 30 分钟、政治 30 分钟），`id: 't1' | 't2' | 't3'`，`status: 'pending'`。
 - `web/main.tsx`：若 `!window.studyCoach`，`window.studyCoach = createMockApi(window.localStorage)`；`window.studyCoachPrototype = { reset: () => { localStorage.removeItem(KEY); location.reload(); } }`。
 
@@ -357,7 +357,7 @@ Expected: FAIL，模块不存在。
 - 字段：考试日期（date，默认 `2027-12-18`）、目标院校（可选）、目标专业（可选）、考试科目（逗号分隔）、每天可用分钟数（number，默认 300）、当前水平（select：基础薄弱/基础一般/基础较好，默认基础一般）。
 - 标签文本必须精确包含：`考试日期`、`考试科目（逗号分隔）`、`每天可用分钟数`。
 - 提交按钮 `生成我的学习计划`（primary）；次按钮 `先看看示例`（ghost，type=button）用 `DEMO_PROFILE` 调 `completeOnboarding`，成功后 `onComplete?.()`。
-- 提交时把科目字符串按 `/[,，、]/` 分割、trim、过滤空值，映射为 `{ name }`；调 `validateExamProfile`；失败显示红色 `text-[#ff3b30]` 错误块；成功后调 `completeOnboarding` 再 `onComplete?.()`。
+- 提交时把科目字符串按 `/[,，、]/` 分割、trim、过滤空值，映射为 `{ name }`；表单加 `noValidate`，统一由 `validateExamProfile` 做校验；失败显示 `text-[#d70015]` 的 `role="alert"` 错误块；成功后调 `completeOnboarding` 再 `onComplete?.()`。
 - 表单错误用 `role="alert"`。
 
 `App`：
@@ -392,7 +392,7 @@ git commit -m "feat: add web mock api and apple style onboarding"
 **Interfaces:**
 - `TodayPage({ hasApiKey?: boolean; onOpenSettings?: () => void })`；`hasApiKey` 默认 `true`。
 - `TaskCard({ task, onUpdate }: { task: StudyTask; onUpdate: (input: UpdateTaskInput) => Promise<void> })`。
-- `Timer({ startedAt, onFinish }: { startedAt: Date; onFinish: (minutes: number) => void })`。
+- `Timer({ startedAt }: { startedAt: Date })`；只显示已计时分钟，不再提供独立完成按钮。
 - `elapsedMinutes(start: Date, end: Date): number`。
 - `ReviewDialog({ date, onClose }: { date: string; onClose: () => void })`。
 
@@ -490,9 +490,9 @@ Expected: FAIL，模块不存在。
 
 `TodayPage`：
 - 挂载时 `getTodayPlan`；失败显示错误块 + 重试按钮。
-- 顶部：日期（`formatLocalDate` 从 `src/shared/date` 或 plan.date 格式化），`<h2>` `今天，按计划走就好。`；右侧 `复盘` primary 按钮。
+- 顶部：日期（`formatLocalDate` 从 `src/shared/date` 或 plan.date 格式化），`<h2>` `今天，按计划走就好。`；右侧 `复盘` secondary 按钮（晚间动作，避免与任务「完成」抢主按钮）。
 - `!hasApiKey` 时显示一张 `Card`：`未配置模型，当前使用模板计划。` + `去设置` 链接按钮（调用 `onOpenSettings`）。
-- 有任务：主栏任务卡列表（`grid gap-8 md:grid-cols-[1fr_280px]`，侧栏 sticky 进度卡）。进度卡显示 `X / Y 完成`、Progress、总分钟数。
+- 有任务：主栏任务卡列表（`grid gap-8 lg:grid-cols-[1fr_280px]`，侧栏 `lg:sticky` 进度卡；移动端进度卡排在最前）。进度卡显示 `X / Y 完成`、Progress、总分钟数。
 - 无计划：`EmptyState` 标题 `今天还没有计划`，按钮 `生成今日计划`。
 - 计划存在但 `tasks` 为空：仍显示头部和 `复盘` 按钮，主区域显示空状态 `今天没有安排任务`。
 - `updateTask` 成功后用返回值替换 plan；失败显示错误。
@@ -500,13 +500,13 @@ Expected: FAIL，模块不存在。
 `TaskCard`：
 - 卡片 `Card`，`p-8`。
 - 顶部 Badge（subject）+ 建议时长；标题 `text-xl md:text-2xl font-semibold tracking-tight text-black`；验收标准 `text-gray-600`。
-- pending：`开始`（secondary）、`完成`（primary）、`跳过`（ghost）；`完成` 按钮调 `onUpdate({ taskId, status: 'done' })`。
-- in-progress：显示 `Timer` + `完成`（primary，带 actualMin）+ `跳过`（ghost）。
+- pending：`开始`（secondary，记录 startedAt 并置为 in-progress）、`完成`（primary）、`跳过`（ghost）；`完成` 走统一的 `finish()`，没有计时时不传 `actualMin`。
+- in-progress：显示 `Timer`；若没有 startedAt（例如刷新后）显示 `开始计时`；`完成`（primary）用 startedAt 计算 actualMin 后走同一条 `finish()`；`跳过`（ghost）。
 - done：Badge `已完成`（green）+ 标题 `line-through text-gray-500`；skipped：Badge `已跳过`（gray）。
 - 按钮容器 `flex flex-wrap gap-2`，窄屏不溢出。
 
 `Timer`：
-- `useEffect` 每秒更新 `now`；显示 `已计时 X 分钟`；按钮 `结束并完成`；卸载清理 interval。
+- `useEffect` 每秒更新 `now`；只显示 `已计时 X 分钟`；完成动作统一由 TaskCard 的 `完成` 按钮承担；卸载清理 interval。
 - `elapsedMinutes`：`Math.max(0, Math.floor((end.getTime() - start.getTime()) / 60000))`。
 
 `ReviewDialog`：
@@ -600,7 +600,7 @@ Expected: FAIL，模块不存在。
   3. 通知：启用提醒 checkbox、早间时间、晚间时间、免打扰开始/结束（time）。
   4. 启动：开机自启 checkbox。
 - 标签精确：`模型名称`、`API Key`、`每日主动会话次数`、`每日 token 上限`、`早间时间`、`晚间时间`、`免打扰开始`、`免打扰结束`、`开机自启`。
-- `保存设置` primary；保存时先 `updateSettings({ provider, budget, notifications, launchAtLogin })`，若 API Key 非空再 `setApiKey(key)`；成功后清空 key、`role="status"` 显示 `已保存`。
+- `保存设置` primary；保存前校验模型名非空、非 Anthropic provider 的 Base URL 非空、预算为非负整数，失败时清空旧的 `已保存` 状态并显示错误；校验通过后先 `updateSettings({ provider, budget, notifications, launchAtLogin })`，若 API Key 非空再 `setApiKey(key)`；成功后清空 key、`role="status"` 显示 `已保存`。
 - 若 `window.studyCoachPrototype` 存在，底部显示 `清除原型数据并重新开始`（ghost/danger），点击 `confirm` 后调用 `reset()`。
 - `App`：`view === 'settings'` 时渲染 `<SettingsPage onClose={() => { setView('today'); void refresh(); }} />`；`Nav` 的“设置”按钮可切换。
 - `README.md` 增加“Web 原型”段落：`npm run dev:web` 打开 `http://localhost:5173`；说明 mock 数据、API Key 仅内存、与 Electron 共用 renderer。
