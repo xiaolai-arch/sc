@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { formatLocalDate } from '../shared/date';
 import type { Bootstrap } from '../shared/ipc';
 import { Onboarding } from './onboarding/Onboarding';
+import { TodayPage } from './today/TodayPage';
 import { Card } from './ui/Card';
 import { Nav } from './ui/Nav';
 import type { AppView } from './ui/Nav';
@@ -47,9 +48,10 @@ export function App() {
           <Nav view={view} onChange={setView} />
           <main className="mx-auto max-w-[980px] px-6 py-12 md:px-8 md:py-20">
             {view === 'today' ? (
-              <Card>
-                <p className="text-gray-600">今日计划即将到来。</p>
-              </Card>
+              <TodayPage
+                hasApiKey={bootstrap.hasApiKey}
+                onOpenSettings={() => setView('settings')}
+              />
             ) : (
               <Card>
                 <p className="text-gray-600">设置页即将到来。</p>

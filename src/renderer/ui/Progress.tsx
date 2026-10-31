@@ -2,9 +2,10 @@ type ProgressProps = {
   value: number;
   max: number;
   label?: string;
+  ariaLabel?: string;
 };
 
-export function Progress({ value, max, label }: ProgressProps) {
+export function Progress({ value, max, label, ariaLabel }: ProgressProps) {
   const percent = max > 0 ? Math.min(100, Math.max(0, (value / max) * 100)) : 0;
 
   return (
@@ -19,7 +20,7 @@ export function Progress({ value, max, label }: ProgressProps) {
       ) : null}
       <div
         role="progressbar"
-        aria-label={label}
+        aria-label={ariaLabel ?? label}
         aria-valuenow={value}
         aria-valuemin={0}
         aria-valuemax={max}

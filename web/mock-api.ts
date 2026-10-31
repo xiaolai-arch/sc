@@ -61,7 +61,7 @@ function createDemoPlan(date: string): DailyPlan {
       subject: '政治',
       durationMin: 30,
       materialRefs: [],
-      acceptance: '过一遍框架，做 10 道选择题',
+      acceptance: '过一遍框架，做 10 道题',
       status: 'pending'
     }
   ];
