@@ -470,6 +470,14 @@ test('opens the review dialog from the today page', async () => {
   await userEvent.click(await screen.findByRole('button', { name: '复盘' }));
   expect(screen.getByLabelText('今天完成了什么？')).toBeInTheDocument();
 });
+
+test('focuses the first field and closes on escape', async () => {
+  const onClose = vi.fn();
+  render(<ReviewDialog date="2026-10-31" onClose={onClose} />);
+  expect(screen.getByLabelText('今天完成了什么？')).toHaveFocus();
+  await userEvent.keyboard('{Escape}');
+  expect(onClose).toHaveBeenCalled();
+});
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
