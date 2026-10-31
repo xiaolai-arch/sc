@@ -71,3 +71,11 @@
 - 每个 Wave 1 模块一个 Orca Task；worktree `new-top-level`，base `feat/v1-completion`。
 - 四个模块可并行；不允许跨目录。Wave 2 在 Wave 1 合并后启动。
 - 每个 worker 在 worktree 内提交，报告 commit、测试、风险。
+
+## Dispatch log (2026-11-01)
+
+- Run: `run_ff9c07a5e79e`
+- Module 1 `task_ba629b385f83` / claude / `ctx_827b8e26eb3f` / `v1-agent-tools` — **done** (commits `c12475f`, `71a203d`, `1f55a95`; merged `d8571b8`; 204 tests/typecheck/build pass)
+- Module 2 `task_bc6c2f97384e` / codex / `ctx_43830f71ec5f` / `v1-workspace-planner`
+- Module 3 `task_546103c80b9b` / opencode / `ctx_ab4d64bb4edd` / `v1-practice-service`
+- Module 4 `task_3ac645878ae1` / zcode / `ctx_ec3ad6bf1a9b` / `v1-memory-profile`
