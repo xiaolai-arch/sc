@@ -1,0 +1,9 @@
+node_modules/
+out/
+dist/
+.DS_Store
+*.local
+.superpowers/
+test-results/
+playwright-report/
+*.tsbuildinfo
