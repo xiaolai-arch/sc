@@ -1,4 +1,5 @@
 import type { Bootstrap, StudyCoachApi, UpdateTaskInput } from '../src/shared/ipc';
+import type { SendMessageInput, SendMessageResult, SubmitReviewInput } from '../src/shared/workspace';
 import { formatLocalDate } from '../src/shared/date';
 import { validateExamProfile } from '../src/shared/profile';
 import type { AppSettings, DailyPlan, ExamProfile, ReviewAnswers, StudyTask } from '../src/shared/types';
@@ -177,9 +178,51 @@ export function createMockApi(storage?: Storage): StudyCoachApi {
       return structuredClone(state.plan);
     },
 
-    async submitReview(input: { date: string; answers: ReviewAnswers }): Promise<void> {
+    async submitReview(input: SubmitReviewInput): Promise<void> {
       state.reviews[input.date] = input.answers;
       persist();
+    },
+
+    async listWorkspaces() {
+      return [];
+    },
+
+    async createWorkspace() {
+      throw new Error('Workspace API is not wired in the browser prototype yet.');
+    },
+
+    async getWorkspaceSnapshot() {
+      throw new Error('Workspace API is not wired in the browser prototype yet.');
+    },
+
+    async createTask() {
+      throw new Error('Workspace API is not wired in the browser prototype yet.');
+    },
+
+    async updateWorkspaceTask() {
+      throw new Error('Workspace API is not wired in the browser prototype yet.');
+    },
+
+    async createNote() {
+      throw new Error('Workspace API is not wired in the browser prototype yet.');
+    },
+
+    async updateNote() {
+      throw new Error('Workspace API is not wired in the browser prototype yet.');
+    },
+
+    async getMemory() {
+      return [];
+    },
+
+    async getReminders() {
+      return [];
+    },
+
+    async send(input: SendMessageInput): Promise<SendMessageResult> {
+      return {
+        text: `收到：${input.message}。原型模式下这里返回固定回复，真实模型接入后会结合你的计划、记录和复盘回答。`
+      };
     }
   };
 }
