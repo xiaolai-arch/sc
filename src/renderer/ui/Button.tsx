@@ -10,7 +10,7 @@ const variantClasses = {
   primary: 'bg-[#0071e3] text-white',
   secondary: 'bg-white text-[#1d1d1f] ring-1 ring-black/10',
   ghost: 'bg-transparent text-[#0071e3]',
-  danger: 'bg-[#ff3b30] text-white'
+  danger: 'bg-[#d70015] text-white'
 } as const;
 
 const sizeClasses = {

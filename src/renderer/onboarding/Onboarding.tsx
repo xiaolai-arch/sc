@@ -89,7 +89,7 @@ export function Onboarding({ onComplete, showDemo = false }: OnboardingProps) {
         </div>
 
         <Card className="mx-auto mt-12 max-w-2xl p-8 md:mt-16 md:p-12">
-          <form className="grid gap-6" onSubmit={submit}>
+          <form className="grid gap-6" onSubmit={submit} noValidate>
             <div className="grid gap-6 md:grid-cols-2">
               <div>
                 <Label htmlFor={fieldId('examDate')}>考试日期</Label>
@@ -161,7 +161,7 @@ export function Onboarding({ onComplete, showDemo = false }: OnboardingProps) {
             </div>
 
             {error ? (
-              <p role="alert" className="text-sm text-[#ff3b30]">
+              <p role="alert" className="text-sm text-[#d70015]">
                 {error}
               </p>
             ) : null}

@@ -68,7 +68,21 @@ function createDemoPlan(date: string): DailyPlan {
   return { date, generatedBy: 'agent', tasks };
 }
 
-function readState(storage: Storage): MockState {
+export function DEMO_PLAN(): DailyPlan {
+  return createDemoPlan(formatLocalDate(new Date()));
+}
+
+function resolveStorage(storage?: Storage): Storage | null {
+  if (storage) return storage;
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function readState(storage: Storage | null): MockState {
+  if (!storage) return defaultState();
   try {
     const raw = storage.getItem(MOCK_STORAGE_KEY);
     if (!raw) return defaultState();
@@ -90,14 +104,16 @@ function readState(storage: Storage): MockState {
   }
 }
 
-export function createMockApi(storage: Storage = window.localStorage): StudyCoachApi {
-  let state = readState(storage);
+export function createMockApi(storage?: Storage): StudyCoachApi {
+  const resolved = resolveStorage(storage);
+  let state = readState(resolved);
   let apiKey: string | null = null;
 
   const today = () => formatLocalDate(new Date());
   const persist = () => {
+    if (!resolved) return;
     try {
-      storage.setItem(MOCK_STORAGE_KEY, JSON.stringify(state));
+      resolved.setItem(MOCK_STORAGE_KEY, JSON.stringify(state));
     } catch {
       // Prototype data is best-effort; an unavailable storage keeps the in-memory state.
     }
@@ -168,9 +184,11 @@ export function createMockApi(storage: Storage = window.localStorage): StudyCoac
   };
 }
 
-export function resetMockData(storage: Storage = window.localStorage): void {
+export function resetMockData(storage?: Storage): void {
+  const resolved = resolveStorage(storage);
+  if (!resolved) return;
   try {
-    storage.removeItem(MOCK_STORAGE_KEY);
+    resolved.removeItem(MOCK_STORAGE_KEY);
   } catch {
     // Nothing to clear if storage is unavailable.
   }

@@ -8,6 +8,9 @@ type DialogProps = {
   children: ReactNode;
 };
 
+const FOCUSABLE_SELECTOR =
+  'input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+
 export function Dialog({ open, onClose, title, children }: DialogProps) {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -22,19 +25,37 @@ export function Dialog({ open, onClose, title, children }: DialogProps) {
     if (!open) return;
 
     previousFocusRef.current = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     const panel = panelRef.current;
-    panel?.querySelector<HTMLElement>('input, textarea, select, button')?.focus();
+    panel?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)?.focus();
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
         onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab' || !panel) return;
+
+      const focusables = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
       }
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
       previousFocusRef.current?.focus?.();
       previousFocusRef.current = null;
     };

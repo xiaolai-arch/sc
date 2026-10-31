@@ -35,3 +35,36 @@ test('focuses the first field and closes on escape', async () => {
   await userEvent.keyboard('{Escape}');
   expect(onClose).toHaveBeenCalled();
 });
+
+test('traps tab focus inside the dialog', async () => {
+  render(<ReviewDialog date="2026-10-31" onClose={() => {}} />);
+  const cancel = screen.getByRole('button', { name: '取消' });
+  cancel.focus();
+  await userEvent.tab();
+  expect(screen.getByLabelText('今天完成了什么？')).toHaveFocus();
+});
+
+test('restores focus and body scroll after closing from the today page', async () => {
+  window.studyCoach = {
+    getTodayPlan: vi.fn().mockResolvedValue({ date: '2026-10-31', generatedBy: 'template', tasks: [] }),
+    submitReview: vi.fn()
+  } as never;
+  render(<TodayPage />);
+  const trigger = await screen.findByRole('button', { name: '复盘' });
+  await userEvent.click(trigger);
+  expect(document.body.style.overflow).toBe('hidden');
+  await userEvent.keyboard('{Escape}');
+  expect(trigger).toHaveFocus();
+  expect(document.body.style.overflow).not.toBe('hidden');
+});
+
+test('submits a skipped review', async () => {
+  const submit = vi.fn().mockResolvedValue(undefined);
+  window.studyCoach = { submitReview: submit } as never;
+  render(<ReviewDialog date="2026-10-31" onClose={() => {}} />);
+  await userEvent.click(screen.getByRole('button', { name: '跳过' }));
+  expect(submit).toHaveBeenCalledWith({
+    date: '2026-10-31',
+    answers: { skipped: true, completed: '', stuck: '', tomorrow: '' }
+  });
+});

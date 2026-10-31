@@ -6,14 +6,16 @@ import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { CheckIcon, ClockIcon, PlayIcon, SkipIcon } from '../ui/icons';
 import { Timer } from './Timer';
+import { elapsedMinutes } from './timer-logic';
 
 type TaskCardProps = {
   task: StudyTask;
+  startedAt?: Date;
+  onStart: () => void;
   onUpdate: (input: UpdateTaskInput) => Promise<void>;
 };
 
-export function TaskCard({ task, onUpdate }: TaskCardProps) {
-  const [startedAt, setStartedAt] = useState<Date | null>(null);
+export function TaskCard({ task, startedAt, onStart, onUpdate }: TaskCardProps) {
   const [busy, setBusy] = useState(false);
 
   async function update(input: UpdateTaskInput) {
@@ -25,6 +27,15 @@ export function TaskCard({ task, onUpdate }: TaskCardProps) {
     } finally {
       setBusy(false);
     }
+  }
+
+  function finish() {
+    const actualMin = startedAt ? elapsedMinutes(startedAt, new Date()) : undefined;
+    void update({
+      taskId: task.id,
+      status: 'done',
+      ...(actualMin !== undefined ? { actualMin } : {})
+    });
   }
 
   const statusBadge =
@@ -49,22 +60,19 @@ export function TaskCard({ task, onUpdate }: TaskCardProps) {
           <h3
             className={
               task.status === 'done'
-                ? 'mt-3 text-xl font-semibold tracking-tight text-gray-500 line-through md:text-2xl'
-                : 'mt-3 text-xl font-semibold tracking-tight text-black md:text-2xl'
+                ? 'mt-3 break-words text-xl font-semibold tracking-tight text-gray-500 line-through md:text-2xl'
+                : 'mt-3 break-words text-xl font-semibold tracking-tight text-black md:text-2xl'
             }
           >
             {task.title}
           </h3>
-          <p className="mt-2 text-gray-600">
+          <p className="mt-2 break-words text-gray-600">
             <span className="text-gray-500">验收：</span>
             <span>{task.acceptance}</span>
           </p>
           {task.status === 'in-progress' && startedAt ? (
             <div className="mt-4">
-              <Timer
-                startedAt={startedAt}
-                onFinish={(minutes) => void update({ taskId: task.id, status: 'done', actualMin: minutes })}
-              />
+              <Timer startedAt={startedAt} />
             </div>
           ) : null}
           {task.status === 'done' && task.actualMin ? (
@@ -80,7 +88,7 @@ export function TaskCard({ task, onUpdate }: TaskCardProps) {
                 size="sm"
                 disabled={busy}
                 onClick={() => {
-                  setStartedAt(new Date());
+                  onStart();
                   void update({ taskId: task.id, status: 'in-progress' });
                 }}
               >
@@ -88,7 +96,13 @@ export function TaskCard({ task, onUpdate }: TaskCardProps) {
                 开始
               </Button>
             ) : null}
-            <Button size="sm" disabled={busy} onClick={() => void update({ taskId: task.id, status: 'done' })}>
+            {task.status === 'in-progress' && !startedAt ? (
+              <Button variant="secondary" size="sm" disabled={busy} onClick={onStart}>
+                <PlayIcon className="h-4 w-4" />
+                开始计时
+              </Button>
+            ) : null}
+            <Button size="sm" disabled={busy} onClick={finish}>
               <CheckIcon className="h-4 w-4" />
               完成
             </Button>

@@ -67,9 +67,12 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   }, [load]);
 
   function updateKind(next: ProviderConfig['kind']) {
+    if (next === kind) return;
     setKind(next);
-    if (next === 'ollama' && !baseURL) {
+    if (next === 'ollama') {
       setBaseURL('http://127.0.0.1:11434/v1');
+    } else if (kind === 'ollama' && baseURL === 'http://127.0.0.1:11434/v1') {
+      setBaseURL('');
     }
   }
 
@@ -79,10 +82,16 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       setError('应用桥接不可用，请刷新页面重试。');
       return;
     }
+    setError(null);
+    setStatus(null);
     const sessionsNumber = Number(sessions);
     const tokensNumber = Number(tokens);
     if (!model.trim()) {
       setError('请填写模型名称。');
+      return;
+    }
+    if (kind !== 'anthropic' && !baseURL.trim()) {
+      setError('请填写 Base URL。');
       return;
     }
     if (!Number.isInteger(sessionsNumber) || sessionsNumber < 0) {
@@ -94,8 +103,6 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       return;
     }
     setSaving(true);
-    setError(null);
-    setStatus(null);
     try {
       const provider: ProviderConfig =
         kind === 'anthropic' ? { kind, model } : { kind, baseURL, model };
@@ -134,14 +141,14 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
           <h2 className="text-3xl font-semibold tracking-tight text-black md:text-4xl">设置</h2>
           <p className="mt-2 text-gray-600">管理模型、预算与提醒。</p>
         </div>
-        <Button variant="ghost" size="sm" onClick={onClose}>
+        <Button variant="secondary" size="sm" onClick={onClose}>
           返回今日
         </Button>
       </header>
 
       {loadError ? (
         <div className="mt-8">
-          <p role="alert" className="text-sm text-[#ff3b30]">
+          <p role="alert" className="text-sm text-[#d70015]">
             {loadError}
           </p>
           <Button className="mt-4" variant="secondary" onClick={() => void load()}>
@@ -326,7 +333,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
                 </p>
               ) : null}
               {error ? (
-                <p role="alert" className="text-sm text-[#ff3b30]">
+                <p role="alert" className="text-sm text-[#d70015]">
                   {error}
                 </p>
               ) : null}

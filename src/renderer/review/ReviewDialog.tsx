@@ -68,7 +68,7 @@ export function ReviewDialog({ date, onClose }: ReviewDialogProps) {
         </div>
 
         {error ? (
-          <p role="alert" className="text-sm text-[#ff3b30]">
+          <p role="alert" className="text-sm text-[#d70015]">
             {error}
           </p>
         ) : null}

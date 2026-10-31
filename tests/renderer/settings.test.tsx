@@ -31,3 +31,37 @@ test('saves provider model and api key without echoing the key', async () => {
   expect(setKey).toHaveBeenCalledWith('sk-test');
   expect(screen.getByLabelText('API Key')).toHaveValue('');
 });
+
+test('clears a previous saved status and validates the model', async () => {
+  const update = vi.fn().mockResolvedValue(settings);
+  window.studyCoach = {
+    getSettings: vi.fn().mockResolvedValue(settings),
+    updateSettings: update,
+    setApiKey: vi.fn().mockResolvedValue(undefined)
+  } as never;
+  render(<SettingsPage onClose={() => {}} />);
+  await screen.findByLabelText('模型名称');
+  await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+  expect(await screen.findByRole('status')).toHaveTextContent('已保存');
+  await userEvent.clear(screen.getByLabelText('模型名称'));
+  await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('请填写模型名称');
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  expect(update).toHaveBeenCalledTimes(1);
+});
+
+test('requires a base URL for non-Anthropic providers', async () => {
+  const update = vi.fn();
+  window.studyCoach = {
+    getSettings: vi.fn().mockResolvedValue(settings),
+    updateSettings: update,
+    setApiKey: vi.fn()
+  } as never;
+  render(<SettingsPage onClose={() => {}} />);
+  await screen.findByLabelText('模型名称');
+  await userEvent.selectOptions(screen.getByLabelText('提供商'), 'openai-compatible');
+  await userEvent.clear(screen.getByLabelText('Base URL'));
+  await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('请填写 Base URL');
+  expect(update).not.toHaveBeenCalled();
+});

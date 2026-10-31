@@ -25,22 +25,29 @@ function formatReadableDate(value: string): string {
 export function TodayPage({ hasApiKey = true, onOpenSettings }: TodayPageProps) {
   const [plan, setPlan] = useState<DailyPlan | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [startedAtByTask, setStartedAtByTask] = useState<Record<string, Date>>({});
 
   const load = useCallback(async () => {
     const api = window.studyCoach;
     if (!api) {
+      setPlan(null);
+      setLoadFailed(true);
       setError('应用桥接不可用，请刷新页面重试。');
       setLoading(false);
       return;
     }
     setLoading(true);
+    setLoadFailed(false);
     setError(null);
     try {
       setPlan(await api.getTodayPlan());
     } catch (cause) {
+      setPlan(null);
+      setLoadFailed(true);
       setError(cause instanceof Error ? cause.message : '加载今日计划失败。');
     } finally {
       setLoading(false);
@@ -112,14 +119,26 @@ export function TodayPage({ hasApiKey = true, onOpenSettings }: TodayPageProps) 
         </Card>
       ) : null}
 
-      {error ? (
-        <p role="alert" className="mt-6 text-sm text-[#ff3b30]">
+      {error && !loadFailed ? (
+        <p role="alert" className="mt-6 text-sm text-[#d70015]">
           {error}
         </p>
       ) : null}
 
       {loading ? (
         <p className="mt-12 text-gray-600">正在加载今日计划…</p>
+      ) : loadFailed ? (
+        <Card className="mt-12">
+          <h3 className="text-xl font-semibold tracking-tight text-black md:text-2xl">
+            今日计划加载失败
+          </h3>
+          <p role="alert" className="mt-2 text-sm text-[#d70015]">
+            {error ?? '请稍后重试。'}
+          </p>
+          <Button className="mt-6" onClick={() => void load()}>
+            重新加载
+          </Button>
+        </Card>
       ) : !plan ? (
         <div className="mt-12">
           <EmptyState
@@ -148,7 +167,15 @@ export function TodayPage({ hasApiKey = true, onOpenSettings }: TodayPageProps) 
         <div className="mt-10 grid gap-8 lg:mt-12 lg:grid-cols-[1fr_280px]">
           <div className="space-y-4">
             {tasks.map((task) => (
-              <TaskCard key={task.id} task={task} onUpdate={updateTask} />
+              <TaskCard
+                key={task.id}
+                task={task}
+                startedAt={startedAtByTask[task.id]}
+                onStart={() =>
+                  setStartedAtByTask((current) => ({ ...current, [task.id]: new Date() }))
+                }
+                onUpdate={updateTask}
+              />
             ))}
           </div>
           <aside className="order-first lg:order-none lg:sticky lg:top-8 lg:self-start">

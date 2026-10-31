@@ -49,3 +49,20 @@ test('badge variants stay inside the restrained palette', () => {
   expect(badge.className).toContain('text-[#1d1d1f]');
   expectNoForbidden(badge);
 });
+
+test('danger and placeholder tokens stay contrast-safe', () => {
+  render(
+    <>
+      <Button variant="danger">删除</Button>
+      <Input aria-label="带占位符" placeholder="请输入" />
+    </>
+  );
+  const danger = screen.getByRole('button', { name: '删除' });
+  expect(danger.className).toContain('bg-[#d70015]');
+  expect(danger.className).toContain('text-white');
+  expectNoForbidden(danger);
+
+  const input = screen.getByLabelText('带占位符');
+  expect(input.className).toContain('placeholder:text-gray-600');
+  expect(input.className).toContain('motion-reduce:transition-none');
+});
