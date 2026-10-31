@@ -351,6 +351,7 @@ Expected: FAIL，模块不存在。
 
 `Onboarding`：
 - 浅灰背景，`PageShell`；主容器 `max-w-[980px] mx-auto px-6 md:px-8 py-20 md:py-32`。
+- 页面顶部左侧放 `Study Coach` 品牌字标（`span`，`text-xl font-semibold tracking-tight text-black`），与主容器同宽；不要做成小号大写 eyebrow 标签。
 - 居中的 `<h2>` `text-4xl md:text-5xl lg:text-6xl font-semibold tracking-tight text-black`，文案 `把考研，变成每天的下一步。`；副标题 `text-base md:text-lg text-gray-600 max-w-xl mx-auto`，文案 `告诉我你的目标，Study Coach 会安排每天的任务，你只需要执行。`
 - 表单卡片 `Card className="mt-12 md:mt-16 max-w-2xl mx-auto p-8 md:p-12"`。
 - 字段：考试日期（date，默认 `2027-12-18`）、目标院校（可选）、目标专业（可选）、考试科目（逗号分隔）、每天可用分钟数（number，默认 300）、当前水平（select：基础薄弱/基础一般/基础较好，默认基础一般）。
