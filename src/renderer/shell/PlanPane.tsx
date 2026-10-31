@@ -113,7 +113,7 @@ export function PlanPane({
     <div className="flex h-full min-w-0 flex-1 flex-col bg-white">
       <header className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-black/[0.06] px-4 md:px-5">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="text-[13px] font-medium text-black">计划</span>
+          <span className="text-[13px] font-medium text-black">今日安排</span>
           <span className="text-[11px] text-gray-400">/</span>
           <span className="truncate text-[11px] text-gray-500">
             {workspace?.name ?? '全部工作区'} · {dateLabel}

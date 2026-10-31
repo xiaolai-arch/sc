@@ -265,13 +265,13 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
             workspaces={workspaces}
           />
 
-          {view === 'chat' || view === 'plan' ? (
+          {view === 'today' ? (
             <TaskListPane
               tasks={filteredTasks}
               workspaces={workspaces}
               selectedTaskId={selectedTask?.id ?? null}
               onSelectTask={setSelectedTaskId}
-              title={view === 'chat' ? '今日安排' : '计划'}
+              title="今日安排"
               showWorkspace={showWorkspace}
             />
           ) : view === 'notes' ? (
@@ -297,29 +297,23 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               onSelectDate={setReviewDate}
               savedDates={savedReviewDates}
             />
-          ) : (
+          ) : view === 'settings' ? (
             <SettingsList onSection={handleSection} />
-          )}
+          ) : null}
 
           <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-white">
             {view === 'chat' ? (
               <ChatPane
                 workspace={currentWorkspace}
-                tasks={filteredTasks}
-                selectedTask={selectedTask}
                 messages={messages}
                 typing={typing}
                 onSend={(text) => void sendMessage(text)}
                 modelLabel={displayModel}
                 hasApiKey={hasApiKey}
                 onOpenSettings={() => setView('settings')}
-                onOpenPlan={() => setView('plan')}
-                onOpenReview={() => setView('review')}
-                streak={streak}
-                nextReminder={`${reminders[1]?.time ?? '21:30'} ${reminders[1]?.label ?? '晚间复盘'}`}
                 dateLabel={dateLabel}
               />
-            ) : view === 'plan' ? (
+            ) : view === 'today' ? (
               <PlanPane
                 workspace={currentWorkspace}
                 tasks={filteredTasks}

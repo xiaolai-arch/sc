@@ -21,7 +21,7 @@ type SidebarProps = {
 
 const navItems: Array<{ view: ShellView; label: string; Icon: typeof SparklesIcon }> = [
   { view: 'chat', label: '管家', Icon: SparklesIcon },
-  { view: 'plan', label: '计划', Icon: CalendarIcon },
+  { view: 'today', label: '今日安排', Icon: CalendarIcon },
   { view: 'notes', label: '记录', Icon: BookOpenIcon },
   { view: 'learn', label: '学习', Icon: TargetIcon },
   { view: 'review', label: '复盘', Icon: MoonIcon },
