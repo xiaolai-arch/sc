@@ -1,0 +1,147 @@
+import { jsonSchema } from 'ai';
+import type {
+  JSONSchema7,
+  LanguageModel,
+  ModelMessage as AiSdkMessage,
+  ToolCallPart,
+  ToolSet
+} from 'ai';
+import type {
+  ModelClient,
+  ModelMessage,
+  ModelRequest,
+  ModelResponse,
+  ModelToolCall,
+  ModelToolDefinition
+} from './model-client';
+
+type AiSdkGenerateOptions = Parameters<typeof import('ai').generateText>[0];
+
+/** Subset of the AI SDK result that the adapter consumes. */
+export interface AiSdkGenerateResult {
+  text: string;
+  usage?: {
+    inputTokens?: number | undefined;
+    outputTokens?: number | undefined;
+    /** Legacy AI SDK usage field names. */
+    promptTokens?: number | undefined;
+    completionTokens?: number | undefined;
+  };
+  toolCalls?: Array<{
+    toolCallId: string;
+    toolName: string;
+    input?: unknown;
+  }>;
+}
+
+export type AiSdkGenerate = (options: AiSdkGenerateOptions) => Promise<AiSdkGenerateResult>;
+
+export interface AiSdkModelClientOptions {
+  generate: AiSdkGenerate;
+  model: LanguageModel;
+}
+
+/**
+ * Adapter between the provider-agnostic ModelClient and the AI SDK.
+ * Tool execution stays outside the SDK so the butler owns the tool loop.
+ */
+export class AiSdkModelClient implements ModelClient {
+  private readonly generate: AiSdkGenerate;
+  private readonly model: LanguageModel;
+
+  constructor(options: AiSdkModelClientOptions) {
+    this.generate = options.generate;
+    this.model = options.model;
+  }
+
+  async complete(request: ModelRequest): Promise<ModelResponse> {
+    const options: Record<string, unknown> = {
+      model: this.model,
+      messages: toAiSdkMessages(request.messages)
+    };
+    if (request.temperature !== undefined) {
+      options['temperature'] = request.temperature;
+    }
+    if (request.maxTokens !== undefined) {
+      options['maxOutputTokens'] = request.maxTokens;
+    }
+    const tools = toAiSdkTools(request.tools);
+    if (tools) {
+      options['tools'] = tools;
+    }
+
+    const result = await this.generate(options as AiSdkGenerateOptions);
+    const usage = result.usage;
+    const toolCalls: ModelToolCall[] = (result.toolCalls ?? []).map((call) => ({
+      id: call.toolCallId,
+      name: call.toolName,
+      arguments: call.input
+    }));
+
+    return {
+      text: result.text,
+      usage: {
+        inputTokens: usage?.inputTokens ?? usage?.promptTokens ?? 0,
+        outputTokens: usage?.outputTokens ?? usage?.completionTokens ?? 0
+      },
+      ...(toolCalls.length > 0 ? { toolCalls } : {})
+    };
+  }
+}
+
+function toAiSdkMessages(messages: ModelMessage[]): AiSdkMessage[] {
+  return messages.map((message): AiSdkMessage => {
+    if (message.role === 'tool') {
+      if (!message.toolCallId || !message.toolName) {
+        throw new Error('Tool messages require toolCallId and toolName.');
+      }
+      return {
+        role: 'tool',
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId: message.toolCallId,
+            toolName: message.toolName,
+            output: { type: 'text', value: message.content }
+          }
+        ]
+      };
+    }
+
+    if (message.role === 'assistant' && message.toolCalls?.length) {
+      const parts: Array<{ type: 'text'; text: string } | ToolCallPart> = [];
+      if (message.content.trim()) {
+        parts.push({ type: 'text', text: message.content });
+      }
+      for (const call of message.toolCalls) {
+        parts.push({
+          type: 'tool-call',
+          toolCallId: call.id,
+          toolName: call.name,
+          input: call.arguments
+        });
+      }
+      return { role: 'assistant', content: parts };
+    }
+
+    if (message.role === 'system' || message.role === 'user' || message.role === 'assistant') {
+      return { role: message.role, content: message.content };
+    }
+
+    throw new Error(`Unsupported model message role: ${String(message.role)}`);
+  });
+}
+
+function toAiSdkTools(definitions?: ModelToolDefinition[]): ToolSet | undefined {
+  if (!definitions?.length) {
+    return undefined;
+  }
+  const tools: ToolSet = {};
+  for (const definition of definitions) {
+    tools[definition.name] = {
+      description: definition.description,
+      inputSchema: jsonSchema(definition.parameters as JSONSchema7)
+    };
+  }
+  return tools;
+}
