@@ -602,7 +602,7 @@ Expected: FAIL，模块不存在。
 - 标签精确：`模型名称`、`API Key`、`每日主动会话次数`、`每日 token 上限`、`早间时间`、`晚间时间`、`免打扰开始`、`免打扰结束`、`开机自启`。
 - `保存设置` primary；保存时先 `updateSettings({ provider, budget, notifications, launchAtLogin })`，若 API Key 非空再 `setApiKey(key)`；成功后清空 key、`role="status"` 显示 `已保存`。
 - 若 `window.studyCoachPrototype` 存在，底部显示 `清除原型数据并重新开始`（ghost/danger），点击 `confirm` 后调用 `reset()`。
-- `App`：`view === 'settings'` 时渲染 `<SettingsPage onClose={() => setView('today')} />`；`Nav` 的“设置”按钮可切换。
+- `App`：`view === 'settings'` 时渲染 `<SettingsPage onClose={() => { setView('today'); void refresh(); }} />`；`Nav` 的“设置”按钮可切换。
 - `README.md` 增加“Web 原型”段落：`npm run dev:web` 打开 `http://localhost:5173`；说明 mock 数据、API Key 仅内存、与 Electron 共用 renderer。
 
 - [ ] **Step 4: 运行测试、构建与视觉验收**
