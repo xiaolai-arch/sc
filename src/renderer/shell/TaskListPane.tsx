@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { cn } from '../ui/cn';
 import { CheckIcon, ChevronRightIcon, SearchIcon } from '../ui/icons';
-import type { Workspace, WorkspaceTask } from './demoData';
+import type { Workspace, WorkspaceTask } from '../../shared/workspace';
 
 export const shellPaneClass =
   'hidden h-full w-[300px] shrink-0 flex-col border-r border-black/[0.06] bg-white lg:flex';

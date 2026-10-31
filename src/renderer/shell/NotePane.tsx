@@ -1,8 +1,12 @@
 import { useState } from 'react';
+import type { CreateNoteInput, Workspace, WorkspaceNote } from '../../shared/workspace';
 import { Button } from '../ui/Button';
+import { Input } from '../ui/Input';
+import { Label } from '../ui/Label';
+import { Textarea } from '../ui/Textarea';
 import { BookOpenIcon, SearchIcon } from '../ui/icons';
 import { cn } from '../ui/cn';
-import type { Workspace, WorkspaceNote } from './demoData';
+import { noteBlocks } from './noteBody';
 import { shellPaneClass } from './TaskListPane';
 
 type NoteListProps = {
@@ -94,23 +98,71 @@ type NotePaneProps = {
   note: WorkspaceNote | null;
   notes: WorkspaceNote[];
   workspaces: Workspace[];
+  workspaceId: string | null;
   onSelectNote: (id: string) => void;
   onOpenChat: () => void;
+  onCreateNote: (input: CreateNoteInput) => Promise<WorkspaceNote>;
 };
 
-export function NotePane({ note, notes, workspaces, onSelectNote, onOpenChat }: NotePaneProps) {
-  if (!note) {
-    return (
-      <div className="flex h-full flex-1 items-center justify-center bg-white text-[13px] text-gray-500">
-        选择一条记录。
-      </div>
-    );
+export function NotePane({
+  note,
+  notes,
+  workspaces,
+  workspaceId,
+  onSelectNote,
+  onOpenChat,
+  onCreateNote
+}: NotePaneProps) {
+  const [creating, setCreating] = useState(false);
+  const [title, setTitle] = useState('');
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const targetWorkspace =
+    workspaces.find((workspace) => workspace.id === (workspaceId ?? note?.workspaceId)) ??
+    workspaces[0] ??
+    null;
+
+  async function submitNote() {
+    if (!targetWorkspace) {
+      setError('还没有工作区，暂时不能新建记录。');
+      return;
+    }
+    if (!title.trim()) {
+      setError('请先填写记录标题。');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await onCreateNote({
+        workspaceId: targetWorkspace.id,
+        title: title.trim(),
+        subject: subject.trim() || targetWorkspace.name,
+        tags: ['随手记'],
+        summary: body.trim().slice(0, 80),
+        body: body.trim()
+      });
+      setTitle('');
+      setSubject('');
+      setBody('');
+      setCreating(false);
+      onSelectNote(created.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '新建记录失败，请重试。');
+    } finally {
+      setBusy(false);
+    }
   }
 
-  const workspace = workspaces.find((item) => item.id === note.workspaceId);
-  const related = note.related
-    .map((id) => notes.find((item) => item.id === id))
-    .filter((item): item is WorkspaceNote => Boolean(item));
+  const workspace = note ? workspaces.find((item) => item.id === note.workspaceId) : null;
+  const related = note
+    ? note.related
+        .map((id) => notes.find((item) => item.id === id))
+        .filter((item): item is WorkspaceNote => Boolean(item))
+    : [];
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col bg-white">
@@ -118,86 +170,179 @@ export function NotePane({ note, notes, workspaces, onSelectNote, onOpenChat }: 
         <div className="flex min-w-0 items-center gap-2">
           <span className="text-[13px] font-medium text-black">记录</span>
           <span className="text-[11px] text-gray-400">/</span>
-          <span className="truncate text-[11px] text-gray-500">{note.title}</span>
+          <span className="truncate text-[11px] text-gray-500">
+            {creating ? '新建记录' : (note?.title ?? '选择一条记录')}
+          </span>
         </div>
-        <Button size="sm" variant="secondary" onClick={onOpenChat}>
-          问管家
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              setCreating(true);
+              setError(null);
+            }}
+          >
+            新建记录
+          </Button>
+          <Button size="sm" variant="secondary" onClick={onOpenChat}>
+            问管家
+          </Button>
+        </div>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-6">
-        <article className="mx-auto w-full max-w-[720px]">
-          <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500">
-            {workspace ? (
-              <span className="inline-flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: workspace.color }} />
-                {workspace.name}
-              </span>
-            ) : null}
-            <span>·</span>
-            <span>{note.subject}</span>
-            <span>·</span>
-            <span>{note.updated}</span>
-            <span>·</span>
-            <span>本地 markdown</span>
-          </p>
-          <h1 className="mt-3 text-[22px] font-semibold tracking-tight text-black">{note.title}</h1>
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {note.tags.map((tag) => (
-              <span key={tag} className="rounded-full bg-[#f5f5f7] px-2 py-0.5 text-[11px] text-gray-600">
-                #{tag}
-              </span>
-            ))}
-          </div>
-          <p className="mt-4 rounded-xl border border-black/[0.06] bg-[#fafafa] px-3 py-2 text-[12px] leading-5 text-gray-600">
-            {note.summary}
-          </p>
-
-          <div className="mt-6 space-y-4">
-            {note.blocks.map((block, index) => {
-              if (block.kind === 'h2') {
-                return (
-                  <h2 key={index} className="pt-2 text-[15px] font-semibold tracking-tight text-black">
-                    {block.text}
-                  </h2>
-                );
-              }
-              if (block.kind === 'ul') {
-                return (
-                  <ul key={index} className="list-disc space-y-1.5 pl-5 text-[13px] leading-6 text-gray-600">
-                    {block.items.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                );
-              }
-              return (
-                <p key={index} className="text-[13px] leading-6 text-gray-600">
-                  {block.text}
+        {creating ? (
+          <form
+            className="mx-auto w-full max-w-[720px] space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submitNote();
+            }}
+          >
+            <div className="rounded-xl border border-black/[0.06] bg-[#fafafa] p-4">
+              <p className="text-[13px] font-medium text-black">新建记录</p>
+              <p className="mt-1 text-[11px] text-gray-500">
+                会写入「{targetWorkspace?.name ?? '当前工作区'}」，之后可以在复盘里回顾。
+              </p>
+              <div className="mt-4 space-y-3">
+                <div>
+                  <Label htmlFor="pane-note-title">标题</Label>
+                  <Input
+                    id="pane-note-title"
+                    aria-label="记录标题"
+                    value={title}
+                    onChange={(event) => setTitle(event.target.value)}
+                    placeholder="例如：今天的错题整理"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="pane-note-subject">科目（可选）</Label>
+                  <Input
+                    id="pane-note-subject"
+                    aria-label="记录科目"
+                    value={subject}
+                    onChange={(event) => setSubject(event.target.value)}
+                    placeholder={targetWorkspace?.name ?? '学习'}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="pane-note-body">正文</Label>
+                  <Textarea
+                    id="pane-note-body"
+                    aria-label="记录正文"
+                    value={body}
+                    onChange={(event) => setBody(event.target.value)}
+                    placeholder="写下今天学到什么、卡在哪里。"
+                  />
+                </div>
+              </div>
+              {error ? (
+                <p role="alert" className="mt-3 text-[12px] text-[#d70015]">
+                  {error}
                 </p>
-              );
-            })}
-          </div>
-
-          {related.length > 0 ? (
-            <div className="mt-8 border-t border-black/[0.06] pt-4">
-              <p className="text-[11px] font-medium text-gray-500">关联笔记</p>
-              <div className="mt-2 space-y-1">
-                {related.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => onSelectNote(item.id)}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-[#0071e3] transition-colors duration-150 hover:bg-[#f7f7f8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
-                  >
-                    <BookOpenIcon className="h-3.5 w-3.5" />
-                    {item.title}
-                  </button>
-                ))}
+              ) : null}
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <Button type="submit" size="sm" disabled={busy}>
+                  {busy ? '正在保存…' : '保存记录'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => {
+                    setCreating(false);
+                    setError(null);
+                  }}
+                >
+                  取消
+                </Button>
               </div>
             </div>
-          ) : null}
-        </article>
+          </form>
+        ) : note ? (
+          <article className="mx-auto w-full max-w-[720px]">
+            <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500">
+              {workspace ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: workspace.color }} />
+                  {workspace.name}
+                </span>
+              ) : null}
+              <span>·</span>
+              <span>{note.subject}</span>
+              <span>·</span>
+              <span>{note.updated}</span>
+              <span>·</span>
+              <span>本地 markdown</span>
+            </p>
+            <h1 className="mt-3 text-[22px] font-semibold tracking-tight text-black">{note.title}</h1>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {note.tags.map((tag) => (
+                <span key={tag} className="rounded-full bg-[#f5f5f7] px-2 py-0.5 text-[11px] text-gray-600">
+                  #{tag}
+                </span>
+              ))}
+            </div>
+            {note.summary ? (
+              <p className="mt-4 rounded-xl border border-black/[0.06] bg-[#fafafa] px-3 py-2 text-[12px] leading-5 text-gray-600">
+                {note.summary}
+              </p>
+            ) : null}
+
+            <div className="mt-6 space-y-4">
+              {noteBlocks(note.body).map((block, index) => {
+                if (block.kind === 'h2') {
+                  return (
+                    <h2 key={index} className="pt-2 text-[15px] font-semibold tracking-tight text-black">
+                      {block.text}
+                    </h2>
+                  );
+                }
+                if (block.kind === 'ul') {
+                  return (
+                    <ul key={index} className="list-disc space-y-1.5 pl-5 text-[13px] leading-6 text-gray-600">
+                      {block.items.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  );
+                }
+                return (
+                  <p key={index} className="text-[13px] leading-6 text-gray-600">
+                    {block.text}
+                  </p>
+                );
+              })}
+            </div>
+
+            {related.length > 0 ? (
+              <div className="mt-8 border-t border-black/[0.06] pt-4">
+                <p className="text-[11px] font-medium text-gray-500">关联笔记</p>
+                <div className="mt-2 space-y-1">
+                  {related.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => onSelectNote(item.id)}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-[#0071e3] transition-colors duration-150 hover:bg-[#f7f7f8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+                    >
+                      <BookOpenIcon className="h-3.5 w-3.5" />
+                      {item.title}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </article>
+        ) : (
+          <div className="mx-auto flex w-full max-w-[720px] flex-col items-center justify-center py-16 text-center">
+            <p className="text-[13px] text-gray-500">选择一条记录，或者新建一条。</p>
+            <Button className="mt-4" size="sm" onClick={() => setCreating(true)}>
+              新建记录
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );
