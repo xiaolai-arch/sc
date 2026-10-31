@@ -9,9 +9,9 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "dev:web": "vite --config vite.web.config.ts",
-    "build:web": "vite build --config vite.web.config.ts",
-    "preview:web": "vite preview --config vite.web.config.ts",
+    "dev:web": "vite --config vite.web.config.mts",
+    "build:web": "vite build --config vite.web.config.mts",
+    "preview:web": "vite preview --config vite.web.config.mts",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run"
   },
