@@ -6,7 +6,7 @@ import { CheckIcon, MoonIcon } from '../ui/icons';
 import { Label } from '../ui/Label';
 import { Textarea } from '../ui/Textarea';
 import { cn } from '../ui/cn';
-import type { MemoryItem, Reminder, Workspace } from './demoData';
+import type { MemoryItem, Reminder, Workspace } from '../../shared/workspace';
 import { shellPaneClass } from './TaskListPane';
 
 function previousDate(date: string, offset: number) {

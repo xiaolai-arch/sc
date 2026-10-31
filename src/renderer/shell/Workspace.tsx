@@ -1,49 +1,81 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { formatChineseDate, formatLocalDate } from '../../shared/date';
 import type { UpdateTaskInput } from '../../shared/ipc';
 import type { ReviewAnswers } from '../../shared/types';
+import type { CreateNoteInput, WorkspaceNote } from '../../shared/workspace';
 import { SettingsPage } from '../settings/SettingsPage';
+import { Button } from '../ui/Button';
 import { ChatPane } from './ChatPane';
-import {
-  demoMemory,
-  demoNotes,
-  demoPracticeSets,
-  demoReminders,
-  demoStreak,
-  demoTasks,
-  workspaces
-} from './demoData';
-import type { WorkspaceNote, WorkspaceTask } from './demoData';
 import { LearningPane, PracticeList } from './LearningPane';
 import { NoteList, NotePane } from './NotePane';
 import { PlanPane } from './PlanPane';
+import type { NewTaskDraft } from './PlanPane';
 import { ReviewList, ReviewPane } from './ReviewPane';
 import { Sidebar } from './Sidebar';
 import { SettingsList, TaskListPane } from './TaskListPane';
 import type { ChatMessage, ShellView } from './types';
+import { useWorkspaceData } from './useWorkspaceData';
 
 type WorkspaceProps = {
   hasApiKey: boolean;
   onRefresh: () => void;
 };
 
-function butlerReply(text: string) {
-  if (/记一下|记录/.test(text)) return '记下了。可以去「记录」里查看这条随手记。';
-  if (/提醒/.test(text)) return '好，我会在 21:30 提醒你复盘（原型）。';
-  if (/优先级|安排|排/.test(text)) {
-    return '我先按截止时间和精力排：数学 45 分钟 → 英语 30 分钟 → 政治 30 分钟。';
-  }
-  if (/洛必达/.test(text)) {
-    return '洛必达法则要先确认 0/0 或 ∞/∞，且导函数比值极限存在。你「错题：洛必达法则的适用条件」里正好记了这一点。';
-  }
-  return '收到。目前是原型模式；接入模型后，我会结合你的计划、记录和复盘回答。';
+function messageOf(cause: unknown) {
+  return cause instanceof Error ? cause.message : '操作失败，请重试。';
+}
+
+function WorkspaceStatus({
+  title,
+  detail,
+  actionLabel,
+  onAction,
+  alert = false
+}: {
+  title: string;
+  detail?: string;
+  actionLabel?: string;
+  onAction?: () => void;
+  alert?: boolean;
+}) {
+  return (
+    <div className="flex h-screen items-center justify-center bg-[#e9e9ec] p-4">
+      <div
+        role={alert ? 'alert' : 'status'}
+        className="w-full max-w-sm rounded-xl border border-black/10 bg-white p-6 text-center shadow-sm"
+      >
+        <p className="text-[15px] font-medium text-black">{title}</p>
+        {detail ? <p className="mt-2 text-[12px] leading-5 text-gray-600">{detail}</p> : null}
+        {actionLabel && onAction ? (
+          <Button className="mt-4" size="sm" onClick={onAction}>
+            {actionLabel}
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
+  const {
+    workspaces,
+    tasks,
+    notes,
+    memory,
+    reminders,
+    practiceSets,
+    streak,
+    loading,
+    error,
+    retry,
+    createTask,
+    updateTask,
+    createNote,
+    send,
+    submitReview
+  } = useWorkspaceData();
   const [view, setView] = useState<ShellView>('chat');
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
-  const [tasks, setTasks] = useState<WorkspaceTask[]>(demoTasks);
-  const [notes, setNotes] = useState<WorkspaceNote[]>(demoNotes);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [selectedSetId, setSelectedSetId] = useState<string | null>(null);
@@ -53,13 +85,13 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [typing, setTyping] = useState(false);
   const [modelLabel, setModelLabel] = useState('模板计划');
-  const timeoutRef = useRef<number | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const currentWorkspace = workspaces.find((workspace) => workspace.id === workspaceId) ?? null;
   const filteredTasks = tasks.filter((task) => !workspaceId || task.workspaceId === workspaceId);
   const filteredNotes = notes.filter((note) => !workspaceId || note.workspaceId === workspaceId);
-  const filteredSets = demoPracticeSets.filter((set) => !workspaceId || set.workspaceId === workspaceId);
-  const filteredMemory = demoMemory.filter((item) => !workspaceId || item.workspaceId === workspaceId);
+  const filteredSets = practiceSets.filter((set) => !workspaceId || set.workspaceId === workspaceId);
+  const filteredMemory = memory.filter((item) => !workspaceId || item.workspaceId === workspaceId);
 
   const selectedTask =
     filteredTasks.find((task) => task.id === selectedTaskId) ?? filteredTasks[0] ?? null;
@@ -87,51 +119,69 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     void loadModelLabel();
   }, [loadModelLabel]);
 
-  useEffect(() => {
-    return () => {
-      if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
-    };
-  }, []);
-
-  async function updateTask(input: UpdateTaskInput) {
-    setTasks((current) =>
-      current.map((task) =>
-        task.id === input.taskId
-          ? { ...task, status: input.status, actualMin: input.actualMin ?? task.actualMin }
-          : task
-      )
-    );
+  async function handleUpdateTask(input: UpdateTaskInput) {
+    setActionError(null);
+    try {
+      await updateTask(input);
+    } catch (cause) {
+      setActionError(messageOf(cause));
+      throw cause;
+    }
   }
 
-  function sendMessage(text: string) {
+  async function handleCreateTask(draft: NewTaskDraft) {
+    const workspace = currentWorkspace ?? workspaces[0];
+    if (!workspace) throw new Error('还没有工作区，暂时不能添加任务。');
+    setActionError(null);
+    try {
+      const task = await createTask({ workspaceId: workspace.id, ...draft });
+      setSelectedTaskId(task.id);
+    } catch (cause) {
+      setActionError(messageOf(cause));
+      throw cause;
+    }
+  }
+
+  async function handleCreateNote(input: CreateNoteInput) {
+    setActionError(null);
+    try {
+      const note: WorkspaceNote = await createNote(input);
+      setSelectedNoteId(note.id);
+      return note;
+    } catch (cause) {
+      setActionError(messageOf(cause));
+      throw cause;
+    }
+  }
+
+  async function sendMessage(text: string) {
     const userMessage: ChatMessage = { id: `u-${Date.now()}`, role: 'user', text };
     setMessages((current) => [...current, userMessage]);
-
-    if (/记一下|记录/.test(text)) {
-      const workspace = currentWorkspace ?? workspaces[0];
-      const title = text.replace(/^(记一下|记录)[：:\s]*/, '').slice(0, 28) || '随手记';
-      const note: WorkspaceNote = {
-        id: `note-${Date.now()}`,
-        workspaceId: workspace.id,
-        title,
-        subject: workspace.name,
-        tags: ['随手记'],
-        updated: '今天',
-        summary: text,
-        blocks: [{ kind: 'p', text }],
-        related: []
-      };
-      setNotes((current) => [note, ...current]);
-    }
-
     setTyping(true);
-    timeoutRef.current = window.setTimeout(() => {
+    setActionError(null);
+    try {
+      const result = await send({
+        workspaceId: workspaceId ?? undefined,
+        taskId: selectedTask?.id,
+        message: text
+      });
       setMessages((current) => [
         ...current,
-        { id: `a-${Date.now()}`, role: 'assistant', text: butlerReply(text) }
+        { id: `a-${Date.now()}`, role: 'assistant', text: result.text }
       ]);
+    } catch (cause) {
+      setMessages((current) => [
+        ...current,
+        {
+          id: `a-${Date.now()}`,
+          role: 'assistant',
+          text: '管家暂时没有回应，请稍后再试。'
+        }
+      ]);
+      setActionError(messageOf(cause));
+    } finally {
       setTyping(false);
-    }, 500);
+    }
   }
 
   function handleViewChange(next: ShellView) {
@@ -150,10 +200,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   }
 
   async function saveReview(answers: ReviewAnswers) {
-    const api = window.studyCoach;
-    if (api) {
-      await api.submitReview({ date: reviewDate, answers });
-    }
+    await submitReview(reviewDate, answers);
     setSavedReviewDates((current) =>
       current.includes(reviewDate) ? current : [...current, reviewDate]
     );
@@ -163,13 +210,48 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     document.getElementById(id)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
   }
 
+  if (loading && workspaces.length === 0) {
+    return <WorkspaceStatus title="正在加载工作区…" detail="从本地 vault 读取任务、记录和提醒。" />;
+  }
+
+  if (error && workspaces.length === 0) {
+    return (
+      <WorkspaceStatus
+        title="工作区加载失败"
+        detail={error}
+        actionLabel="重试"
+        onAction={() => void retry()}
+        alert
+      />
+    );
+  }
+
   const showWorkspace = workspaceId === null;
   const dateLabel = formatChineseDate(today);
   const displayModel = hasApiKey ? modelLabel : '模板计划';
+  const bannerError = actionError ?? error;
 
   return (
     <div className="flex h-screen flex-col bg-[#e9e9ec] md:p-2">
       <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden border-black/10 bg-white md:rounded-xl md:border md:shadow-sm">
+        {bannerError ? (
+          <div
+            role="alert"
+            className="flex shrink-0 items-center justify-between gap-3 border-b border-[#d70015]/10 bg-[#fdf3f2] px-4 py-2 text-[12px] text-[#d70015]"
+          >
+            <span className="min-w-0 truncate">{bannerError}</span>
+            <button
+              type="button"
+              onClick={() => {
+                setActionError(null);
+                void retry();
+              }}
+              className="shrink-0 font-medium text-[#0071e3] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+            >
+              重试
+            </button>
+          </div>
+        ) : null}
         <div className="flex min-h-0 flex-1 flex-col md:flex-row">
           <Sidebar
             view={view}
@@ -223,14 +305,14 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
                 selectedTask={selectedTask}
                 messages={messages}
                 typing={typing}
-                onSend={sendMessage}
+                onSend={(text) => void sendMessage(text)}
                 modelLabel={displayModel}
                 hasApiKey={hasApiKey}
                 onOpenSettings={() => setView('settings')}
                 onOpenPlan={() => setView('plan')}
                 onOpenReview={() => setView('review')}
-                streak={demoStreak}
-                nextReminder={`${demoReminders[1]?.time ?? '21:30'} ${demoReminders[1]?.label ?? '晚间复盘'}`}
+                streak={streak}
+                nextReminder={`${reminders[1]?.time ?? '21:30'} ${reminders[1]?.label ?? '晚间复盘'}`}
                 dateLabel={dateLabel}
               />
             ) : view === 'plan' ? (
@@ -245,7 +327,8 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
                   setStartedAtByTask((current) => ({ ...current, [selectedTask.id]: new Date() }));
                 }}
                 onSelectTask={setSelectedTaskId}
-                onUpdate={updateTask}
+                onUpdate={handleUpdateTask}
+                onCreateTask={handleCreateTask}
                 showWorkspace={showWorkspace}
                 dateLabel={dateLabel}
                 onOpenChat={() => setView('chat')}
@@ -255,8 +338,10 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
                 note={selectedNote}
                 notes={notes}
                 workspaces={workspaces}
+                workspaceId={workspaceId}
                 onSelectNote={setSelectedNoteId}
                 onOpenChat={() => setView('chat')}
+                onCreateNote={handleCreateNote}
               />
             ) : view === 'learn' ? (
               <LearningPane
@@ -276,8 +361,8 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
                 date={reviewDate}
                 dateLabel={formatChineseDate(reviewDate)}
                 memory={filteredMemory}
-                reminders={demoReminders}
-                streak={demoStreak}
+                reminders={reminders}
+                streak={streak}
                 saved={savedReviewDates.includes(reviewDate)}
                 onSave={saveReview}
                 onOpenChat={() => setView('chat')}

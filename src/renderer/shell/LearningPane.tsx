@@ -3,7 +3,8 @@ import { Button } from '../ui/Button';
 import { BookOpenIcon, CheckIcon, TargetIcon } from '../ui/icons';
 import { Progress } from '../ui/Progress';
 import { cn } from '../ui/cn';
-import type { PracticeSet, Workspace, WorkspaceNote } from './demoData';
+import type { Workspace, WorkspaceNote } from '../../shared/workspace';
+import type { PracticeSet } from './demoData';
 import { shellPaneClass } from './TaskListPane';
 
 type PracticeListProps = {

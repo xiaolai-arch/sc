@@ -8,7 +8,7 @@ import {
   SparklesIcon,
   TargetIcon
 } from '../ui/icons';
-import type { Workspace } from './demoData';
+import type { Workspace } from '../../shared/workspace';
 import type { ShellView } from './types';
 
 type SidebarProps = {

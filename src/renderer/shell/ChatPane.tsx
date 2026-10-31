@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Button } from '../ui/Button';
 import { MoreHorizontalIcon, SparklesIcon } from '../ui/icons';
 import { Composer } from './Composer';
-import type { Workspace, WorkspaceTask } from './demoData';
+import type { Workspace, WorkspaceTask } from '../../shared/workspace';
 import type { ChatMessage } from './types';
 
 type ChatPaneProps = {
