@@ -1,27 +1,37 @@
 import { cn } from '../ui/cn';
-import { FolderIcon, MoonIcon, SettingsIcon, SunIcon } from '../ui/icons';
+import {
+  BookOpenIcon,
+  CalendarIcon,
+  FolderIcon,
+  MoonIcon,
+  SettingsIcon,
+  SparklesIcon,
+  TargetIcon
+} from '../ui/icons';
+import type { Workspace } from './demoData';
 import type { ShellView } from './types';
 
 type SidebarProps = {
   view: ShellView;
   onViewChange: (view: ShellView) => void;
-  onReview: () => void;
-  subjects: string[];
-  subjectFilter: string | null;
-  onSelectSubject: (subject: string | null) => void;
+  workspaceId: string | null;
+  onWorkspaceChange: (workspaceId: string | null) => void;
+  workspaces: Workspace[];
 };
 
-const subjectDotClasses = [
-  'bg-[#0071e3]',
-  'bg-[#34c759]',
-  'bg-[#ff9f0a]',
-  'bg-[#a13ff6]'
+const navItems: Array<{ view: ShellView; label: string; Icon: typeof SparklesIcon }> = [
+  { view: 'chat', label: '管家', Icon: SparklesIcon },
+  { view: 'plan', label: '计划', Icon: CalendarIcon },
+  { view: 'notes', label: '记录', Icon: BookOpenIcon },
+  { view: 'learn', label: '学习', Icon: TargetIcon },
+  { view: 'review', label: '复盘', Icon: MoonIcon },
+  { view: 'settings', label: '设置', Icon: SettingsIcon }
 ];
 
-const recentDays = [
-  { label: '10月30日', progress: '2/3' },
-  { label: '10月29日', progress: '3/3' },
-  { label: '10月28日', progress: '1/2' }
+const recentItems = [
+  { label: '今天 · 3 条记录', meta: '记录' },
+  { label: '10月30日 · 复盘', meta: '复盘' },
+  { label: '10月29日 · 复盘', meta: '复盘' }
 ];
 
 function navClass(active: boolean) {
@@ -34,10 +44,9 @@ function navClass(active: boolean) {
 export function Sidebar({
   view,
   onViewChange,
-  onReview,
-  subjects,
-  subjectFilter,
-  onSelectSubject
+  workspaceId,
+  onWorkspaceChange,
+  workspaces
 }: SidebarProps) {
   return (
     <aside className="flex w-full shrink-0 flex-col border-b border-black/[0.06] bg-[#f5f5f7] md:h-full md:w-[236px] md:border-b-0 md:border-r">
@@ -55,69 +64,64 @@ export function Sidebar({
       </div>
 
       <nav className="flex items-center gap-1 overflow-x-auto px-2 pb-2 md:flex-col md:items-stretch md:overflow-visible md:px-3">
-        <button
-          type="button"
-          onClick={() => onViewChange('today')}
-          aria-current={view === 'today' ? 'page' : undefined}
-          className={navClass(view === 'today')}
-        >
-          <SunIcon className="h-4 w-4" />
-          今日
-        </button>
-        <button type="button" onClick={onReview} className={navClass(false)}>
-          <MoonIcon className="h-4 w-4" />
-          复盘
-        </button>
-        <button
-          type="button"
-          onClick={() => onViewChange('settings')}
-          aria-current={view === 'settings' ? 'page' : undefined}
-          className={navClass(view === 'settings')}
-        >
-          <SettingsIcon className="h-4 w-4" />
-          设置
-        </button>
+        {navItems.map(({ view: itemView, label, Icon }) => (
+          <button
+            key={itemView}
+            type="button"
+            onClick={() => onViewChange(itemView)}
+            aria-current={view === itemView ? 'page' : undefined}
+            className={navClass(view === itemView)}
+          >
+            <Icon className="h-4 w-4" />
+            {label}
+          </button>
+        ))}
       </nav>
 
       <div className="hidden min-h-0 flex-1 overflow-y-auto px-3 pb-3 md:block">
-        <p className="px-2.5 pb-1 pt-3 text-[11px] font-medium text-gray-500">科目</p>
+        <p className="px-2.5 pb-1 pt-3 text-[11px] font-medium text-gray-500">工作区</p>
         <button
           type="button"
-          onClick={() => onSelectSubject(null)}
+          onClick={() => onWorkspaceChange(null)}
           className={cn(
             'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12px] transition-colors duration-150',
-            subjectFilter === null ? 'bg-black/[0.06] text-black' : 'text-gray-600 hover:bg-black/[0.04]'
+            workspaceId === null ? 'bg-black/[0.06] text-black' : 'text-gray-600 hover:bg-black/[0.04]'
           )}
         >
-          <span className="h-1.5 w-1.5 rounded-full bg-[#c7c7cc]" />
-          全部科目
+          <span className="h-1.5 w-1.5 rounded-full bg-[#8e8e93]" />
+          全部工作区
         </button>
-        {subjects.map((subject, index) => (
+        {workspaces.map((workspace) => (
           <button
-            key={subject}
+            key={workspace.id}
             type="button"
-            onClick={() => onSelectSubject(subject)}
+            onClick={() => onWorkspaceChange(workspace.id)}
             className={cn(
               'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12px] transition-colors duration-150',
-              subjectFilter === subject ? 'bg-black/[0.06] text-black' : 'text-gray-600 hover:bg-black/[0.04]'
+              workspaceId === workspace.id
+                ? 'bg-black/[0.06] text-black'
+                : 'text-gray-600 hover:bg-black/[0.04]'
             )}
           >
-            <span className={cn('h-1.5 w-1.5 rounded-full', subjectDotClasses[index % subjectDotClasses.length])} />
-            {subject}
+            <span
+              className="h-1.5 w-1.5 rounded-full"
+              style={{ backgroundColor: workspace.color }}
+            />
+            {workspace.name}
           </button>
         ))}
 
         <p className="px-2.5 pb-1 pt-4 text-[11px] font-medium text-gray-500">最近</p>
-        {recentDays.map((day) => (
+        {recentItems.map((item) => (
           <div
-            key={day.label}
+            key={item.label}
             className="flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-[12px] text-gray-600"
           >
             <span className="flex min-w-0 items-center gap-2">
               <FolderIcon className="h-3.5 w-3.5 shrink-0 text-gray-400" />
-              <span className="truncate">{day.label}</span>
+              <span className="truncate">{item.label}</span>
             </span>
-            <span className="shrink-0 text-[11px] text-gray-400">{day.progress}</span>
+            <span className="shrink-0 text-[11px] text-gray-400">{item.meta}</span>
           </div>
         ))}
       </div>

@@ -303,3 +303,40 @@ export function FolderIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+export function BookOpenIcon({ className }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={iconClassName(className)}
+    >
+      <path d="M12 6.5c-1.8-1.4-4-2-6.2-2H4v14h2c2.1 0 4.1.6 6 2 1.9-1.4 3.9-2 6-2h2v-14h-1.8c-2.2 0-4.4.6-6.2 2z" />
+      <path d="M12 6.5v14" />
+    </svg>
+  );
+}
+
+export function TargetIcon({ className }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={iconClassName(className)}
+    >
+      <circle cx="12" cy="12" r="8.5" />
+      <circle cx="12" cy="12" r="4.5" />
+      <circle cx="12" cy="12" r="1" />
+    </svg>
+  );
+}

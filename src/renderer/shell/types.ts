@@ -1,4 +1,4 @@
-export type ShellView = 'today' | 'settings';
+export type ShellView = 'chat' | 'plan' | 'notes' | 'learn' | 'review' | 'settings';
 
 export type ChatMessage = {
   id: string;

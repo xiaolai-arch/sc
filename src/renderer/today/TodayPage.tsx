@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { formatLocalDate } from '../../shared/date';
+import { formatChineseDate, formatLocalDate } from '../../shared/date';
 import type { UpdateTaskInput } from '../../shared/ipc';
 import type { DailyPlan } from '../../shared/types';
 import { ReviewDialog } from '../review/ReviewDialog';
@@ -13,14 +13,6 @@ type TodayPageProps = {
   hasApiKey?: boolean;
   onOpenSettings?: () => void;
 };
-
-function formatReadableDate(value: string): string {
-  const date = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return value;
-  return date
-    .toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })
-    .replace('星期', ' 星期');
-}
 
 export function TodayPage({ hasApiKey = true, onOpenSettings }: TodayPageProps) {
   const [plan, setPlan] = useState<DailyPlan | null>(null);
@@ -98,7 +90,7 @@ export function TodayPage({ hasApiKey = true, onOpenSettings }: TodayPageProps) 
     <div>
       <header className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
         <div>
-          <p className="text-sm text-gray-600">{formatReadableDate(today)}</p>
+          <p className="text-sm text-gray-600">{formatChineseDate(today)}</p>
           <h2 className="mt-2 text-3xl font-semibold tracking-tight text-black md:text-4xl">
             今天，按计划走就好。
           </h2>

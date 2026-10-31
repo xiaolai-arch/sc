@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import type { StudyTask } from '../../shared/types';
 import { cn } from '../ui/cn';
 import { CheckIcon, ChevronRightIcon, SearchIcon } from '../ui/icons';
+import type { Workspace, WorkspaceTask } from './demoData';
 
-const paneClass =
+export const shellPaneClass =
   'hidden h-full w-[300px] shrink-0 flex-col border-r border-black/[0.06] bg-white lg:flex';
 
-function statusDotClass(status: StudyTask['status']) {
+function statusDotClass(status: WorkspaceTask['status']) {
   if (status === 'done') return 'bg-[#34c759]';
   if (status === 'in-progress') return 'bg-[#0071e3]';
   if (status === 'skipped') return 'bg-[#c7c7cc]';
@@ -14,42 +14,37 @@ function statusDotClass(status: StudyTask['status']) {
 }
 
 type TaskListPaneProps = {
-  tasks: StudyTask[];
+  tasks: WorkspaceTask[];
+  workspaces: Workspace[];
   selectedTaskId: string | null;
   onSelectTask: (id: string) => void;
-  subjectFilter: string | null;
-  loading: boolean;
-  loadFailed: boolean;
+  title: string;
+  showWorkspace: boolean;
 };
 
 export function TaskListPane({
   tasks,
+  workspaces,
   selectedTaskId,
   onSelectTask,
-  subjectFilter,
-  loading,
-  loadFailed
+  title,
+  showWorkspace
 }: TaskListPaneProps) {
   const [query, setQuery] = useState('');
   const visible = tasks.filter((task) => {
-    const matchesSubject = !subjectFilter || task.subject === subjectFilter;
-    const matchesQuery =
-      !query.trim() ||
-      task.title.toLowerCase().includes(query.trim().toLowerCase()) ||
-      task.subject.toLowerCase().includes(query.trim().toLowerCase());
-    return matchesSubject && matchesQuery;
+    const workspace = workspaces.find((item) => item.id === task.workspaceId);
+    const haystack = `${task.title} ${task.subject} ${workspace?.name ?? ''}`.toLowerCase();
+    return !query.trim() || haystack.includes(query.trim().toLowerCase());
   });
 
   return (
-    <aside className={paneClass}>
+    <aside className={shellPaneClass}>
       <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-black/[0.06] px-4">
         <div className="flex items-center gap-2">
-          <span className="text-[13px] font-medium text-black">今日任务</span>
-          {!loading && !loadFailed ? (
-            <span className="rounded-full bg-black/[0.05] px-1.5 py-0.5 text-[10px] text-gray-500">
-              {tasks.length}
-            </span>
-          ) : null}
+          <span className="text-[13px] font-medium text-black">{title}</span>
+          <span className="rounded-full bg-black/[0.05] px-1.5 py-0.5 text-[10px] text-gray-500">
+            {tasks.length}
+          </span>
         </div>
       </div>
 
@@ -67,61 +62,59 @@ export function TaskListPane({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
-        {loading ? (
-          <div className="space-y-2 px-1 pt-1">
-            {[0, 1, 2].map((index) => (
-              <div key={index} className="h-[52px] rounded-lg bg-black/[0.03]" />
-            ))}
-          </div>
-        ) : loadFailed ? (
-          <p className="px-3 pt-2 text-[12px] leading-5 text-gray-500">
-            今日计划加载失败，请在右侧重试。
-          </p>
+        {visible.length === 0 ? (
+          <p className="px-3 py-2 text-[12px] text-gray-500">没有匹配的任务。</p>
         ) : (
-          <>
-            <p className="px-2.5 pb-1 pt-1 text-[11px] font-medium text-gray-500">
-              {subjectFilter ?? '今天'}
-            </p>
-            {visible.length === 0 ? (
-              <p className="px-3 py-2 text-[12px] text-gray-500">没有匹配的任务。</p>
-            ) : (
-              visible.map((task) => (
-                <button
-                  key={task.id}
-                  type="button"
-                  onClick={() => onSelectTask(task.id)}
-                  aria-current={selectedTaskId === task.id ? 'true' : undefined}
-                  className={cn(
-                    'flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors duration-150',
-                    selectedTaskId === task.id ? 'bg-[#f0f0f2]' : 'hover:bg-[#f7f7f8]'
-                  )}
-                >
-                  <span className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', statusDotClass(task.status))} />
-                  <span className="min-w-0 flex-1">
-                    <span
-                      className={cn(
-                        'block truncate text-[13px]',
-                        task.status === 'done' ? 'text-gray-400 line-through' : 'text-black'
-                      )}
-                    >
-                      {task.title}
-                    </span>
-                    <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-gray-500">
-                      <span>{task.subject}</span>
-                      <span>·</span>
-                      <span>{task.durationMin} 分钟</span>
-                      {task.status === 'in-progress' ? (
-                        <span className="text-[10px] font-medium text-[#0071e3]">进行中</span>
-                      ) : null}
-                    </span>
+          visible.map((task) => {
+            const workspace = workspaces.find((item) => item.id === task.workspaceId);
+            return (
+              <button
+                key={task.id}
+                type="button"
+                onClick={() => onSelectTask(task.id)}
+                aria-current={selectedTaskId === task.id ? 'true' : undefined}
+                className={cn(
+                  'flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors duration-150',
+                  selectedTaskId === task.id ? 'bg-[#f0f0f2]' : 'hover:bg-[#f7f7f8]'
+                )}
+              >
+                <span className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', statusDotClass(task.status))} />
+                <span className="min-w-0 flex-1">
+                  <span
+                    className={cn(
+                      'block truncate text-[13px]',
+                      task.status === 'done' ? 'text-gray-400 line-through' : 'text-black'
+                    )}
+                  >
+                    {task.title}
                   </span>
-                  {task.status === 'done' ? (
-                    <CheckIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#34c759]" />
-                  ) : null}
-                </button>
-              ))
-            )}
-          </>
+                  <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-gray-500">
+                    {showWorkspace && workspace ? (
+                      <>
+                        <span className="inline-flex items-center gap-1">
+                          <span
+                            className="h-1.5 w-1.5 rounded-full"
+                            style={{ backgroundColor: workspace.color }}
+                          />
+                          {workspace.name}
+                        </span>
+                        <span>·</span>
+                      </>
+                    ) : null}
+                    <span>{task.subject}</span>
+                    <span>·</span>
+                    <span>{task.durationMin} 分钟</span>
+                    {task.status === 'in-progress' ? (
+                      <span className="text-[10px] font-medium text-[#0071e3]">进行中</span>
+                    ) : null}
+                  </span>
+                </span>
+                {task.status === 'done' ? (
+                  <CheckIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#34c759]" />
+                ) : null}
+              </button>
+            );
+          })
         )}
       </div>
     </aside>
@@ -137,7 +130,7 @@ const settingsSections = [
 
 export function SettingsList({ onSection }: { onSection: (id: string) => void }) {
   return (
-    <aside className={paneClass}>
+    <aside className={shellPaneClass}>
       <div className="flex h-11 shrink-0 items-center border-b border-black/[0.06] px-4">
         <span className="text-[13px] font-medium text-black">设置</span>
       </div>
