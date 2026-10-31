@@ -1,11 +1,20 @@
+import { useState } from 'react';
 import type { UpdateTaskInput } from '../../shared/ipc';
 import type { StudyTask } from '../../shared/types';
+import type { Workspace, WorkspaceTask } from '../../shared/workspace';
 import { TaskCard } from '../today/TaskCard';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
+import { Input } from '../ui/Input';
 import { cn } from '../ui/cn';
 import { MoreHorizontalIcon } from '../ui/icons';
-import type { Workspace, WorkspaceTask } from './demoData';
+
+export type NewTaskDraft = {
+  title: string;
+  subject: string;
+  durationMin: number;
+  acceptance: string;
+};
 
 function statusLabel(status: WorkspaceTask['status']) {
   if (status === 'done') return '已完成';
@@ -43,6 +52,7 @@ type PlanPaneProps = {
   onStart: () => void;
   onSelectTask: (id: string) => void;
   onUpdate: (input: UpdateTaskInput) => Promise<void>;
+  onCreateTask: (input: NewTaskDraft) => Promise<void>;
   showWorkspace: boolean;
   dateLabel: string;
   onOpenChat: () => void;
@@ -57,12 +67,47 @@ export function PlanPane({
   onStart,
   onSelectTask,
   onUpdate,
+  onCreateTask,
   showWorkspace,
   dateLabel,
   onOpenChat
 }: PlanPaneProps) {
   const completed = tasks.filter((task) => task.status === 'done').length;
   const totalMinutes = tasks.reduce((sum, task) => sum + task.durationMin, 0);
+  const [title, setTitle] = useState('');
+  const [subject, setSubject] = useState('');
+  const [duration, setDuration] = useState('30');
+  const [acceptance, setAcceptance] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [formStatus, setFormStatus] = useState<string | null>(null);
+
+  async function submitTask() {
+    if (!title.trim()) {
+      setFormError('请先填写任务标题。');
+      return;
+    }
+    setBusy(true);
+    setFormError(null);
+    setFormStatus(null);
+    try {
+      await onCreateTask({
+        title: title.trim(),
+        subject: subject.trim() || '学习',
+        durationMin: Math.max(0, Number(duration) || 30),
+        acceptance: acceptance.trim() || '完成即可'
+      });
+      setTitle('');
+      setSubject('');
+      setDuration('30');
+      setAcceptance('');
+      setFormStatus('任务已添加');
+    } catch (cause) {
+      setFormError(cause instanceof Error ? cause.message : '添加任务失败，请重试。');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col bg-white">
@@ -109,6 +154,60 @@ export function PlanPane({
               <span>{completed} / {tasks.length} 完成</span>
               <span>·</span>
               <span>{totalMinutes} 分钟</span>
+            </div>
+          </Card>
+
+          <Card padding="compact">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="text-[13px] font-medium text-black">添加任务</p>
+                <p className="mt-1 text-[11px] text-gray-500">
+                  新任务会写入当前工作区，稍后可以在管家那里继续拆解。
+                </p>
+              </div>
+              {formStatus ? (
+                <span role="status" className="text-[11px] text-gray-500">
+                  {formStatus}
+                </span>
+              ) : null}
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <Input
+                aria-label="任务标题"
+                placeholder="任务标题"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+              />
+              <Input
+                aria-label="科目"
+                placeholder="科目"
+                value={subject}
+                onChange={(event) => setSubject(event.target.value)}
+              />
+              <Input
+                aria-label="时长（分钟）"
+                type="number"
+                min={0}
+                placeholder="时长（分钟）"
+                value={duration}
+                onChange={(event) => setDuration(event.target.value)}
+              />
+              <Input
+                aria-label="验收标准"
+                placeholder="验收标准（可选）"
+                value={acceptance}
+                onChange={(event) => setAcceptance(event.target.value)}
+              />
+            </div>
+            {formError ? (
+              <p role="alert" className="mt-2 text-[12px] text-[#d70015]">
+                {formError}
+              </p>
+            ) : null}
+            <div className="mt-3">
+              <Button size="sm" disabled={busy} onClick={() => void submitTask()}>
+                {busy ? '正在添加…' : '添加任务'}
+              </Button>
             </div>
           </Card>
 
