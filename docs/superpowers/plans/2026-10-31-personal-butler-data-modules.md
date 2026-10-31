@@ -102,7 +102,7 @@
 - Coordinator handle: `term_f7fb4d18-03fe-46f7-9609-9ca43a903cb8`
 - Module 1 `task_41b4d05c392b` / zcode / `ctx_9432316ba158` / worktree `module-1-workspace-vault`
 - Module 2 `task_ef6f6cb1b903` / codex / `ctx_e4b01e0095e5` / worktree `module-2-desktop-ipc` — **done** (commits `bbc1c3a`, `3b67b75`, `dc24397`; merged `a0b35db`; 70 tests/typecheck/build pass)
-- Module 3 `task_64e84a0c2fe0` / claude / `ctx_d74c9357838d` / worktree `module-3-butler-agent`
+- Module 3 `task_64e84a0c2fe0` / claude / `ctx_d74c9357838d` / worktree `module-3-butler-agent` — **done** (commits `8c08409`, `7e2c582`, `ba3a3bc`; merged `7bc8a11`; 103 tests/typecheck/build pass)
 - Module 4 `task_0ea8cffe8515` / opencode / `ctx_19a72b17dfb1` / worktree `module-4-renderer-wiring`
 - Worktree root: `/Users/Admin/orca/workspaces/OrcaProject/`
 - GitHub remote: pending `gh auth login`; local commits continue.
