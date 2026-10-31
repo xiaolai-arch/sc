@@ -95,3 +95,14 @@
 - 模块 5 在 1-4 完成并合并后启动。
 - 每个 worker 在 worktree 内提交；报告 commit hash、测试输出、遗留风险。
 - 远端仓库在 GitHub 登录后创建；每个模块合并后本地提交并推送。
+
+## Dispatch log (2026-10-31)
+
+- Run: `run_cd1ae7afebca`
+- Coordinator handle: `term_f7fb4d18-03fe-46f7-9609-9ca43a903cb8`
+- Module 1 `task_41b4d05c392b` / zcode / `ctx_9432316ba158` / worktree `module-1-workspace-vault`
+- Module 2 `task_ef6f6cb1b903` / codex / `ctx_e4b01e0095e5` / worktree `module-2-desktop-ipc`
+- Module 3 `task_64e84a0c2fe0` / claude / `ctx_d74c9357838d` / worktree `module-3-butler-agent`
+- Module 4 `task_0ea8cffe8515` / opencode / `ctx_19a72b17dfb1` / worktree `module-4-renderer-wiring`
+- Worktree root: `/Users/Admin/orca/workspaces/OrcaProject/`
+- GitHub remote: pending `gh auth login`; local commits continue.
