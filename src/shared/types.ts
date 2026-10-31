@@ -41,10 +41,13 @@ export interface ExamProfile {
   currentLevel: string;
 }
 
+export type LocalCliAgent = 'codex' | 'claude' | 'zcode' | 'opencode';
+
 export type ProviderConfig =
   | { kind: 'anthropic'; model: string }
   | { kind: 'openai-compatible'; baseURL: string; model: string }
-  | { kind: 'ollama'; baseURL: string; model: string };
+  | { kind: 'ollama'; baseURL: string; model: string }
+  | { kind: 'local-cli'; agent: LocalCliAgent; command?: string; model?: string };
 
 export interface NotificationSettings {
   enabled: boolean;

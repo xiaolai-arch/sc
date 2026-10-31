@@ -1,5 +1,9 @@
 import type { AppSettings, DailyPlan, ExamProfile } from './types';
-import type { ButlerService, WorkspaceService } from './workspace';
+import type {
+  ButlerService,
+  WorkspaceOnboardingInput,
+  WorkspaceService
+} from './workspace';
 
 export interface Bootstrap {
   needsOnboarding: boolean;
@@ -15,6 +19,7 @@ export interface UpdateTaskInput {
 
 export interface StudyCoachApi extends WorkspaceService, ButlerService {
   getBootstrap(): Promise<Bootstrap>;
+  completeWorkspaceOnboarding(input: WorkspaceOnboardingInput): Promise<void>;
   completeOnboarding(profile: ExamProfile): Promise<void>;
   getSettings(): Promise<AppSettings>;
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;

@@ -5,6 +5,7 @@ import type { AppSettings, DailyPlan, ExamProfile, ReviewAnswers } from '../shar
 /** Everything the desktop shell persists outside of the vault itself. */
 export interface AppState {
   profile: ExamProfile | null;
+  onboarded: boolean;
   plan: DailyPlan | null;
   reviews: Record<string, ReviewAnswers>;
   settings: AppSettings;
@@ -103,6 +104,10 @@ export class JsonStateStore {
     if (!isRecord(value)) return defaults;
     return {
       profile: value.profile === null || value.profile === undefined ? null : (value.profile as ExamProfile),
+      onboarded:
+        typeof value.onboarded === 'boolean'
+          ? value.onboarded
+          : value.profile !== null && value.profile !== undefined,
       plan: value.plan === null || value.plan === undefined ? null : (value.plan as DailyPlan),
       reviews: isRecord(value.reviews) ? (value.reviews as Record<string, ReviewAnswers>) : {},
       settings: isRecord(value.settings)

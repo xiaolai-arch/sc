@@ -1,7 +1,8 @@
 import type { AppSettings, NotificationSettings, ProviderConfig } from '../../shared/types';
 import type { AppState, JsonStateStore } from '../state-store';
 
-const PROVIDER_KINDS = ['anthropic', 'openai-compatible', 'ollama'] as const;
+const PROVIDER_KINDS = ['anthropic', 'openai-compatible', 'ollama', 'local-cli'] as const;
+const LOCAL_CLI_AGENTS = ['codex', 'claude', 'zcode', 'opencode'] as const;
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -20,6 +21,29 @@ function validateProvider(value: unknown): ProviderConfig {
   const kind = value.kind;
   if (typeof kind !== 'string' || !(PROVIDER_KINDS as readonly string[]).includes(kind)) {
     throw new Error('模型 provider 类型无效。');
+  }
+  if (kind === 'local-cli') {
+    const agent = value.agent;
+    if (
+      typeof agent !== 'string' ||
+      !(LOCAL_CLI_AGENTS as readonly string[]).includes(agent)
+    ) {
+      throw new Error('本地 CLI agent 无效。');
+    }
+    const command =
+      typeof value.command === 'string' && value.command.trim().length > 0
+        ? value.command.trim()
+        : undefined;
+    const model =
+      typeof value.model === 'string' && value.model.trim().length > 0
+        ? value.model.trim()
+        : undefined;
+    return {
+      kind: 'local-cli',
+      agent: agent as (typeof LOCAL_CLI_AGENTS)[number],
+      ...(command ? { command } : {}),
+      ...(model ? { model } : {})
+    };
   }
   const model = nonEmptyString(value.model, '模型名称');
   if (kind === 'anthropic') {

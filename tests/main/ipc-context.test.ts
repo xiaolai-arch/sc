@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ButlerService, WorkspaceService } from '../../src/shared/workspace';
+import type { ButlerService, Workspace, WorkspaceService } from '../../src/shared/workspace';
 import { createAppContext } from '../../src/main/context';
 import { InMemorySecretStore } from '../../src/main/settings/secret-store';
 
@@ -12,11 +12,21 @@ afterEach(async () => {
 });
 
 function services(): { workspace: WorkspaceService; butler: ButlerService } {
+  const workspaces: Workspace[] = [];
   return {
     workspace: {
-      listWorkspaces: async () => [],
-      createWorkspace: async () => {
-        throw new Error('unused');
+      listWorkspaces: async () => workspaces,
+      createWorkspace: async (input) => {
+        const workspace: Workspace = {
+          id: `ws-${workspaces.length + 1}`,
+          name: input.name,
+          kind: input.kind,
+          color: '#0071e3',
+          goal: input.goal,
+          description: input.description
+        };
+        workspaces.push(workspace);
+        return workspace;
       },
       getWorkspaceSnapshot: async () => {
         throw new Error('unused');
@@ -66,7 +76,7 @@ test('bootstrap, onboarding and api key status work end to end', async () => {
   expect(await context.api.getBootstrap()).toEqual({
     needsOnboarding: true,
     today: '2026-10-31',
-    hasApiKey: false
+    hasApiKey: true
   });
 
   await expect(
@@ -141,4 +151,27 @@ test('settings updates are persisted and validated', async () => {
 
   const second = await contextAt(dir);
   expect((await second.api.getSettings()).launchAtLogin).toBe(true);
+});
+
+test('workspace onboarding creates a workspace and selects the local CLI agent', async () => {
+  const dir = await tempDir();
+  const context = await contextAt(dir);
+  expect((await context.api.getBootstrap()).needsOnboarding).toBe(true);
+
+  await context.api.completeWorkspaceOnboarding({
+    name: '我的学习',
+    kind: 'study',
+    goal: 'g',
+    description: 'd'
+  });
+
+  expect((await context.api.getBootstrap()).needsOnboarding).toBe(false);
+  expect((await context.api.getBootstrap()).hasApiKey).toBe(true);
+  expect((await context.api.getSettings()).provider).toEqual({
+    kind: 'local-cli',
+    agent: 'codex',
+    command: 'codex'
+  });
+  const workspaces = await context.api.listWorkspaces();
+  expect(workspaces.some((workspace) => workspace.name === '我的学习')).toBe(true);
 });

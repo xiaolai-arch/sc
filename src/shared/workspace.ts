@@ -72,6 +72,14 @@ export interface CreateWorkspaceInput {
   color?: string;
 }
 
+export interface WorkspaceOnboardingInput {
+  name: string;
+  kind: WorkspaceKind;
+  goal: string;
+  description: string;
+  useDemo?: boolean;
+}
+
 export interface CreateTaskInput {
   workspaceId: string;
   title: string;

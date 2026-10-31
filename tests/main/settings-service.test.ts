@@ -22,7 +22,7 @@ test('returns documented defaults', async () => {
   const settings = await service.get();
   expect(settings).toEqual({
     vaultPath: '/tmp/study-vault',
-    provider: { kind: 'anthropic', model: 'claude-sonnet-4-5' },
+    provider: { kind: 'local-cli', agent: 'codex', command: 'codex' },
     notifications: {
       enabled: true,
       morning: '08:00',

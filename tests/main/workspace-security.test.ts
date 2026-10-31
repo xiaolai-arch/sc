@@ -103,7 +103,7 @@ test('after every rejected escape nothing was written outside the vault root', a
   // mkdtemp entries concurrently, so only assert that no *new* entry appeared
   // other than other tests' workspace-* temp dirs.
   const appeared = parentAfter.filter((name) => !parentBefore.includes(name));
-  expect(appeared.filter((name) => !/^workspace-(service|vault|security)-/.test(name))).toEqual([]);
+  expect(appeared.filter((name) => !/^(workspace-|study-coach-)/.test(name))).toEqual([]);
 
   const tree = await walk(root);
   for (const file of tree) {
