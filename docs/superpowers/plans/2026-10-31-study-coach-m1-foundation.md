@@ -139,7 +139,7 @@ git commit -m "chore: scaffold electron react typescript app"
 **Interfaces:**
 - Consumes: 无
 - Produces:
-  - 类型：`NoteType`、`NoteMeta`、`Note`、`TaskStatus`、`StudyTask`、`DailyPlan`、`WeeklyPlan`、`SubjectConfig`、`ExamProfile`、`ProviderConfig`、`AppSettings`、`NotificationSettings`、`BudgetSettings`、`ReviewAnswers`
+  - 类型：`NoteType`、`NoteMeta`、`Note`、`TaskStatus`、`StudyTask`、`DailyPlan`、`SubjectConfig`、`ExamProfile`、`ProviderConfig`、`AppSettings`、`NotificationSettings`、`BudgetSettings`、`ReviewAnswers`
   - `formatLocalDate(date: Date): string`
   - `parseLocalDate(value: string): Date`
   - `parseNote(raw: string): { meta: NoteMeta; body: string }`
