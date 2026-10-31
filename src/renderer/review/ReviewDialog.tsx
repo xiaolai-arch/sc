@@ -74,17 +74,18 @@ export function ReviewDialog({ date, onClose }: ReviewDialogProps) {
         ) : null}
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button disabled={busy} onClick={() => void submit({ completed, stuck, tomorrow })}>
+          <Button size="sm" disabled={busy} onClick={() => void submit({ completed, stuck, tomorrow })}>
             保存复盘
           </Button>
           <Button
+            size="sm"
             variant="ghost"
             disabled={busy}
             onClick={() => void submit({ skipped: true, completed: '', stuck: '', tomorrow: '' })}
           >
             跳过
           </Button>
-          <Button variant="ghost" disabled={busy} onClick={onClose}>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={onClose}>
             取消
           </Button>
         </div>
