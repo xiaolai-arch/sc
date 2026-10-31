@@ -1,7 +1,14 @@
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import type { LocalCliAgent, ProviderConfig } from '../../shared/types';
-import type { ModelClient, ModelRequest, ModelResponse } from './model-client';
+import type {
+  ModelClient,
+  ModelMessage,
+  ModelRequest,
+  ModelResponse,
+  ModelToolCall,
+  ModelToolDefinition
+} from './model-client';
 
 type LocalCliProvider = Extract<ProviderConfig, { kind: 'local-cli' }>;
 
@@ -32,10 +39,128 @@ const AGENT_CONFIG: Record<LocalCliAgent, AgentConfig> = {
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 
+/**
+ * Local CLI agents do not receive a native tool schema, so the protocol is
+ * stated in the prompt: the agent may answer in text, or answer with a single
+ * fenced JSON block that carries the visible text and any tool calls.
+ */
+const TOOL_PROTOCOL = [
+  '## 工具调用协议',
+  '你可以使用下面的工具。不需要工具时直接输出回答；需要调用工具时，只输出一个 fenced JSON 代码块（```json ... ```），格式如下：',
+  '```json',
+  '{"text":"给用户看的说明","toolCalls":[{"name":"工具名","arguments":{}}]}',
+  '```',
+  '- text：要展示给用户的文字，可以为空字符串。',
+  '- toolCalls[].name：下面的工具名之一。',
+  '- toolCalls[].arguments：JSON 对象，字段遵循对应工具的参数 schema。',
+  '- 一次可以调用多个工具；不要编造工具结果，工具结果会由系统在下一轮提供。'
+].join('\n');
+
 function buildPrompt(request: ModelRequest): string {
-  return request.messages
-    .map((message) => `${message.role.toUpperCase()}:\n${message.content}`)
-    .join('\n\n');
+  const parts = request.messages.map(renderMessage);
+  if (request.tools?.length) {
+    const systemIndex = request.messages.findIndex((message) => message.role === 'system');
+    parts.splice(systemIndex >= 0 ? systemIndex + 1 : 0, 0, renderToolSection(request.tools));
+  }
+  return parts.join('\n\n');
+}
+
+function renderToolSection(tools: ModelToolDefinition[]): string {
+  const lines = [TOOL_PROTOCOL, '', '### 可用工具'];
+  for (const tool of tools) {
+    lines.push(`- ${tool.name}：${tool.description}`);
+    lines.push(`  参数 schema：${JSON.stringify(tool.parameters)}`);
+  }
+  return lines.join('\n');
+}
+
+function renderMessage(message: ModelMessage): string {
+  if (message.role === 'tool') {
+    return `TOOL RESULT (${message.toolName ?? 'tool'}):\n${message.content}`;
+  }
+  const parts = [`${message.role.toUpperCase()}:\n${message.content}`];
+  if (message.role === 'assistant' && message.toolCalls?.length) {
+    const calls = message.toolCalls.map((call) => ({
+      id: call.id,
+      name: call.name,
+      arguments: call.arguments
+    }));
+    parts.push(`ASSISTANT TOOL CALLS:\n${JSON.stringify(calls)}`);
+  }
+  return parts.join('\n\n');
+}
+
+export interface ParsedCliResponse {
+  text: string;
+  toolCalls?: ModelToolCall[];
+}
+
+/**
+ * Parses an agent answer that may end with the structured JSON protocol
+ * block. The last fenced block is authoritative: a malformed or unrelated
+ * block means the whole answer is plain text, never a stale earlier call.
+ */
+export function parseCliResponse(answer: string): ParsedCliResponse {
+  const plain = answer.trim();
+  const fallback: ParsedCliResponse = { text: plain };
+  const candidate = lastJsonCandidate(plain);
+  if (!candidate) return fallback;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(candidate);
+  } catch {
+    return fallback;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return fallback;
+  }
+
+  const envelope = parsed as Record<string, unknown>;
+  const text = typeof envelope['text'] === 'string' ? envelope['text'].trim() : '';
+  const hasText = typeof envelope['text'] === 'string';
+  const hasToolCalls = Array.isArray(envelope['toolCalls']);
+  if (!hasText && !hasToolCalls) return fallback;
+
+  const toolCalls = hasToolCalls ? normalizeToolCalls(envelope['toolCalls']) : [];
+  if (!text && toolCalls.length === 0) return fallback;
+
+  return { text, ...(toolCalls.length > 0 ? { toolCalls } : {}) };
+}
+
+/** Returns the body of the last fenced block (any language tag). */
+function lastJsonCandidate(answer: string): string | undefined {
+  let last: string | undefined;
+  const blockPattern = /```[ \t]*(?:json)?[ \t]*([\s\S]*?)```/gi;
+  for (const match of answer.matchAll(blockPattern)) {
+    last = match[1] ?? '';
+  }
+  if (last !== undefined) {
+    return last.trim();
+  }
+  // Tolerate an agent that emits the envelope without a code fence.
+  if (answer.startsWith('{') && answer.endsWith('}')) {
+    return answer;
+  }
+  return undefined;
+}
+
+function normalizeToolCalls(value: unknown): ModelToolCall[] {
+  if (!Array.isArray(value)) return [];
+  const calls: ModelToolCall[] = [];
+  for (const [index, entry] of value.entries()) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue;
+    const record = entry as Record<string, unknown>;
+    const name = typeof record['name'] === 'string' ? record['name'].trim() : '';
+    if (!name) continue;
+    const providedId = typeof record['id'] === 'string' ? record['id'].trim() : '';
+    calls.push({
+      id: providedId || `cli-call-${index + 1}`,
+      name,
+      arguments: record['arguments'] ?? {}
+    });
+  }
+  return calls;
 }
 
 /**
@@ -154,12 +279,17 @@ export class CliAgentClient implements ModelClient {
     }
 
     const raw = result.stdout.trim();
-    const text =
+    const answer =
       this.provider.agent === 'codex' ? extractCodexAnswer(result.stdout) : raw;
-    if (!text) {
+    const parsed = parseCliResponse(answer);
+    if (!parsed.text && !parsed.toolCalls?.length) {
       throw new Error(`本地 CLI agent ${this.provider.agent} 没有返回内容。`);
     }
 
-    return { text, usage: { inputTokens: 0, outputTokens: 0 } };
+    return {
+      text: parsed.text,
+      usage: { inputTokens: 0, outputTokens: 0 },
+      ...(parsed.toolCalls?.length ? { toolCalls: parsed.toolCalls } : {})
+    };
   }
 }
