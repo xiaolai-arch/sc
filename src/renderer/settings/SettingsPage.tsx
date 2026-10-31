@@ -9,6 +9,7 @@ import { Select } from '../ui/Select';
 
 type SettingsPageProps = {
   onClose: () => void;
+  embedded?: boolean;
 };
 
 const providerLabels: Record<ProviderConfig['kind'], string> = {
@@ -17,7 +18,7 @@ const providerLabels: Record<ProviderConfig['kind'], string> = {
   ollama: 'Ollama'
 };
 
-export function SettingsPage({ onClose }: SettingsPageProps) {
+export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [kind, setKind] = useState<ProviderConfig['kind']>('anthropic');
@@ -136,10 +137,26 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
 
   return (
     <div>
-      <header className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
+      <header
+        className={
+          embedded
+            ? 'flex flex-wrap items-center justify-between gap-3'
+            : 'flex flex-col gap-6 md:flex-row md:items-end md:justify-between'
+        }
+      >
         <div>
-          <h2 className="text-3xl font-semibold tracking-tight text-black md:text-4xl">设置</h2>
-          <p className="mt-2 text-gray-600">管理模型、预算与提醒。</p>
+          <h2
+            className={
+              embedded
+                ? 'text-[15px] font-semibold tracking-tight text-black'
+                : 'text-3xl font-semibold tracking-tight text-black md:text-4xl'
+            }
+          >
+            设置
+          </h2>
+          <p className={embedded ? 'mt-0.5 text-[12px] text-gray-500' : 'mt-2 text-gray-600'}>
+            管理模型、预算与提醒。
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="secondary" size="sm" onClick={onClose}>
@@ -180,7 +197,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         <p className="mt-10 text-gray-600">正在加载设置…</p>
       ) : (
         <div className="mt-8 grid gap-8">
-          <Card>
+          <Card id="settings-model-section">
             <h3 className="text-xl font-semibold tracking-tight text-black md:text-2xl">模型</h3>
             <p className="mt-2 text-gray-600">选择模型提供商并配置访问凭据。</p>
             <div className="mt-6 grid gap-5 md:grid-cols-2">
@@ -232,7 +249,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
             </div>
           </Card>
 
-          <Card>
+          <Card id="settings-budget">
             <h3 className="text-xl font-semibold tracking-tight text-black md:text-2xl">预算</h3>
             <p className="mt-2 text-gray-600">限制每天主动调用模型的次数与 token 用量。</p>
             <div className="mt-6 grid gap-5 md:grid-cols-2">
@@ -259,7 +276,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
             </div>
           </Card>
 
-          <Card>
+          <Card id="settings-notifications">
             <h3 className="text-xl font-semibold tracking-tight text-black md:text-2xl">通知</h3>
             <p className="mt-2 text-gray-600">设置早间计划与晚间复盘提醒。</p>
             <label className="mt-6 flex min-h-11 items-center gap-3 text-sm font-medium text-gray-600">
@@ -321,7 +338,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
             </div>
           </Card>
 
-          <Card>
+          <Card id="settings-launch">
             <h3 className="text-xl font-semibold tracking-tight text-black md:text-2xl">启动</h3>
             <label className="mt-4 flex min-h-11 items-center gap-3 text-sm font-medium text-gray-600">
               <input

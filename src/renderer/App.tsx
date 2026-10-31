@@ -2,15 +2,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { formatLocalDate } from '../shared/date';
 import type { Bootstrap } from '../shared/ipc';
 import { Onboarding } from './onboarding/Onboarding';
-import { SettingsPage } from './settings/SettingsPage';
-import { TodayPage } from './today/TodayPage';
-import { Nav } from './ui/Nav';
-import type { AppView } from './ui/Nav';
+import { Workspace } from './shell/Workspace';
 import { PageShell } from './ui/PageShell';
 
 export function App() {
   const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null);
-  const [view, setView] = useState<AppView>('today');
 
   const refresh = useCallback(async () => {
     const api = window.studyCoach;
@@ -44,30 +40,12 @@ export function App() {
           }}
         />
       ) : (
-        <PageShell>
-          <Nav
-            view={view}
-            onChange={(next) => {
-              setView(next);
-              if (next === 'today') void refresh();
-            }}
-          />
-          <main className="mx-auto max-w-[980px] px-6 py-12 md:px-8 md:py-20">
-            {view === 'today' ? (
-              <TodayPage
-                hasApiKey={bootstrap.hasApiKey}
-                onOpenSettings={() => setView('settings')}
-              />
-            ) : (
-              <SettingsPage
-                onClose={() => {
-                  setView('today');
-                  void refresh();
-                }}
-              />
-            )}
-          </main>
-        </PageShell>
+        <Workspace
+          hasApiKey={bootstrap.hasApiKey}
+          onRefresh={() => {
+            void refresh();
+          }}
+        />
       )}
     </>
   );

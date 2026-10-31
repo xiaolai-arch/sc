@@ -13,9 +13,10 @@ type TaskCardProps = {
   startedAt?: Date;
   onStart: () => void;
   onUpdate: (input: UpdateTaskInput) => Promise<void>;
+  compact?: boolean;
 };
 
-export function TaskCard({ task, startedAt, onStart, onUpdate }: TaskCardProps) {
+export function TaskCard({ task, startedAt, onStart, onUpdate, compact = false }: TaskCardProps) {
   const [busy, setBusy] = useState(false);
 
   async function update(input: UpdateTaskInput) {
@@ -46,8 +47,8 @@ export function TaskCard({ task, startedAt, onStart, onUpdate }: TaskCardProps) 
     ) : null;
 
   return (
-    <Card>
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+    <Card padding={compact ? 'compact' : 'default'}>
+      <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-3">
             <Badge>{task.subject}</Badge>
@@ -60,13 +61,13 @@ export function TaskCard({ task, startedAt, onStart, onUpdate }: TaskCardProps) 
           <h3
             className={
               task.status === 'done'
-                ? 'mt-3 break-words text-xl font-semibold tracking-tight text-gray-500 line-through md:text-2xl'
-                : 'mt-3 break-words text-xl font-semibold tracking-tight text-black md:text-2xl'
+                ? `break-words font-semibold tracking-tight text-gray-500 line-through ${compact ? 'mt-2.5 text-lg' : 'mt-3 text-xl md:text-2xl'}`
+                : `break-words font-semibold tracking-tight text-black ${compact ? 'mt-2.5 text-lg' : 'mt-3 text-xl md:text-2xl'}`
             }
           >
             {task.title}
           </h3>
-          <p className="mt-2 break-words text-gray-600">
+          <p className={compact ? 'mt-1.5 break-words text-[13px] text-gray-600' : 'mt-2 break-words text-gray-600'}>
             <span className="text-gray-500">验收：</span>
             <span>{task.acceptance}</span>
           </p>
