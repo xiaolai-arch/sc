@@ -36,7 +36,7 @@ export function TaskCard({ task, onUpdate }: TaskCardProps) {
 
   return (
     <Card>
-      <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-3">
             <Badge>{task.subject}</Badge>

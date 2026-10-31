@@ -145,13 +145,13 @@ export function TodayPage({ hasApiKey = true, onOpenSettings }: TodayPageProps) 
           />
         </div>
       ) : (
-        <div className="mt-10 grid gap-8 md:mt-12 md:grid-cols-[1fr_280px]">
+        <div className="mt-10 grid gap-8 lg:mt-12 lg:grid-cols-[1fr_280px]">
           <div className="space-y-4">
             {tasks.map((task) => (
               <TaskCard key={task.id} task={task} onUpdate={updateTask} />
             ))}
           </div>
-          <aside className="order-first md:order-none md:sticky md:top-8 md:self-start">
+          <aside className="order-first lg:order-none lg:sticky lg:top-8 lg:self-start">
             <Card>
               <p className="text-sm text-gray-600">今日进度</p>
               <p className="mt-2 text-4xl font-semibold tracking-tight text-black">
