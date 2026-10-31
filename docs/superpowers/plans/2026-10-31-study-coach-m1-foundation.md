@@ -114,7 +114,7 @@ export function App() {
 }
 ```
 
-`src/renderer/index.html` 包含 `<div id="root"></div>` 和 `<script type="module" src="./main.tsx"></script>`；`src/renderer/main.tsx` 挂载 `<App />` 到 `#root`。`vitest.config.ts` 使用 `globals: true`、`environment: 'node'`、`setupFiles: ['tests/setup.ts']`、`include: ['tests/**/*.test.{ts,tsx}']`；tsconfig 的 `types` 加 `vitest/globals`。`tests/setup.ts` 引入 `@testing-library/jest-dom/vitest`。`.gitignore` 写入 `node_modules/`、`out/`、`dist/`、`.DS_Store`、`*.local`。
+`src/renderer/index.html` 包含 `<div id="root"></div>` 和 `<script type="module" src="./main.tsx"></script>`；`src/renderer/main.tsx` 挂载 `<App />` 到 `#root`。`vitest.config.ts` 使用 `globals: true`、`environment: 'node'`、`setupFiles: ['tests/setup.ts']`、`include: ['tests/**/*.test.{ts,tsx}']`；tsconfig 的 `types` 加 `vitest/globals`。`tests/setup.ts` 引入 `@testing-library/jest-dom/vitest`。`.gitignore` 写入 `node_modules/`、`out/`、`dist/`、`.DS_Store`、`*.local`、`.superpowers/`、`test-results/`、`playwright-report/`。
 
 - [ ] **Step 4: 运行测试与类型检查**
 
@@ -388,7 +388,7 @@ Expected: FAIL，模块不存在
 
 - [ ] **Step 3: 实现**
 
-`assertSafeRelPath`：拒绝绝对路径、`..` 段、空路径；`path.resolve(root, rel)` 后必须以 `root + path.sep` 开头。`VaultService.write`：读取旧文件（不存在则跳过）；若 `expectedMtimeMs` 与当前 mtime 不同抛 `VaultConflictError`；若旧笔记 `source === 'user' || userTouched` 且正文变化且 `allowUserNoteEdit !== true` 抛 `UserNoteEditError`；元数据变化不触发。写入用临时文件 + `rename` 原子替换。`moveToTrash` 生成 `.trash/<timestamp>-<basename>` 并 `rename`。`updateMeta` 合并 frontmatter 后写回，不检查正文守卫。`list` 递归读取 `.md`，跳过 `.trash`。
+`assertSafeRelPath`：拒绝绝对路径、`..` 段、空路径；`path.resolve(root, rel)` 后必须以 `root + path.sep` 开头。`VaultService.write`：读取旧文件（不存在则跳过）；若 `expectedMtimeMs` 与当前 mtime 不同抛 `VaultConflictError`；若旧笔记 `source === 'user' || userTouched` 且正文变化且 `allowUserNoteEdit !== true` 抛 `UserNoteEditError`；元数据变化不触发。写入前 `mkdir(dirname(target), { recursive: true })`，用临时文件 + `rename` 原子替换。`moveToTrash` 生成 `.trash/<timestamp>-<basename>`，先 `mkdir('.trash', { recursive: true })` 再 `rename`。`updateMeta` 合并 frontmatter 后写回，不检查正文守卫。`list` 递归读取 `.md`，跳过 `.trash`。
 
 - [ ] **Step 4: 运行测试确认通过**
 
@@ -480,7 +480,7 @@ Expected: FAIL，模块不存在
 
 - [ ] **Step 3: 实现**
 
-MiniSearch 配置 `fields: ['title', 'body', 'tags']`、`storeFields: ['path', 'title', 'body']`、`tokenize: cjkTokenize`。`cjkTokenize`：拉丁字母数字按 `/[a-z0-9]+/gi` 切；CJK 连续段生成全部单字 + 相邻双字 bigram（单字查询也能命中）；全部小写。`title` 取 frontmatter `title` 或文件名。`snippet` 取正文中首个命中词前后各 40 字符。`startVaultWatcher` 用 chokidar 监听 `vault.root/**/*.md`，`ignoreInitial: true`，100ms 防抖后回调相对路径；返回 `{ close, ready }`，`ready` 在 chokidar 的 `ready` 事件后 resolve。
+MiniSearch 配置 `fields: ['title', 'body', 'tags']`、`storeFields: ['path', 'title', 'body']`、`tokenize: cjkTokenize`。`cjkTokenize`：拉丁字母数字按 `/[a-z0-9]+/gi` 切；CJK 连续段生成全部单字 + 相邻双字 bigram（单字查询也能命中）；全部小写。`title` 取 frontmatter `title` 或文件名。`snippet` 取正文中首个命中词前后各 40 字符。`startVaultWatcher` 用 chokidar 监听 `vault.root`（不要依赖 glob：chokidar 4 已移除 glob 支持），`ignoreInitial: true`，过滤 `.md` 且忽略 `.trash/`，100ms 防抖后回调相对路径；返回 `{ close, ready }`，`ready` 在 chokidar 的 `ready` 事件后 resolve。
 
 - [ ] **Step 4: 运行测试确认通过**
 
@@ -559,7 +559,7 @@ Expected: FAIL，模块不存在
 
 - [ ] **Step 3: 实现**
 
-`JsonStateStore` 读文件为 `Record<string, unknown>`，`get` 返回 `data[key] ?? fallback`；`set` 更新后写临时文件并 `rename`。`createDefaultSettings(vaultPath)` 返回：provider `{ kind: 'anthropic', model: 'claude-sonnet-5-5' }`，通知 `{ enabled: true, morning: '08:00', evening: '21:30', dndStart: '23:00', dndEnd: '07:30' }`，预算 `{ proactiveSessionsPerDay: 4, dailyTokens: 200000 }`，`launchAtLogin: true`。`SettingsService.get` 用一层深合并（`notifications`、`budget`、`provider` 分别合并）。`getApiKey` / `setApiKey` 使用固定 key `'model-api-key'`。`ElectronSecretStore` 用 `safeStorage.encryptString` 加密后 base64 存 JSON；`safeStorage.isEncryptionAvailable()` 为 false 时抛 `SecretStorageUnavailableError`。
+`JsonStateStore` 读文件为 `Record<string, unknown>`，`get` 返回 `data[key] ?? fallback`；`set` 更新后写临时文件并 `rename`。`createDefaultSettings(vaultPath)` 返回：provider `{ kind: 'anthropic', model: 'claude-sonnet-5-5' }`，通知 `{ enabled: true, morning: '08:00', evening: '21:30', dndStart: '23:00', dndEnd: '07:30' }`，预算 `{ proactiveSessionsPerDay: 4, dailyTokens: 200000 }`，`launchAtLogin: false`（开机自启是 opt-in；托盘常驻不等于登录项）。`SettingsService.get` 用一层深合并（`notifications`、`budget`、`provider` 分别合并）。`getApiKey` / `setApiKey` 使用固定 key `'model-api-key'`。`ElectronSecretStore` 用 `safeStorage.encryptString` 加密后 base64 存 JSON；`safeStorage.isEncryptionAvailable()` 为 false 时抛 `SecretStorageUnavailableError`。
 
 - [ ] **Step 4: 运行测试确认通过**
 
@@ -622,7 +622,7 @@ Expected: FAIL，模块不存在
 
 - [ ] **Step 3: 实现**
 
-`pack.json` 至少包含：政治（马原、毛中特、史纲、思修、时政）、英语（词汇、长难句、阅读、写作、翻译、完形，codes 英语一/英语二）、数学（高等数学、线性代数、概率论与数理统计，codes 数学一/数学二/数学三）、专业课（空 topics，用户导入）。用 zod 校验 `id`、`name`、`subjects[].name`、`codes`、`topics`；`subjects` 为空时抛错。`renderSyllabusNote` 生成 `# 考试大纲`，每个选中的科目一个 `## <name>（<code>）`，下面列 `- [ ] 话题`。
+`pack.json` 至少包含：政治（马原、毛中特、史纲、思修、时政）、英语（词汇、长难句、阅读、写作、翻译、完形，codes 英语一/英语二）、数学（高等数学、线性代数、概率论与数理统计，codes 数学一/数学二/数学三）、专业课（空 topics，用户导入）。用 zod 校验 `id`、`name`、`subjects[].name`、`codes`、`topics`；`subjects` 为空时抛错，错误信息必须包含 `subjects`（测试用 `/subjects/` 匹配）。`renderSyllabusNote` 生成 `# 考试大纲`，每个选中的科目一个 `## <name>（<code>）`，下面列 `- [ ] 话题`。
 
 同时创建 `tests/fixtures/empty-pack/pack.json`，内容为 `{"id":"empty","name":"Empty","subjects":[]}`，供拒绝测试使用。
 
@@ -708,11 +708,11 @@ Expected: FAIL，模块不存在
 
 - [ ] **Step 3: 实现**
 
-`validateExamProfile` 用 zod：`examDate` 必须匹配 `YYYY-MM-DD`；`subjects` 至少 1 项；`dailyMinutes` 30–720；`currentLevel` 非空。`renderExamProfile` 输出 `---\ntype: profile\n---` + 标题 + 字段列表；`parseExamProfile` 用 `parseNote` 读回，缺字段抛错。
+`validateExamProfile` 用 zod：`examDate` 必须匹配 `YYYY-MM-DD`；`subjects` 至少 1 项；`dailyMinutes` 30–720；`currentLevel` 非空。校验失败时抛出 `Error`，message 必须包含每个 issue 的字段路径（如 `dailyMinutes: ...`、`subjects: ...`），以便测试用 `/dailyMinutes/`、`/subjects/` 匹配。`renderExamProfile` 输出 `---\ntype: profile\n---` + 标题 + 字段列表；`parseExamProfile` 用 `parseNote` 读回，缺字段抛错。
 
-`OnboardingService.complete`：校验 → `ExamProfileService.save` → 读取 `resources/exam-packs/kaoyan-2027` 的 pack → `vault.write('00-目标/考试大纲.md', { type: 'profile', source: 'agent' }, renderSyllabusNote(...))` → `settings.update({ vaultPath })`。pack 路径在开发时用 `join(process.cwd(), 'resources/...')`，打包后由 `app.getAppPath()` 解析；封装 `resolveResourcePath(rel)`。
+`OnboardingService.complete`：校验 → `ExamProfileService.save` → 读取 `resources/exam-packs/kaoyan-2027` 的 pack → 把输入科目解析为 pack 科目（按 `subject.name` 或 `subject.codes` 匹配，例如输入 `数学一` 匹配 name=数学/code=数学一；解析为 `{ name: packSubject.name, code: 输入 code 或 packSubject.codes[0] }`；匹配不到抛错）→ `vault.write('00-目标/考试大纲.md', { type: 'profile', source: 'agent' }, renderSyllabusNote(pack, resolved))` → `settings.update({ vaultPath: vault.root })`。pack 路径在开发时用 `join(process.cwd(), 'resources/...')`，打包后由 `app.getAppPath()` 解析；封装 `resolveResourcePath(rel)`。
 
-`src/shared/ipc.ts` 定义 `StudyCoachApi` 与 `Bootstrap`。`src/main/context.ts` 创建 `JsonStateStore`（`app.getPath('userData')/state.json`）、`ElectronSecretStore`、`SettingsService`、`VaultService`（settings.vaultPath 或 `join(app.getPath('documents'), 'StudyCoachVault')`）、`ExamProfileService`、`OnboardingService`。`src/main/ipc.ts` 注册 `getBootstrap`、`completeOnboarding`。`src/preload/index.ts` 用 `ipcRenderer.invoke` 暴露同名方法。`App.tsx` 在 `needsOnboarding` 时渲染 `<Onboarding />`，否则渲染占位标题。
+`src/shared/ipc.ts` 定义 `StudyCoachApi` 与 `Bootstrap`。`src/main/context.ts` 创建 `JsonStateStore`（`app.getPath('userData')/state.json`）、`ElectronSecretStore`、`SettingsService`、`VaultService`（settings.vaultPath 或 `join(app.getPath('documents'), 'StudyCoachVault')`）、`ExamProfileService`、`OnboardingService`。`src/main/ipc.ts` 注册 `getBootstrap`、`completeOnboarding`。`src/preload/index.ts` 用 `ipcRenderer.invoke` 暴露同名方法。`App.tsx` 始终渲染 `<h1>Study Coach</h1>`（Task 1 的测试和 Task 13 的 e2e 都依赖这个标题），在 `needsOnboarding` 时渲染 `<Onboarding />`，否则渲染占位内容；bootstrap 调用要容错 `window.studyCoach` 不存在或 `getBootstrap` 失败的情况（单元测试环境没有 preload），失败时按 `needsOnboarding: true` 渲染。Onboarding 表单包含考试日期、考试科目（逗号分隔）、每天可用分钟数、当前水平（默认 `基础一般`，保证 validate 通过）。
 
 - [ ] **Step 4: 运行测试确认通过**
 
@@ -779,7 +779,7 @@ Expected: FAIL，模块不存在
 
 - [ ] **Step 3: 实现**
 
-`FakeModelClient` 按顺序返回；字符串包装为 `{ text, usage: { inputTokens: 0, outputTokens: 0 } }`。`createModelClient`：`anthropic` 要求 key，用 `@ai-sdk/anthropic` 的 `createAnthropic({ apiKey })`；`openai-compatible` 用 `@ai-sdk/openai-compatible` 的 `createOpenAICompatible({ baseURL, apiKey })`；`ollama` 用 OpenAI-compatible，`baseURL` 默认 `http://127.0.0.1:11434/v1`，`apiKey: 'ollama'`。`AiSdkModelClient` 构造函数注入 `{ generate: typeof generateText }` 以便测试；`complete` 调 `generate`，把 `responseFormat === 'json'` 映射为 `output: Output.json()` 或等效配置（按所装 AI SDK 版本），返回 text 与 usage。
+`FakeModelClient` 按顺序返回；字符串包装为 `{ text, usage: { inputTokens: 0, outputTokens: 0 } }`。`createModelClient`：`anthropic` 要求 key，用 `@ai-sdk/anthropic` 的 `createAnthropic({ apiKey })`；`openai-compatible` 用 `@ai-sdk/openai-compatible` 的 `createOpenAICompatible({ baseURL, apiKey })`；`ollama` 用 OpenAI-compatible，`baseURL` 默认 `http://127.0.0.1:11434/v1`，`apiKey: 'ollama'`。`AiSdkModelClient` 构造函数注入 `{ generate: typeof generateText }` 以便测试；`complete` 调 `generate`，返回 text 与 usage（v5+ 的 usage 是 `inputTokens`/`outputTokens`，旧版是 `promptTokens`/`completionTokens`，缺失时回退 0）。`responseFormat === 'json'` 优先映射为所装版本的 JSON 输出配置；若该 API 不稳定，M1 可忽略 `responseFormat`，由 prompt 要求 JSON、`parseDailyPlan` 兼容围栏——不要为实验性 API 牺牲构建。`maxTokens` 按所装版本映射为 `maxOutputTokens` 或 `maxTokens`。
 
 - [ ] **Step 4: 运行测试确认通过**
 
@@ -885,16 +885,17 @@ git commit -m "feat: add settings page for model budget and notifications"
 - Test: `tests/main/planner.test.ts`
 
 **Interfaces:**
-- Consumes: `ModelClient`、`FakeModelClient`（Task 8）、`VaultService` / `dailyPlanPath`（Task 3）、`DailyPlan` / `ExamProfile` / `StudyTask`（Task 2）、`StateStore`（Task 5）、`formatLocalDate`（Task 2）
+- Consumes: `ModelClient`、`ModelUsage`、`FakeModelClient`（Task 8）、`VaultService` / `dailyPlanPath`（Task 3）、`DailyPlan` / `ExamProfile` / `StudyTask`（Task 2）、`StateStore`（Task 5）、`formatLocalDate`（Task 2）
 - Produces:
   - `class PlanParseError extends Error`
   - `parseDailyPlan(text: string): DailyPlan`
   - `templateDailyPlan(profile: ExamProfile, date: string): DailyPlan`
   - `buildPlannerPrompt(ctx: PlannerContext): ModelMessage[]`
   - `PlannerContext { profile: ExamProfile; date: string; syllabus: string; lastLog?: string; unfinishedTasks: StudyTask[] }`
+  - `renderPlanBody(plan: DailyPlan): string`
   - `class PlanRepo`：构造函数 `(vault: VaultService)`，方法 `read(date: string): Promise<DailyPlan | null>`、`write(plan: DailyPlan): Promise<void>`
   - `type BudgetDecision = { allowed: true } | { allowed: false; reason: 'proactive-limit' | 'token-limit'; requiresConfirmation: boolean }`
-  - `class BudgetGuard`：`canRun(mode: 'proactive' | 'manual'): Promise<BudgetDecision>`、`record(usage: ModelUsage): Promise<void>`
+  - `class BudgetGuard`：构造函数 `(store: StateStore, limits: { proactiveSessionsPerDay: number; dailyTokens: number }, now: () => Date)`，方法 `canRun(mode: 'proactive' | 'manual'): Promise<BudgetDecision>`、`record(usage: ModelUsage): Promise<void>`
   - `class Planner`：构造函数 `(client: ModelClient | null, repo: PlanRepo, budget: BudgetGuard, now: () => Date)`，方法 `generateDailyPlan(ctx: PlannerContext): Promise<DailyPlan>`
 
 - [ ] **Step 1: 写失败测试**
@@ -940,7 +941,7 @@ test('planner retries once then falls back to a template', async () => {
   const vault = new VaultService(await mkdtemp(join(tmpdir(), 'sc-')));
   await vault.init();
   const store = new JsonStateStore(join(await mkdtemp(join(tmpdir(), 'sc-')), 'state.json'));
-  const planner = new Planner(client, new PlanRepo(vault), new BudgetGuard(store, { proactivePerDay: 4, dailyTokens: 200000 }, () => new Date('2026-10-31T08:00:00')), () => new Date('2026-10-31T08:00:00'));
+  const planner = new Planner(client, new PlanRepo(vault), new BudgetGuard(store, { proactiveSessionsPerDay: 4, dailyTokens: 200000 }, () => new Date('2026-10-31T08:00:00')), () => new Date('2026-10-31T08:00:00'));
   const plan = await planner.generateDailyPlan(ctx);
   expect(client.calls).toHaveLength(2);
   expect(plan.generatedBy).toBe('template');
@@ -951,20 +952,20 @@ test('planner falls back when no model client', async () => {
   const vault = new VaultService(await mkdtemp(join(tmpdir(), 'sc-')));
   await vault.init();
   const store = new JsonStateStore(join(await mkdtemp(join(tmpdir(), 'sc-')), 'state.json'));
-  const planner = new Planner(null, new PlanRepo(vault), new BudgetGuard(store, { proactivePerDay: 4, dailyTokens: 200000 }, () => new Date()), () => new Date());
+  const planner = new Planner(null, new PlanRepo(vault), new BudgetGuard(store, { proactiveSessionsPerDay: 4, dailyTokens: 200000 }, () => new Date()), () => new Date());
   expect((await planner.generateDailyPlan(ctx)).generatedBy).toBe('template');
 });
 
 test('proactive budget exhaustion returns a template', async () => {
   const store = new JsonStateStore(join(await mkdtemp(join(tmpdir(), 'sc-')), 'state.json'));
-  const budget = new BudgetGuard(store, { proactivePerDay: 0, dailyTokens: 200000 }, () => new Date('2026-10-31T08:00:00'));
+  const budget = new BudgetGuard(store, { proactiveSessionsPerDay: 0, dailyTokens: 200000 }, () => new Date('2026-10-31T08:00:00'));
   expect(await budget.canRun('proactive')).toEqual({ allowed: false, reason: 'proactive-limit', requiresConfirmation: false });
 });
 
 test('manual mode asks for confirmation after token limit', async () => {
   const store = new JsonStateStore(join(await mkdtemp(join(tmpdir(), 'sc-')), 'state.json'));
   await store.set('budget/2026-10-31', { proactiveRuns: 0, tokens: 200000 });
-  const budget = new BudgetGuard(store, { proactivePerDay: 4, dailyTokens: 200000 }, () => new Date('2026-10-31T08:00:00'));
+  const budget = new BudgetGuard(store, { proactiveSessionsPerDay: 4, dailyTokens: 200000 }, () => new Date('2026-10-31T08:00:00'));
   expect(await budget.canRun('manual')).toEqual({ allowed: false, reason: 'token-limit', requiresConfirmation: true });
 });
 ```
@@ -980,11 +981,11 @@ Expected: FAIL，模块不存在
 
 `templateDailyPlan`：按 `profile.subjects` 轮流出 3 个任务，每个 30 分钟，`acceptance: '完成本节基础练习'`，`generatedBy: 'template'`。
 
-`PlanRepo.write`：`vault.write(dailyPlanPath(plan.date), { type: 'plan', date: plan.date, tasks: plan.tasks, source: 'agent' }, renderPlanBody(plan))`。`read` 从 `meta.tasks` 解析，缺失返回 `null`。
+`PlanRepo.write`：`vault.write(dailyPlanPath(plan.date), { type: 'plan', date: plan.date, tasks: plan.tasks, source: 'agent' }, renderPlanBody(plan))`；`renderPlanBody` 输出标题 `# <date> 计划` + 每个任务一行 `- [ ] <title>（<subject>，<durationMin> 分钟）`。`read` 从 `meta.tasks` 解析，缺失返回 `null`。
 
 `buildPlannerPrompt`：system 说明“你是考研教练，只输出 JSON”；user 内容包含考试日期、科目、每日分钟、大纲、昨日未完成任务、昨日日志。要求 3–5 个任务、每个含 id/title/subject/durationMin/materialRefs/acceptance/status。
 
-`BudgetGuard`：state key `budget/YYYY-MM-DD` 存 `{ proactiveRuns, tokens }`；`canRun('proactive')` 在 `proactiveRuns >= limit` 时拒绝；`dailyTokens` 超限时拒绝，`manual` 模式返回 `requiresConfirmation: true`。`record` 累加。
+`BudgetGuard`：state key `budget/YYYY-MM-DD` 存 `{ proactiveRuns, tokens }`；`canRun('proactive')` 在 `proactiveRuns >= limits.proactiveSessionsPerDay` 时拒绝；`tokens >= limits.dailyTokens` 时拒绝（测试把 tokens 设为恰好等于上限），`manual` 模式返回 `requiresConfirmation: true`。`record` 累加。
 
 `Planner.generateDailyPlan`：若 `client` 为 null → 模板；`budget.canRun('proactive')` 不允许 → 模板；调用模型，`record` usage；解析失败时把错误信息追加到 prompt 重试一次；第二次失败 → 模板。
 
@@ -1165,7 +1166,7 @@ Expected: FAIL，模块不存在
 
 - [ ] **Step 3: 实现**
 
-`renderReviewLog`：首次写入 `---\ntype: log\ndate: ...\nsource: agent\n---\n# 2026-10-31 复盘\n\n## 今天完成了什么\n...`；`ReviewService.save` 若日志已存在，追加 `## 补充复盘 HH:mm` 段落，不覆盖。`ReviewDialog` 三个 textarea、保存/跳过按钮；跳过时提交 `{ skipped: true, completed: '', stuck: '', tomorrow: '' }`。主进程注册 `submitReview`，`context.ts` 创建 `ReviewService`。`TodayPage` 顶部加“复盘”按钮，点击打开 `ReviewDialog`，提交或关闭后关闭对话框。
+`renderReviewLog`：首次写入 `---\ntype: log\ndate: ...\nsource: agent\n---\n# 2026-10-31 复盘\n\n## 今天完成了什么\n...`；`ReviewService.save` 若日志已存在，追加 `## 补充复盘 HH:mm` 段落，不覆盖；若旧日志 `source === 'user' || userTouched`，追加时传 `allowUserNoteEdit: true`（只追加、不改原段落，符合设计文档 §6.4 的“文末追加 Agent 补充”）。`ReviewDialog` 三个 textarea、保存/跳过按钮；跳过时提交 `{ skipped: true, completed: '', stuck: '', tomorrow: '' }`。主进程注册 `submitReview`，`context.ts` 创建 `ReviewService`。`TodayPage` 顶部加“复盘”按钮，点击打开 `ReviewDialog`，提交或关闭后关闭对话框。
 
 - [ ] **Step 4: 运行测试确认通过**
 
@@ -1275,7 +1276,7 @@ Expected: FAIL，模块不存在
 
 `Scheduler.tick`：读 `scheduler/last-morning`、`scheduler/last-evening`（日期字符串）；到 08:00 且今天未触发、且当前时间 ≤ 12:00 → 调 `onMorning`，写状态，非免打扰时 `notify('今日计划已生成', ...)`；到 21:30 且今天未触发 → `onEvening`，状态，通知“该复盘了”。`start` 每 60 秒 `tick`；`stop` 清理定时器。`isWithinDnd` 处理跨午夜区间。
 
-`tray.ts` 用 Electron `Tray` 和 `Menu`，菜单项：打开 Study Coach、开始下一任务、免打扰开关、退出。图标暂用 `resources/iconTemplate.png`（16×16 模板图，随任务创建占位）。`main/index.ts` 启动 Scheduler：`onMorning` 调 `planner.generateDailyPlan` 并写计划、发通知；`onEvening` 发通知提醒打开复盘（不自动弹窗）。`context.ts` 暴露 `planner`、`review`、`scheduler`。
+`tray.ts` 用 Electron `Tray` 和 `Menu`，菜单项：打开 Study Coach、开始下一任务、免打扰开关、退出。图标暂用 `resources/iconTemplate.png`（16×16 模板图；若没有 16×16，用 1×1 黑色 PNG 占位，base64 `iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=` 写入文件）；`createTray` 用 `resolveResourcePath` 解析图标路径，图标缺失时不能抛错。`main/index.ts` 启动 Scheduler：`onMorning` 调 `planner.generateDailyPlan` 并写计划、发通知；`onEvening` 发通知提醒打开复盘（不自动弹窗）。`context.ts` 暴露 `planner`、`review`、`scheduler`。
 
 - [ ] **Step 4: 运行测试确认通过**
 
@@ -1339,7 +1340,7 @@ if (process.env.STUDYCOACH_USER_DATA) app.setPath('userData', process.env.STUDYC
 
 `context.ts` 的默认 vault 路径改为 `process.env.STUDYCOACH_VAULT ?? join(app.getPath('documents'), 'StudyCoachVault')`，保证 e2e 使用独立 vault。
 
-`playwright.config.ts`：`testDir: './tests/e2e'`，`timeout: 30000`，`workers: 1`。`README.md` 包含：项目简介、安装（Node 22+、npm）、开发（`npm run dev`）、模型配置（Anthropic / OpenAI-compatible / Ollama，key 只存本机）、隐私说明（数据在 vault、无遥测、模型调用除外）、测试（`npm test`、`npm run test:e2e`）、当前范围（M1）与路线图。`LICENSE` 用 MIT 标准文本，版权行 `Copyright (c) 2026 Study Coach contributors`。
+`playwright.config.ts`：`testDir: './tests/e2e'`，`timeout: 30000`，`workers: 1`；确保 `tests/e2e` 被 `tsconfig.node.json` 覆盖并带上 `@playwright/test` 类型（或从 typecheck 排除），`npm run typecheck` 不得因 e2e 文件失败。`README.md` 包含：项目简介、安装（Node 22+、npm）、开发（`npm run dev`）、模型配置（Anthropic / OpenAI-compatible / Ollama，key 只存本机）、隐私说明（数据在 vault、无遥测、模型调用除外）、测试（`npm test`、`npm run test:e2e`）、当前范围（M1）与路线图。`LICENSE` 用 MIT 标准文本，版权行 `Copyright (c) 2026 Study Coach contributors`。
 
 - [ ] **Step 4: 运行构建与测试**
 
