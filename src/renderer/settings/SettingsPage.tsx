@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { NotificationSettings, ProviderConfig } from '../../shared/types';
+import type {
+  LocalCliAgent,
+  NotificationSettings,
+  ProviderConfig
+} from '../../shared/types';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { CheckIcon } from '../ui/icons';
@@ -15,8 +19,11 @@ type SettingsPageProps = {
 const providerLabels: Record<ProviderConfig['kind'], string> = {
   anthropic: 'Anthropic',
   'openai-compatible': 'OpenAI 兼容',
-  ollama: 'Ollama'
+  ollama: 'Ollama',
+  'local-cli': '本地 CLI agent'
 };
+
+const cliAgents: LocalCliAgent[] = ['codex', 'claude', 'zcode', 'opencode'];
 
 export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
   const [loaded, setLoaded] = useState(false);
@@ -24,6 +31,8 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
   const [kind, setKind] = useState<ProviderConfig['kind']>('anthropic');
   const [model, setModel] = useState('');
   const [baseURL, setBaseURL] = useState('');
+  const [cliAgent, setCliAgent] = useState<LocalCliAgent>('codex');
+  const [cliCommand, setCliCommand] = useState('codex');
   const [apiKey, setApiKey] = useState('');
   const [sessions, setSessions] = useState('4');
   const [tokens, setTokens] = useState('200000');
@@ -50,8 +59,12 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
     try {
       const value = await api.getSettings();
       setKind(value.provider.kind);
-      setModel(value.provider.model);
+      setModel(value.provider.model ?? '');
       setBaseURL('baseURL' in value.provider ? value.provider.baseURL : '');
+      if (value.provider.kind === 'local-cli') {
+        setCliAgent(value.provider.agent);
+        setCliCommand(value.provider.command ?? value.provider.agent);
+      }
       setSessions(String(value.budget.proactiveSessionsPerDay));
       setTokens(String(value.budget.dailyTokens));
       setNotifications(value.notifications);
@@ -75,6 +88,9 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
     } else if (kind === 'ollama' && baseURL === 'http://127.0.0.1:11434/v1') {
       setBaseURL('');
     }
+    if (next === 'local-cli' && !cliCommand.trim()) {
+      setCliCommand(cliAgent);
+    }
   }
 
   async function save() {
@@ -87,12 +103,16 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
     setStatus(null);
     const sessionsNumber = Number(sessions);
     const tokensNumber = Number(tokens);
-    if (!model.trim()) {
+    if (kind !== 'local-cli' && !model.trim()) {
       setError('请填写模型名称。');
       return;
     }
-    if (kind !== 'anthropic' && !baseURL.trim()) {
+    if ((kind === 'openai-compatible' || kind === 'ollama') && !baseURL.trim()) {
       setError('请填写 Base URL。');
+      return;
+    }
+    if (kind === 'local-cli' && !cliCommand.trim()) {
+      setError('请填写本地 CLI 命令。');
       return;
     }
     if (!Number.isInteger(sessionsNumber) || sessionsNumber < 0) {
@@ -106,7 +126,16 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
     setSaving(true);
     try {
       const provider: ProviderConfig =
-        kind === 'anthropic' ? { kind, model } : { kind, baseURL, model };
+        kind === 'anthropic'
+          ? { kind, model }
+          : kind === 'local-cli'
+            ? {
+                kind,
+                agent: cliAgent,
+                command: cliCommand.trim(),
+                ...(model.trim() ? { model: model.trim() } : {})
+              }
+            : { kind, baseURL, model };
       await api.updateSettings({
         provider,
         budget: {
@@ -221,7 +250,42 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
               </div>
             </div>
 
-            {kind !== 'anthropic' ? (
+            {kind === 'local-cli' ? (
+              <div className="mt-5 grid gap-5 md:grid-cols-2">
+                <div>
+                  <Label htmlFor="settings-cli-agent">CLI agent</Label>
+                  <Select
+                    id="settings-cli-agent"
+                    value={cliAgent}
+                    onChange={(event) => {
+                      const next = event.target.value as LocalCliAgent;
+                      setCliAgent(next);
+                      setCliCommand(next);
+                    }}
+                  >
+                    {cliAgents.map((agent) => (
+                      <option key={agent} value={agent}>
+                        {agent}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="settings-cli-command">CLI 命令</Label>
+                  <Input
+                    id="settings-cli-command"
+                    value={cliCommand}
+                    onChange={(event) => setCliCommand(event.target.value)}
+                    placeholder="codex"
+                  />
+                </div>
+                <p className="text-sm text-gray-600 md:col-span-2">
+                  使用本机已登录的 CLI agent，不需要 API key；命令会在临时目录中运行。
+                </p>
+              </div>
+            ) : null}
+
+            {(kind === 'openai-compatible' || kind === 'ollama') ? (
               <div className="mt-5">
                 <Label htmlFor="settings-base-url">Base URL</Label>
                 <Input
@@ -233,20 +297,22 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
               </div>
             ) : null}
 
-            <div className="mt-5">
-              <Label htmlFor="settings-api-key">API Key</Label>
-              <Input
-                id="settings-api-key"
-                type="password"
-                value={apiKey}
-                onChange={(event) => setApiKey(event.target.value)}
-                placeholder="已保存则留空"
-                autoComplete="off"
-              />
-              <p className="mt-2 text-sm text-gray-600">
-                原型模式下，API Key 只保存在当前页面内存，不会写入浏览器存储或发送到服务器。
-              </p>
-            </div>
+            {kind !== 'local-cli' ? (
+              <div className="mt-5">
+                <Label htmlFor="settings-api-key">API Key</Label>
+                <Input
+                  id="settings-api-key"
+                  type="password"
+                  value={apiKey}
+                  onChange={(event) => setApiKey(event.target.value)}
+                  placeholder="已保存则留空"
+                  autoComplete="off"
+                />
+                <p className="mt-2 text-sm text-gray-600">
+                  原型模式下，API Key 只保存在当前页面内存，不会写入浏览器存储或发送到服务器。
+                </p>
+              </div>
+            ) : null}
           </Card>
 
           <Card id="settings-budget">

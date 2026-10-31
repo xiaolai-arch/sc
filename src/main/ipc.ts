@@ -7,12 +7,14 @@ import type {
   SendMessageInput,
   SubmitReviewInput,
   UpdateWorkspaceNoteInput,
-  UpdateWorkspaceTaskInput
+  UpdateWorkspaceTaskInput,
+  WorkspaceOnboardingInput
 } from '../shared/workspace';
 
 /** Every IPC channel exposed to the preload bridge. */
 export const IPC_CHANNELS = {
   getBootstrap: 'study-coach:bootstrap:get',
+  completeWorkspaceOnboarding: 'study-coach:bootstrap:complete-workspace-onboarding',
   completeOnboarding: 'study-coach:bootstrap:complete-onboarding',
   getSettings: 'study-coach:settings:get',
   updateSettings: 'study-coach:settings:update',
@@ -142,6 +144,10 @@ function requireSend(value: unknown): SendMessageInput {
 export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
   const raw: IpcHandlerMap = {
     getBootstrap: async () => api.getBootstrap(),
+    completeWorkspaceOnboarding: async (input) =>
+      api.completeWorkspaceOnboarding(
+        requireObject(input, '完成 workspace 引导') as unknown as WorkspaceOnboardingInput
+      ),
     completeOnboarding: async (input) =>
       api.completeOnboarding(requireObject(input, '完成引导') as unknown as ExamProfile),
     getSettings: async () => api.getSettings(),
@@ -237,6 +243,8 @@ export function createStudyCoachBridge(invoke: Invoke): StudyCoachApi {
 
   return {
     getBootstrap: () => call(IPC_CHANNELS.getBootstrap),
+    completeWorkspaceOnboarding: (input) =>
+      call(IPC_CHANNELS.completeWorkspaceOnboarding, input),
     completeOnboarding: (profile) => call(IPC_CHANNELS.completeOnboarding, profile),
     getSettings: () => call(IPC_CHANNELS.getSettings),
     updateSettings: (patch) => call(IPC_CHANNELS.updateSettings, patch),

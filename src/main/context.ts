@@ -68,6 +68,7 @@ interface ActiveServices {
 export function createDefaultAppState(vaultPath: string): AppState {
   return {
     profile: null,
+    onboarded: false,
     plan: null,
     reviews: {},
     settings: createDefaultSettings(vaultPath)
@@ -202,16 +203,45 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
   const api: StudyCoachApi = {
     async getBootstrap() {
       const snapshot = await state.read();
+      const hasApiKey =
+        snapshot.settings.provider.kind === 'local-cli'
+          ? true
+          : await secrets.hasApiKey();
       return {
-        needsOnboarding: snapshot.profile === null,
+        needsOnboarding: !snapshot.onboarded,
         today: today(),
-        hasApiKey: await secrets.hasApiKey()
+        hasApiKey
       };
+    },
+
+    async completeWorkspaceOnboarding(input) {
+      const services = await getServices();
+      if (input.useDemo) {
+        // Ensure the seed exists; the user can keep or edit the example workspaces.
+        await services.workspace.listWorkspaces();
+      } else {
+        await services.workspace.createWorkspace({
+          name: input.name,
+          kind: input.kind,
+          goal: input.goal,
+          description: input.description
+        });
+      }
+
+      const currentSettings = await settings.get();
+      if (currentSettings.provider.kind !== 'local-cli') {
+        await settings.update({
+          provider: { kind: 'local-cli', agent: 'codex', command: 'codex' }
+        });
+        await syncServices(await settings.get());
+      }
+
+      await state.update((current) => ({ ...current, onboarded: true }));
     },
 
     async completeOnboarding(profile) {
       const validated = validateExamProfile(profile);
-      await state.update((current) => ({ ...current, profile: validated }));
+      await state.update((current) => ({ ...current, profile: validated, onboarded: true }));
     },
 
     async getSettings() {

@@ -8,6 +8,7 @@ import {
 test('locks the public channel names', () => {
   expect(IPC_CHANNELS).toEqual({
     getBootstrap: 'study-coach:bootstrap:get',
+    completeWorkspaceOnboarding: 'study-coach:bootstrap:complete-workspace-onboarding',
     completeOnboarding: 'study-coach:bootstrap:complete-onboarding',
     getSettings: 'study-coach:settings:get',
     updateSettings: 'study-coach:settings:update',
@@ -38,6 +39,13 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
   const bridge: StudyCoachApi = createStudyCoachBridge(invoke);
 
   await bridge.getBootstrap();
+  await bridge.completeWorkspaceOnboarding({
+    name: '我的学习',
+    kind: 'study',
+    goal: 'g',
+    description: 'd',
+    useDemo: true
+  });
   await bridge.completeOnboarding({ examDate: '2027-12-18', subjects: [], dailyMinutes: 60, currentLevel: 'x' } as never);
   await bridge.getSettings();
   await bridge.updateSettings({ launchAtLogin: true });
@@ -59,10 +67,11 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
 
   expect(calls.map((entry) => entry.channel)).toEqual(Object.values(IPC_CHANNELS));
   expect(calls[0]).toEqual({ channel: IPC_CHANNELS.getBootstrap, args: [] });
-  expect(calls[4]).toEqual({ channel: IPC_CHANNELS.setApiKey, args: ['k'] });
-  expect(calls[10]).toEqual({ channel: IPC_CHANNELS.getWorkspaceSnapshot, args: ['ws-1'] });
-  expect(calls[15]).toEqual({ channel: IPC_CHANNELS.getMemory, args: ['ws-1'] });
-  expect(calls[18]?.args).toEqual([{ message: 'hi' }]);
+  expect(calls[1]?.channel).toBe(IPC_CHANNELS.completeWorkspaceOnboarding);
+  expect(calls[5]).toEqual({ channel: IPC_CHANNELS.setApiKey, args: ['k'] });
+  expect(calls[11]).toEqual({ channel: IPC_CHANNELS.getWorkspaceSnapshot, args: ['ws-1'] });
+  expect(calls[16]).toEqual({ channel: IPC_CHANNELS.getMemory, args: ['ws-1'] });
+  expect(calls[19]?.args).toEqual([{ message: 'hi' }]);
 });
 
 test('bridge does not swallow rejected invokes', async () => {

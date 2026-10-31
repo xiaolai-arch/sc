@@ -3,6 +3,7 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { generateText } from 'ai';
 import { AiSdkModelClient } from './ai-sdk-client';
+import { CliAgentClient } from './cli-agent-client';
 
 export type ModelRole = 'system' | 'user' | 'assistant' | 'tool';
 
@@ -112,5 +113,7 @@ export function createModelClient(provider: ProviderConfig, apiKey: string | nul
       });
       return new AiSdkModelClient({ generate: generateText, model: ollama(provider.model) });
     }
+    case 'local-cli':
+      return new CliAgentClient(provider);
   }
 }

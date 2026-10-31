@@ -65,3 +65,30 @@ test('requires a base URL for non-Anthropic providers', async () => {
   expect(await screen.findByRole('alert')).toHaveTextContent('请填写 Base URL');
   expect(update).not.toHaveBeenCalled();
 });
+
+test('saves a local cli provider without an api key', async () => {
+  const localSettings = {
+    ...settings,
+    provider: { kind: 'local-cli' as const, agent: 'codex' as const, command: 'codex' }
+  };
+  const update = vi.fn().mockResolvedValue(localSettings);
+  window.studyCoach = {
+    getSettings: vi.fn().mockResolvedValue(localSettings),
+    updateSettings: update,
+    setApiKey: vi.fn()
+  } as never;
+  render(<SettingsPage onClose={() => {}} />);
+  expect(await screen.findByLabelText('CLI agent')).toHaveValue('codex');
+  expect(screen.queryByLabelText('API Key')).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+  expect(update).toHaveBeenCalledWith(
+    expect.objectContaining({
+      provider: expect.objectContaining({
+        kind: 'local-cli',
+        agent: 'codex',
+        command: 'codex'
+      })
+    })
+  );
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});

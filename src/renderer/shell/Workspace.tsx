@@ -109,7 +109,11 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     }
     try {
       const settings = await api.getSettings();
-      setModelLabel(settings.provider.model);
+      setModelLabel(
+        settings.provider.kind === 'local-cli'
+          ? settings.provider.model ?? settings.provider.agent
+          : settings.provider.model
+      );
     } catch {
       setModelLabel('模板计划');
     }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { formatLocalDate } from '../shared/date';
 import type { Bootstrap } from '../shared/ipc';
-import { Onboarding } from './onboarding/Onboarding';
+import { WorkspaceOnboarding } from './onboarding/WorkspaceOnboarding';
 import { Workspace } from './shell/Workspace';
 import { PageShell } from './ui/PageShell';
 
@@ -33,8 +33,7 @@ export function App() {
           <div className="mx-auto max-w-[980px] px-6 py-20 text-gray-600">正在准备…</div>
         </PageShell>
       ) : bootstrap.needsOnboarding ? (
-        <Onboarding
-          showDemo={Boolean(window.studyCoachPrototype)}
+        <WorkspaceOnboarding
           onComplete={() => {
             void refresh();
           }}

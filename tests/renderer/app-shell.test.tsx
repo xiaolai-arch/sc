@@ -10,7 +10,7 @@ test('saving an API key clears the unconfigured banner when returning via nav', 
   window.studyCoachPrototype = { reset: vi.fn() };
 
   render(<App />);
-  await userEvent.click(await screen.findByRole('button', { name: '先看看示例' }));
+  await userEvent.click(await screen.findByRole('button', { name: '先看看示例工作区' }));
   expect(await screen.findByText('未配置模型，当前使用模板计划。')).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole('button', { name: '设置' }));

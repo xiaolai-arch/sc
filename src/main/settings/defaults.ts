@@ -3,7 +3,7 @@ import type { AppSettings, ProviderConfig } from '../../shared/types';
 export const DEFAULT_VAULT_DIRECTORY = 'StudyCoachVault';
 
 export function defaultProvider(): ProviderConfig {
-  return { kind: 'anthropic', model: 'claude-sonnet-4-5' };
+  return { kind: 'local-cli', agent: 'codex', command: 'codex' };
 }
 
 export function createDefaultSettings(vaultPath: string): AppSettings {

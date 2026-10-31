@@ -31,6 +31,7 @@ export const MOCK_STORAGE_KEY = 'study-coach:prototype:v1';
 
 interface MockState {
   profile: ExamProfile | null;
+  onboarded: boolean;
   settings: AppSettings;
   plan: DailyPlan | null;
   reviews: Record<string, ReviewAnswers>;
@@ -95,6 +96,7 @@ function seedWorkspaceData() {
 function defaultState(): MockState {
   return {
     profile: null,
+    onboarded: false,
     settings: structuredClone(defaultSettings),
     plan: null,
     reviews: {},
@@ -157,6 +159,10 @@ function readState(storage: Storage | null): MockState {
     const seeded = seedWorkspaceData();
     return {
       profile: parsed.profile ?? null,
+      onboarded:
+        typeof parsed.onboarded === 'boolean'
+          ? parsed.onboarded
+          : parsed.profile !== null && parsed.profile !== undefined,
       settings: {
         ...structuredClone(defaultSettings),
         ...parsed.settings,
@@ -234,14 +240,34 @@ export function createMockApi(storage?: Storage): StudyCoachApi {
   return {
     async getBootstrap(): Promise<Bootstrap> {
       return {
-        needsOnboarding: state.profile === null,
+        needsOnboarding: !state.onboarded,
         today: today(),
-        hasApiKey: apiKey !== null
+        hasApiKey:
+          state.settings.provider.kind === 'local-cli' ? true : apiKey !== null
       };
+    },
+
+    async completeWorkspaceOnboarding(input): Promise<void> {
+      if (!input.useDemo) {
+        const workspace: Workspace = {
+          id: nextId('workspace'),
+          name: input.name,
+          kind: input.kind,
+          color: '#0071e3',
+          goal: input.goal,
+          description: input.description,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        state.workspaces = [...state.workspaces, workspace];
+      }
+      state.onboarded = true;
+      persist();
     },
 
     async completeOnboarding(profile: ExamProfile): Promise<void> {
       state.profile = validateExamProfile(profile);
+      state.onboarded = true;
       if (!state.plan || state.plan.date !== today()) {
         state.plan = createDemoPlan(today());
       }
