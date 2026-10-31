@@ -38,3 +38,26 @@ test('treats non-object frontmatter as malformed and keeps the body', () => {
   expect(note.meta).toEqual({ type: 'note', source: 'user' });
   expect(note.body).toBe('正文');
 });
+
+test('keeps date-valued frontmatter as strings', () => {
+  const note = parseNote('---\ntype: plan\ncreated: 2026-10-31\nreview:\n  next: 2026-11-02\n---\n正文');
+  expect(note.meta.created).toBe('2026-10-31');
+  expect(note.meta.review?.next).toBe('2026-11-02');
+});
+
+test('omits undefined optional metadata when serializing', () => {
+  const meta = { type: 'note', subject: undefined } as never;
+  expect(() => serializeNote(meta, '正文')).not.toThrow();
+  expect(serializeNote(meta, '正文')).not.toContain('subject');
+});
+
+test('keeps Chinese tags as literal UTF-8 in serialized output', () => {
+  const raw = serializeNote({ type: 'note', tags: ['数学'] }, '');
+  expect(raw).toContain('数学');
+});
+
+test('round-trips an empty body', () => {
+  const parsed = parseNote(serializeNote({ type: 'note' }, ''));
+  expect(parsed.meta.type).toBe('note');
+  expect(parsed.body).toBe('');
+});
