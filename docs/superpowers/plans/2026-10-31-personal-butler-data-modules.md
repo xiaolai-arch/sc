@@ -104,5 +104,6 @@
 - Module 2 `task_ef6f6cb1b903` / codex / `ctx_e4b01e0095e5` / worktree `module-2-desktop-ipc` — **done** (commits `bbc1c3a`, `3b67b75`, `dc24397`; merged `a0b35db`; 70 tests/typecheck/build pass)
 - Module 3 `task_64e84a0c2fe0` / claude / `ctx_d74c9357838d` / worktree `module-3-butler-agent` — **done** (commits `8c08409`, `7e2c582`, `ba3a3bc`; merged `7bc8a11`; 103 tests/typecheck/build pass)
 - Module 4 `task_0ea8cffe8515` / opencode / `ctx_19a72b17dfb1` / worktree `module-4-renderer-wiring` — **done** (commits `1e510d9`, `c10cf48`, `3f50119`; merged `b12551a`; 112 tests/typecheck/build:web pass)
+- Module 5 `task_436e4ace0a8a` / codex / `ctx_bcc36b347e42` / worktree `module-5-integration` — **done** (commits `fed16c1`, `7db7c8f`, `03096b8`, `17782bc`; merged `32869d2`; startup wiring `25e1290`; 173 tests/typecheck/build pass)
 - Worktree root: `/Users/Admin/orca/workspaces/OrcaProject/`
-- GitHub remote: pending `gh auth login`; local commits continue.
+- GitHub remote: pending a repo URL or `gh auth login`; local commits continue.
