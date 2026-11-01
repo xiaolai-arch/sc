@@ -4,7 +4,14 @@ import type {
   ConversationSummary,
   CreateConversationInput
 } from './conversations';
-import type { LearnerProfile, MemoryRecord, MemorySynthesisResult, SynthesizeMemoryInput } from './memory';
+import type {
+  DeleteMemoryInput,
+  LearnerProfile,
+  MemoryRecord,
+  MemorySynthesisResult,
+  SynthesizeMemoryInput,
+  UpdateMemoryInput
+} from './memory';
 import type {
   CreatePracticeSetInput,
   PracticeAttempt,
@@ -69,6 +76,8 @@ export interface MemoryApi {
   listMemory(workspaceId?: string): Promise<MemoryRecord[]>;
   synthesizeMemory(input: SynthesizeMemoryInput): Promise<MemorySynthesisResult>;
   getMemoryProfile(workspaceId?: string): Promise<LearnerProfile>;
+  updateMemory(input: UpdateMemoryInput): Promise<MemoryRecord>;
+  deleteMemory(input: DeleteMemoryInput): Promise<void>;
 }
 
 /** Renderer-facing vault search. `rebuild` is exposed; `dispose` stays main-only. */

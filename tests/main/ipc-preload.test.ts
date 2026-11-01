@@ -38,6 +38,8 @@ test('locks the public channel names', () => {
     listMemory: 'study-coach:memory:list',
     synthesizeMemory: 'study-coach:memory:synthesize',
     getMemoryProfile: 'study-coach:memory:profile',
+    updateMemory: 'study-coach:memory:update',
+    deleteMemory: 'study-coach:memory:delete',
     searchWorkspace: 'study-coach:search:query',
     rebuildSearchIndex: 'study-coach:search:rebuild',
     listConversations: 'study-coach:conversations:list',
@@ -104,6 +106,13 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
     answers: { completed: 'a', stuck: 'b', tomorrow: 'c' }
   });
   await bridge.getMemoryProfile('ws-1');
+  await bridge.updateMemory({
+    workspaceId: 'ws-1',
+    id: 'm1',
+    text: '新内容',
+    kind: 'strength'
+  });
+  await bridge.deleteMemory({ workspaceId: 'ws-1', id: 'm1' });
   await bridge.searchWorkspace({ workspaceId: 'ws-1', query: '极限', limit: 5 });
   await bridge.rebuildSearchIndex();
   await bridge.listConversations();
@@ -141,10 +150,18 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
     args: [{ workspaceId: 'ws-1', limit: 5 }]
   });
   expect(calls[29]).toEqual({
+    channel: IPC_CHANNELS.updateMemory,
+    args: [{ workspaceId: 'ws-1', id: 'm1', text: '新内容', kind: 'strength' }]
+  });
+  expect(calls[30]).toEqual({
+    channel: IPC_CHANNELS.deleteMemory,
+    args: [{ workspaceId: 'ws-1', id: 'm1' }]
+  });
+  expect(calls[31]).toEqual({
     channel: IPC_CHANNELS.searchWorkspace,
     args: [{ workspaceId: 'ws-1', query: '极限', limit: 5 }]
   });
-  expect(calls[34]).toEqual({
+  expect(calls[36]).toEqual({
     channel: IPC_CHANNELS.appendConversationMessage,
     args: [
       {
@@ -158,23 +175,23 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
       }
     ]
   });
-  expect(calls[36]).toEqual({
+  expect(calls[38]).toEqual({
     channel: IPC_CHANNELS.renameConversation,
     args: [{ conversationId: 'c1', title: '数学复盘' }]
   });
-  expect(calls[37]).toEqual({
+  expect(calls[39]).toEqual({
     channel: IPC_CHANNELS.setConversationPinned,
     args: [{ conversationId: 'c1', pinned: true }]
   });
-  expect(calls[38]).toEqual({
+  expect(calls[40]).toEqual({
     channel: IPC_CHANNELS.truncateConversationMessages,
     args: [{ conversationId: 'c1', keepCount: 2 }]
   });
-  expect(calls[39]).toEqual({
+  expect(calls[41]).toEqual({
     channel: IPC_CHANNELS.searchConversations,
     args: ['极限']
   });
-  expect(calls[40]?.args).toEqual([{ message: 'hi' }]);
+  expect(calls[42]?.args).toEqual([{ message: 'hi' }]);
 });
 
 test('bridge does not swallow rejected invokes', async () => {

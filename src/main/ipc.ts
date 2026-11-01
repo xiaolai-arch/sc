@@ -19,7 +19,12 @@ import type {
   WorkspaceOnboardingInput
 } from '../shared/workspace';
 import type { CreatePracticeSetInput, SubmitAnswerInput } from '../shared/practice';
-import type { SynthesizeMemoryInput } from '../shared/memory';
+import type {
+  DeleteMemoryInput,
+  MemoryKind,
+  SynthesizeMemoryInput,
+  UpdateMemoryInput
+} from '../shared/memory';
 import type { PlanWorkspaceInput } from '../shared/planning';
 
 /** Every IPC channel exposed to the preload bridge. */
@@ -53,6 +58,8 @@ export const IPC_CHANNELS = {
   listMemory: 'study-coach:memory:list',
   synthesizeMemory: 'study-coach:memory:synthesize',
   getMemoryProfile: 'study-coach:memory:profile',
+  updateMemory: 'study-coach:memory:update',
+  deleteMemory: 'study-coach:memory:delete',
   searchWorkspace: 'study-coach:search:query',
   rebuildSearchIndex: 'study-coach:search:rebuild',
   listConversations: 'study-coach:conversations:list',
@@ -380,6 +387,33 @@ function requireSynthesizeMemory(value: unknown): SynthesizeMemoryInput {
   return input as unknown as SynthesizeMemoryInput;
 }
 
+const MEMORY_KINDS = ['weakness', 'strength', 'preference', 'plan', 'fact'] as const;
+
+function requireMemoryKind(value: unknown): MemoryKind {
+  if (typeof value !== 'string' || !(MEMORY_KINDS as readonly string[]).includes(value)) {
+    throw new Error('记忆类型无效。');
+  }
+  return value as MemoryKind;
+}
+
+function requireUpdateMemory(value: unknown): UpdateMemoryInput {
+  const input = requireObject(value, '更新记忆');
+  return {
+    workspaceId: requireString(input.workspaceId, '工作区 ID'),
+    id: requireString(input.id, '记忆 ID'),
+    ...(input.text !== undefined ? { text: requireString(input.text, '记忆内容') } : {}),
+    ...(input.kind !== undefined ? { kind: requireMemoryKind(input.kind) } : {})
+  };
+}
+
+function requireDeleteMemory(value: unknown): DeleteMemoryInput {
+  const input = requireObject(value, '删除记忆');
+  return {
+    workspaceId: requireString(input.workspaceId, '工作区 ID'),
+    id: requireString(input.id, '记忆 ID')
+  };
+}
+
 function requirePlanWorkspace(value: unknown): PlanWorkspaceInput {
   const input = requireObject(value, '生成计划');
   requireString(input.workspaceId, '工作区 ID');
@@ -464,6 +498,8 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
     listMemory: async (input) => api.listMemory(optionalString(input, '工作区 ID')),
     synthesizeMemory: async (input) => api.synthesizeMemory(requireSynthesizeMemory(input)),
     getMemoryProfile: async (input) => api.getMemoryProfile(optionalString(input, '工作区 ID')),
+    updateMemory: async (input) => api.updateMemory(requireUpdateMemory(input)),
+    deleteMemory: async (input) => api.deleteMemory(requireDeleteMemory(input)),
     searchWorkspace: async (input) => api.searchWorkspace(requireSearchWorkspace(input)),
     rebuildSearchIndex: async () => api.rebuildSearchIndex(),
     listConversations: async () => api.listConversations(),
@@ -645,6 +681,8 @@ export function createStudyCoachBridge(
     listMemory: (workspaceId) => call(IPC_CHANNELS.listMemory, workspaceId),
     synthesizeMemory: (input) => call(IPC_CHANNELS.synthesizeMemory, input),
     getMemoryProfile: (workspaceId) => call(IPC_CHANNELS.getMemoryProfile, workspaceId),
+    updateMemory: (input) => call(IPC_CHANNELS.updateMemory, input),
+    deleteMemory: (input) => call(IPC_CHANNELS.deleteMemory, input),
     searchWorkspace: (input) => call(IPC_CHANNELS.searchWorkspace, input),
     rebuildSearchIndex: () => call(IPC_CHANNELS.rebuildSearchIndex),
     listConversations: () => call(IPC_CHANNELS.listConversations),

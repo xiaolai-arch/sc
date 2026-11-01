@@ -499,6 +499,16 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     async getMemoryProfile(workspaceId) {
       return (await getServices()).memory.getProfile(workspaceId);
     },
+    async updateMemory(input) {
+      const memory = (await getServices()).memory;
+      if (!memory.updateRecord) throw new Error('当前存储不支持编辑记忆。');
+      return memory.updateRecord(input);
+    },
+    async deleteMemory(input) {
+      const memory = (await getServices()).memory;
+      if (!memory.deleteRecord) throw new Error('当前存储不支持编辑记忆。');
+      await memory.deleteRecord(input);
+    },
     async searchWorkspace(input) {
       return (await getServices()).search.search(input.workspaceId, input.query, input.limit);
     },
