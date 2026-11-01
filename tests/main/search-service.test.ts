@@ -1,0 +1,386 @@
+import { promises as fs } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  createSearchService,
+  type VaultFileEvent,
+  type VaultWatcherHandlers,
+  type WatcherFactory
+} from '../../src/main/search';
+import type { SearchService } from '../../src/shared/search';
+import type { WorkspaceService } from '../../src/shared/workspace';
+import { createWorkspaceService } from '../../src/main/workspace/create-workspace-service';
+import { createPracticeService } from '../../src/main/practice';
+import { writeFileAtomic } from '../../src/main/workspace/fs-utils';
+import { serializeNoteFile, type NoteRecord } from '../../src/main/workspace/records/notes';
+import { serializeTaskFile, type TaskRecord } from '../../src/main/workspace/records/tasks';
+
+/** Test double: records the registered handlers so tests push events synchronously. */
+function createFakeWatcher() {
+  let handlers: VaultWatcherHandlers | null = null;
+  let closeCount = 0;
+  const factory: WatcherFactory = (_vaultRoot, registered) => {
+    handlers = registered;
+    return {
+      close: async () => {
+        closeCount += 1;
+      }
+    };
+  };
+  return {
+    factory,
+    emit(event: VaultFileEvent, absPath: string): void {
+      handlers?.onFileEvent(event, absPath);
+    },
+    fail(error: unknown): void {
+      handlers?.onError(error);
+    },
+    closeCount: () => closeCount
+  };
+}
+
+type FakeWatcher = ReturnType<typeof createFakeWatcher>;
+
+function noteRecord(id: string, title: string, body: string): NoteRecord {
+  const now = '2026-11-01T08:00:00.000Z';
+  return {
+    id,
+    title,
+    subject: '检索',
+    tags: [],
+    summary: '',
+    body,
+    related: [],
+    source: 'user',
+    created: now,
+    updated: now
+  };
+}
+
+const UNIQUE = '独门检索词';
+
+let root: string;
+const services: SearchService[] = [];
+
+beforeEach(async () => {
+  root = await mkdtemp(join(tmpdir(), 'search-service-'));
+  services.length = 0;
+});
+
+afterEach(async () => {
+  for (const service of services) await service.dispose();
+  await rm(root, { recursive: true, force: true });
+});
+
+async function seedVault(): Promise<WorkspaceService> {
+  const ws = createWorkspaceService(root);
+  await ws.listWorkspaces(); // triggers demo-vault seeding
+  return ws;
+}
+
+function startService(fake: FakeWatcher = createFakeWatcher()): { service: SearchService; fake: FakeWatcher } {
+  const service = createSearchService({
+    workspaceService: createWorkspaceService(root),
+    vaultRoot: root,
+    debounceMs: 10,
+    watcherFactory: fake.factory
+  });
+  services.push(service);
+  return { service, fake };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+test('indexes seeded notes at startup and returns typed results', async () => {
+  await seedVault();
+  const { service } = startService();
+  const hits = await service.search('kaoyan', '洛必达');
+  expect(hits.length).toBeGreaterThan(0);
+  for (const hit of hits) {
+    expect(hit.workspaceId).toBe('kaoyan');
+    expect(hit.kind).toBe('note');
+    expect(hit.path.startsWith('workspaces/kaoyan/')).toBe(true);
+    expect(hit.score).toBeGreaterThan(0);
+    expect(typeof hit.docId).toBe('string');
+    expect(hit.snippet.length).toBeGreaterThan(0);
+  }
+  expect(hits.some((hit) => hit.docId === 'n4')).toBe(true);
+});
+
+test('covers workspace, task and memory kinds', async () => {
+  await seedVault();
+  const { service } = startService();
+  expect((await service.search('kaoyan', '数学一')).some((hit) => hit.kind === 'workspace')).toBe(true);
+  const taskHits = await service.search('kaoyan', '极限与连续');
+  expect(taskHits[0]).toMatchObject({ docId: 'k1', kind: 'task' });
+  expect((await service.search('kaoyan', '长难句主干')).some((hit) => hit.kind === 'memory' && hit.docId === 'm2')).toBe(true);
+  expect((await service.search('english', 'poised')).some((hit) => hit.kind === 'note' && hit.docId === 'n5')).toBe(true);
+});
+
+test('searches are scoped to the requested workspace', async () => {
+  await seedVault();
+  const { service } = startService();
+  expect(await service.search('kaoyan', 'poised')).toEqual([]);
+  expect((await service.search('english', 'poised')).length).toBeGreaterThan(0);
+});
+
+test('handles limits, empty queries and invalid workspace ids', async () => {
+  await seedVault();
+  const { service } = startService();
+  expect((await service.search('kaoyan', '极限', 2)).length).toBeLessThanOrEqual(2);
+  expect(await service.search('kaoyan', '')).toEqual([]);
+  expect(await service.search('kaoyan', '   ')).toEqual([]);
+  expect(await service.search('kaoyan', '极限', 0)).toEqual([]);
+  await expect(service.search('../evil', '极限')).rejects.toThrow('Invalid workspace id');
+});
+
+test('indexes new files from watcher add events', async () => {
+  const ws = await seedVault();
+  const { service, fake } = startService();
+  await service.search('kaoyan', '考研'); // readiness barrier: watcher is up
+  const note = await ws.createNote({
+    workspaceId: 'kaoyan',
+    title: '搜索测试笔记',
+    subject: '检索',
+    body: `全库检索应该能找到这条${UNIQUE}。`
+  });
+  fake.emit('add', join(root, note.path as string));
+  await vi.waitFor(
+    async () => {
+      const hits = await service.search('kaoyan', '搜索测试');
+      expect(hits.some((hit) => hit.docId === note.id)).toBe(true);
+    },
+    { timeout: 2000, interval: 10 }
+  );
+});
+
+test('re-indexes changed files and drops stale terms', async () => {
+  const ws = await seedVault();
+  const { service, fake } = startService();
+  await service.search('kaoyan', '考研');
+  const note = await ws.createNote({
+    workspaceId: 'kaoyan',
+    title: '搜索测试笔记',
+    subject: '检索',
+    body: `初版内容${UNIQUE}`
+  });
+  const abs = join(root, note.path as string);
+  fake.emit('add', abs);
+  await vi.waitFor(
+    async () => {
+      expect((await service.search('kaoyan', '搜索测试')).some((hit) => hit.docId === note.id)).toBe(true);
+    },
+    { timeout: 2000, interval: 10 }
+  );
+
+  const revised = noteRecord(note.id, '二次修订标题', '修订后的独特内容');
+  await writeFileAtomic(abs, serializeNoteFile(revised));
+  fake.emit('change', abs);
+  await vi.waitFor(
+    async () => {
+      const stale = await service.search('kaoyan', '搜索测试');
+      const fresh = await service.search('kaoyan', '二次修订');
+      expect(stale.some((hit) => hit.docId === note.id)).toBe(false);
+      expect(fresh.some((hit) => hit.docId === note.id)).toBe(true);
+    },
+    { timeout: 2000, interval: 10 }
+  );
+});
+
+test('removes documents on unlink events', async () => {
+  const ws = await seedVault();
+  const { service, fake } = startService();
+  await service.search('kaoyan', '考研');
+  const note = await ws.createNote({
+    workspaceId: 'kaoyan',
+    title: '删除目标笔记',
+    subject: '检索',
+    body: `删除后应当消失${UNIQUE}`
+  });
+  const abs = join(root, note.path as string);
+  fake.emit('add', abs);
+  await vi.waitFor(
+    async () => {
+      expect((await service.search('kaoyan', '删除目标')).length).toBeGreaterThan(0);
+    },
+    { timeout: 2000, interval: 10 }
+  );
+  await fs.rm(abs);
+  fake.emit('unlink', abs);
+  await vi.waitFor(
+    async () => {
+      expect(await service.search('kaoyan', '删除目标')).toEqual([]);
+    },
+    { timeout: 2000, interval: 10 }
+  );
+});
+
+test('drops all docs under a directory on unlinkDir, rescans on addDir', async () => {
+  const ws = await seedVault();
+  const notesDir = join(root, 'workspaces', 'kaoyan', 'notes');
+  const { service, fake } = startService();
+  await service.search('kaoyan', '考研');
+  const note = await ws.createNote({
+    workspaceId: 'kaoyan',
+    title: '目录内笔记',
+    subject: '检索',
+    body: `目录删除测试${UNIQUE}`
+  });
+  fake.emit('add', join(root, note.path as string));
+  await vi.waitFor(
+    async () => {
+      expect((await service.search('kaoyan', '目录删除测试')).length).toBeGreaterThan(0);
+    },
+    { timeout: 2000, interval: 10 }
+  );
+
+  await fs.rm(notesDir, { recursive: true, force: true });
+  fake.emit('unlinkDir', notesDir);
+  await vi.waitFor(
+    async () => {
+      expect(await service.search('kaoyan', '目录删除测试')).toEqual([]);
+    },
+    { timeout: 2000, interval: 10 }
+  );
+
+  await fs.mkdir(notesDir, { recursive: true });
+  const rebuilt = noteRecord('rebuilt-1', '重建笔记', '目录重建后的新内容');
+  await writeFileAtomic(join(notesDir, 'rebuilt.md'), serializeNoteFile(rebuilt));
+  fake.emit('addDir', notesDir);
+  await vi.waitFor(
+    async () => {
+      expect((await service.search('kaoyan', '重建笔记')).some((hit) => hit.docId === 'rebuilt-1')).toBe(true);
+    },
+    { timeout: 2000, interval: 10 }
+  );
+});
+
+test('rebuild() picks up cold changes and drops deleted files', async () => {
+  await seedVault();
+  const { service } = startService();
+  expect((await service.search('kaoyan', '冷启动独门任务')).length).toBe(0);
+  const tasks: TaskRecord[] = [
+    {
+      id: 'cold-1',
+      title: '冷启动独门任务',
+      subject: '数学',
+      durationMin: 30,
+      materialRefs: [],
+      acceptance: '直接写盘，不走服务',
+      status: 'pending'
+    }
+  ];
+  const taskFile = join(root, 'workspaces', 'kaoyan', 'tasks', '2026-05-01.md');
+  await writeFileAtomic(taskFile, serializeTaskFile('2026-05-01', tasks));
+  expect((await service.search('kaoyan', '冷启动独门任务')).length).toBe(0);
+  await service.rebuild();
+  expect((await service.search('kaoyan', '冷启动独门任务')).some((hit) => hit.docId === 'cold-1')).toBe(true);
+
+  await fs.rm(taskFile);
+  await service.rebuild();
+  expect(await service.search('kaoyan', '冷启动独门任务')).toEqual([]);
+});
+
+test('indexes practice records and reviews', async () => {
+  const ws = await seedVault();
+  const practice = createPracticeService(root);
+  await practice.listSets('kaoyan'); // writes seed sets into the vault
+  const set = await practice.getSet('ps1');
+  expect(set).not.toBeNull();
+  const first = set?.questions[0];
+  expect(first).toBeDefined();
+  // A wrong answer records a mistake (practice-mistake doc).
+  await practice.submitAnswer({ questionId: first?.id as string, choice: ((first?.answer ?? 0) + 1) % (first?.options.length ?? 2) });
+  await ws.submitReview({
+    date: '2026-11-01',
+    workspaceId: 'kaoyan',
+    answers: { completed: '复盘独门完成项', stuck: '卡在极限', tomorrow: '做题' }
+  });
+
+  const { service } = startService();
+  const questionHits = await service.search('kaoyan', '未定式');
+  expect(questionHits.some((hit) => hit.kind === 'practice-question' && hit.docId === 'q2')).toBe(true);
+  expect(questionHits.some((hit) => hit.kind === 'practice-set' && hit.docId === 'ps1')).toBe(true);
+  expect((await service.search('kaoyan', 'sin')).some((hit) => hit.kind === 'practice-mistake')).toBe(true);
+  const reviewHits = await service.search('kaoyan', '复盘独门完成项');
+  expect(reviewHits.some((hit) => hit.kind === 'review' && hit.docId === '2026-11-01#0')).toBe(true);
+});
+
+test('never indexes files outside the vault root', async () => {
+  await seedVault();
+  const { service, fake } = startService();
+  await service.search('kaoyan', '考研');
+  const outside = await mkdtemp(join(tmpdir(), 'search-outside-'));
+  try {
+    await writeFileAtomic(join(outside, 'escape.md'), serializeNoteFile(noteRecord('escape-1', '逃逸独门词', '外部内容')));
+    fake.emit('add', join(outside, 'escape.md'));
+    fake.emit('change', join(root, '..', 'escape.md'));
+    await sleep(50);
+    expect(await service.search('kaoyan', '逃逸独门词')).toEqual([]);
+    await service.rebuild();
+    expect(await service.search('kaoyan', '逃逸独门词')).toEqual([]);
+  } finally {
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test('skips symlinks, hidden directories and non-markdown files', async () => {
+  await seedVault();
+  const { service, fake } = startService();
+  await service.search('kaoyan', '考研');
+  const outside = await mkdtemp(join(tmpdir(), 'search-symlink-'));
+  try {
+    const notesDir = join(root, 'workspaces', 'kaoyan', 'notes');
+    const target = join(outside, 'target.md');
+    await writeFileAtomic(target, serializeNoteFile(noteRecord('outside-1', '链接独门词', '软链内容')));
+    await fs.symlink(target, join(notesDir, 'linked.md'));
+
+    await writeFileAtomic(join(root, 'workspaces', 'kaoyan', '.hidden', 'secret.md'), serializeNoteFile(noteRecord('hidden-1', '隐藏独门词', '隐藏内容')));
+    await writeFileAtomic(join(notesDir, 'raw.txt'), '非 markdown 独门词');
+
+    await service.rebuild();
+    expect(await service.search('kaoyan', '链接独门词')).toEqual([]);
+    expect(await service.search('kaoyan', '隐藏独门词')).toEqual([]);
+    expect(await service.search('kaoyan', '非 markdown 独门词')).toEqual([]);
+
+    // Watcher events for symlinks are dropped too (lstat says "not a file").
+    fake.emit('add', join(notesDir, 'linked.md'));
+    await sleep(30);
+    expect(await service.search('kaoyan', '链接独门词')).toEqual([]);
+  } finally {
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test('bootstraps a fresh vault root and survives watcher errors', async () => {
+  const freshRoot = join(root, 'fresh-vault');
+  const freshFake = createFakeWatcher();
+  const service = createSearchService({
+    workspaceService: createWorkspaceService(freshRoot),
+    vaultRoot: freshRoot,
+    debounceMs: 10,
+    watcherFactory: freshFake.factory
+  });
+  services.push(service);
+  const hits = await service.search('kaoyan', '考研');
+  expect(hits.some((hit) => hit.kind === 'workspace')).toBe(true);
+  freshFake.fail(new Error('watcher exploded'));
+  expect((await service.search('kaoyan', '极限')).length).toBeGreaterThan(0);
+});
+
+test('dispose closes the watcher once and stops applying updates', async () => {
+  await seedVault();
+  const { service, fake } = startService();
+  expect((await service.search('kaoyan', '极限')).length).toBeGreaterThan(0);
+  await service.dispose();
+  expect(fake.closeCount()).toBe(1);
+  await service.dispose();
+  expect(fake.closeCount()).toBe(1);
+
+  fake.emit('add', join(root, 'workspaces', 'kaoyan', 'notes', 'late.md'));
+  await sleep(50);
+  expect(await service.search('kaoyan', '极限')).toEqual([]);
+});
