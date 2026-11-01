@@ -104,6 +104,9 @@ app.whenReady().then(async () => {
     trayController?.destroy();
     scheduler = null;
     trayController = null;
+    // Stops the vault search watcher; the app is already quitting, so this is
+    // fire-and-forget (the resources are released with the process anyway).
+    void context.dispose().catch(() => undefined);
   });
 
   app.on('activate', () => {

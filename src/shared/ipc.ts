@@ -1,4 +1,15 @@
-import type { AppSettings, DailyPlan, ExamProfile } from './types';
+import type { LearnerProfile, MemoryRecord, MemorySynthesisResult, SynthesizeMemoryInput } from './memory';
+import type {
+  CreatePracticeSetInput,
+  PracticeAttempt,
+  PracticeMistake,
+  PracticeSet,
+  SubmitAnswerInput,
+  SubmitAnswerResult
+} from './practice';
+import type { PlanWorkspaceInput, WorkspacePlan } from './planning';
+import type { SearchResult } from './search';
+import type { AppSettings, DailyPlan, ExamProfile, ReviewAnswers } from './types';
 import type {
   ButlerService,
   WorkspaceOnboardingInput,
@@ -17,7 +28,67 @@ export interface UpdateTaskInput {
   actualMin?: number;
 }
 
-export interface StudyCoachApi extends WorkspaceService, ButlerService {
+/** One persisted review entry, as written by `submitReview`. */
+export interface ReviewRecord extends ReviewAnswers {
+  /** Local calendar date (`YYYY-MM-DD`) of the review file. */
+  date: string;
+  submittedAt: string;
+  workspaceId?: string;
+}
+
+export interface ListReviewsInput {
+  /** When omitted, every workspace's reviews plus vault-wide reviews are read. */
+  workspaceId?: string;
+  /** Newest first; defaults to 30. */
+  limit?: number;
+}
+
+export interface SearchWorkspaceInput {
+  workspaceId: string;
+  query: string;
+  /** Defaults to the main-process search limit. */
+  limit?: number;
+}
+
+/**
+ * Renderer-facing practice contract. The main process delegates straight to
+ * `PracticeService`, so the result shapes are the shared vault records.
+ */
+export interface PracticeApi {
+  listPracticeSets(workspaceId: string): Promise<PracticeSet[]>;
+  getPracticeSet(id: string): Promise<PracticeSet | null>;
+  createPracticeSet(input: CreatePracticeSetInput): Promise<PracticeSet>;
+  submitPracticeAnswer(input: SubmitAnswerInput): Promise<SubmitAnswerResult>;
+  getPracticeMistakes(workspaceId: string): Promise<PracticeMistake[]>;
+  getPracticeDue(input: { workspaceId: string; date: string }): Promise<PracticeMistake[]>;
+  listPracticeAttempts(workspaceId: string): Promise<PracticeAttempt[]>;
+}
+
+/** Renderer-facing memory contract (vault-backed memory + learner profile). */
+export interface MemoryApi {
+  listMemory(workspaceId?: string): Promise<MemoryRecord[]>;
+  synthesizeMemory(input: SynthesizeMemoryInput): Promise<MemorySynthesisResult>;
+  getMemoryProfile(workspaceId?: string): Promise<LearnerProfile>;
+}
+
+/** Renderer-facing vault search. `rebuild` is exposed; `dispose` stays main-only. */
+export interface SearchApi {
+  searchWorkspace(input: SearchWorkspaceInput): Promise<SearchResult[]>;
+  rebuildSearchIndex(): Promise<void>;
+}
+
+/** Planner over IPC: turns a workspace goal into validated tasks. */
+export interface PlannerApi {
+  planWorkspace(input: PlanWorkspaceInput): Promise<WorkspacePlan>;
+}
+
+export interface StudyCoachApi
+  extends WorkspaceService,
+    ButlerService,
+    PracticeApi,
+    MemoryApi,
+    SearchApi,
+    PlannerApi {
   getBootstrap(): Promise<Bootstrap>;
   completeWorkspaceOnboarding(input: WorkspaceOnboardingInput): Promise<void>;
   completeOnboarding(profile: ExamProfile): Promise<void>;
@@ -27,4 +98,6 @@ export interface StudyCoachApi extends WorkspaceService, ButlerService {
   getTodayPlan(): Promise<DailyPlan | null>;
   generateTodayPlan(): Promise<DailyPlan>;
   updateTask(input: UpdateTaskInput): Promise<DailyPlan>;
+  /** Reads persisted review entries (newest first). */
+  listReviews(input?: ListReviewsInput): Promise<ReviewRecord[]>;
 }

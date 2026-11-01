@@ -10,6 +10,9 @@ import type {
   UpdateWorkspaceTaskInput,
   WorkspaceOnboardingInput
 } from '../shared/workspace';
+import type { CreatePracticeSetInput, SubmitAnswerInput } from '../shared/practice';
+import type { SynthesizeMemoryInput } from '../shared/memory';
+import type { PlanWorkspaceInput } from '../shared/planning';
 
 /** Every IPC channel exposed to the preload bridge. */
 export const IPC_CHANNELS = {
@@ -32,6 +35,20 @@ export const IPC_CHANNELS = {
   getMemory: 'study-coach:workspaces:memory',
   getReminders: 'study-coach:reminders:list',
   submitReview: 'study-coach:review:submit',
+  listReviews: 'study-coach:review:list',
+  planWorkspace: 'study-coach:planning:plan-workspace',
+  listPracticeSets: 'study-coach:practice:list-sets',
+  getPracticeSet: 'study-coach:practice:get-set',
+  createPracticeSet: 'study-coach:practice:create-set',
+  submitPracticeAnswer: 'study-coach:practice:submit-answer',
+  getPracticeMistakes: 'study-coach:practice:mistakes',
+  getPracticeDue: 'study-coach:practice:due',
+  listPracticeAttempts: 'study-coach:practice:attempts',
+  listMemory: 'study-coach:memory:list',
+  synthesizeMemory: 'study-coach:memory:synthesize',
+  getMemoryProfile: 'study-coach:memory:profile',
+  searchWorkspace: 'study-coach:search:query',
+  rebuildSearchIndex: 'study-coach:search:rebuild',
   send: 'study-coach:butler:send'
 } as const;
 
@@ -137,6 +154,90 @@ function requireSend(value: unknown): SendMessageInput {
   return input as unknown as SendMessageInput;
 }
 
+function optionalPositiveNumber(value: unknown, label: string): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    throw new Error(`${label}参数无效。`);
+  }
+  return value;
+}
+
+function optionalNonNegativeInteger(value: unknown, label: string): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new Error(`${label}参数无效。`);
+  }
+  return value;
+}
+
+function requirePracticeDue(value: unknown): { workspaceId: string; date: string } {
+  const input = requireObject(value, '错题到期');
+  requireString(input.workspaceId, '工作区 ID');
+  requireString(input.date, '日期');
+  return input as unknown as { workspaceId: string; date: string };
+}
+
+function requireSubmitAnswer(value: unknown): SubmitAnswerInput {
+  const input = requireObject(value, '提交答案');
+  requireString(input.questionId, '题目 ID');
+  const choice = optionalNonNegativeInteger(input.choice, '选项');
+  if (choice === undefined) throw new Error('选项参数无效。');
+  return { questionId: input.questionId as string, choice };
+}
+
+function requireCreatePracticeSet(value: unknown): CreatePracticeSetInput {
+  const input = requireObject(value, '创建练习');
+  requireString(input.workspaceId, '工作区 ID');
+  requireString(input.title, '练习标题');
+  if (!Array.isArray(input.questions) || input.questions.length === 0) {
+    throw new Error('练习题目不能为空。');
+  }
+  return input as unknown as CreatePracticeSetInput;
+}
+
+function requireSynthesizeMemory(value: unknown): SynthesizeMemoryInput {
+  const input = requireObject(value, '生成记忆');
+  requireString(input.workspaceId, '工作区 ID');
+  requireString(input.date, '复盘日期');
+  requireObject(input.answers, '复盘答案');
+  return input as unknown as SynthesizeMemoryInput;
+}
+
+function requirePlanWorkspace(value: unknown): PlanWorkspaceInput {
+  const input = requireObject(value, '生成计划');
+  requireString(input.workspaceId, '工作区 ID');
+  optionalString(input.date, '计划日期');
+  optionalPositiveNumber(input.availableMinutes, '可用时长');
+  return input as unknown as PlanWorkspaceInput;
+}
+
+function requireSearchWorkspace(value: unknown): {
+  workspaceId: string;
+  query: string;
+  limit?: number;
+} {
+  const input = requireObject(value, '搜索');
+  requireString(input.workspaceId, '工作区 ID');
+  requireString(input.query, '搜索关键词');
+  const limit = optionalPositiveNumber(input.limit, '结果数量');
+  return {
+    workspaceId: input.workspaceId as string,
+    query: input.query as string,
+    ...(limit !== undefined ? { limit } : {})
+  };
+}
+
+function requireListReviews(value: unknown): { workspaceId?: string; limit?: number } {
+  if (value === undefined || value === null) return {};
+  const input = requireObject(value, '读取复盘');
+  const workspaceId = optionalString(input.workspaceId, '工作区 ID');
+  const limit = optionalPositiveNumber(input.limit, '结果数量');
+  return {
+    ...(workspaceId !== undefined ? { workspaceId } : {}),
+    ...(limit !== undefined ? { limit } : {})
+  };
+}
+
 /**
  * Builds the channel handlers around a StudyCoachApi. Kept separate from
  * Electron so the same table can be exercised in unit tests.
@@ -176,6 +277,21 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
     getMemory: async (input) => api.getMemory(optionalString(input, '工作区 ID')),
     getReminders: async () => api.getReminders(),
     submitReview: async (input) => api.submitReview(requireReview(input)),
+    listReviews: async (input) => api.listReviews(requireListReviews(input)),
+    planWorkspace: async (input) => api.planWorkspace(requirePlanWorkspace(input)),
+    listPracticeSets: async (input) => api.listPracticeSets(requireString(input, '工作区 ID')),
+    getPracticeSet: async (input) => api.getPracticeSet(requireString(input, '练习 ID')),
+    createPracticeSet: async (input) => api.createPracticeSet(requireCreatePracticeSet(input)),
+    submitPracticeAnswer: async (input) => api.submitPracticeAnswer(requireSubmitAnswer(input)),
+    getPracticeMistakes: async (input) => api.getPracticeMistakes(requireString(input, '工作区 ID')),
+    getPracticeDue: async (input) => api.getPracticeDue(requirePracticeDue(input)),
+    listPracticeAttempts: async (input) =>
+      api.listPracticeAttempts(requireString(input, '工作区 ID')),
+    listMemory: async (input) => api.listMemory(optionalString(input, '工作区 ID')),
+    synthesizeMemory: async (input) => api.synthesizeMemory(requireSynthesizeMemory(input)),
+    getMemoryProfile: async (input) => api.getMemoryProfile(optionalString(input, '工作区 ID')),
+    searchWorkspace: async (input) => api.searchWorkspace(requireSearchWorkspace(input)),
+    rebuildSearchIndex: async () => api.rebuildSearchIndex(),
     send: async (input) => api.send(requireSend(input))
   };
 
@@ -262,6 +378,20 @@ export function createStudyCoachBridge(invoke: Invoke): StudyCoachApi {
     getMemory: (workspaceId) => call(IPC_CHANNELS.getMemory, workspaceId),
     getReminders: () => call(IPC_CHANNELS.getReminders),
     submitReview: (input) => call(IPC_CHANNELS.submitReview, input),
+    listReviews: (input) => call(IPC_CHANNELS.listReviews, input),
+    planWorkspace: (input) => call(IPC_CHANNELS.planWorkspace, input),
+    listPracticeSets: (workspaceId) => call(IPC_CHANNELS.listPracticeSets, workspaceId),
+    getPracticeSet: (id) => call(IPC_CHANNELS.getPracticeSet, id),
+    createPracticeSet: (input) => call(IPC_CHANNELS.createPracticeSet, input),
+    submitPracticeAnswer: (input) => call(IPC_CHANNELS.submitPracticeAnswer, input),
+    getPracticeMistakes: (workspaceId) => call(IPC_CHANNELS.getPracticeMistakes, workspaceId),
+    getPracticeDue: (input) => call(IPC_CHANNELS.getPracticeDue, input),
+    listPracticeAttempts: (workspaceId) => call(IPC_CHANNELS.listPracticeAttempts, workspaceId),
+    listMemory: (workspaceId) => call(IPC_CHANNELS.listMemory, workspaceId),
+    synthesizeMemory: (input) => call(IPC_CHANNELS.synthesizeMemory, input),
+    getMemoryProfile: (workspaceId) => call(IPC_CHANNELS.getMemoryProfile, workspaceId),
+    searchWorkspace: (input) => call(IPC_CHANNELS.searchWorkspace, input),
+    rebuildSearchIndex: () => call(IPC_CHANNELS.rebuildSearchIndex),
     send: (input) => call(IPC_CHANNELS.send, input)
   };
 }
