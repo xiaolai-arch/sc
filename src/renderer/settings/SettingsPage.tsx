@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { formatLocalDate } from '../../shared/date';
 import type {
   LocalCliAgent,
+  LocalCliEffort,
   NotificationSettings,
   ProviderConfig
 } from '../../shared/types';
@@ -46,6 +47,7 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
   const [baseURL, setBaseURL] = useState('');
   const [cliAgent, setCliAgent] = useState<LocalCliAgent>('codex');
   const [cliCommand, setCliCommand] = useState('codex');
+  const [cliEffort, setCliEffort] = useState<LocalCliEffort | ''>('');
   const [cliIsolate, setCliIsolate] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [sessions, setSessions] = useState('4');
@@ -99,6 +101,7 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
       if (value.provider.kind === 'local-cli') {
         setCliAgent(value.provider.agent);
         setCliCommand(value.provider.command ?? value.provider.agent);
+        setCliEffort(value.provider.effort ?? '');
         setCliIsolate(value.provider.isolate === true);
       }
       setSessions(String(value.budget.proactiveSessionsPerDay));
@@ -191,6 +194,7 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
                 agent: cliAgent,
                 command: cliCommand.trim(),
                 ...(model.trim() ? { model: model.trim() } : {}),
+                ...(cliEffort ? { effort: cliEffort } : {}),
                 ...(cliAgent === 'claude' && cliIsolate ? { isolate: true } : {})
               }
             : { kind, baseURL, model };
@@ -403,6 +407,21 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
                     placeholder="codex"
                   />
                 </div>
+                <div>
+                  <Label htmlFor="settings-cli-effort">推理强度</Label>
+                  <Select
+                    id="settings-cli-effort"
+                    value={cliEffort}
+                    onChange={(event) =>
+                      setCliEffort(event.target.value as LocalCliEffort | '')
+                    }
+                  >
+                    <option value="">默认</option>
+                    <option value="low">低</option>
+                    <option value="medium">中</option>
+                    <option value="high">高</option>
+                  </Select>
+                </div>
                 {cliAgent === 'claude' ? (
                   <label className="flex items-start gap-3 text-sm text-gray-600 dark:text-[#a1a1a6] md:col-span-2">
                     <input
@@ -421,6 +440,7 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
                 ) : null}
                 <p className="text-sm text-gray-600 dark:text-[#a1a1a6] md:col-span-2">
                   使用本机已登录的 CLI agent，不需要 API key；命令会在临时目录中运行。
+                  Codex 使用 -c model_reasoning_effort，Claude 使用 --effort。
                 </p>
               </div>
             ) : null}
