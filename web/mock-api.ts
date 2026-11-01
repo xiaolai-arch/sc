@@ -1,4 +1,11 @@
-import type { Bootstrap, StudyCoachApi, UpdateTaskInput } from '../src/shared/ipc';
+import type {
+  Bootstrap,
+  ListReviewsInput,
+  ReviewRecord,
+  SearchWorkspaceInput,
+  StudyCoachApi,
+  UpdateTaskInput
+} from '../src/shared/ipc';
 import type {
   CreateNoteInput,
   CreateTaskInput,
@@ -15,12 +22,31 @@ import type {
   WorkspaceSnapshot,
   WorkspaceTask
 } from '../src/shared/workspace';
-import { formatLocalDate } from '../src/shared/date';
+import type {
+  CreatePracticeSetInput,
+  PracticeAttempt,
+  PracticeMistake,
+  PracticeSet,
+  SubmitAnswerInput,
+  SubmitAnswerResult
+} from '../src/shared/practice';
+import { PRACTICE_INTERVALS } from '../src/shared/practice';
+import type {
+  LearnerProfile,
+  MemoryKind,
+  MemoryRecord,
+  MemorySynthesisResult,
+  SynthesizeMemoryInput
+} from '../src/shared/memory';
+import type { PlanWorkspaceInput, WorkspacePlan } from '../src/shared/planning';
+import type { SearchResult, SearchResultKind } from '../src/shared/search';
+import { formatLocalDate, parseLocalDate } from '../src/shared/date';
 import { validateExamProfile } from '../src/shared/profile';
-import type { AppSettings, DailyPlan, ExamProfile, ReviewAnswers, StudyTask } from '../src/shared/types';
+import type { AppSettings, DailyPlan, ExamProfile, StudyTask } from '../src/shared/types';
 import {
   demoMemory,
   demoNotes,
+  demoPracticeSets,
   demoReminders,
   demoTasks,
   workspaces as demoWorkspaces
@@ -34,12 +60,29 @@ interface MockState {
   onboarded: boolean;
   settings: AppSettings;
   plan: DailyPlan | null;
-  reviews: Record<string, ReviewAnswers>;
+  reviews: ReviewRecord[];
   workspaces: Workspace[];
   tasks: WorkspaceTask[];
   notes: WorkspaceNote[];
-  memory: MemoryItem[];
+  memory: MemoryRecord[];
   reminders: Reminder[];
+  practiceSets: PracticeSet[];
+  practiceAttempts: PracticeAttempt[];
+  practiceMistakes: PracticeMistake[];
+}
+
+function inferMemoryKind(text: string): MemoryKind {
+  if (/不稳|偏慢|卡|错|薄弱|不会/.test(text)) return 'weakness';
+  if (/有效|保持|进步|不错|坚持/.test(text)) return 'strength';
+  if (/先|明天|计划|建议|下一步/.test(text)) return 'plan';
+  if (/喜欢|偏好|习惯/.test(text)) return 'preference';
+  return 'fact';
+}
+
+function addDays(date: string, days: number): string {
+  const next = parseLocalDate(date);
+  next.setDate(next.getDate() + days);
+  return formatLocalDate(next);
 }
 
 const defaultSettings: AppSettings = {
@@ -74,6 +117,7 @@ function bodyFromBlocks(blocks: NoteBlock[]) {
 }
 
 function seedWorkspaceData() {
+  const now = new Date().toISOString();
   return {
     workspaces: structuredClone(demoWorkspaces),
     tasks: structuredClone(demoTasks),
@@ -88,9 +132,36 @@ function seedWorkspaceData() {
       body: bodyFromBlocks(note.blocks),
       related: note.related
     })),
-    memory: structuredClone(demoMemory),
-    reminders: demoReminders.map((reminder): Reminder => ({ ...reminder, enabled: true }))
+    memory: demoMemory.map((item): MemoryRecord => ({
+      ...structuredClone(item),
+      kind: inferMemoryKind(item.text)
+    })),
+    reminders: demoReminders.map((reminder): Reminder => ({ ...reminder, enabled: true })),
+    practiceSets: demoPracticeSets.map(
+      (set): PracticeSet => ({ ...structuredClone(set), createdAt: now, updatedAt: now })
+    ),
+    practiceAttempts: [] as PracticeAttempt[],
+    practiceMistakes: [] as PracticeMistake[]
   };
+}
+
+function normalizeMemory(items: unknown): MemoryRecord[] | null {
+  if (!Array.isArray(items)) return null;
+  const records: MemoryRecord[] = [];
+  for (const value of items) {
+    if (typeof value !== 'object' || value === null) continue;
+    const record = value as Partial<MemoryRecord>;
+    if (typeof record.id !== 'string' || typeof record.text !== 'string') continue;
+    records.push({
+      id: record.id,
+      workspaceId: typeof record.workspaceId === 'string' ? record.workspaceId : '',
+      text: record.text,
+      source: typeof record.source === 'string' ? record.source : '',
+      ...(typeof record.createdAt === 'string' ? { createdAt: record.createdAt } : {}),
+      kind: record.kind ?? inferMemoryKind(record.text)
+    });
+  }
+  return records;
 }
 
 function defaultState(): MockState {
@@ -99,7 +170,7 @@ function defaultState(): MockState {
     onboarded: false,
     settings: structuredClone(defaultSettings),
     plan: null,
-    reviews: {},
+    reviews: [],
     ...seedWorkspaceData()
   };
 }
@@ -171,12 +242,19 @@ function readState(storage: Storage | null): MockState {
         budget: { ...defaultSettings.budget, ...parsed.settings?.budget }
       },
       plan: parsed.plan ?? null,
-      reviews: parsed.reviews ?? {},
+      reviews: Array.isArray(parsed.reviews) ? (parsed.reviews as ReviewRecord[]) : [],
       workspaces: Array.isArray(parsed.workspaces) ? parsed.workspaces : seeded.workspaces,
       tasks: Array.isArray(parsed.tasks) ? parsed.tasks : seeded.tasks,
       notes: Array.isArray(parsed.notes) ? parsed.notes : seeded.notes,
-      memory: Array.isArray(parsed.memory) ? parsed.memory : seeded.memory,
-      reminders: Array.isArray(parsed.reminders) ? parsed.reminders : seeded.reminders
+      memory: normalizeMemory(parsed.memory) ?? seeded.memory,
+      reminders: Array.isArray(parsed.reminders) ? parsed.reminders : seeded.reminders,
+      practiceSets: Array.isArray(parsed.practiceSets) ? parsed.practiceSets : seeded.practiceSets,
+      practiceAttempts: Array.isArray(parsed.practiceAttempts)
+        ? parsed.practiceAttempts
+        : seeded.practiceAttempts,
+      practiceMistakes: Array.isArray(parsed.practiceMistakes)
+        ? parsed.practiceMistakes
+        : seeded.practiceMistakes
     };
   } catch {
     return defaultState();
@@ -235,6 +313,153 @@ export function createMockApi(storage?: Storage): StudyCoachApi {
     };
     state.notes = [note, ...state.notes];
     return note;
+  }
+
+  function synthesize(input: SynthesizeMemoryInput): MemorySynthesisResult {
+    const workspace = requireWorkspace(input.workspaceId);
+    if (input.answers.skipped === true) return { items: [], generatedBy: 'rules' };
+    const createdAt = new Date().toISOString();
+    const source = `review:${input.date}`;
+    const candidates: Array<{ text: string; kind: MemoryKind }> = [];
+    if (input.answers.completed?.trim()) {
+      candidates.push({ kind: 'strength', text: `${workspace.name} 完成：${input.answers.completed.trim()}` });
+    }
+    if (input.answers.stuck?.trim()) {
+      candidates.push({ kind: 'weakness', text: `卡点：${input.answers.stuck.trim()}` });
+    }
+    if (input.answers.tomorrow?.trim()) {
+      candidates.push({ kind: 'plan', text: `下一步：${input.answers.tomorrow.trim()}` });
+    }
+    const seen = new Set(state.memory.map((entry) => `${entry.source}\n${entry.text}`));
+    const items = candidates
+      .filter((candidate) => !seen.has(`${source}\n${candidate.text}`))
+      .slice(0, 3)
+      .map(
+        (candidate): MemoryRecord => ({
+          id: nextId('m'),
+          workspaceId: workspace.id,
+          text: candidate.text,
+          kind: candidate.kind,
+          source,
+          createdAt
+        })
+      );
+    state.memory = [...items, ...state.memory];
+    return { items, generatedBy: 'rules' };
+  }
+
+  function profileFor(workspaceId?: string): LearnerProfile {
+    const scoped = workspaceId
+      ? state.memory.filter((entry) => entry.workspaceId === workspaceId)
+      : state.memory;
+    const textsOf = (kind: MemoryKind) =>
+      scoped.filter((entry) => entry.kind === kind).map((entry) => entry.text);
+    const sorted = [...scoped].sort((a, b) =>
+      (b.createdAt ?? '').localeCompare(a.createdAt ?? '') || b.id.localeCompare(a.id)
+    );
+    const strengths = textsOf('strength');
+    const weaknesses = textsOf('weakness');
+    const preferences = textsOf('preference');
+    const plans = textsOf('plan');
+    const oldest = [...scoped].sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? ''))[0];
+    const newest = sorted[0];
+    const summary =
+      scoped.length === 0
+        ? '还没有记忆，完成一次复盘后会开始积累。'
+        : `共 ${scoped.length} 条记忆：薄弱点 ${weaknesses.length} 条，偏好 ${preferences.length} 条，计划 ${plans.length} 条。`;
+    return {
+      ...(workspaceId !== undefined ? { workspaceId } : {}),
+      memoryCount: scoped.length,
+      ...(oldest?.createdAt ? { firstAt: oldest.createdAt } : {}),
+      ...(newest?.createdAt ? { lastAt: newest.createdAt } : {}),
+      strengths,
+      weaknesses,
+      preferences,
+      plans,
+      recent: sorted.slice(0, 5).map((entry) => entry.text),
+      summary,
+      generatedAt: new Date().toISOString()
+    };
+  }
+
+  function findPracticeQuestion(questionId: string) {
+    for (const set of state.practiceSets) {
+      const question = set.questions.find((entry) => entry.id === questionId);
+      if (question !== undefined) return { set, question };
+    }
+    return null;
+  }
+
+  function searchDocs(workspaceId: string) {
+    const docs: Array<{
+      docId: string;
+      kind: SearchResultKind;
+      title: string;
+      content: string;
+      path: string;
+    }> = [];
+    for (const note of state.notes.filter((entry) => entry.workspaceId === workspaceId)) {
+      docs.push({
+        docId: note.id,
+        kind: 'note',
+        title: note.title,
+        content: `${note.summary}\n${note.body}\n${note.tags.join(' ')}`,
+        path: `workspaces/${workspaceId}/notes/${note.id}.md`
+      });
+    }
+    for (const task of state.tasks.filter((entry) => entry.workspaceId === workspaceId)) {
+      docs.push({
+        docId: task.id,
+        kind: 'task',
+        title: task.title,
+        content: `${task.subject}\n${task.acceptance}`,
+        path: `workspaces/${workspaceId}/tasks/${task.id}.md`
+      });
+    }
+    for (const memory of state.memory.filter((entry) => entry.workspaceId === workspaceId)) {
+      docs.push({
+        docId: memory.id,
+        kind: 'memory',
+        title: `记忆：${memory.text.slice(0, 24)}`,
+        content: `${memory.text}\n${memory.source}`,
+        path: `workspaces/${workspaceId}/memory.md`
+      });
+    }
+    for (const review of state.reviews.filter((entry) => entry.workspaceId === workspaceId)) {
+      docs.push({
+        docId: `${review.date}-${review.submittedAt}`,
+        kind: 'review',
+        title: `${review.date} 复盘`,
+        content: `${review.completed}\n${review.stuck}\n${review.tomorrow}`,
+        path: `workspaces/${workspaceId}/reviews/${review.date}.md`
+      });
+    }
+    for (const set of state.practiceSets.filter((entry) => entry.workspaceId === workspaceId)) {
+      docs.push({
+        docId: set.id,
+        kind: 'practice-set',
+        title: set.title,
+        content: set.subject,
+        path: `workspaces/${workspaceId}/practice/sets/${set.id}.md`
+      });
+      for (const question of set.questions) {
+        docs.push({
+          docId: question.id,
+          kind: 'practice-question',
+          title: question.prompt.slice(0, 24),
+          content: `${question.prompt}\n${question.options.join(' ')}\n${question.explanation}`,
+          path: `workspaces/${workspaceId}/practice/sets/${set.id}.md`
+        });
+      }
+    }
+    return docs;
+  }
+
+  function snippetOf(text: string, query: string): string {
+    const index = text.toLowerCase().indexOf(query.toLowerCase());
+    if (index < 0) return text.slice(0, 120);
+    const start = Math.max(0, index - 30);
+    return text.slice(start, start + 120);
   }
 
   return {
@@ -316,8 +541,268 @@ export function createMockApi(storage?: Storage): StudyCoachApi {
     },
 
     async submitReview(input: SubmitReviewInput): Promise<void> {
-      state.reviews[input.date] = input.answers;
+      state.reviews = [
+        {
+          date: input.date,
+          submittedAt: new Date().toISOString(),
+          ...(input.workspaceId !== undefined ? { workspaceId: input.workspaceId } : {}),
+          completed: input.answers.completed ?? '',
+          stuck: input.answers.stuck ?? '',
+          tomorrow: input.answers.tomorrow ?? '',
+          skipped: input.answers.skipped === true
+        },
+        ...state.reviews
+      ];
+      if (input.workspaceId !== undefined && input.answers.skipped !== true) {
+        synthesize({ workspaceId: input.workspaceId, date: input.date, answers: input.answers });
+      }
       persist();
+    },
+
+    async listReviews(input: ListReviewsInput = {}): Promise<ReviewRecord[]> {
+      const scoped =
+        input.workspaceId === undefined
+          ? state.reviews
+          : state.reviews.filter(
+              (entry) =>
+                entry.workspaceId === undefined || entry.workspaceId === input.workspaceId
+            );
+      const limit = input.limit ?? 30;
+      return structuredClone(
+        [...scoped]
+          .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt) || b.date.localeCompare(a.date))
+          .slice(0, limit)
+      );
+    },
+
+    async planWorkspace(input: PlanWorkspaceInput): Promise<WorkspacePlan> {
+      const workspace = requireWorkspace(input.workspaceId);
+      const available = input.availableMinutes ?? 120;
+      const perTask = Math.max(15, Math.round(available / 3));
+      return {
+        workspaceId: workspace.id,
+        date: input.date ?? today(),
+        generatedBy: 'template',
+        tasks: [
+          {
+            title: `推进「${workspace.goal || workspace.name}」`,
+            subject: workspace.name,
+            durationMin: perTask,
+            acceptance: '完成一段可验收的推进，并记下结果'
+          },
+          {
+            title: '整理今天的记录与错题',
+            subject: '复盘',
+            durationMin: Math.max(15, available - perTask),
+            acceptance: '留下至少一条记录或一个错题'
+          }
+        ]
+      };
+    },
+
+    async listPracticeSets(workspaceId: string): Promise<PracticeSet[]> {
+      requireWorkspace(workspaceId);
+      return structuredClone(
+        state.practiceSets.filter((set) => set.workspaceId === workspaceId)
+      );
+    },
+
+    async getPracticeSet(id: string): Promise<PracticeSet | null> {
+      const set = state.practiceSets.find((entry) => entry.id === id);
+      return set === undefined ? null : structuredClone(set);
+    },
+
+    async createPracticeSet(input: CreatePracticeSetInput): Promise<PracticeSet> {
+      const workspace = requireWorkspace(input.workspaceId);
+      if (input.questions.length === 0) throw new Error('练习至少需要一道题');
+      const timestamp = new Date().toISOString();
+      const set: PracticeSet = {
+        id: nextId('ps'),
+        workspaceId: workspace.id,
+        title: input.title,
+        subject: input.subject ?? '',
+        questions: input.questions.map((question) => ({
+          id: question.id ?? nextId('q'),
+          prompt: question.prompt,
+          options: [...question.options],
+          answer: question.answer,
+          explanation: question.explanation ?? ''
+        })),
+        createdAt: timestamp,
+        updatedAt: timestamp
+      };
+      state.practiceSets = [...state.practiceSets, set];
+      persist();
+      return structuredClone(set);
+    },
+
+    async submitPracticeAnswer(input: SubmitAnswerInput): Promise<SubmitAnswerResult> {
+      const found = findPracticeQuestion(input.questionId);
+      if (found === null) throw new Error('题目不存在');
+      const { set, question } = found;
+      if (!Number.isInteger(input.choice) || input.choice < 0 || input.choice >= question.options.length) {
+        throw new Error('选项无效');
+      }
+      const answeredAtDate = new Date();
+      const answeredAt = answeredAtDate.toISOString();
+      const date = formatLocalDate(answeredAtDate);
+      const correct = input.choice === question.answer;
+      const attempt: PracticeAttempt = {
+        id: nextId('pa'),
+        workspaceId: set.workspaceId,
+        setId: set.id,
+        questionId: question.id,
+        choice: input.choice,
+        correct,
+        answeredAt
+      };
+      state.practiceAttempts = [...state.practiceAttempts, attempt];
+
+      const mistakes = [...state.practiceMistakes];
+      const index = mistakes.findIndex((entry) => entry.questionId === question.id);
+      const existing = index >= 0 ? mistakes[index] : undefined;
+      let mistake: PracticeMistake | null = existing ?? null;
+      if (!correct) {
+        const wrongCount = (existing?.wrongCount ?? 0) + 1;
+        const intervalDays =
+          PRACTICE_INTERVALS[Math.min(wrongCount - 1, PRACTICE_INTERVALS.length - 1)];
+        const updated: PracticeMistake = {
+          id: existing?.id ?? nextId('pm'),
+          workspaceId: set.workspaceId,
+          setId: set.id,
+          questionId: question.id,
+          prompt: question.prompt,
+          options: [...question.options],
+          answer: question.answer,
+          explanation: question.explanation,
+          wrongCount,
+          correctStreak: 0,
+          priority: Math.min(3, (existing?.priority ?? 0) + 1),
+          intervalDays,
+          due: addDays(date, intervalDays),
+          status: 'active',
+          createdAt: existing?.createdAt ?? answeredAt,
+          updatedAt: answeredAt,
+          lastAnsweredAt: answeredAt
+        };
+        if (index >= 0) mistakes[index] = updated;
+        else mistakes.push(updated);
+        mistake = updated;
+      } else if (existing !== undefined) {
+        const correctStreak = existing.correctStreak + 1;
+        const updated: PracticeMistake = {
+          ...existing,
+          correctStreak,
+          priority: Math.max(0, existing.priority - 1),
+          status: correctStreak >= 2 ? 'resolved' : 'active',
+          updatedAt: answeredAt,
+          lastAnsweredAt: answeredAt
+        };
+        mistakes[index] = updated;
+        mistake = updated;
+      }
+      state.practiceMistakes = mistakes;
+      persist();
+
+      return {
+        questionId: question.id,
+        setId: set.id,
+        workspaceId: set.workspaceId,
+        choice: input.choice,
+        correct,
+        answer: question.answer,
+        explanation: question.explanation,
+        attempt,
+        mistake,
+        ...(mistake?.status === 'active' ? { due: mistake.due } : {})
+      };
+    },
+
+    async getPracticeMistakes(workspaceId: string): Promise<PracticeMistake[]> {
+      requireWorkspace(workspaceId);
+      return structuredClone(
+        state.practiceMistakes
+          .filter((entry) => entry.workspaceId === workspaceId && entry.status === 'active')
+          .sort(
+            (a, b) =>
+              b.priority - a.priority || a.due.localeCompare(b.due) || a.questionId.localeCompare(b.questionId)
+          )
+      );
+    },
+
+    async getPracticeDue(input: {
+      workspaceId: string;
+      date: string;
+    }): Promise<PracticeMistake[]> {
+      requireWorkspace(input.workspaceId);
+      return structuredClone(
+        state.practiceMistakes
+          .filter(
+            (entry) =>
+              entry.workspaceId === input.workspaceId &&
+              entry.status === 'active' &&
+              entry.due <= input.date
+          )
+          .sort(
+            (a, b) =>
+              a.due.localeCompare(b.due) || b.priority - a.priority || a.questionId.localeCompare(b.questionId)
+          )
+      );
+    },
+
+    async listPracticeAttempts(workspaceId: string): Promise<PracticeAttempt[]> {
+      requireWorkspace(workspaceId);
+      return structuredClone(
+        state.practiceAttempts
+          .filter((entry) => entry.workspaceId === workspaceId)
+          .sort((a, b) => a.answeredAt.localeCompare(b.answeredAt) || a.id.localeCompare(b.id))
+      );
+    },
+
+    async listMemory(workspaceId?: string): Promise<MemoryRecord[]> {
+      const scoped = workspaceId
+        ? state.memory.filter((entry) => entry.workspaceId === workspaceId)
+        : state.memory;
+      return structuredClone(
+        [...scoped].sort(
+          (a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '') || b.id.localeCompare(a.id)
+        )
+      );
+    },
+
+    async synthesizeMemory(input: SynthesizeMemoryInput): Promise<MemorySynthesisResult> {
+      const result = synthesize(input);
+      persist();
+      return structuredClone(result);
+    },
+
+    async getMemoryProfile(workspaceId?: string): Promise<LearnerProfile> {
+      return structuredClone(profileFor(workspaceId));
+    },
+
+    async searchWorkspace(input: SearchWorkspaceInput): Promise<SearchResult[]> {
+      const query = input.query.trim();
+      if (query.length === 0) return [];
+      const limit = input.limit ?? 20;
+      const needle = query.toLowerCase();
+      return searchDocs(input.workspaceId)
+        .filter((doc) => `${doc.title}\n${doc.content}`.toLowerCase().includes(needle))
+        .slice(0, limit)
+        .map(
+          (doc): SearchResult => ({
+            workspaceId: input.workspaceId,
+            docId: doc.docId,
+            kind: doc.kind,
+            title: doc.title,
+            snippet: snippetOf(`${doc.title} ${doc.content}`, query),
+            score: doc.title.toLowerCase().includes(needle) ? 3 : 1,
+            path: doc.path
+          })
+        );
+    },
+
+    async rebuildSearchIndex(): Promise<void> {
+      // The browser prototype searches live state; nothing to rebuild.
     },
 
     async listWorkspaces(): Promise<Workspace[]> {

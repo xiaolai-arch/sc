@@ -1,5 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { StudyCoachApi } from '../../shared/ipc';
+import { formatLocalDate, parseLocalDate } from '../../shared/date';
+import type { ReviewRecord, StudyCoachApi } from '../../shared/ipc';
+import type { LearnerProfile, MemoryRecord } from '../../shared/memory';
+import type {
+  CreatePracticeSetInput,
+  PracticeAttempt,
+  PracticeMistake,
+  PracticeSet,
+  SubmitAnswerInput,
+  SubmitAnswerResult
+} from '../../shared/practice';
+import type { WorkspacePlan } from '../../shared/planning';
+import type { SearchResult } from '../../shared/search';
 import type { ReviewAnswers } from '../../shared/types';
 import type {
   CreateNoteInput,
@@ -14,16 +26,27 @@ import type {
   WorkspaceNote,
   WorkspaceTask
 } from '../../shared/workspace';
-import { demoPracticeSets, demoStreak } from './demoData';
-import type { PracticeSet } from './demoData';
+
+type PracticeData = {
+  practiceSets: PracticeSet[];
+  practiceMistakes: PracticeMistake[];
+  practiceDue: PracticeMistake[];
+  practiceAttempts: PracticeAttempt[];
+};
 
 type WorkspaceDataState = {
   workspaces: Workspace[];
   tasks: WorkspaceTask[];
   notes: WorkspaceNote[];
   memory: MemoryItem[];
+  memoryRecords: MemoryRecord[];
+  memoryProfile: LearnerProfile | null;
+  reviews: ReviewRecord[];
   reminders: Reminder[];
   practiceSets: PracticeSet[];
+  practiceMistakes: PracticeMistake[];
+  practiceDue: PracticeMistake[];
+  practiceAttempts: PracticeAttempt[];
   streak: number;
   loading: boolean;
   error: string | null;
@@ -36,8 +59,19 @@ export type WorkspaceData = WorkspaceDataState & {
   updateTask: (input: UpdateWorkspaceTaskInput) => Promise<WorkspaceTask>;
   createNote: (input: CreateNoteInput) => Promise<WorkspaceNote>;
   updateNote: (input: UpdateWorkspaceNoteInput) => Promise<WorkspaceNote>;
+  createPracticeSet: (input: CreatePracticeSetInput) => Promise<PracticeSet>;
+  submitPracticeAnswer: (input: SubmitAnswerInput) => Promise<SubmitAnswerResult>;
+  generatePlan: (workspaceId: string) => Promise<WorkspacePlan>;
+  searchWorkspace: (workspaceId: string, query: string, limit?: number) => Promise<SearchResult[]>;
   send: (input: SendMessageInput) => Promise<SendMessageResult>;
-  submitReview: (date: string, answers: ReviewAnswers) => Promise<void>;
+  submitReview: (date: string, answers: ReviewAnswers, workspaceId?: string) => Promise<void>;
+};
+
+const EMPTY_PRACTICE: PracticeData = {
+  practiceSets: [],
+  practiceMistakes: [],
+  practiceDue: [],
+  practiceAttempts: []
 };
 
 function apiOrThrow(): StudyCoachApi {
@@ -48,6 +82,58 @@ function apiOrThrow(): StudyCoachApi {
 
 function messageOf(cause: unknown) {
   return cause instanceof Error ? cause.message : '数据加载失败，请重试。';
+}
+
+function replaceWorkspaceSlice<T extends { workspaceId: string }>(
+  current: T[],
+  next: T[],
+  workspaceId: string
+): T[] {
+  const firstIndex = current.findIndex((entry) => entry.workspaceId === workspaceId);
+  const without = current.filter((entry) => entry.workspaceId !== workspaceId);
+  if (firstIndex < 0) return [...without, ...next];
+  // Keep the refreshed workspace slice at its original position so lists that
+  // fall back to "first item" (e.g. the selected practice set) stay stable.
+  const before = current
+    .slice(0, firstIndex)
+    .filter((entry) => entry.workspaceId !== workspaceId).length;
+  return [...without.slice(0, before), ...next, ...without.slice(before)];
+}
+
+/** Consecutive review days ending today (skipped days still count as reviewed). */
+function reviewStreak(reviews: ReviewRecord[], today: string): number {
+  const dates = new Set(reviews.map((entry) => entry.date));
+  let streak = 0;
+  const cursor = parseLocalDate(today);
+  while (dates.has(formatLocalDate(cursor))) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
+async function loadPractice(
+  api: StudyCoachApi,
+  workspaceIds: string[]
+): Promise<PracticeData> {
+  const date = formatLocalDate(new Date());
+  const perWorkspace = await Promise.all(
+    workspaceIds.map(async (workspaceId) => {
+      const [sets, mistakes, due, attempts] = await Promise.all([
+        api.listPracticeSets(workspaceId).catch(() => [] as PracticeSet[]),
+        api.getPracticeMistakes(workspaceId).catch(() => [] as PracticeMistake[]),
+        api.getPracticeDue({ workspaceId, date }).catch(() => [] as PracticeMistake[]),
+        api.listPracticeAttempts(workspaceId).catch(() => [] as PracticeAttempt[])
+      ]);
+      return { sets, mistakes, due, attempts };
+    })
+  );
+  return {
+    practiceSets: perWorkspace.flatMap((entry) => entry.sets),
+    practiceMistakes: perWorkspace.flatMap((entry) => entry.mistakes),
+    practiceDue: perWorkspace.flatMap((entry) => entry.due),
+    practiceAttempts: perWorkspace.flatMap((entry) => entry.attempts)
+  };
 }
 
 /**
@@ -61,9 +147,12 @@ export function useWorkspaceData(): WorkspaceData {
     tasks: [],
     notes: [],
     memory: [],
+    memoryRecords: [],
+    memoryProfile: null,
+    reviews: [],
     reminders: [],
-    practiceSets: demoPracticeSets,
-    streak: demoStreak,
+    ...EMPTY_PRACTICE,
+    streak: 0,
     loading: true,
     error: null
   });
@@ -74,14 +163,15 @@ export function useWorkspaceData(): WorkspaceData {
     setState((current) => ({ ...current, loading: true, error: null }));
     try {
       const api = apiOrThrow();
-      const [workspaces, reminders, memory] = await Promise.all([
-        api.listWorkspaces(),
-        api.getReminders(),
-        api.getMemory()
+      const [workspaces, reminders] = await Promise.all([api.listWorkspaces(), api.getReminders()]);
+      const workspaceIds = workspaces.map((workspace) => workspace.id);
+      const [snapshots, practice, memoryRecords, memoryProfile, reviews] = await Promise.all([
+        Promise.all(workspaces.map((workspace) => api.getWorkspaceSnapshot(workspace.id))),
+        loadPractice(api, workspaceIds),
+        api.listMemory().catch(() => [] as MemoryRecord[]),
+        api.getMemoryProfile().catch(() => null),
+        api.listReviews({ limit: 60 }).catch(() => [] as ReviewRecord[])
       ]);
-      const snapshots = await Promise.all(
-        workspaces.map((workspace) => api.getWorkspaceSnapshot(workspace.id))
-      );
       if (request !== requestRef.current) return;
 
       const snapshotMemory = snapshots.flatMap((snapshot) => snapshot.memory);
@@ -89,10 +179,13 @@ export function useWorkspaceData(): WorkspaceData {
         workspaces,
         tasks: snapshots.flatMap((snapshot) => snapshot.tasks),
         notes: snapshots.flatMap((snapshot) => snapshot.notes),
-        memory: memory.length > 0 ? memory : snapshotMemory,
+        memory: snapshotMemory.length > 0 ? snapshotMemory : memoryRecords,
+        memoryRecords,
+        memoryProfile,
+        reviews,
         reminders,
-        practiceSets: demoPracticeSets,
-        streak: demoStreak,
+        ...practice,
+        streak: reviewStreak(reviews, formatLocalDate(new Date())),
         loading: false,
         error: null
       });
@@ -136,6 +229,66 @@ export function useWorkspaceData(): WorkspaceData {
     return note;
   }, []);
 
+  const createPracticeSet = useCallback(async (input: CreatePracticeSetInput) => {
+    const set = await apiOrThrow().createPracticeSet(input);
+    setState((current) => ({
+      ...current,
+      practiceSets: [...current.practiceSets.filter((item) => item.id !== set.id), set]
+    }));
+    return set;
+  }, []);
+
+  const submitPracticeAnswer = useCallback(async (input: SubmitAnswerInput) => {
+    const api = apiOrThrow();
+    const result = await api.submitPracticeAnswer(input);
+    const fresh = await loadPractice(api, [result.workspaceId]);
+    setState((current) => ({
+      ...current,
+      practiceSets: replaceWorkspaceSlice(current.practiceSets, fresh.practiceSets, result.workspaceId),
+      practiceMistakes: replaceWorkspaceSlice(
+        current.practiceMistakes,
+        fresh.practiceMistakes,
+        result.workspaceId
+      ),
+      practiceDue: replaceWorkspaceSlice(current.practiceDue, fresh.practiceDue, result.workspaceId),
+      practiceAttempts: replaceWorkspaceSlice(
+        current.practiceAttempts,
+        fresh.practiceAttempts,
+        result.workspaceId
+      )
+    }));
+    return result;
+  }, []);
+
+  const generatePlan = useCallback(async (workspaceId: string) => {
+    const api = apiOrThrow();
+    const plan = await api.planWorkspace({ workspaceId });
+    // Regenerating the same goal must not duplicate tasks already in the workspace.
+    const snapshot = await api.getWorkspaceSnapshot(workspaceId);
+    const existing = new Set(snapshot.tasks.map((task) => task.title.trim()));
+    const created = await Promise.all(
+      plan.tasks
+        .filter((task) => !existing.has(task.title.trim()))
+        .map((task) =>
+          api.createTask({
+            workspaceId,
+            title: task.title,
+            subject: task.subject,
+            durationMin: task.durationMin,
+            acceptance: task.acceptance
+          })
+        )
+    );
+    setState((current) => ({ ...current, tasks: [...created, ...current.tasks] }));
+    return plan;
+  }, []);
+
+  const searchWorkspace = useCallback(
+    async (workspaceId: string, query: string, limit?: number) =>
+      apiOrThrow().searchWorkspace({ workspaceId, query, ...(limit !== undefined ? { limit } : {}) }),
+    []
+  );
+
   const send = useCallback(
     async (input: SendMessageInput) => {
       const result = await apiOrThrow().send(input);
@@ -147,8 +300,12 @@ export function useWorkspaceData(): WorkspaceData {
   );
 
   const submitReview = useCallback(
-    async (date: string, answers: ReviewAnswers) => {
-      await apiOrThrow().submitReview({ date, answers });
+    async (date: string, answers: ReviewAnswers, workspaceId?: string) => {
+      await apiOrThrow().submitReview({
+        date,
+        answers,
+        ...(workspaceId !== undefined ? { workspaceId } : {})
+      });
       await reload();
     },
     [reload]
@@ -162,6 +319,10 @@ export function useWorkspaceData(): WorkspaceData {
     updateTask,
     createNote,
     updateNote,
+    createPracticeSet,
+    submitPracticeAnswer,
+    generatePlan,
+    searchWorkspace,
     send,
     submitReview
   };

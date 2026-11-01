@@ -101,9 +101,14 @@ test('after every rejected escape nothing was written outside the vault root', a
   const parentAfter = await readdir(dirname(root));
   // The parent is the shared system tmpdir; other test files churn their own
   // mkdtemp entries concurrently, so only assert that no *new* entry appeared
-  // other than other tests' workspace-* temp dirs.
+  // other than the other suites' known temp-dir prefixes.
   const appeared = parentAfter.filter((name) => !parentBefore.includes(name));
-  expect(appeared.filter((name) => !/^(workspace-|study-coach-)/.test(name))).toEqual([]);
+  expect(
+    appeared.filter(
+      (name) =>
+        !/^(workspace-|study-coach-|memory-|practice-|search-|settings-)/.test(name)
+    )
+  ).toEqual([]);
 
   const tree = await walk(root);
   for (const file of tree) {

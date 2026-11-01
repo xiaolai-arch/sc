@@ -1,12 +1,15 @@
 import { useState } from 'react';
 import type { ReviewAnswers } from '../../shared/types';
 import { formatLocalDate, parseLocalDate } from '../../shared/date';
+import type { ReviewRecord } from '../../shared/ipc';
+import type { LearnerProfile, MemoryRecord } from '../../shared/memory';
+import type { PracticeMistake } from '../../shared/practice';
 import { Button } from '../ui/Button';
 import { CheckIcon, MoonIcon } from '../ui/icons';
 import { Label } from '../ui/Label';
 import { Textarea } from '../ui/Textarea';
 import { cn } from '../ui/cn';
-import type { MemoryItem, Reminder, Workspace } from '../../shared/workspace';
+import type { Reminder, Workspace } from '../../shared/workspace';
 import { shellPaneClass } from './TaskListPane';
 
 function previousDate(date: string, offset: number) {
@@ -65,7 +68,10 @@ type ReviewPaneProps = {
   workspace: Workspace | null;
   date: string;
   dateLabel: string;
-  memory: MemoryItem[];
+  memory: MemoryRecord[];
+  profile: LearnerProfile | null;
+  records: ReviewRecord[];
+  dueMistakes: PracticeMistake[];
   reminders: Reminder[];
   streak: number;
   saved: boolean;
@@ -77,6 +83,9 @@ export function ReviewPane({
   workspace,
   dateLabel,
   memory,
+  profile,
+  records,
+  dueMistakes,
   reminders,
   streak,
   saved,
@@ -134,8 +143,15 @@ export function ReviewPane({
           <div className="rounded-xl border border-black/[0.06] p-4">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[13px] font-medium text-black">画像与记忆</p>
-              <span className="text-[10px] text-gray-400">可见 · 可编辑（后续）</span>
+              <span className="text-[10px] text-gray-400">
+                {profile && profile.memoryCount > 0 ? `${profile.memoryCount} 条记忆` : '可见'}
+              </span>
             </div>
+            {profile && profile.summary ? (
+              <p className="mt-2 rounded-lg bg-[#fafafa] px-3 py-2 text-[12px] leading-5 text-gray-600">
+                {profile.summary}
+              </p>
+            ) : null}
             <div className="mt-3 space-y-2">
               {memory.length === 0 ? (
                 <p className="text-[12px] text-gray-500">这个工作区还没有记忆，完成一次复盘后会开始积累。</p>
@@ -153,8 +169,39 @@ export function ReviewPane({
             </div>
           </div>
 
+          {dueMistakes.length > 0 ? (
+            <div className="rounded-xl border border-black/[0.06] p-4">
+              <p className="text-[13px] font-medium text-black">今天该复习的错题</p>
+              <ul className="mt-3 space-y-2">
+                {dueMistakes.slice(0, 5).map((mistake) => (
+                  <li key={mistake.id} className="text-[12px] leading-5 text-gray-600">
+                    {mistake.prompt}
+                    <span className="ml-1 text-[10px] text-gray-400">
+                      （错 {mistake.wrongCount} 次 · {mistake.due}）
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           <div className="rounded-xl border border-black/[0.06] p-4">
             <p className="text-[13px] font-medium text-black">今天复盘</p>
+            {records.length > 0 ? (
+              <div className="mt-3 rounded-lg bg-[#fafafa] px-3 py-2 text-[12px] leading-5 text-gray-600">
+                <p className="text-[11px] text-gray-500">
+                  上次提交 · {records[0].submittedAt.slice(0, 16).replace('T', ' ')}
+                  {records[0].skipped ? ' · 已跳过' : ''}
+                </p>
+                {!records[0].skipped ? (
+                  <div className="mt-1 space-y-0.5">
+                    {records[0].completed ? <p>完成：{records[0].completed}</p> : null}
+                    {records[0].stuck ? <p>卡点：{records[0].stuck}</p> : null}
+                    {records[0].tomorrow ? <p>下一步：{records[0].tomorrow}</p> : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <div className="mt-4 space-y-4">
               <div>
                 <Label htmlFor="pane-review-completed">今天完成了什么？</Label>

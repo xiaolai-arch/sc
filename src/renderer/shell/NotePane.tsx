@@ -1,5 +1,8 @@
 import { useState } from 'react';
-import type { CreateNoteInput, Workspace, WorkspaceNote } from '../../shared/workspace';
+import type { CreateNoteInput, Workspace, WorkspaceNote, WorkspaceTask } from '../../shared/workspace';
+import type { ReviewRecord } from '../../shared/ipc';
+import type { PracticeAttempt, PracticeSet } from '../../shared/practice';
+import type { SearchResult, SearchResultKind } from '../../shared/search';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Label } from '../ui/Label';
@@ -8,6 +11,17 @@ import { BookOpenIcon, SearchIcon } from '../ui/icons';
 import { cn } from '../ui/cn';
 import { noteBlocks } from './noteBody';
 import { shellPaneClass } from './TaskListPane';
+
+const SEARCH_KIND_LABEL: Record<SearchResultKind, string> = {
+  workspace: '工作区',
+  note: '笔记',
+  task: '任务',
+  memory: '记忆',
+  review: '复盘',
+  'practice-set': '练习',
+  'practice-question': '练习',
+  'practice-mistake': '错题'
+};
 
 type NoteListProps = {
   notes: WorkspaceNote[];
@@ -99,9 +113,14 @@ type NotePaneProps = {
   notes: WorkspaceNote[];
   workspaces: Workspace[];
   workspaceId: string | null;
+  tasks: WorkspaceTask[];
+  practiceSets: PracticeSet[];
+  practiceAttempts: PracticeAttempt[];
+  reviews: ReviewRecord[];
   onSelectNote: (id: string) => void;
   onOpenChat: () => void;
   onCreateNote: (input: CreateNoteInput) => Promise<WorkspaceNote>;
+  onSearch: (query: string) => Promise<SearchResult[]>;
 };
 
 export function NotePane({
@@ -109,9 +128,14 @@ export function NotePane({
   notes,
   workspaces,
   workspaceId,
+  tasks,
+  practiceSets,
+  practiceAttempts,
+  reviews,
   onSelectNote,
   onOpenChat,
-  onCreateNote
+  onCreateNote,
+  onSearch
 }: NotePaneProps) {
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState('');
@@ -119,6 +143,27 @@ export function NotePane({
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [results, setResults] = useState<SearchResult[] | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
+
+  async function runSearch() {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setResults([]);
+      return;
+    }
+    setSearching(true);
+    setSearchError(null);
+    try {
+      setResults(await onSearch(trimmed));
+    } catch (cause) {
+      setSearchError(cause instanceof Error ? cause.message : '搜索失败，请重试。');
+    } finally {
+      setSearching(false);
+    }
+  }
 
   const targetWorkspace =
     workspaces.find((workspace) => workspace.id === (workspaceId ?? note?.workspaceId)) ??
@@ -192,6 +237,120 @@ export function NotePane({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-6">
+        <div className="mx-auto mb-5 w-full max-w-[720px]">
+          <div className="rounded-xl border border-black/[0.06] bg-[#fafafa] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[13px] font-medium text-black">最近活动</p>
+              <span className="text-[11px] text-gray-500">
+                {tasks.length} 个任务 · {practiceAttempts.length} 次练习 · {reviews.length} 条复盘
+              </span>
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <div>
+                <p className="text-[11px] font-medium text-gray-500">任务</p>
+                <ul className="mt-1.5 space-y-1 text-[12px] leading-5 text-gray-600">
+                  {tasks.length === 0 ? (
+                    <li className="text-gray-400">还没有任务</li>
+                  ) : (
+                    tasks.slice(0, 3).map((task) => (
+                      <li key={task.id} className="truncate">
+                        {task.status === 'done' ? '✓ ' : ''}
+                        {task.title}
+                      </li>
+                    ))
+                  )}
+                </ul>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium text-gray-500">练习</p>
+                <ul className="mt-1.5 space-y-1 text-[12px] leading-5 text-gray-600">
+                  {practiceAttempts.length === 0 ? (
+                    <li className="text-gray-400">还没有练习</li>
+                  ) : (
+                    [...practiceAttempts]
+                      .slice(-3)
+                      .reverse()
+                      .map((attempt) => {
+                        const set = practiceSets.find((item) => item.id === attempt.setId);
+                        return (
+                          <li key={attempt.id} className="truncate">
+                            {set?.title ?? '练习'} · {attempt.correct ? '答对' : '答错'}
+                          </li>
+                        );
+                      })
+                  )}
+                </ul>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium text-gray-500">复盘</p>
+                <ul className="mt-1.5 space-y-1 text-[12px] leading-5 text-gray-600">
+                  {reviews.length === 0 ? (
+                    <li className="text-gray-400">还没有复盘</li>
+                  ) : (
+                    reviews.slice(0, 3).map((review) => (
+                      <li key={`${review.date}-${review.submittedAt}`} className="truncate">
+                        {review.date}
+                        {review.skipped ? ' · 已跳过' : ''}
+                      </li>
+                    ))
+                  )}
+                </ul>
+              </div>
+            </div>
+            <form
+              className="mt-3 flex flex-wrap items-center gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void runSearch();
+              }}
+            >
+              <Input
+                aria-label="搜索全库"
+                placeholder="搜索整个 vault：笔记、任务、练习、复盘"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                className="min-w-0 flex-1"
+              />
+              <Button type="submit" size="sm" variant="secondary" disabled={searching}>
+                {searching ? '搜索中…' : '搜索'}
+              </Button>
+            </form>
+            {searchError ? (
+              <p role="alert" className="mt-2 text-[12px] text-[#d70015]">
+                {searchError}
+              </p>
+            ) : null}
+            {results !== null ? (
+              results.length === 0 ? (
+                <p className="mt-2 text-[12px] text-gray-500">没有匹配的记录。</p>
+              ) : (
+                <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto">
+                  {results.map((result) => (
+                    <li key={`${result.kind}-${result.docId}`}>
+                      <button
+                        type="button"
+                        aria-label={`${SEARCH_KIND_LABEL[result.kind]}：${result.title}`}
+                        disabled={result.kind !== 'note'}
+                        onClick={() => {
+                          if (result.kind === 'note') onSelectNote(result.docId);
+                        }}
+                        className="w-full rounded-md px-2 py-1.5 text-left text-[12px] leading-5 text-gray-600 transition-colors duration-150 enabled:hover:bg-white disabled:cursor-default"
+                      >
+                        <span className="mr-1.5 rounded bg-black/[0.05] px-1 py-0.5 text-[10px] text-gray-500">
+                          {SEARCH_KIND_LABEL[result.kind]}
+                        </span>
+                        <span className="text-black">{result.title}</span>
+                        <span className="mt-0.5 block truncate text-[11px] text-gray-500">
+                          {result.snippet}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )
+            ) : null}
+          </div>
+        </div>
         {creating ? (
           <form
             className="mx-auto w-full max-w-[720px] space-y-4"

@@ -163,3 +163,69 @@ test('shows a load error and retries through the API', async () => {
   await userEvent.click(screen.getByRole('button', { name: '重试' }));
   expect(await screen.findByText('早上好，xiaolai。')).toBeInTheDocument();
 });
+
+test('generates today tasks through the planner and persists them', async () => {
+  const api = setup();
+  const plan = vi.spyOn(api, 'planWorkspace');
+  const createTask = vi.spyOn(api, 'createTask');
+  await screen.findByText('早上好，xiaolai。');
+  await userEvent.click(screen.getByRole('button', { name: '今日安排' }));
+  await userEvent.click(await screen.findByRole('button', { name: '生成今日任务' }));
+
+  expect(await screen.findByText('已按目标生成今日任务')).toBeInTheDocument();
+  expect(plan).toHaveBeenCalledWith({ workspaceId: 'kaoyan' });
+  expect(createTask).toHaveBeenCalledWith(
+    expect.objectContaining({ workspaceId: 'kaoyan', title: expect.stringContaining('推进「') })
+  );
+  expect((await screen.findAllByText(/推进「2027 考研/)).length).toBeGreaterThan(0);
+});
+
+test('records a wrong practice answer in the mistake book', async () => {
+  const api = setup();
+  await screen.findByText('早上好，xiaolai。');
+  await userEvent.click(screen.getByRole('button', { name: '学习' }));
+  await screen.findByText('当 x→0 时，sin x / x 的极限是？');
+  await userEvent.click(screen.getByRole('button', { name: /^A\. 0/ }));
+  await userEvent.click(screen.getByRole('button', { name: '检查答案' }));
+
+  expect(await screen.findByText('回答错误')).toBeInTheDocument();
+  expect(await screen.findByText(/已加入错题本/)).toBeInTheDocument();
+  expect(await api.getPracticeMistakes('kaoyan')).toHaveLength(1);
+  expect((await api.listPracticeAttempts('kaoyan')).at(-1)?.correct).toBe(false);
+});
+
+test('shows recent notes, tasks, practice and review activity in the records surface', async () => {
+  setup();
+  await screen.findByText('早上好，xiaolai。');
+  await userEvent.click(screen.getByRole('button', { name: '学习' }));
+  await screen.findByText('当 x→0 时，sin x / x 的极限是？');
+  await userEvent.click(screen.getByRole('button', { name: /^B\. 1/ }));
+  await userEvent.click(screen.getByRole('button', { name: '检查答案' }));
+  await screen.findByText('回答正确');
+
+  await userEvent.click(screen.getByRole('button', { name: '复盘' }));
+  await userEvent.click(await screen.findByRole('button', { name: '保存复盘' }));
+  await screen.findByRole('status');
+
+  await userEvent.click(screen.getByRole('button', { name: '记录' }));
+  expect(await screen.findByText('最近活动')).toBeInTheDocument();
+  expect(screen.getByText(/次练习/)).toHaveTextContent('1 次练习');
+  expect(screen.getByText(/条复盘/)).toHaveTextContent('1 条复盘');
+  expect(screen.getByText('极限基础 3 题 · 答对')).toBeInTheDocument();
+});
+
+test('searches the vault from the records surface and opens a note hit', async () => {
+  setup();
+  await screen.findByText('早上好，xiaolai。');
+  await userEvent.click(screen.getByRole('button', { name: '记录' }));
+  await userEvent.type(screen.getByLabelText('搜索全库'), '洛必达');
+  await userEvent.click(screen.getByRole('button', { name: '搜索' }));
+
+  expect((await screen.findAllByText(/洛必达法则的适用条件/)).length).toBeGreaterThan(0);
+  await userEvent.click(
+    screen.getByRole('button', { name: '笔记：错题：洛必达法则的适用条件' })
+  );
+  expect(
+    await screen.findByRole('heading', { name: '错题：洛必达法则的适用条件' })
+  ).toBeInTheDocument();
+});
