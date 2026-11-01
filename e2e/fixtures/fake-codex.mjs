@@ -16,7 +16,7 @@ const jsonMode = process.argv.includes('--json');
 
 let reply;
 if (prompt.includes('只输出一个 JSON 对象')) {
-  // generateTodayPlan() path: a bare JSON object is accepted by the planner.
+  // Workspace planner path: a bare JSON object is accepted by the parser.
   reply = JSON.stringify({
     tasks: [
       {

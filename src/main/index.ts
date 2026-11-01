@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import { join } from 'node:path';
 import { createAppContext } from './context';
 import { registerIpcHandlers, serializeError } from './ipc';
-import { createContextScheduler } from './scheduler';
+import { createContextScheduler, planFirstEmptyWorkspace } from './scheduler';
 import { DEFAULT_VAULT_DIRECTORY } from './settings/defaults';
 import { createElectronNotificationSink, createElectronTray } from './tray';
 
@@ -55,6 +55,7 @@ function showWindow(): void {
   mainWindow.focus();
 }
 
+
 app.whenReady().then(async () => {
   const context = await createAppContext({
     userDataPath: app.getPath('userData'),
@@ -78,12 +79,18 @@ app.whenReady().then(async () => {
     scheduler.start();
 
     const { controller } = await createElectronTray({
-      getPlan: () => context.api.getTodayPlan(),
+      getTasks: async () => {
+        const workspaces = await context.api.listWorkspaces();
+        const snapshots = await Promise.all(
+          workspaces.map((workspace) => context.api.getWorkspaceSnapshot(workspace.id))
+        );
+        return snapshots.flatMap((snapshot) => snapshot.tasks);
+      },
       getSettings: () => context.settings.get(),
       actions: {
         onOpen: showWindow,
         onGeneratePlan: () => {
-          void context.api.generateTodayPlan().catch((error: unknown) => {
+          void planFirstEmptyWorkspace(context).catch((error: unknown) => {
             console.error('Study Coach tray plan failed:', serializeError(error).message);
           });
         },

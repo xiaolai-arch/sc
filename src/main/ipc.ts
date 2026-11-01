@@ -1,4 +1,4 @@
-import type { AppSettings, ExamProfile } from '../shared/types';
+import type { AppSettings } from '../shared/types';
 import type { StudyCoachApi } from '../shared/ipc';
 import type { ButlerStreamEvent } from '../shared/butler-stream';
 import type {
@@ -20,13 +20,9 @@ import type { PlanWorkspaceInput } from '../shared/planning';
 export const IPC_CHANNELS = {
   getBootstrap: 'study-coach:bootstrap:get',
   completeWorkspaceOnboarding: 'study-coach:bootstrap:complete-workspace-onboarding',
-  completeOnboarding: 'study-coach:bootstrap:complete-onboarding',
   getSettings: 'study-coach:settings:get',
   updateSettings: 'study-coach:settings:update',
   setApiKey: 'study-coach:settings:set-api-key',
-  getTodayPlan: 'study-coach:today-plan:get',
-  generateTodayPlan: 'study-coach:today-plan:generate',
-  updateTask: 'study-coach:today-plan:update-task',
   listWorkspaces: 'study-coach:workspaces:list',
   createWorkspace: 'study-coach:workspaces:create',
   getWorkspaceSnapshot: 'study-coach:workspaces:snapshot',
@@ -281,23 +277,10 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
       api.completeWorkspaceOnboarding(
         requireObject(input, '完成 workspace 引导') as unknown as WorkspaceOnboardingInput
       ),
-    completeOnboarding: async (input) =>
-      api.completeOnboarding(requireObject(input, '完成引导') as unknown as ExamProfile),
     getSettings: async () => api.getSettings(),
     updateSettings: async (input) =>
       api.updateSettings(requireObject(input, '更新设置') as Partial<AppSettings>),
     setApiKey: async (input) => api.setApiKey(requireString(input, 'API key')),
-    getTodayPlan: async () => api.getTodayPlan(),
-    generateTodayPlan: async () => api.generateTodayPlan(),
-    updateTask: async (input) => {
-      const raw = requireObject(input, '更新今日任务');
-      requireString(raw.taskId, '任务 ID');
-      return api.updateTask({
-        taskId: raw.taskId as string,
-        status: requireTaskStatus(raw.status),
-        actualMin: typeof raw.actualMin === 'number' ? raw.actualMin : undefined
-      });
-    },
     listWorkspaces: async () => api.listWorkspaces(),
     createWorkspace: async (input) => api.createWorkspace(requireCreateWorkspace(input)),
     getWorkspaceSnapshot: async (input) =>
@@ -427,13 +410,9 @@ export function createStudyCoachBridge(
     getBootstrap: () => call(IPC_CHANNELS.getBootstrap),
     completeWorkspaceOnboarding: (input) =>
       call(IPC_CHANNELS.completeWorkspaceOnboarding, input),
-    completeOnboarding: (profile) => call(IPC_CHANNELS.completeOnboarding, profile),
     getSettings: () => call(IPC_CHANNELS.getSettings),
     updateSettings: (patch) => call(IPC_CHANNELS.updateSettings, patch),
     setApiKey: (key) => call(IPC_CHANNELS.setApiKey, key),
-    getTodayPlan: () => call(IPC_CHANNELS.getTodayPlan),
-    generateTodayPlan: () => call(IPC_CHANNELS.generateTodayPlan),
-    updateTask: (input) => call(IPC_CHANNELS.updateTask, input),
     listWorkspaces: () => call(IPC_CHANNELS.listWorkspaces),
     createWorkspace: (input) => call(IPC_CHANNELS.createWorkspace, input),
     getWorkspaceSnapshot: (workspaceId) => call(IPC_CHANNELS.getWorkspaceSnapshot, workspaceId),

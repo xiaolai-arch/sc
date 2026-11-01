@@ -28,19 +28,6 @@ export interface StudyTask {
   actualMin?: number;
 }
 
-export interface DailyPlan { date: string; tasks: StudyTask[]; generatedBy: 'agent' | 'template'; }
-
-export interface SubjectConfig { name: string; code?: string; syllabusRef?: string; }
-
-export interface ExamProfile {
-  examDate: string;
-  targetSchool?: string;
-  targetMajor?: string;
-  subjects: SubjectConfig[];
-  dailyMinutes: number;
-  currentLevel: string;
-}
-
 export type LocalCliAgent = 'codex' | 'claude' | 'zcode' | 'opencode';
 
 export type ProviderConfig =

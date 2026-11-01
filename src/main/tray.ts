@@ -1,5 +1,6 @@
 import type { MenuItemConstructorOptions } from 'electron';
-import type { AppSettings, DailyPlan, StudyTask } from '../shared/types';
+import type { AppSettings } from '../shared/types';
+import type { WorkspaceTask } from '../shared/workspace';
 import type { SchedulerNotification } from './scheduler/scheduler';
 import { notificationState, type NotificationState } from './scheduler/time';
 
@@ -7,7 +8,7 @@ export interface TrayProgress {
   total: number;
   completed: number;
   percent: number;
-  nextTask: StudyTask | null;
+  nextTask: WorkspaceTask | null;
 }
 
 export interface TrayMenuItem {
@@ -38,7 +39,8 @@ export interface TrayLike {
 export interface TrayControllerOptions {
   tray: TrayLike;
   buildMenu: (template: TrayMenuItem[]) => unknown;
-  getPlan: () => Promise<DailyPlan | null>;
+  /** Today's tasks across every workspace; the tray has no separate plan. */
+  getTasks: () => Promise<WorkspaceTask[]>;
   getSettings: () => Promise<AppSettings>;
   now?: () => Date;
   actions?: Pick<TrayMenuOptions, 'onOpen' | 'onGeneratePlan' | 'onEveningReview' | 'onOpenSettings' | 'onQuit'>;
@@ -57,19 +59,19 @@ const NOTIFICATION_LABELS: Record<NotificationState, string> = {
   disabled: '通知：已关闭'
 };
 
-export function summarizeTodayPlan(plan: DailyPlan | null): TrayProgress {
-  if (!plan || plan.tasks.length === 0) {
+export function summarizeWorkspaceTasks(tasks: readonly WorkspaceTask[]): TrayProgress {
+  if (tasks.length === 0) {
     return { total: 0, completed: 0, percent: 0, nextTask: null };
   }
-  const completed = plan.tasks.filter((task) => task.status === 'done').length;
+  const completed = tasks.filter((task) => task.status === 'done').length;
   const nextTask =
-    plan.tasks.find((task) => task.status === 'in-progress') ??
-    plan.tasks.find((task) => task.status === 'pending') ??
+    tasks.find((task) => task.status === 'in-progress') ??
+    tasks.find((task) => task.status === 'pending') ??
     null;
   return {
-    total: plan.tasks.length,
+    total: tasks.length,
     completed,
-    percent: Math.round((completed / plan.tasks.length) * 100),
+    percent: Math.round((completed / tasks.length) * 100),
     nextTask
   };
 }
@@ -122,11 +124,11 @@ export function createTrayController(options: TrayControllerOptions): TrayContro
   let timer: ReturnType<typeof setInterval> | null = null;
 
   async function refresh(): Promise<void> {
-    let progress: TrayProgress = summarizeTodayPlan(null);
+    let progress: TrayProgress = summarizeWorkspaceTasks([]);
     let state: NotificationState = 'disabled';
     try {
-      const [plan, settings] = await Promise.all([options.getPlan(), options.getSettings()]);
-      progress = summarizeTodayPlan(plan);
+      const [tasks, settings] = await Promise.all([options.getTasks(), options.getSettings()]);
+      progress = summarizeWorkspaceTasks(tasks);
       state = notificationState(settings, now());
     } catch {
       // A failed read leaves the tray in a safe, notification-disabled state.

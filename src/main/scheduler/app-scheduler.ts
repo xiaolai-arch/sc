@@ -11,10 +11,38 @@ export interface ContextSchedulerOptions {
 }
 
 /**
+ * Plans into the first workspace that has no tasks yet and persists the
+ * generated tasks through the workspace service. Shared by the morning
+ * scheduler and the tray action so both converge on the single workspace
+ * planner instead of a separate global daily plan. Returns false when every
+ * workspace already has tasks.
+ */
+export async function planFirstEmptyWorkspace(
+  context: Pick<AppContext, 'api'>
+): Promise<boolean> {
+  for (const workspace of await context.api.listWorkspaces()) {
+    const snapshot = await context.api.getWorkspaceSnapshot(workspace.id);
+    if (snapshot.tasks.length > 0) continue;
+    const plan = await context.api.planWorkspace({ workspaceId: workspace.id });
+    for (const task of plan.tasks) {
+      await context.api.createTask({
+        workspaceId: workspace.id,
+        title: task.title,
+        subject: task.subject,
+        durationMin: task.durationMin,
+        acceptance: task.acceptance
+      });
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
  * Production-shaped scheduler wiring: settings and reminders always come from
  * the live context, so a vault switch is picked up on the next tick. The
- * morning trigger only plans when today's plan is still missing, avoiding a
- * duplicate model call/overwrite after a restart.
+ * morning trigger only plans an empty workspace, avoiding a duplicate model
+ * call/overwrite after a restart.
  */
 export function createContextScheduler(options: ContextSchedulerOptions): Scheduler {
   const schedulerOptions: SchedulerOptions = {
@@ -22,8 +50,7 @@ export function createContextScheduler(options: ContextSchedulerOptions): Schedu
     getReminders: () => options.context.workspace.getReminders(),
     notify: options.notify,
     onMorningPlan: async () => {
-      const existing = await options.context.api.getTodayPlan();
-      if (!existing) await options.context.api.generateTodayPlan();
+      await planFirstEmptyWorkspace(options.context);
     },
     ...(options.onEveningReview ? { onEveningReview: options.onEveningReview } : {}),
     ...(options.onError ? { onError: options.onError } : {}),

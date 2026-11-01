@@ -1,6 +1,5 @@
 import { useState } from 'react';
-import type { UpdateTaskInput } from '../../shared/ipc';
-import type { StudyTask } from '../../shared/types';
+import type { UpdateWorkspaceTaskInput, WorkspaceTask } from '../../shared/workspace';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -9,17 +8,17 @@ import { Timer } from './Timer';
 import { elapsedMinutes } from './timer-logic';
 
 type TaskCardProps = {
-  task: StudyTask;
+  task: WorkspaceTask;
   startedAt?: Date;
   onStart: () => void;
-  onUpdate: (input: UpdateTaskInput) => Promise<void>;
+  onUpdate: (input: UpdateWorkspaceTaskInput) => Promise<void>;
   compact?: boolean;
 };
 
 export function TaskCard({ task, startedAt, onStart, onUpdate, compact = false }: TaskCardProps) {
   const [busy, setBusy] = useState(false);
 
-  async function update(input: UpdateTaskInput) {
+  async function update(input: UpdateWorkspaceTaskInput) {
     setBusy(true);
     try {
       await onUpdate(input);

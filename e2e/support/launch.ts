@@ -28,10 +28,7 @@ export async function createIsolatedEnvironment(): Promise<IsolatedEnvironment> 
     join(userData, 'state.json'),
     `${JSON.stringify(
       {
-        profile: null,
         onboarded: false,
-        plan: null,
-        reviews: {},
         settings: {
           vaultPath: vault,
           provider: { kind: 'local-cli', agent: 'codex', command: FAKE_CLI_PATH }

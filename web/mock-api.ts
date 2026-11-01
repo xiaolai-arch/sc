@@ -3,8 +3,7 @@ import type {
   ListReviewsInput,
   ReviewRecord,
   SearchWorkspaceInput,
-  StudyCoachApi,
-  UpdateTaskInput
+  StudyCoachApi
 } from '../src/shared/ipc';
 import type {
   CreateNoteInput,
@@ -43,8 +42,7 @@ import type {
 import type { PlanWorkspaceInput, WorkspacePlan } from '../src/shared/planning';
 import type { SearchResult, SearchResultKind } from '../src/shared/search';
 import { formatLocalDate, parseLocalDate } from '../src/shared/date';
-import { validateExamProfile } from '../src/shared/profile';
-import type { AppSettings, DailyPlan, ExamProfile, StudyTask } from '../src/shared/types';
+import type { AppSettings } from '../src/shared/types';
 import {
   demoMemory,
   demoNotes,
@@ -58,10 +56,8 @@ import type { NoteBlock } from '../src/renderer/shell/demoData';
 export const MOCK_STORAGE_KEY = 'study-coach:prototype:v1';
 
 interface MockState {
-  profile: ExamProfile | null;
   onboarded: boolean;
   settings: AppSettings;
-  plan: DailyPlan | null;
   reviews: ReviewRecord[];
   workspaces: Workspace[];
   tasks: WorkspaceTask[];
@@ -168,50 +164,11 @@ function normalizeMemory(items: unknown): MemoryRecord[] | null {
 
 function defaultState(): MockState {
   return {
-    profile: null,
     onboarded: false,
     settings: structuredClone(defaultSettings),
-    plan: null,
     reviews: [],
     ...seedWorkspaceData()
   };
-}
-
-function createDemoPlan(date: string): DailyPlan {
-  const tasks: StudyTask[] = [
-    {
-      id: 't1',
-      title: '极限与连续',
-      subject: '数学',
-      durationMin: 45,
-      materialRefs: [],
-      acceptance: '完成 10 题，并整理错题',
-      status: 'pending'
-    },
-    {
-      id: 't2',
-      title: '阅读理解',
-      subject: '英语',
-      durationMin: 30,
-      materialRefs: [],
-      acceptance: '精读 1 篇，标出长难句',
-      status: 'pending'
-    },
-    {
-      id: 't3',
-      title: '马原第一章',
-      subject: '政治',
-      durationMin: 30,
-      materialRefs: [],
-      acceptance: '过一遍框架，做 10 道题',
-      status: 'pending'
-    }
-  ];
-  return { date, generatedBy: 'agent', tasks };
-}
-
-export function DEMO_PLAN(): DailyPlan {
-  return createDemoPlan(formatLocalDate(new Date()));
 }
 
 function resolveStorage(storage?: Storage): Storage | null {
@@ -231,11 +188,7 @@ function readState(storage: Storage | null): MockState {
     const parsed = JSON.parse(raw) as Partial<MockState>;
     const seeded = seedWorkspaceData();
     return {
-      profile: parsed.profile ?? null,
-      onboarded:
-        typeof parsed.onboarded === 'boolean'
-          ? parsed.onboarded
-          : parsed.profile !== null && parsed.profile !== undefined,
+      onboarded: typeof parsed.onboarded === 'boolean' ? parsed.onboarded : false,
       settings: {
         ...structuredClone(defaultSettings),
         ...parsed.settings,
@@ -243,7 +196,6 @@ function readState(storage: Storage | null): MockState {
         notifications: { ...defaultSettings.notifications, ...parsed.settings?.notifications },
         budget: { ...defaultSettings.budget, ...parsed.settings?.budget }
       },
-      plan: parsed.plan ?? null,
       reviews: Array.isArray(parsed.reviews) ? (parsed.reviews as ReviewRecord[]) : [],
       workspaces: Array.isArray(parsed.workspaces) ? parsed.workspaces : seeded.workspaces,
       tasks: Array.isArray(parsed.tasks) ? parsed.tasks : seeded.tasks,
@@ -532,15 +484,6 @@ export function createMockApi(
       persist();
     },
 
-    async completeOnboarding(profile: ExamProfile): Promise<void> {
-      state.profile = validateExamProfile(profile);
-      state.onboarded = true;
-      if (!state.plan || state.plan.date !== today()) {
-        state.plan = createDemoPlan(today());
-      }
-      persist();
-    },
-
     async getSettings(): Promise<AppSettings> {
       return structuredClone(state.settings);
     },
@@ -559,27 +502,6 @@ export function createMockApi(
 
     async setApiKey(key: string): Promise<void> {
       apiKey = key.trim() ? key : null;
-    },
-
-    async getTodayPlan(): Promise<DailyPlan | null> {
-      if (!state.plan || state.plan.date !== today()) return null;
-      return structuredClone(state.plan);
-    },
-
-    async generateTodayPlan(): Promise<DailyPlan> {
-      state.plan = createDemoPlan(today());
-      persist();
-      return structuredClone(state.plan);
-    },
-
-    async updateTask(input: UpdateTaskInput): Promise<DailyPlan> {
-      if (!state.plan) throw new Error('今天还没有计划');
-      const task = state.plan.tasks.find((entry) => entry.id === input.taskId);
-      if (!task) throw new Error('任务不存在');
-      task.status = input.status;
-      if (input.actualMin !== undefined) task.actualMin = input.actualMin;
-      persist();
-      return structuredClone(state.plan);
     },
 
     async submitReview(input: SubmitReviewInput): Promise<void> {
@@ -994,5 +916,3 @@ export function resetMockData(storage?: Storage): void {
     // Nothing to clear if storage is unavailable.
   }
 }
-
-export { DEMO_PROFILE } from '../src/shared/demo';

@@ -1,52 +1,48 @@
-import type { DailyPlan } from '../../src/shared/types';
+import type { WorkspaceTask } from '../../src/shared/workspace';
 import { createDefaultSettings } from '../../src/main/settings/defaults';
 import {
   buildTrayMenuTemplate,
   buildTrayTitle,
   buildTrayTooltip,
   createTrayController,
-  summarizeTodayPlan,
+  summarizeWorkspaceTasks,
   type TrayLike,
   type TrayMenuItem
 } from '../../src/main/tray';
 
-const PLAN: DailyPlan = {
-  date: '2026-10-31',
-  generatedBy: 'agent',
-  tasks: [
-    {
-      id: 'p1',
-      title: '背单词',
-      subject: '英语',
-      durationMin: 20,
-      materialRefs: [],
-      acceptance: '50 词',
-      status: 'pending'
-    },
-    {
-      id: 'p2',
-      title: '极限刷题',
-      subject: '数学',
-      durationMin: 45,
-      materialRefs: [],
-      acceptance: '10 题',
-      status: 'in-progress'
-    },
-    {
-      id: 'p3',
-      title: '精读',
-      subject: '英语',
-      durationMin: 30,
-      materialRefs: [],
-      acceptance: '一篇',
-      status: 'done'
-    }
-  ]
-};
+const TASKS: WorkspaceTask[] = [
+  {
+    id: 'p1',
+    workspaceId: 'kaoyan',
+    title: '背单词',
+    subject: '英语',
+    durationMin: 20,
+    acceptance: '50 词',
+    status: 'pending'
+  },
+  {
+    id: 'p2',
+    workspaceId: 'kaoyan',
+    title: '极限刷题',
+    subject: '数学',
+    durationMin: 45,
+    acceptance: '10 题',
+    status: 'in-progress'
+  },
+  {
+    id: 'p3',
+    workspaceId: 'english',
+    title: '精读',
+    subject: '英语',
+    durationMin: 30,
+    acceptance: '一篇',
+    status: 'done'
+  }
+];
 
 describe('tray summary and notification gating', () => {
   test('summarizes progress and prefers an in-progress next task', () => {
-    const summary = summarizeTodayPlan(PLAN);
+    const summary = summarizeWorkspaceTasks(TASKS);
     expect(summary).toMatchObject({ total: 3, completed: 1, percent: 33 });
     expect(summary.nextTask?.id).toBe('p2');
     expect(buildTrayTooltip(summary)).toBe('学习教练 · 今日 1/3 · 下一项：极限刷题');
@@ -54,21 +50,18 @@ describe('tray summary and notification gating', () => {
   });
 
   test('handles an empty day and completed day', () => {
-    expect(summarizeTodayPlan(null)).toEqual({ total: 0, completed: 0, percent: 0, nextTask: null });
-    expect(buildTrayTooltip(summarizeTodayPlan(null))).toBe('学习教练 · 今天还没有计划');
-    expect(buildTrayTitle(summarizeTodayPlan(null))).toBe('');
+    expect(summarizeWorkspaceTasks([])).toEqual({ total: 0, completed: 0, percent: 0, nextTask: null });
+    expect(buildTrayTooltip(summarizeWorkspaceTasks([]))).toBe('学习教练 · 今天还没有计划');
+    expect(buildTrayTitle(summarizeWorkspaceTasks([]))).toBe('');
 
-    const allDone: DailyPlan = {
-      ...PLAN,
-      tasks: PLAN.tasks.map((task) => ({ ...task, status: 'done' }))
-    };
-    expect(buildTrayTooltip(summarizeTodayPlan(allDone))).toBe(
+    const allDone = TASKS.map((task) => ({ ...task, status: 'done' as const }));
+    expect(buildTrayTooltip(summarizeWorkspaceTasks(allDone))).toBe(
       '学习教练 · 今日 3/3 · 今日任务已完成'
     );
   });
 
   test('reflects enabled, DND and disabled notification states', () => {
-    const progress = summarizeTodayPlan(PLAN);
+    const progress = summarizeWorkspaceTasks(TASKS);
     expect(
       buildTrayMenuTemplate({ progress, notification: 'enabled' }).find((item) =>
         item.label?.startsWith('通知')
@@ -100,7 +93,7 @@ describe('tray summary and notification gating', () => {
     const controller = createTrayController({
       tray,
       buildMenu: (template) => template,
-      getPlan: async () => PLAN,
+      getTasks: async () => TASKS,
       getSettings: async () => createDefaultSettings('/tmp/vault'),
       now: () => new Date(2026, 9, 31, 12, 0, 0),
       actions: {
@@ -132,7 +125,7 @@ describe('tray summary and notification gating', () => {
         setContextMenu: (menu) => menus.push(menu as TrayMenuItem[])
       },
       buildMenu: (template) => template,
-      getPlan: async () => {
+      getTasks: async () => {
         throw new Error('vault unavailable');
       },
       getSettings: async () => createDefaultSettings('/tmp/vault')

@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { formatChineseDate, formatLocalDate } from '../../shared/date';
-import type { UpdateTaskInput } from '../../shared/ipc';
 import type { ReviewAnswers } from '../../shared/types';
-import type { CreateNoteInput, WorkspaceNote } from '../../shared/workspace';
+import type {
+  CreateNoteInput,
+  UpdateWorkspaceTaskInput,
+  WorkspaceNote
+} from '../../shared/workspace';
 import { SettingsPage } from '../settings/SettingsPage';
 import { Button } from '../ui/Button';
 import { ChatPane } from './ChatPane';
@@ -150,7 +153,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     void loadModelLabel();
   }, [loadModelLabel]);
 
-  async function handleUpdateTask(input: UpdateTaskInput) {
+  async function handleUpdateTask(input: UpdateWorkspaceTaskInput) {
     setActionError(null);
     try {
       await updateTask(input);
