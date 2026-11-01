@@ -23,7 +23,7 @@ test('runs codex in one-shot mode with the prompt on stdin', async () => {
 
   const result = await client.complete({
     messages: [
-      { role: 'system', content: '你是学习教练' },
+      { role: 'system', content: '你是阿咲' },
       { role: 'user', content: '你好' }
     ]
   });
@@ -36,7 +36,7 @@ test('runs codex in one-shot mode with the prompt on stdin', async () => {
     'model_reasoning_effort=medium',
     '-'
   ]);
-  expect(calls[0]?.input).toContain('SYSTEM:\n你是学习教练');
+  expect(calls[0]?.input).toContain('SYSTEM:\n你是阿咲');
   expect(calls[0]?.input).toContain('USER:\n你好');
   expect(result.text).toBe('hello from codex');
   expect(result.usage).toEqual({ inputTokens: 0, outputTokens: 0 });

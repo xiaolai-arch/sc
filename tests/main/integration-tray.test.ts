@@ -45,18 +45,18 @@ describe('tray summary and notification gating', () => {
     const summary = summarizeWorkspaceTasks(TASKS);
     expect(summary).toMatchObject({ total: 3, completed: 1, percent: 33 });
     expect(summary.nextTask?.id).toBe('p2');
-    expect(buildTrayTooltip(summary)).toBe('学习教练 · 今日 1/3 · 下一项：极限刷题');
+    expect(buildTrayTooltip(summary)).toBe('阿咲 · 今日 1/3 · 下一项：极限刷题');
     expect(buildTrayTitle(summary)).toBe('1/3');
   });
 
   test('handles an empty day and completed day', () => {
     expect(summarizeWorkspaceTasks([])).toEqual({ total: 0, completed: 0, percent: 0, nextTask: null });
-    expect(buildTrayTooltip(summarizeWorkspaceTasks([]))).toBe('学习教练 · 今天还没有计划');
+    expect(buildTrayTooltip(summarizeWorkspaceTasks([]))).toBe('阿咲 · 今天还没有计划');
     expect(buildTrayTitle(summarizeWorkspaceTasks([]))).toBe('');
 
     const allDone = TASKS.map((task) => ({ ...task, status: 'done' as const }));
     expect(buildTrayTooltip(summarizeWorkspaceTasks(allDone))).toBe(
-      '学习教练 · 今日 3/3 · 今日任务已完成'
+      '阿咲 · 今日 3/3 · 今日任务已完成'
     );
   });
 
@@ -132,7 +132,7 @@ describe('tray summary and notification gating', () => {
     expect(menu.find((item) => item.label === '今日进度：1/3（33%）')).toBeTruthy();
     expect(menu.find((item) => item.label === '下一项：极限刷题')).toBeTruthy();
     expect(menu.find((item) => item.label === '通知：已开启')).toBeTruthy();
-    menu.find((item) => item.label === '打开学习教练')?.click?.();
+    menu.find((item) => item.label === '打开阿咲')?.click?.();
     expect(opened).toBe(1);
 
     controller.destroy();
@@ -154,7 +154,7 @@ describe('tray summary and notification gating', () => {
     });
 
     await controller.refresh();
-    expect(tooltips.at(-1)).toBe('学习教练 · 今天还没有计划');
+    expect(tooltips.at(-1)).toBe('阿咲 · 今天还没有计划');
     expect(menus.at(-1)?.find((item) => item.label === '通知：已关闭')).toBeTruthy();
   });
 });

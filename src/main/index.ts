@@ -14,11 +14,14 @@ import { createContextScheduler, planFirstEmptyWorkspace } from './scheduler';
 import { DEFAULT_VAULT_DIRECTORY } from './settings/defaults';
 import { createElectronNotificationSink, createElectronTray } from './tray';
 
-// Local development/e2e isolation hook. Normal launches leave this unset and
-// keep Electron's platform default userData directory.
+// Local development/e2e isolation hook. Normal launches keep a stable data
+// folder across product renames so conversations, settings and credentials
+// are not lost.
 const userDataOverride = process.env['STUDY_COACH_USER_DATA_DIR']?.trim();
 if (userDataOverride) {
   app.setPath('userData', userDataOverride);
+} else {
+  app.setPath('userData', join(app.getPath('appData'), 'study-coach'));
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -46,7 +49,7 @@ function createWindow(): BrowserWindow {
     ? window.loadURL(rendererUrl)
     : window.loadFile(join(__dirname, '../renderer/index.html'));
   void loading.catch((error: unknown) => {
-    console.error('Study Coach renderer failed to load:', serializeError(error).message);
+    console.error('阿咲 renderer failed to load:', serializeError(error).message);
   });
 
   mainWindow = window;
@@ -136,7 +139,7 @@ app.whenReady().then(async () => {
     { accelerator: 'CommandOrControl+Shift+Space', run: openQuickCapture }
   ]);
   for (const accelerator of shortcuts.failed) {
-    console.warn(`Study Coach shortcut unavailable: ${accelerator}`);
+    console.warn(`阿咲 shortcut unavailable: ${accelerator}`);
   }
   app.on('will-quit', () => shortcuts.dispose());
 
@@ -155,7 +158,7 @@ app.whenReady().then(async () => {
       context,
       notify,
       onError: (error) => {
-        console.error('Study Coach scheduler error:', serializeError(error).message);
+        console.error('阿咲 scheduler error:', serializeError(error).message);
       }
     });
     scheduler.start();
@@ -174,7 +177,7 @@ app.whenReady().then(async () => {
         onQuickCapture: openQuickCapture,
         onGeneratePlan: () => {
           void planFirstEmptyWorkspace(context).catch((error: unknown) => {
-            console.error('Study Coach tray plan failed:', serializeError(error).message);
+            console.error('阿咲 tray plan failed:', serializeError(error).message);
           });
         },
         onEveningReview: showWindow,
@@ -186,7 +189,7 @@ app.whenReady().then(async () => {
     controller.start();
   } catch (error) {
     // Background services are optional; the window and IPC stay usable.
-    console.error('Study Coach background services failed:', serializeError(error).message);
+    console.error('阿咲 background services failed:', serializeError(error).message);
   }
 
   app.on('before-quit', () => {
@@ -208,7 +211,7 @@ app.whenReady().then(async () => {
   });
 }).catch((error: unknown) => {
   // Only the sanitized message is logged; API keys never reach this path.
-  console.error('Study Coach failed to start:', serializeError(error).message);
+  console.error('阿咲 failed to start:', serializeError(error).message);
   app.quit();
 });
 

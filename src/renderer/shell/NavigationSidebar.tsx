@@ -426,11 +426,13 @@ export function NavigationSidebar({
         </button>
       </div>
 
-      <div className="flex items-center gap-2 px-4 pb-3 pt-3">
-        <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-[#1d1d1f] text-[12px] font-semibold text-white">
-          S
+      <div className="flex items-baseline gap-2 px-4 pb-3 pt-3">
+        <span className="text-[17px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
+          阿咲
         </span>
-        <span className="text-[15px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">Study Coach</span>
+        <span className="text-[10px] font-medium tracking-[0.18em] text-gray-400 dark:text-[#8e8e93]">
+          ASAKI
+        </span>
       </div>
 
       <div className="px-3 pb-3">

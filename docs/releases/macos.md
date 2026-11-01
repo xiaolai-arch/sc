@@ -3,7 +3,7 @@
 ## 本地构建
 
 ```bash
-npm run package   # 快速验证：dist/mac-arm64/Study Coach.app
+npm run package   # 快速验证：dist/mac-arm64/阿咲.app
 npm run dist      # 分发产物：zip + dmg（arm64）
 ```
 
@@ -27,8 +27,8 @@ electron-builder 会使用 `build/entitlements.mac.plist`（hardened runtime）�
 验证：
 
 ```bash
-codesign --verify --deep --strict --verbose=2 "dist/mac-arm64/Study Coach.app"
-spctl -a -vv "dist/mac-arm64/Study Coach.app"
+codesign --verify --deep --strict --verbose=2 "dist/mac-arm64/阿咲.app"
+spctl -a -vv "dist/mac-arm64/阿咲.app"
 ```
 
 ## 图标

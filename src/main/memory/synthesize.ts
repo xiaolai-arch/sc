@@ -86,7 +86,7 @@ export function parseModelItems(raw: string): Candidate[] | null {
 
 function buildMessages(source: ReviewSynthesisSource): ModelMessage[] {
   const system = [
-    '你是学习教练的记忆整理助手。根据用户的每日复盘回答，提炼 1–3 条对后续辅导有长期参考价值的记忆。',
+    '你是阿咲的记忆整理助手。根据用户的每日复盘回答，提炼 1–3 条对后续辅导有长期参考价值的记忆。',
     '只输出一个 JSON 对象，不要任何其他文字，格式：',
     '{"items":[{"text":"...","kind":"weakness|strength|preference|plan|fact"}]}',
     'text 不超过 60 字，用第三人称陈述（例如“极限定义不熟”而不是“我今天……”）；',

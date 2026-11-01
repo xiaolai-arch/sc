@@ -1,7 +1,8 @@
 {
   "name": "study-coach",
+  "productName": "阿咲",
   "version": "1.0.0",
-  "description": "本地优先的 AI 学习教练",
+  "description": "本地优先的个人管家",
   "private": true,
   "type": "commonjs",
   "main": "./out/main/index.js",

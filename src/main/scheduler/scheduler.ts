@@ -84,7 +84,7 @@ function buildTriggers(settings: AppSettings, reminders: Reminder[]): Trigger[] 
       id: 'morning',
       time: settings.notifications.morning,
       title: '早上好，开始今天的计划',
-      body: '打开学习教练，看看今天最重要的三件事。'
+      body: '打开阿咲，看看今天最重要的三件事。'
     },
     {
       kind: 'evening-review',

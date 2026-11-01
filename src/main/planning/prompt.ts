@@ -18,7 +18,7 @@ export interface WorkspacePlanPrompt {
   user: string;
 }
 
-export const WORKSPACE_PLAN_SYSTEM_PROMPT = `你是 Study Coach 的规划助手。你要根据工作区目标、最近记录和今天的可用时间，为用户安排今天可执行的任务。
+export const WORKSPACE_PLAN_SYSTEM_PROMPT = `你是 阿咲 的规划助手。你要根据工作区目标、最近记录和今天的可用时间，为用户安排今天可执行的任务。
 规则：
 - 只输出一个 JSON 对象，不要 Markdown、解释或代码围栏。
 - 输出 1-5 个任务，按优先级排序。
