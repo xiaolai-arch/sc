@@ -319,7 +319,7 @@ export class ButlerServiceImpl implements ButlerService {
           throwIfAborted(signal);
           const step = this.startToolStep(call, steps);
           onEvent({ type: 'tool-start', id: call.id, name: call.name, label: step.label });
-          const result = await this.runTool(call, context);
+          const result = await this.runTool(call, context, signal);
           if (!result.ok) {
             lastToolFailure = call.name;
           }
@@ -528,7 +528,8 @@ export class ButlerServiceImpl implements ButlerService {
 
   private async runTool(
     call: { id: string; name: string; arguments: unknown },
-    context: ButlerContext
+    context: ButlerContext,
+    signal?: AbortSignal
   ): Promise<ButlerToolResult> {
     if (!this.workspaceService) {
       return {
@@ -545,7 +546,8 @@ export class ButlerServiceImpl implements ButlerService {
       workspaceId: context.workspaceId,
       memory: this.memoryService,
       planner: this.planner,
-      now: this.now
+      now: this.now,
+      ...(signal ? { signal } : {})
     });
   }
 

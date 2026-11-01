@@ -238,3 +238,17 @@ test('updates workspace metadata', async () => {
     result: { id: 'ws-exam', goal: '2027 考研 400 分' }
   });
 });
+
+test('does not start a tool after generation was stopped', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const execute = vi.fn();
+  await expect(
+    executeButlerTool(
+      { id: 'c-stop', name: 'noop', arguments: {} },
+      [{ name: 'noop', description: '', parameters: {}, execute }],
+      { ...context, signal: controller.signal }
+    )
+  ).rejects.toThrow(/已停止生成/);
+  expect(execute).not.toHaveBeenCalled();
+});

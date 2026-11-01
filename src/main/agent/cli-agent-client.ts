@@ -113,12 +113,15 @@ export function buildAgentArgs(
  * stated in the prompt: the agent may answer in text, or answer with a single
  * fenced JSON block that carries the visible text and any tool calls.
  */
+const ENVELOPE_PROTOCOL = 'asaki.butler.v1';
+
 const TOOL_PROTOCOL = [
   '## 工具调用协议',
   '你可以使用下面的工具。不需要工具时直接输出回答；需要调用工具时，只输出一个 fenced JSON 代码块（```json ... ```），格式如下：',
   '```json',
-  '{"text":"给用户看的说明","toolCalls":[{"name":"工具名","arguments":{}}]}',
+  `{"protocol":"${ENVELOPE_PROTOCOL}","text":"给用户看的说明","toolCalls":[{"name":"工具名","arguments":{}}]}`,
   '```',
+  `- protocol：固定为 "${ENVELOPE_PROTOCOL}"。`,
   '- text：要展示给用户的文字，可以为空字符串。',
   '- toolCalls[].name：下面的工具名之一。',
   '- toolCalls[].arguments：JSON 对象，字段遵循对应工具的参数 schema。',
@@ -187,6 +190,15 @@ export function parseCliResponse(answer: string): ParsedCliResponse {
   }
 
   const envelope = parsed as Record<string, unknown>;
+  // A marked envelope is authoritative. The markerless form is only accepted
+  // when it is the entire response, so an example or a JSON snippet embedded in
+  // prose can never execute real tools.
+  if (
+    envelope['protocol'] !== ENVELOPE_PROTOCOL &&
+    !isSingleEnvelopeBlock(plain)
+  ) {
+    return fallback;
+  }
   const text = typeof envelope['text'] === 'string' ? envelope['text'].trim() : '';
   const hasText = typeof envelope['text'] === 'string';
   const hasToolCalls = Array.isArray(envelope['toolCalls']);
@@ -196,6 +208,12 @@ export function parseCliResponse(answer: string): ParsedCliResponse {
   if (!text && toolCalls.length === 0) return fallback;
 
   return { text, ...(toolCalls.length > 0 ? { toolCalls } : {}) };
+}
+
+function isSingleEnvelopeBlock(answer: string): boolean {
+  const trimmed = answer.trim();
+  if (/^```[ \t]*(?:json)?[ \t]*\r?\n?[\s\S]*?```$/i.test(trimmed)) return true;
+  return trimmed.startsWith('{') && trimmed.endsWith('}') && !trimmed.includes('```');
 }
 
 /** Returns the body of the last fenced block (any language tag). */
@@ -317,6 +335,10 @@ function defaultRunner(
     });
     child.on('error', (error) => fail(error));
     child.on('close', (code) => finish({ stdout, stderr, code }));
+    // A CLI can exit before reading stdin (bad flag, auth failure, large paste).
+    // Without this listener Node treats the resulting EPIPE as an unhandled
+    // process-level error instead of rejecting the model turn.
+    child.stdin?.on('error', (error) => fail(error));
     child.stdin?.end(input);
   });
 }
@@ -403,6 +425,10 @@ function defaultStreamRunner(
     });
     child.on('error', (error) => fail(error));
     child.on('close', (code) => finish({ stdout, stderr, code }));
+    // A CLI can exit before reading stdin (bad flag, auth failure, large paste).
+    // Without this listener Node treats the resulting EPIPE as an unhandled
+    // process-level error instead of rejecting the model turn.
+    child.stdin?.on('error', (error) => fail(error));
     child.stdin?.end(input);
   });
 }
@@ -415,51 +441,73 @@ function defaultStreamRunner(
  */
 export class EnvelopeTextGate {
   private static readonly STREAM_THRESHOLD = 800;
-  private buffer = '';
-  private streaming = false;
+  /** Keep enough tail to catch a fence split across CLI deltas. */
+  private static readonly TAIL = 4;
+  private raw = '';
+  private pending = '';
   private forwarded = '';
-  private sawFence = false;
+  private inEnvelope = false;
 
   constructor(private readonly onEvent: (event: ModelStreamEvent) => void) {}
 
-  push(delta: string) {
-    if (this.streaming) {
-      this.forwarded += delta;
-      this.onEvent({ type: 'text', text: delta });
-      return;
-    }
-
-    this.buffer += delta;
-    // Hold anything that could be a tool envelope: a fenced block anywhere, or
-    // a response that starts as JSON. This also handles a prose preamble
-    // followed by the fenced envelope.
-    if (this.buffer.includes('```')) this.sawFence = true;
-    if (this.sawFence || this.buffer.trimStart().startsWith('{')) {
-      return;
-    }
-    if (this.buffer.length < EnvelopeTextGate.STREAM_THRESHOLD) return;
-
-    this.streaming = true;
-    this.forwarded = this.buffer;
-    this.onEvent({ type: 'text', text: this.buffer });
-    this.buffer = '';
+  private emit(text: string) {
+    if (!text) return;
+    this.forwarded += text;
+    this.onEvent({ type: 'text', text });
   }
 
-  finish(): { text: string; toolCalls?: ModelToolCall[]; streamed: boolean } {
-    if (this.streaming) {
-      return { text: this.forwarded, streamed: true };
+  push(delta: string) {
+    this.raw += delta;
+    if (this.inEnvelope) return;
+
+    this.pending += delta;
+    const fenceAt = this.pending.indexOf('```');
+    if (fenceAt >= 0) {
+      // A short preamble before a tool envelope is discarded (the envelope's
+      // text is the answer). If prose was already streaming, keep showing it;
+      // the final done event reconciles the message. Never forward the fence.
+      if (this.forwarded) this.emit(this.pending.slice(0, fenceAt));
+      this.pending = '';
+      this.inEnvelope = true;
+      return;
     }
-    const parsed = parseCliResponse(this.buffer);
-    // Plain answers are held during the envelope probe; emit them once at the
-    // end so callers still receive a text event. Fenced content and tool
-    // envelopes stay silent so raw JSON/code never leaks as a live answer.
-    if (!this.sawFence && !parsed.toolCalls?.length && parsed.text.trim()) {
-      this.onEvent({ type: 'text', text: parsed.text });
+
+    // A JSON-looking answer (with or without a fence) is held until finish.
+    if (this.pending.trimStart().startsWith('{')) {
+      this.inEnvelope = true;
+      return;
     }
+
+    if (this.pending.length <= EnvelopeTextGate.STREAM_THRESHOLD) return;
+    const safeLength = this.pending.length - EnvelopeTextGate.TAIL;
+    this.emit(this.pending.slice(0, safeLength));
+    this.pending = this.pending.slice(safeLength);
+  }
+
+  finish(): {
+    text: string;
+    toolCalls?: ModelToolCall[];
+    streamed: boolean;
+    fenced: boolean;
+  } {
+    if (this.inEnvelope) {
+      const parsed = parseCliResponse(this.raw);
+      return {
+        text: parsed.text,
+        streamed: this.forwarded.length > 0,
+        fenced: true,
+        ...(parsed.toolCalls?.length ? { toolCalls: parsed.toolCalls } : {})
+      };
+    }
+
+    // A plain answer: flush the small fence-detection tail, then return the
+    // complete text so a done event can reconcile anything already streamed.
+    this.emit(this.pending);
+    this.pending = '';
     return {
-      text: parsed.text,
-      streamed: false,
-      ...(parsed.toolCalls?.length ? { toolCalls: parsed.toolCalls } : {})
+      text: this.raw.trim(),
+      streamed: this.forwarded.length > 0,
+      fenced: false
     };
   }
 }
@@ -609,16 +657,36 @@ export class CliAgentClient implements StreamingModelClient {
     if (gateResult) {
       state.text = gateResult.text;
       if (gateResult.toolCalls?.length) state.toolCalls = gateResult.toolCalls;
-    } else if (!state.text && state.finalResult) {
-      state.text = state.finalResult;
+    }
+
+    // Some CLIs emit the final answer only in the terminal `result` event and
+    // never produce text deltas. Parse it here instead of spawning the CLI a
+    // second time through the fallback path.
+    if (!state.text.trim() && !state.toolCalls?.length && state.finalResult) {
+      const parsed = parseCliResponse(state.finalResult);
+      state.text = parsed.text;
+      if (parsed.toolCalls?.length) state.toolCalls = parsed.toolCalls;
     }
 
     if (state.explicitFailure) {
       throw new Error(state.explicitFailure);
     }
 
+    if (
+      !state.emitted &&
+      state.text.trim() &&
+      !state.toolCalls?.length &&
+      !gateResult?.fenced
+    ) {
+      forward({ type: 'text', text: state.text });
+    }
+
+    const hasPayload = Boolean(
+      state.emitted || state.text.trim() || state.toolCalls?.length
+    );
+
     if (result.code !== 0) {
-      if (!state.emitted && !state.text.trim()) {
+      if (!hasPayload) {
         return this.streamFallback(request, onEvent);
       }
       const detail = result.stderr.trim().slice(0, 500);
@@ -627,7 +695,7 @@ export class CliAgentClient implements StreamingModelClient {
       );
     }
 
-    if (!state.emitted && !state.text.trim()) {
+    if (!hasPayload) {
       return this.streamFallback(request, onEvent);
     }
 

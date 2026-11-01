@@ -16,6 +16,8 @@ export interface ButlerToolContext {
   memory?: MemoryService | null;
   planner?: WorkspacePlanner | null;
   now: () => Date;
+  /** Stop generation must prevent starting or continuing tool work. */
+  signal?: AbortSignal;
 }
 
 export interface ButlerToolDefinition {
@@ -469,6 +471,9 @@ export async function executeButlerTool(
   tools: ButlerToolDefinition[],
   context: ButlerToolContext
 ): Promise<ButlerToolResult> {
+  if (context.signal?.aborted) {
+    throw new Error('已停止生成');
+  }
   const tool = tools.find((candidate) => candidate.name === call.name);
   if (!tool) {
     return {
@@ -477,16 +482,20 @@ export async function executeButlerTool(
     };
   }
 
+  let result: unknown;
   try {
     const input = normalizeArguments(call.arguments);
-    const result = await tool.execute(input, context);
-    return { ok: true, content: toJson({ ok: true, result }) };
+    result = await tool.execute(input, context);
   } catch (error) {
     return {
       ok: false,
       content: toJson({ ok: false, tool: call.name, error: describeError(error) })
     };
   }
+  if (context.signal?.aborted) {
+    throw new Error('已停止生成');
+  }
+  return { ok: true, content: toJson({ ok: true, result }) };
 }
 
 function summarizePlan(

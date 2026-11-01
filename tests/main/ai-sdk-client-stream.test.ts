@@ -108,3 +108,31 @@ test('passes the abort signal into the AI SDK stream options', async () => {
   );
   expect((captured as Record<string, unknown>)['abortSignal']).toBe(controller.signal);
 });
+
+test('moves system messages into instructions for AI SDK v7', async () => {
+  let captured: Record<string, unknown> | null = null;
+  const client = new AiSdkModelClient({
+    generate: async () => {
+      throw new Error('generate not expected');
+    },
+    streamGenerate: (options) => {
+      captured = options as Record<string, unknown>;
+      return streamOf([{ type: 'text-delta', text: 'ok' }]);
+    },
+    model: {} as never
+  });
+
+  await client.stream(
+    {
+      messages: [
+        { role: 'system', content: '你是阿咲。' },
+        { role: 'system', content: '回答要具体。' },
+        { role: 'user', content: '你好' }
+      ]
+    },
+    () => undefined
+  );
+
+  expect(captured?.['instructions']).toBe('你是阿咲。\n\n回答要具体。');
+  expect(captured?.['messages']).toEqual([{ role: 'user', content: '你好' }]);
+});

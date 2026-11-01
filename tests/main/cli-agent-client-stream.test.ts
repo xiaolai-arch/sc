@@ -63,7 +63,11 @@ function codexCompleted(inputTokens = 0, outputTokens = 0) {
 }
 
 function envelope(text: string, toolCalls: Array<{ name: string; arguments: unknown }>) {
-  return `\`\`\`json\n${JSON.stringify({ text, toolCalls })}\n\`\`\``;
+  return `\`\`\`json\n${JSON.stringify({
+    protocol: 'asaki.butler.v1',
+    text,
+    toolCalls
+  })}\n\`\`\``;
 }
 
 test('claude streams reasoning and text deltas', async () => {
@@ -363,5 +367,73 @@ test('claude holds a prose preamble before a fenced tool envelope', async () => 
 
   expect(events).toEqual([]);
   expect(result.text).toBe('我先读计划');
+  expect(result.toolCalls?.[0]?.name).toBe('get_today_plan');
+});
+
+test('claude uses a result-only answer without spawning the CLI twice', async () => {
+  const events: ModelStreamEvent[] = [];
+  const runner = vi.fn();
+  const client = new CliAgentClient(
+    { kind: 'local-cli', agent: 'claude', command: 'claude' },
+    { runner, streamRunner: scriptedStream([claudeResult('直接回答')]) }
+  );
+
+  const result = await client.stream(
+    { messages: [{ role: 'user', content: 'hi' }] },
+    (event) => events.push(event)
+  );
+
+  expect(runner).not.toHaveBeenCalled();
+  expect(events).toEqual([{ type: 'text', text: '直接回答' }]);
+  expect(result.text).toBe('直接回答');
+});
+
+test('claude keeps a tool-only result and does not run the fallback', async () => {
+  const runner = vi.fn();
+  const answer = envelope('', [{ name: 'get_today_plan', arguments: {} }]);
+  const client = new CliAgentClient(
+    { kind: 'local-cli', agent: 'claude', command: 'claude' },
+    { runner, streamRunner: scriptedStream([claudeResult(answer)]) }
+  );
+
+  const result = await client.stream(
+    { messages: [{ role: 'user', content: '我现在需要干什么' }] },
+    () => undefined
+  );
+
+  expect(runner).not.toHaveBeenCalled();
+  expect(result.text).toBe('');
+  expect(result.toolCalls?.[0]?.name).toBe('get_today_plan');
+});
+
+test('keeps a late tool envelope out of the stream after a long preamble', async () => {
+  const events: ModelStreamEvent[] = [];
+  const prose = '先说明一下。'.repeat(200);
+  const answer = `${prose}${envelope('最终答案', [
+    { name: 'get_today_plan', arguments: {} }
+  ])}`;
+  const client = new CliAgentClient(
+    { kind: 'local-cli', agent: 'claude', command: 'claude' },
+    {
+      streamRunner: scriptedStream([
+        claudeText(prose),
+        claudeText(envelope('最终答案', [{ name: 'get_today_plan', arguments: {} }])),
+        claudeResult(answer)
+      ])
+    }
+  );
+
+  const result = await client.stream(
+    { messages: [{ role: 'user', content: '我现在需要干什么' }] },
+    (event) => events.push(event)
+  );
+
+  const streamed = events
+    .filter((event): event is { type: 'text'; text: string } => event.type === 'text')
+    .map((event) => event.text)
+    .join('');
+  expect(streamed).not.toContain('```');
+  expect(streamed).not.toContain('toolCalls');
+  expect(result.text).toBe('最终答案');
   expect(result.toolCalls?.[0]?.name).toBe('get_today_plan');
 });

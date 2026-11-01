@@ -433,3 +433,20 @@ describe('path and input safety', () => {
     ).rejects.toThrow('Review answers are required');
   });
 });
+
+test('refuses to overwrite a memory.md whose entries cannot be parsed', async () => {
+  const service = createMemoryService({ root });
+  const file = join(root, 'workspaces', workspaceId, 'memory.md');
+  const original = '---\ntype: log\nitems: [broken\n---\n# 记忆\n\n- 【薄弱】旧记录（来源：review:2026-10-30）\n';
+  await fs.writeFile(file, original, 'utf8');
+
+  await expect(
+    service.synthesizeFromReview({
+      workspaceId,
+      date: '2026-11-01',
+      answers: answers('完成数学 10 题', '极限定义', '复习错题')
+    })
+  ).rejects.toThrow(/无法识别/);
+
+  expect(await fs.readFile(file, 'utf8')).toBe(original);
+});

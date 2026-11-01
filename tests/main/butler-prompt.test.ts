@@ -21,3 +21,35 @@ test('buildSystemPrompt keeps the weekly guidance alongside context', () => {
   expect(prompt).toContain('save_review');
   expect(prompt).toContain('plan_workspace');
 });
+
+test('includes workspace and task ids so check-ins can call project tools', () => {
+  const prompt = buildSystemPrompt({
+    now: new Date('2026-11-01T12:00:00.000Z'),
+    workspaces: [
+      {
+        id: 'kaoyan',
+        name: '考研',
+        kind: 'exam',
+        color: '#0071e3',
+        goal: '上岸',
+        description: ''
+      }
+    ],
+    tasks: [
+      {
+        id: 't-1',
+        workspaceId: 'kaoyan',
+        title: '极限',
+        subject: '数学',
+        durationMin: 45,
+        acceptance: '完成 10 题',
+        status: 'pending'
+      }
+    ],
+    memory: [],
+    contextError: false
+  });
+
+  expect(prompt).toContain('ID：kaoyan');
+  expect(prompt).toContain('ID：t-1');
+});

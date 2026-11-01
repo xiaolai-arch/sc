@@ -18,6 +18,7 @@ import {
   workspacesDir
 } from '../workspace/paths';
 import { parseWorkspaceFile } from '../workspace/records/workspace';
+import { parseNote } from '../vault/note';
 import { buildProfile } from './profile';
 import { isMemoryKind, parseMemoryRecords, serializeMemoryRecords } from './records';
 import { synthesizeByModel, synthesizeByRules, type ReviewSynthesisSource } from './synthesize';
@@ -106,7 +107,16 @@ export function createMemoryService(options: MemoryServiceOptions): MemoryServic
     additions: readonly MemoryRecord[]
   ): Promise<MemoryRecord[]> {
     return runExclusively(async () => {
-      const existing = await readRecords(workspaceId);
+      const raw = await readFileOrNull(memoryFile(vaultRoot, workspaceId));
+      const existing = raw === null ? [] : parseMemoryRecords(raw, workspaceId);
+      if (raw !== null && raw.trim() !== '' && existing.length === 0) {
+        // A broken edit (bad YAML, missing `type: log`) parses as an empty log.
+        // Rewriting now would silently delete every earlier memory, so stop.
+        const { meta } = parseNote(raw);
+        if (!Array.isArray(meta.items) || meta.items.length > 0) {
+          throw new Error('记忆文件格式无法识别，已停止写入以保护现有记录。');
+        }
+      }
       // Re-synthesizing the same review must not duplicate entries.
       const seen = new Set(existing.map((entry) => `${entry.source}\n${entry.text}`));
       const fresh = additions.filter((entry) => !seen.has(`${entry.source}\n${entry.text}`));

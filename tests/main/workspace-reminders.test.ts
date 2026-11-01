@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createWorkspaceService } from '../../src/main/workspace/create-workspace-service';
@@ -39,6 +39,23 @@ test('creates and updates global reminders in the vault', async () => {
     await expect(
       service.updateReminder?.({ id: 'missing', label: '不存在' })
     ).rejects.toThrow(/not found/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('refuses to overwrite an unreadable reminders file', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'study-coach-reminders-'));
+  try {
+    const service = createWorkspaceService(dir);
+    await service.getReminders();
+    const original = '---\ntype: plan\nitems: [broken\n---\n# 提醒\n\n- 08:00 早间计划\n';
+    await writeFile(remindersFile(dir), original, 'utf8');
+
+    await expect(
+      service.createReminder?.({ time: '09:00', label: '新提醒' })
+    ).rejects.toThrow(/无法识别/);
+    expect(await readFile(remindersFile(dir), 'utf8')).toBe(original);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

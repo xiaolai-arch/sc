@@ -110,13 +110,18 @@ export async function createBackup(options: CreateBackupOptions): Promise<Backup
 
   const vaultExists = await isDirectory(vaultPath);
   if (vaultExists) {
-    await cp(vaultPath, join(target, 'vault'), { recursive: true });
+    // Dereference the vault root (and any links inside it) so an iCloud/Dropbox
+    // symlinked vault is copied as real data, not a dangling link.
+    await cp(vaultPath, join(target, 'vault'), { recursive: true, dereference: true });
   }
 
   const conversationsSource = join(userDataPath, 'conversations');
   const conversationsExists = await isDirectory(conversationsSource);
   if (conversationsExists) {
-    await cp(conversationsSource, join(target, 'conversations'), { recursive: true });
+    await cp(conversationsSource, join(target, 'conversations'), {
+      recursive: true,
+      dereference: true
+    });
   }
 
   const stateSource = join(userDataPath, 'state.json');

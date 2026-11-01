@@ -85,7 +85,11 @@ test('extracts the final answer from a codex exec transcript', () => {
 });
 
 function structuredEnvelope(value: unknown): string {
-  return `\`\`\`json\n${JSON.stringify(value)}\n\`\`\``;
+  const body =
+    typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? { protocol: 'asaki.butler.v1', ...value }
+      : value;
+  return `\`\`\`json\n${JSON.stringify(body)}\n\`\`\``;
 }
 
 describe('parseCliResponse', () => {
@@ -142,7 +146,11 @@ describe('parseCliResponse', () => {
   });
 
   test('accepts a fenced block without the json language tag', () => {
-    const answer = `回答\n\`\`\`\n${JSON.stringify({ text: '好', toolCalls: [] })}\n\`\`\``;
+    const answer = `回答\n\`\`\`\n${JSON.stringify({
+      protocol: 'asaki.butler.v1',
+      text: '好',
+      toolCalls: []
+    })}\n\`\`\``;
     expect(parseCliResponse(answer)).toEqual({ text: '好' });
   });
 
@@ -529,4 +537,18 @@ test('passes the abort signal to the runner and rejects after abort', async () =
       signal: controller.signal
     })
   ).rejects.toThrow(/Aborted/);
+});
+
+test('does not execute a markerless envelope embedded in prose', () => {
+  const answer = [
+    '下面是一个调用示例：',
+    '```json',
+    JSON.stringify({
+      text: '示例',
+      toolCalls: [{ name: 'write_note', arguments: { title: '示例', body: '示例' } }]
+    }),
+    '```'
+  ].join('\n');
+
+  expect(parseCliResponse(answer)).toEqual({ text: answer });
 });

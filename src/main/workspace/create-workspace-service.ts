@@ -60,6 +60,20 @@ import {
   type ReviewEntry
 } from './records/reviews';
 import { ensureSeeded } from './seed';
+import { parseNote } from '../vault/note';
+
+/**
+ * Append-only files must never be rewritten when the existing file is
+ * unreadable: doing so would erase every prior record. A canonical empty list
+ * (`items: []`, `tasks: []`, `entries: []`) is safe to extend.
+ */
+function assertAppendable(raw: string, key: 'items' | 'tasks' | 'entries', label: string): void {
+  if (raw.trim() === '') return;
+  const value = parseNote(raw).meta[key];
+  if (!Array.isArray(value) || value.length > 0) {
+    throw new Error(`${label}格式无法识别，已停止写入以保护现有记录。`);
+  }
+}
 
 function requireString(value: unknown, label: string): string {
   if (typeof value !== 'string' || value.trim() === '') {
@@ -337,6 +351,9 @@ export function createWorkspaceService(
       await runExclusively(async () => {
         const existingRaw = await readFileOrNull(taskFile(vaultRoot, workspaceId, date));
         const records = existingRaw === null ? [] : parseTaskFile(existingRaw);
+        if (existingRaw !== null && records.length === 0) {
+          assertAppendable(existingRaw, 'tasks', '任务文件');
+        }
         await writeFileAtomic(
           taskFile(vaultRoot, workspaceId, date),
           serializeTaskFile(date, [...records, record])
@@ -448,7 +465,11 @@ export function createWorkspaceService(
       const time = normalizeReminderTime(input?.time);
       const label = requireString(input?.label, 'Reminder label');
       return runExclusively(async () => {
-        const reminders = await readReminders();
+        const raw = await readFileOrNull(remindersFile(vaultRoot));
+        const reminders = raw === null ? [] : parseRemindersFile(raw);
+        if (raw !== null && reminders.length === 0) {
+          assertAppendable(raw, 'items', '提醒文件');
+        }
         const reminder: Reminder = {
           id: newId('rem'),
           time,
@@ -507,6 +528,9 @@ export function createWorkspaceService(
         const target = reviewFile(vaultRoot, entry.workspaceId, date);
         const existingRaw = await readFileOrNull(target);
         const entries = existingRaw === null ? [] : parseReviewFile(existingRaw);
+        if (existingRaw !== null && entries.length === 0) {
+          assertAppendable(existingRaw, 'entries', '复盘文件');
+        }
         await writeFileAtomic(target, serializeReviewFile(date, [...entries, entry]));
       });
     }

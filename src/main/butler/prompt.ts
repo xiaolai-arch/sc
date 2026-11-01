@@ -43,7 +43,7 @@ function renderContext(context: ButlerContext): string {
   if (context.workspaces.length > 0) {
     lines.push(
       `工作区：${context.workspaces
-        .map((workspace) => `${workspace.name}（${workspace.kind}）`)
+        .map((workspace) => `${workspace.name}（${workspace.kind}，ID：${workspace.id}）`)
         .join('、')}`
     );
   }
@@ -67,7 +67,7 @@ function renderContext(context: ButlerContext): string {
     lines.push(`任务：共 ${context.tasks.length} 项，未完成 ${activeTasks.length} 项。`);
     for (const task of activeTasks.slice(0, MAX_PROMPT_TASKS)) {
       lines.push(
-        `- [${task.status}] ${task.title}（${task.subject}，${task.durationMin} 分钟；验收：${task.acceptance}）`
+        `- [${task.status}] ${task.title}（${task.subject}，${task.durationMin} 分钟；验收：${task.acceptance}；ID：${task.id}）`
       );
     }
     if (activeTasks.length > MAX_PROMPT_TASKS) {

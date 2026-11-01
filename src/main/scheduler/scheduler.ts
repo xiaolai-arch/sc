@@ -106,13 +106,16 @@ function buildTriggers(settings: AppSettings, reminders: Reminder[]): Trigger[] 
     });
   }
 
-  // The seed vault mirrors the built-in morning/evening check-ins as
-  // reminders. The check-ins stay authoritative, so a reminder at the same
-  // minute would otherwise produce a duplicate notification. The weekly
-  // recap is Sunday-only, so it is skipped precisely in runTick instead.
+  // Only the two seed vault mirrors are deduped against built-in check-ins.
+  // A user-created reminder at 08:00 must still fire even if the check-in is
+  // snoozed or skipped, as the UI promises. The weekly recap is Sunday-only,
+  // so it is skipped precisely in runTick instead.
   const checkInTimes = new Set([settings.notifications.morning, settings.notifications.evening]);
   for (const reminder of reminders) {
-    if (!reminder.enabled || checkInTimes.has(reminder.time)) continue;
+    const seedMirror =
+      (reminder.id === 'r1' && reminder.label === '早间计划') ||
+      (reminder.id === 'r2' && reminder.label === '晚间复盘');
+    if (!reminder.enabled || (seedMirror && checkInTimes.has(reminder.time))) continue;
     triggers.push({
       kind: 'reminder',
       id: reminder.id,

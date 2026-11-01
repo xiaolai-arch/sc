@@ -144,10 +144,20 @@ export class AiSdkModelClient implements StreamingModelClient {
   }
 
   private buildOptions(request: ModelRequest): Record<string, unknown> {
+    // AI SDK v7 rejects system messages inside `messages`; they belong in
+    // `instructions`, which applies to both generateText and streamText.
+    const instructions = request.messages
+      .filter((message) => message.role === 'system')
+      .map((message) => message.content)
+      .join('\n\n');
+    const conversation = request.messages.filter((message) => message.role !== 'system');
     const options: Record<string, unknown> = {
       model: this.model,
-      messages: toAiSdkMessages(request.messages)
+      messages: toAiSdkMessages(conversation)
     };
+    if (instructions) {
+      options['instructions'] = instructions;
+    }
     if (request.temperature !== undefined) {
       options['temperature'] = request.temperature;
     }

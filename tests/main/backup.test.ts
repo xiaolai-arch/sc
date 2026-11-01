@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createBackup, handleExportBackup } from '../../src/main/backup';
@@ -217,6 +217,38 @@ test('handleExportBackup surfaces a rejected destination', async () => {
         now: NOW
       })
     ).rejects.toThrow(/不能位于/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('dereferences a symlinked vault instead of copying the link', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'study-coach-backup-'));
+  try {
+    const realVault = join(root, 'real-vault');
+    const linkedVault = join(root, 'vault-link');
+    const userData = join(root, 'user-data');
+    await mkdir(join(realVault, 'workspaces', 'kaoyan'), { recursive: true });
+    await writeFile(join(realVault, 'workspaces', 'kaoyan', 'workspace.md'), 'vault-data', 'utf8');
+    await mkdir(userData, { recursive: true });
+    try {
+      await symlink(realVault, linkedVault, 'dir');
+    } catch {
+      return;
+    }
+
+    const result = await createBackup({
+      vaultPath: linkedVault,
+      userDataPath: userData,
+      destinationRoot: join(root, 'exports'),
+      now: NOW
+    });
+
+    const copiedVault = join(result.path, 'vault');
+    expect((await lstat(copiedVault)).isSymbolicLink()).toBe(false);
+    expect(
+      await readFile(join(copiedVault, 'workspaces', 'kaoyan', 'workspace.md'), 'utf8')
+    ).toBe('vault-data');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
