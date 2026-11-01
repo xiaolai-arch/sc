@@ -87,4 +87,4 @@
 - Module 5 `task_1bde9d51b07f` / zcode / `ctx_2311d116033c` / `v1-search-watcher` — **done** (commits `35e9225`–`c18a54c`; merged; 297 unit tests/typecheck/build pass; `src/main/search/**` + `src/shared/search.ts`; IPC wiring 与 app-quit dispose 留给 ui-wiring)
 - Module 7 `task_800fc28572f5` / codex / `ctx_f7f1f4670e03` / `v1-packaging-e2e` — **done** (commits `adf4812`–`a01d225`; merged `cbedfce`; 264 unit tests + 1 e2e/typecheck/build/electron-builder pass; one additive `STUDY_COACH_USER_DATA_DIR` hook in `src/main/index.ts`)
 - Module 6 `task_446fe77d2532` / opencode / `ctx_117290dee28b` / `v1-ui-wiring` — **done**（commits `2dd1e0c`–`61232cd`；merged `ea7b2da`；310 tests/typecheck/build pass；含 search IPC 接线与 app-quit dispose）
-- Module 8 `legacy-cleanup`（claude）queued — ready to dispatch after module 6 merge
+- Module 8 `task_0b766a6f547e` / claude / `ctx_911cc0fa2178` / `v1-legacy-cleanup` — dispatched（base `e82af86`；删除孤儿旧页面、退役 ExamProfile/DailyPlan 旧面；不得触碰 butler-stream 工作线文件）
