@@ -45,6 +45,11 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
   const [usageError, setUsageError] = useState<string | null>(null);
   const [confirmClearUsage, setConfirmClearUsage] = useState(false);
   const [clearingUsage, setClearingUsage] = useState(false);
+  const [exportingBackup, setExportingBackup] = useState(false);
+  const [backupStatus, setBackupStatus] = useState<{
+    kind: 'success' | 'canceled' | 'error';
+    message: string;
+  } | null>(null);
   const [notifications, setNotifications] = useState<NotificationSettings>({
     enabled: true,
     morning: '08:00',
@@ -224,6 +229,31 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
       setUsageError(cause instanceof Error ? cause.message : '清空用量失败，请重试。');
     } finally {
       setClearingUsage(false);
+    }
+  }
+
+  async function exportBackup() {
+    const api = window.studyCoach;
+    if (!api || typeof api.exportBackup !== 'function') {
+      setBackupStatus({ kind: 'error', message: '当前版本不支持导出备份。' });
+      return;
+    }
+    setExportingBackup(true);
+    setBackupStatus(null);
+    try {
+      const result = await api.exportBackup();
+      if (result === null) {
+        setBackupStatus({ kind: 'canceled', message: '已取消' });
+      } else {
+        setBackupStatus({ kind: 'success', message: `已导出到 ${result.path}` });
+      }
+    } catch (cause) {
+      setBackupStatus({
+        kind: 'error',
+        message: cause instanceof Error ? cause.message : '导出备份失败，请重试。'
+      });
+    } finally {
+      setExportingBackup(false);
     }
   }
 
@@ -529,6 +559,40 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
                 </div>
               </>
             )}
+          </Card>
+
+          <Card id="settings-backup">
+            <h3 className="text-xl font-semibold tracking-tight text-black md:text-2xl">
+              数据与备份
+            </h3>
+            <p className="mt-2 text-gray-600">
+              备份包含项目、记录、对话、设置和用量，不包含 API Key。
+            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <Button
+                size="sm"
+                disabled={exportingBackup}
+                onClick={() => void exportBackup()}
+              >
+                {exportingBackup ? '正在导出…' : '导出备份…'}
+              </Button>
+              {backupStatus ? (
+                <p
+                  {...(backupStatus.kind === 'success'
+                    ? { role: 'status' }
+                    : backupStatus.kind === 'error'
+                      ? { role: 'alert' }
+                      : {})}
+                  className={
+                    backupStatus.kind === 'error'
+                      ? 'text-sm text-[#d70015]'
+                      : 'text-sm text-gray-600'
+                  }
+                >
+                  {backupStatus.message}
+                </p>
+              ) : null}
+            </div>
           </Card>
 
           <Card id="settings-notifications">
