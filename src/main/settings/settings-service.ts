@@ -128,6 +128,14 @@ function validateBudget(value: unknown): AppSettings['budget'] | undefined {
     }
     result[key] = entry;
   }
+  for (const key of ['inputPricePerMillion', 'outputPricePerMillion'] as const) {
+    const entry = value[key];
+    if (entry === undefined) continue;
+    if (typeof entry !== 'number' || !Number.isFinite(entry) || entry < 0) {
+      throw new Error('单价必须是非负数字。');
+    }
+    result[key] = entry;
+  }
   return result as AppSettings['budget'];
 }
 

@@ -26,6 +26,7 @@ import type {
   WorkspaceTask
 } from '../src/shared/workspace';
 import type { StreamingButlerApi } from '../src/shared/butler-stream';
+import type { UsageSummary } from '../src/shared/usage';
 import { BUTLER_TOOL_LABELS } from '../src/shared/butler-stream';
 import type {
   Conversation,
@@ -1111,6 +1112,18 @@ export function createMockApi(
 
     onQuickCapture() {
       return () => undefined;
+    },
+
+    async getUsageSummary(): Promise<UsageSummary> {
+      return {
+        days: [],
+        totals: { inputTokens: 0, outputTokens: 0, calls: 0 },
+        estimatedCost: null
+      };
+    },
+
+    async clearUsage(): Promise<void> {
+      // The browser prototype keeps no usage history.
     },
 
     async send(input: SendMessageInput): Promise<SendMessageResult> {

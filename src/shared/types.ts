@@ -56,7 +56,14 @@ export interface NotificationSettings {
   dndEnd: string;
 }
 
-export interface BudgetSettings { proactiveSessionsPerDay: number; dailyTokens: number; }
+export interface BudgetSettings {
+  proactiveSessionsPerDay: number;
+  dailyTokens: number;
+  /** Yuan per million input tokens; absent/0 means no cost estimate. */
+  inputPricePerMillion?: number;
+  /** Yuan per million output tokens; absent/0 means no cost estimate. */
+  outputPricePerMillion?: number;
+}
 
 export interface AppSettings {
   vaultPath: string;

@@ -120,6 +120,30 @@ test('validates and persists the weekly review settings', async () => {
   expect(updated.notifications).toMatchObject({ weekly: '19:30', weeklyEnabled: false });
 });
 
+test('accepts non-negative token prices and rejects invalid ones', async () => {
+  const { service } = memorySettings();
+
+  const updated = await service.update({
+    budget: { inputPricePerMillion: 2, outputPricePerMillion: 8 } as never
+  });
+  expect(updated.budget).toEqual({
+    proactiveSessionsPerDay: 4,
+    dailyTokens: 200000,
+    inputPricePerMillion: 2,
+    outputPricePerMillion: 8
+  });
+
+  await expect(
+    service.update({ budget: { inputPricePerMillion: -1 } as never })
+  ).rejects.toThrow(/单价/);
+  await expect(
+    service.update({ budget: { outputPricePerMillion: Number.NaN } as never })
+  ).rejects.toThrow(/单价/);
+  await expect(
+    service.update({ budget: { inputPricePerMillion: '2' } as never })
+  ).rejects.toThrow(/单价/);
+});
+
 test('validates and clears the snoozed date', async () => {
   const { service } = memorySettings();
 

@@ -73,6 +73,8 @@ export const IPC_CHANNELS = {
   setConversationPinned: 'study-coach:conversations:set-pinned',
   truncateConversationMessages: 'study-coach:conversations:truncate-messages',
   searchConversations: 'study-coach:conversations:search',
+  getUsageSummary: 'study-coach:usage:summary',
+  clearUsage: 'study-coach:usage:clear',
   send: 'study-coach:butler:send'
 } as const;
 
@@ -446,6 +448,14 @@ function requirePlanWorkspace(value: unknown): PlanWorkspaceInput {
   return input as unknown as PlanWorkspaceInput;
 }
 
+function requireUsageDays(value: unknown): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 90) {
+    throw new Error('用量天数必须在 1-90 之间。');
+  }
+  return value;
+}
+
 function requireSearchWorkspace(value: unknown): {
   workspaceId: string;
   query: string;
@@ -556,6 +566,8 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
     },
     searchConversations: async (input) =>
       api.searchConversations(requireConversationSearch(input)),
+    getUsageSummary: async (input) => api.getUsageSummary(requireUsageDays(input)),
+    clearUsage: async () => api.clearUsage(),
     send: async (input) => api.send(requireSend(input))
   };
 
@@ -728,6 +740,8 @@ export function createStudyCoachBridge(
     truncateConversationMessages: (id, keepCount) =>
       call(IPC_CHANNELS.truncateConversationMessages, { conversationId: id, keepCount }),
     searchConversations: (query) => call(IPC_CHANNELS.searchConversations, query),
+    getUsageSummary: (days) => call(IPC_CHANNELS.getUsageSummary, days),
+    clearUsage: () => call(IPC_CHANNELS.clearUsage),
     cancelStream: (messageId) => call(BUTLER_STREAM_CHANNELS.cancel, messageId),
     onConversationOpened(listener) {
       if (!subscribe) return () => undefined;

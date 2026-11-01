@@ -28,6 +28,7 @@ import type {
   ProviderConfig,
   ReviewAnswers
 } from './types';
+import type { UsageSummary } from './usage';
 import type {
   ButlerService,
   WorkspaceOnboardingInput,
@@ -128,6 +129,12 @@ export interface SettingsPatch {
   launchAtLogin?: boolean;
 }
 
+/** Local-only usage accounting; nothing leaves this machine. */
+export interface UsageApi {
+  getUsageSummary(days?: number): Promise<UsageSummary>;
+  clearUsage(): Promise<void>;
+}
+
 export interface StudyCoachApi
   extends WorkspaceService,
     ButlerService,
@@ -135,7 +142,8 @@ export interface StudyCoachApi
     MemoryApi,
     SearchApi,
     PlannerApi,
-    ConversationApi {
+    ConversationApi,
+    UsageApi {
   getBootstrap(): Promise<Bootstrap>;
   completeWorkspaceOnboarding(input: WorkspaceOnboardingInput): Promise<void>;
   getSettings(): Promise<AppSettings>;

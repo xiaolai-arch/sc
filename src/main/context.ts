@@ -6,6 +6,7 @@ import type { WorkspacePlanner } from '../shared/planning';
 import type { PracticeService } from '../shared/practice';
 import type { SearchService } from '../shared/search';
 import type { AppSettings, ProviderConfig } from '../shared/types';
+import { estimateUsageCost, summarizeUsage } from '../shared/usage';
 import type { ButlerService, SendMessageInput, WorkspaceService } from '../shared/workspace';
 import { createModelClient, NoApiKeyError, type ModelClient } from './agent/model-client';
 import { createButlerService } from './butler/create-butler-service';
@@ -19,6 +20,8 @@ import { createDefaultSettings } from './settings/defaults';
 import { InMemorySecretStore, SafeStorageSecretStore, type SecretStore } from './settings/secret-store';
 import { SettingsService } from './settings/settings-service';
 import { JsonStateStore, type AppState } from './state-store';
+import { createRecordingModelClient } from './usage/recording-model-client';
+import { UsageStore } from './usage/usage-store';
 import { createWorkspaceService } from './workspace/create-workspace-service';
 import { listDirectories, listMarkdownFiles, readFileOrNull } from './workspace/fs-utils';
 import { assertSafeSegment, reviewsDir, workspacesDir } from './workspace/paths';
@@ -76,6 +79,7 @@ export interface AppContext {
   settings: SettingsService;
   secrets: SecretStore;
   conversationStore: ConversationStore;
+  usage: UsageStore;
   readonly workspace: WorkspaceService;
   readonly butler: ButlerService;
   readonly practice: PracticeService;
@@ -156,6 +160,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     new SafeStorageSecretStore(join(options.userDataPath, 'secrets', 'api-key.bin'));
   const now = options.now ?? (() => new Date());
   const today = () => formatLocalDate(now());
+  const usageStore = new UsageStore(join(options.userDataPath, 'usage.json'), { now });
 
   let active: ActiveServices | null = null;
   let pendingRebuild: Promise<ActiveServices> | null = null;
@@ -219,10 +224,23 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
   async function buildServices(nextSettings: AppSettings): Promise<ActiveServices> {
     const apiKey = await secrets.getApiKey();
     const workspace = createWorkspace(nextSettings.vaultPath);
-    const modelClient =
+    const resolvedClient =
       options.modelClient !== undefined
         ? options.modelClient
         : resolveModelClient(nextSettings.provider, apiKey);
+    const modelClient = resolvedClient
+      ? createRecordingModelClient(
+          resolvedClient,
+          (entry) => usageStore.record(entry),
+          {
+            provider:
+              nextSettings.provider.kind === 'local-cli'
+                ? nextSettings.provider.agent
+                : nextSettings.provider.kind,
+            model: nextSettings.provider.model ?? ''
+          }
+        )
+      : null;
     const memory = createMemory(nextSettings.vaultPath, modelClient);
     const planner = createPlanner(nextSettings.vaultPath, workspace, modelClient);
     const dependencies: ButlerFactoryDependencies = {
@@ -231,9 +249,9 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       apiKey,
       conversationStore,
       memoryService: memory,
-      planner
+      planner,
+      modelClient
     };
-    if (options.modelClient !== undefined) dependencies.modelClient = options.modelClient;
     const butler = createButler(nextSettings.vaultPath, dependencies);
 
     const checkIns = new ProactiveCheckInService({
@@ -547,6 +565,24 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     async searchConversations(query) {
       return conversationStore.search(query);
     },
+    async getUsageSummary(days) {
+      const requested =
+        typeof days === 'number' && Number.isFinite(days) ? Math.trunc(days) : 7;
+      const windowDays = Math.min(90, Math.max(1, requested));
+      const [entries, current] = await Promise.all([usageStore.list(), settings.get()]);
+      const summary = summarizeUsage(entries, windowDays, today());
+      return {
+        ...summary,
+        estimatedCost: estimateUsageCost(
+          summary.totals,
+          current.budget.inputPricePerMillion,
+          current.budget.outputPricePerMillion
+        )
+      };
+    },
+    async clearUsage() {
+      await usageStore.clear();
+    },
     onConversationOpened() {
       return () => undefined;
     },
@@ -567,6 +603,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     settings,
     secrets,
     conversationStore,
+    usage: usageStore,
     get workspace() {
       if (!active) throw new Error('工作区服务尚未初始化。');
       return active.workspace;
