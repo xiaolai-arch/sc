@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { ChevronRightIcon, MoreHorizontalIcon, SparklesIcon } from '../ui/icons';
 import { Composer } from './Composer';
+import { MarkdownText } from './MarkdownText';
 import { ReasoningBlock } from './ReasoningBlock';
 import type { Workspace } from '../../shared/workspace';
 import type { ChatMessage } from './types';
@@ -159,7 +160,9 @@ export function ChatPane({
                     endedAt={message.reasoningEndedAt}
                   />
                   {message.text ? (
-                    <p className="mt-1 text-[13px] leading-6 text-[#1d1d1f]">{message.text}</p>
+                    <div className="mt-1">
+                      <MarkdownText text={message.text} />
+                    </div>
                   ) : null}
                 </div>
               </div>
