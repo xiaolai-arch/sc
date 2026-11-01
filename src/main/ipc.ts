@@ -1,10 +1,12 @@
 import type { AppSettings, ExamProfile } from '../shared/types';
 import type { StudyCoachApi } from '../shared/ipc';
+import type { ButlerStreamEvent } from '../shared/butler-stream';
 import type {
   CreateNoteInput,
   CreateTaskInput,
   CreateWorkspaceInput,
   SendMessageInput,
+  SendMessageResult,
   SubmitReviewInput,
   UpdateWorkspaceNoteInput,
   UpdateWorkspaceTaskInput,
@@ -52,15 +54,32 @@ export const IPC_CHANNELS = {
   send: 'study-coach:butler:send'
 } as const;
 
+/** Streaming uses a separate request/event pair so the request map stays stable. */
+export const BUTLER_STREAM_CHANNELS = {
+  stream: 'study-coach:butler:stream',
+  event: 'study-coach:butler:stream-event'
+} as const;
+
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
 export type IpcChannelName = keyof typeof IPC_CHANNELS;
 
 export type IpcHandler = (input?: unknown) => Promise<unknown>;
 export type IpcHandlerMap = Record<IpcChannelName, IpcHandler>;
 export type Invoke = (channel: string, ...args: unknown[]) => Promise<unknown>;
+export type Subscribe = (
+  channel: string,
+  listener: (payload: unknown) => void
+) => () => void;
 
 export interface IpcMainLike {
   handle(channel: string, listener: (event: unknown, ...args: unknown[]) => unknown): void;
+}
+
+export interface IpcEventLike {
+  sender: {
+    send(channel: string, payload: unknown): void;
+    isDestroyed?(): boolean;
+  };
 }
 
 const TASK_STATUSES = ['pending', 'in-progress', 'done', 'skipped'] as const;
@@ -152,6 +171,19 @@ function requireSend(value: unknown): SendMessageInput {
   optionalString(input.workspaceId, '工作区 ID');
   optionalString(input.taskId, '任务 ID');
   return input as unknown as SendMessageInput;
+}
+
+interface ButlerStreamPayload {
+  requestId: string;
+  input: SendMessageInput;
+}
+
+function requireStreamPayload(value: unknown): ButlerStreamPayload {
+  const payload = requireObject(value, '管家流式请求');
+  return {
+    requestId: requireString(payload.requestId, '请求 ID'),
+    input: requireSend(payload.input)
+  };
 }
 
 function optionalPositiveNumber(value: unknown, label: string): number | undefined {
@@ -341,20 +373,54 @@ async function invokeSafely(handler: IpcHandler, args: unknown[]): Promise<unkno
   }
 }
 
+/**
+ * Streams one butler request to the requesting webContents. Events carry the
+ * caller's requestId so a delayed stream cannot leak into another message.
+ */
+export function createButlerStreamHandler(api: StudyCoachApi) {
+  return async (event: IpcEventLike, value: unknown): Promise<SendMessageResult> => {
+    const { requestId, input } = requireStreamPayload(value);
+    try {
+      return await api.stream(input, (streamEvent: ButlerStreamEvent) => {
+        if (event.sender.isDestroyed?.()) return;
+        event.sender.send(BUTLER_STREAM_CHANNELS.event, {
+          requestId,
+          event: streamEvent
+        });
+      });
+    } catch (error) {
+      if (!event.sender.isDestroyed?.()) {
+        event.sender.send(BUTLER_STREAM_CHANNELS.event, {
+          requestId,
+          event: { type: 'error', message: serializeError(error).message }
+        });
+      }
+      throw toSafeError(error);
+    }
+  };
+}
+
 /** Registers every channel; Electron's ipcMain is injected for testability. */
 export function registerIpcHandlers(api: StudyCoachApi, ipcMain: IpcMainLike): void {
   const handlers = createIpcHandlers(api);
   for (const name of Object.keys(IPC_CHANNELS) as IpcChannelName[]) {
     ipcMain.handle(IPC_CHANNELS[name], (_event, ...args) => handlers[name](args[0]));
   }
+  const streamHandler = createButlerStreamHandler(api);
+  ipcMain.handle(BUTLER_STREAM_CHANNELS.stream, (event, ...args) =>
+    streamHandler(event as IpcEventLike, args[0])
+  );
 }
 
 /**
  * Builds the exact object exposed on `window.studyCoach`. Preload only supplies
  * `ipcRenderer.invoke`, which keeps this mapping unit-testable without Electron.
  */
-export function createStudyCoachBridge(invoke: Invoke): StudyCoachApi {
-  const call = <T>(channel: IpcChannel, ...args: unknown[]): Promise<T> =>
+export function createStudyCoachBridge(
+  invoke: Invoke,
+  subscribe?: Subscribe
+): StudyCoachApi {
+  const call = <T>(channel: string, ...args: unknown[]): Promise<T> =>
     invoke(channel, ...args) as Promise<T>;
 
   return {
@@ -392,6 +458,30 @@ export function createStudyCoachBridge(invoke: Invoke): StudyCoachApi {
     getMemoryProfile: (workspaceId) => call(IPC_CHANNELS.getMemoryProfile, workspaceId),
     searchWorkspace: (input) => call(IPC_CHANNELS.searchWorkspace, input),
     rebuildSearchIndex: () => call(IPC_CHANNELS.rebuildSearchIndex),
-    send: (input) => call(IPC_CHANNELS.send, input)
+    send: (input) => call(IPC_CHANNELS.send, input),
+    async stream(input, onEvent) {
+      const requestId = createRequestId();
+      const unsubscribe = subscribe?.(BUTLER_STREAM_CHANNELS.event, (payload) => {
+        if (!isRecord(payload) || payload['requestId'] !== requestId) return;
+        const event = payload['event'];
+        if (isRecord(event)) onEvent(event as ButlerStreamEvent);
+      });
+      try {
+        return await call<SendMessageResult>(BUTLER_STREAM_CHANNELS.stream, {
+          requestId,
+          input
+        });
+      } finally {
+        unsubscribe?.();
+      }
+    }
   };
+}
+
+function createRequestId(): string {
+  const maybeCrypto = globalThis.crypto as { randomUUID?: () => string } | undefined;
+  return (
+    maybeCrypto?.randomUUID?.() ??
+    `req-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  );
 }

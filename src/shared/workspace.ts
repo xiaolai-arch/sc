@@ -1,4 +1,5 @@
 import type { ReviewAnswers, TaskStatus } from './types';
+import type { ButlerStreamEvent } from './butler-stream';
 
 export type WorkspaceKind = 'exam' | 'study' | 'project' | 'life';
 export type WorkspaceTaskStatus = TaskStatus;
@@ -151,4 +152,8 @@ export interface WorkspaceService {
 /** Main-process contract for the butler/teaching agent. */
 export interface ButlerService {
   send(input: SendMessageInput): Promise<SendMessageResult>;
+  stream(
+    input: SendMessageInput,
+    onEvent: (event: ButlerStreamEvent) => void
+  ): Promise<SendMessageResult>;
 }

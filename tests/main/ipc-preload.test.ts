@@ -1,8 +1,10 @@
 import type { StudyCoachApi } from '../../src/shared/ipc';
 import {
+  BUTLER_STREAM_CHANNELS,
   IPC_CHANNELS,
   createStudyCoachBridge,
-  type Invoke
+  type Invoke,
+  type Subscribe
 } from '../../src/main/ipc';
 
 test('locks the public channel names', () => {
@@ -125,4 +127,35 @@ test('bridge does not swallow rejected invokes', async () => {
   const bridge = createStudyCoachBridge(invoke);
   await expect(bridge.getBootstrap()).rejects.toThrow('main exploded');
   await expect(bridge.send({ message: 'hi' })).rejects.toThrow('main exploded');
+});
+
+test('bridge streams events for the matching requestId and unsubscribes', async () => {
+  const listeners = new Map<string, (payload: unknown) => void>();
+  const unsubscribed: string[] = [];
+  const subscribe: Subscribe = (channel, listener) => {
+    listeners.set(channel, listener);
+    return () => {
+      unsubscribed.push(channel);
+    };
+  };
+  const invoke: Invoke = async (channel, ...args) => {
+    if (channel !== BUTLER_STREAM_CHANNELS.stream) return null;
+    const payload = args[0] as { requestId: string };
+    const listener = listeners.get(BUTLER_STREAM_CHANNELS.event);
+    listener?.({ requestId: 'other-request', event: { type: 'text', text: '错误请求' } });
+    listener?.({ requestId: payload.requestId, event: { type: 'reasoning', text: '想' } });
+    listener?.({ requestId: payload.requestId, event: { type: 'done', text: '答' } });
+    return { text: '答' };
+  };
+
+  const bridge: StudyCoachApi = createStudyCoachBridge(invoke, subscribe);
+  const events: unknown[] = [];
+  const result = await bridge.stream({ message: '你好' }, (event) => events.push(event));
+
+  expect(result).toEqual({ text: '答' });
+  expect(events).toEqual([
+    { type: 'reasoning', text: '想' },
+    { type: 'done', text: '答' }
+  ]);
+  expect(unsubscribed).toEqual([BUTLER_STREAM_CHANNELS.event]);
 });

@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-01-butler-reasoning-stream-design.md`
 
+> **Update (2026-11-01):** 用户要求继续打通 Electron 全链路，因此本计划在实施时把 `ButlerService.stream`、IPC 事件通道和 preload bridge 一并接上；Web 端 mock 已先在 `2026-11-01-butler-reasoning-stream-web-first.md` 中完成并验收。当前 333 个单测 + Electron e2e 通过。
+
 ## Global Constraints
 
 - 每个任务结束运行 `npm run typecheck && npm test`。

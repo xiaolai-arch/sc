@@ -34,7 +34,10 @@ function fakeWorkspace(overrides: Partial<WorkspaceService> = {}): WorkspaceServ
 }
 
 function fakeButler(): ButlerService {
-  return { send: vi.fn().mockResolvedValue({ text: 'ok' }) };
+  return {
+    send: vi.fn().mockResolvedValue({ text: 'ok' }),
+    stream: vi.fn().mockResolvedValue({ text: 'ok' })
+  };
 }
 
 function fakePractice(overrides: Partial<PracticeService> = {}): PracticeService {

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { ButlerService, WorkspaceService } from '../../src/shared/workspace';
 import { createAppContext, type AppContext } from '../../src/main/context';
 import {
+  BUTLER_STREAM_CHANNELS,
   IPC_CHANNELS,
   createIpcHandlers,
   registerIpcHandlers,
@@ -34,7 +35,11 @@ function fakeWorkspace(overrides: Partial<WorkspaceService> = {}): WorkspaceServ
 }
 
 function fakeButler(overrides: Partial<ButlerService> = {}): ButlerService {
-  return { send: vi.fn().mockResolvedValue({ text: '好的' }), ...overrides };
+  return {
+    send: vi.fn().mockResolvedValue({ text: '好的' }),
+    stream: vi.fn().mockResolvedValue({ text: '好的' }),
+    ...overrides
+  };
 }
 
 async function makeContext(
@@ -64,10 +69,11 @@ test('registers every channel exactly once', async () => {
     }
   });
 
-  expect(registered.size).toBe(Object.keys(IPC_CHANNELS).length);
+  expect(registered.size).toBe(Object.keys(IPC_CHANNELS).length + 1);
   for (const channel of Object.values(IPC_CHANNELS)) {
     expect(registered.has(channel)).toBe(true);
   }
+  expect(registered.has(BUTLER_STREAM_CHANNELS.stream)).toBe(true);
 });
 
 test('routes every channel to the matching api method', async () => {

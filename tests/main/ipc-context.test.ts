@@ -47,7 +47,10 @@ function services(): { workspace: WorkspaceService; butler: ButlerService } {
       getReminders: async () => [],
       submitReview: async () => undefined
     },
-    butler: { send: async () => ({ text: 'ok' }) }
+    butler: {
+      send: async () => ({ text: 'ok' }),
+      stream: async () => ({ text: 'ok' })
+    }
   };
 }
 

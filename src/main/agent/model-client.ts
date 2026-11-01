@@ -53,6 +53,22 @@ export interface ModelClient {
   complete(request: ModelRequest): Promise<ModelResponse>;
 }
 
+export type ModelStreamEvent =
+  | { type: 'reasoning'; text: string }
+  | { type: 'text'; text: string };
+
+/** Optional capability implemented by providers that can stream deltas. */
+export interface StreamingModelClient extends ModelClient {
+  stream(
+    request: ModelRequest,
+    onEvent: (event: ModelStreamEvent) => void
+  ): Promise<ModelResponse>;
+}
+
+export function supportsStreaming(client: ModelClient): client is StreamingModelClient {
+  return typeof (client as Partial<StreamingModelClient>).stream === 'function';
+}
+
 export class NoApiKeyError extends Error {
   constructor(readonly providerKind: ProviderConfig['kind']) {
     super(`No API key configured for provider "${providerKind}".`);

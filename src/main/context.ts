@@ -554,6 +554,9 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     },
     async send(input: SendMessageInput) {
       return (await getServices()).butler.send(input);
+    },
+    async stream(input, onEvent) {
+      return (await getServices()).butler.stream(input, onEvent);
     }
   };
 

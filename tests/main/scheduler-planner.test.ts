@@ -71,6 +71,9 @@ describe('butler-backed today-plan planner', () => {
             tasks: [{ title: '做真题', subject: '数学', durationMin: 60, acceptance: '一套' }]
           })
         };
+      },
+      async stream() {
+        throw new Error('stream is not used by the planner');
       }
     };
 
@@ -96,6 +99,9 @@ describe('butler-backed today-plan planner', () => {
       butler: {
         async send() {
           throw new Error('model unavailable');
+        },
+        async stream() {
+          throw new Error('stream is not used by the planner');
         }
       }
     });
