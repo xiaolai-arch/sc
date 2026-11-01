@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain } from 'electron';
 import { join } from 'node:path';
-import { handleExportBackup } from './backup';
+import { handleExportBackup, handleRestoreBackup } from './backup';
 import { createAppContext } from './context';
 import {
   APP_EVENT_CHANNELS,
@@ -133,6 +133,40 @@ app.whenReady().then(async () => {
       // Same sanitized envelope as the regular IPC handlers.
       throw new Error(serializeError(error).message);
     }
+  });
+
+  ipcMain.handle(APP_IPC_CHANNELS.restoreBackup, async () => {
+    try {
+      return await handleRestoreBackup({
+        pickDirectory: async () => {
+          const options = {
+            title: '选择 ASAKI 备份文件夹',
+            properties: ['openDirectory'] as const
+          };
+          const selection = mainWindow
+            ? await dialog.showOpenDialog(mainWindow, {
+                ...options,
+                properties: [...options.properties]
+              })
+            : await dialog.showOpenDialog({
+                ...options,
+                properties: [...options.properties]
+              });
+          return selection.canceled ? null : (selection.filePaths[0] ?? null);
+        },
+        getPaths: async () => {
+          const current = await context.settings.get();
+          return { vaultPath: current.vaultPath, userDataPath: app.getPath('userData') };
+        }
+      });
+    } catch (error) {
+      throw new Error(serializeError(error).message);
+    }
+  });
+
+  ipcMain.handle(APP_IPC_CHANNELS.restartApp, () => {
+    app.relaunch();
+    app.quit();
   });
 
   const shortcuts = registerAppShortcuts(globalShortcut, [

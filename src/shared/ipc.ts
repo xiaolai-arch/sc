@@ -122,6 +122,10 @@ export interface ConversationApi {
   onQuickCapture?(listener: () => void): () => void;
   /** Opens a native directory picker and writes a local backup. */
   exportBackup?(): Promise<BackupResult | null>;
+  /** Opens a picker, snapshots current data, then restores a backup. */
+  restoreBackup?(): Promise<RestoreResult | null>;
+  /** Relaunches the app so a restore takes effect. */
+  restartApp?(): Promise<void>;
 }
 
 /** Partial settings update; nested notifications/budget accept partials. */
@@ -150,6 +154,18 @@ export interface BackupCopied {
 export interface BackupResult {
   path: string;
   copied: BackupCopied;
+}
+
+/** Result of restoring a backup; settings and secrets are not overwritten. */
+export interface RestoreResult {
+  path: string;
+  /** Snapshot of the data that was replaced. */
+  safetyPath: string;
+  restored: {
+    vault: boolean;
+    conversations: boolean;
+    usage: boolean;
+  };
 }
 
 export interface StudyCoachApi

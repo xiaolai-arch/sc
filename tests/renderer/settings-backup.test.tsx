@@ -49,7 +49,7 @@ test('exports a backup and shows the destination', async () => {
   render(<SettingsPage onClose={() => {}} />);
 
   expect(
-    await screen.findByText('备份包含项目、记录、对话、设置和用量，不包含 API Key。')
+    await screen.findByText(/备份包含项目、记录、对话、设置和用量，不包含 API Key。/)
   ).toBeInTheDocument();
   await userEvent.click(screen.getByRole('button', { name: '导出备份…' }));
 

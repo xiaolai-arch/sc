@@ -1,7 +1,12 @@
 import { access, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createBackup, handleExportBackup } from '../../src/main/backup';
+import {
+  createBackup,
+  handleExportBackup,
+  handleRestoreBackup,
+  restoreBackup
+} from '../../src/main/backup';
 
 async function exists(path: string): Promise<boolean> {
   try {
@@ -217,6 +222,114 @@ test('handleExportBackup surfaces a rejected destination', async () => {
         now: NOW
       })
     ).rejects.toThrow(/不能位于/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+async function backupFixture() {
+  const current = await fixture();
+  const backup = join(current.root, 'my-backup');
+  await mkdir(join(backup, 'vault', 'workspaces', 'kaoyan'), { recursive: true });
+  await writeFile(join(backup, 'vault', 'workspaces', 'kaoyan', 'workspace.md'), 'restored-vault', 'utf8');
+  await mkdir(join(backup, 'conversations'), { recursive: true });
+  await writeFile(join(backup, 'conversations', 'c2.json'), '{"id":"c2"}', 'utf8');
+  await writeFile(join(backup, 'usage.json'), '[{"restored":true}]', 'utf8');
+  await writeFile(join(backup, 'state.json'), '{"backup":true}', 'utf8');
+  return { ...current, backup };
+}
+
+test('restores vault, conversations and usage after snapshotting current data', async () => {
+  const { root, vault, userData, backup } = await backupFixture();
+  try {
+    const result = await restoreBackup({
+      backupPath: backup,
+      vaultPath: vault,
+      userDataPath: userData,
+      now: NOW
+    });
+
+    expect(result.restored).toEqual({ vault: true, conversations: true, usage: true });
+    expect(
+      await readFile(join(vault, 'workspaces', 'kaoyan', 'workspace.md'), 'utf8')
+    ).toBe('restored-vault');
+    expect(await readFile(join(userData, 'conversations', 'c2.json'), 'utf8')).toBe(
+      '{"id":"c2"}'
+    );
+    expect(await exists(join(userData, 'conversations', 'c1.json'))).toBe(false);
+    expect(await readFile(join(userData, 'usage.json'), 'utf8')).toBe('[{"restored":true}]');
+
+    // Settings and secrets are deliberately left alone.
+    expect(await readFile(join(userData, 'state.json'), 'utf8')).toBe('{"onboarded":true}');
+    expect(await readFile(join(userData, 'secrets', 'api-key.bin'), 'utf8')).toBe('secret');
+
+    const safety = join(userData, 'restore-safety', 'restore-safety-2026-11-02-143000');
+    expect(result.safetyPath).toBe(safety);
+    expect(
+      await readFile(join(safety, 'vault', 'workspaces', 'kaoyan', 'workspace.md'), 'utf8')
+    ).toBe('vault-data');
+    expect(await readFile(join(safety, 'conversations', 'c1.json'), 'utf8')).toBe(
+      '{"id":"c1"}'
+    );
+    expect(await readFile(join(safety, 'state.json'), 'utf8')).toBe('{"onboarded":true}');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects a folder without a vault and leaves current data untouched', async () => {
+  const { root, vault, userData } = await fixture();
+  const notABackup = join(root, 'not-a-backup');
+  await mkdir(notABackup, { recursive: true });
+  try {
+    await expect(
+      restoreBackup({ backupPath: notABackup, vaultPath: vault, userDataPath: userData, now: NOW })
+    ).rejects.toThrow(/不是 ASAKI 备份/);
+
+    expect(
+      await readFile(join(vault, 'workspaces', 'kaoyan', 'workspace.md'), 'utf8')
+    ).toBe('vault-data');
+    expect(await exists(join(userData, 'restore-safety'))).toBe(false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects a backup folder inside the current vault', async () => {
+  const { root, vault, userData } = await fixture();
+  const inside = join(vault, 'backups');
+  await mkdir(join(inside, 'vault'), { recursive: true });
+  try {
+    await expect(
+      restoreBackup({ backupPath: inside, vaultPath: vault, userDataPath: userData, now: NOW })
+    ).rejects.toThrow(/不能位于/);
+    expect(await exists(join(userData, 'restore-safety'))).toBe(false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('handleRestoreBackup returns null without touching data on cancel', async () => {
+  const pickDirectory = vi.fn().mockResolvedValue(null);
+  const getPaths = vi.fn();
+
+  expect(await handleRestoreBackup({ pickDirectory, getPaths })).toBeNull();
+  expect(getPaths).not.toHaveBeenCalled();
+});
+
+test('handleRestoreBackup restores the picked backup folder', async () => {
+  const { root, vault, userData, backup } = await backupFixture();
+  try {
+    const result = await handleRestoreBackup({
+      pickDirectory: async () => backup,
+      getPaths: async () => ({ vaultPath: vault, userDataPath: userData }),
+      now: NOW
+    });
+
+    expect(result?.restored.vault).toBe(true);
+    expect(
+      await readFile(join(vault, 'workspaces', 'kaoyan', 'workspace.md'), 'utf8')
+    ).toBe('restored-vault');
   } finally {
     await rm(root, { recursive: true, force: true });
   }

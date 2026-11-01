@@ -1147,6 +1147,15 @@ export function createMockApi(
       return null;
     },
 
+    async restoreBackup() {
+      // Restoring needs the native file picker and an app restart.
+      return null;
+    },
+
+    async restartApp() {
+      window.location.reload();
+    },
+
     async send(input: SendMessageInput): Promise<SendMessageResult> {
       recordNoteIfNeeded(input);
       return {

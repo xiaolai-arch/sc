@@ -1,6 +1,11 @@
 import { isLocalDateTime } from '../shared/date';
 import type { AppSettings } from '../shared/types';
-import type { BackupResult, SettingsPatch, StudyCoachApi } from '../shared/ipc';
+import type {
+  BackupResult,
+  RestoreResult,
+  SettingsPatch,
+  StudyCoachApi
+} from '../shared/ipc';
 import type { ButlerStreamEvent } from '../shared/butler-stream';
 import type {
   ConversationMessage,
@@ -100,7 +105,9 @@ export const APP_EVENT_CHANNELS = {
 
 /** Renderer-initiated app actions that live outside the handler table. */
 export const APP_IPC_CHANNELS = {
-  exportBackup: 'study-coach:app:export-backup'
+  exportBackup: 'study-coach:app:export-backup',
+  restoreBackup: 'study-coach:app:restore-backup',
+  restartApp: 'study-coach:app:restart'
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
@@ -796,6 +803,8 @@ export function createStudyCoachBridge(
       return subscribe(APP_EVENT_CHANNELS.quickCapture, () => listener());
     },
     exportBackup: () => call<BackupResult | null>(APP_IPC_CHANNELS.exportBackup),
+    restoreBackup: () => call<RestoreResult | null>(APP_IPC_CHANNELS.restoreBackup),
+    restartApp: () => call<void>(APP_IPC_CHANNELS.restartApp),
     send: (input) => call(IPC_CHANNELS.send, input),
     async stream(input, onEvent) {
       const requestId = createRequestId();

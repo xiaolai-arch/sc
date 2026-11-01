@@ -70,6 +70,8 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
   const [clearingUsage, setClearingUsage] = useState(false);
   const [theme, setTheme] = useState<ThemePreference>(() => loadThemePreference());
   const [exportingBackup, setExportingBackup] = useState(false);
+  const [restoringBackup, setRestoringBackup] = useState(false);
+  const [restoreSafetyPath, setRestoreSafetyPath] = useState<string | null>(null);
   const [backupStatus, setBackupStatus] = useState<{
     kind: 'success' | 'canceled' | 'error';
     message: string;
@@ -299,6 +301,40 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
       });
     } finally {
       setExportingBackup(false);
+    }
+  }
+
+  async function restoreBackup() {
+    const api = window.studyCoach;
+    if (!api || typeof api.restoreBackup !== 'function') {
+      setBackupStatus({ kind: 'error', message: '当前版本不支持恢复备份。' });
+      return;
+    }
+    const confirmed = window.confirm(
+      '从备份恢复会覆盖当前项目、记录和对话。恢复前会自动保存一份当前数据的快照；当前设置和 API Key 保持不变。继续？'
+    );
+    if (!confirmed) {
+      setBackupStatus({ kind: 'canceled', message: '已取消恢复' });
+      return;
+    }
+    setRestoringBackup(true);
+    setBackupStatus(null);
+    setRestoreSafetyPath(null);
+    try {
+      const result = await api.restoreBackup();
+      if (result === null) {
+        setBackupStatus({ kind: 'canceled', message: '已取消' });
+      } else {
+        setRestoreSafetyPath(result.safetyPath);
+        setBackupStatus({ kind: 'success', message: '恢复完成，重启后生效。' });
+      }
+    } catch (cause) {
+      setBackupStatus({
+        kind: 'error',
+        message: cause instanceof Error ? cause.message : '恢复备份失败，请重试。'
+      });
+    } finally {
+      setRestoringBackup(false);
     }
   }
 
@@ -636,16 +672,33 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
               数据与备份
             </h3>
             <p className="mt-2 text-gray-500 dark:text-[#a1a1a6]">
-              备份包含项目、记录、对话、设置和用量，不包含 API Key。
+              备份包含项目、记录、对话、设置和用量，不包含 API Key。恢复会覆盖项目、记录和对话；当前设置与 API Key 保持不变。
             </p>
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <Button
                 size="sm"
-                disabled={exportingBackup}
+                disabled={exportingBackup || restoringBackup}
                 onClick={() => void exportBackup()}
               >
                 {exportingBackup ? '正在导出…' : '导出备份…'}
               </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={exportingBackup || restoringBackup}
+                onClick={() => void restoreBackup()}
+              >
+                {restoringBackup ? '正在恢复…' : '从备份恢复…'}
+              </Button>
+              {restoreSafetyPath ? (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => void window.studyCoach?.restartApp?.()}
+                >
+                  立即重启
+                </Button>
+              ) : null}
               {backupStatus ? (
                 <p
                   {...(backupStatus.kind === 'success'
@@ -660,6 +713,11 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
                   }
                 >
                   {backupStatus.message}
+                </p>
+              ) : null}
+              {restoreSafetyPath ? (
+                <p className="text-sm text-gray-500 dark:text-[#a1a1a6]">
+                  恢复前的数据已保存在 {restoreSafetyPath}
                 </p>
               ) : null}
             </div>

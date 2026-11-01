@@ -40,6 +40,54 @@ test('saves provider model and api key without echoing the key', async () => {
   expect(screen.getByLabelText('API Key')).toHaveValue('');
 });
 
+test('restores a backup after confirmation and offers a restart', async () => {
+  const restoreBackup = vi.fn().mockResolvedValue({
+    path: '/tmp/backup',
+    safetyPath: '/tmp/safety',
+    restored: { vault: true, conversations: true, usage: true }
+  });
+  const restartApp = vi.fn().mockResolvedValue(undefined);
+  window.studyCoach = {
+    getSettings: vi.fn().mockResolvedValue(settings),
+    updateSettings: vi.fn(),
+    setApiKey: vi.fn(),
+    restoreBackup,
+    restartApp
+  } as never;
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+  render(<SettingsPage onClose={() => {}} />);
+  await screen.findByLabelText('模型名称');
+  await userEvent.click(screen.getByRole('button', { name: '从备份恢复…' }));
+
+  expect(confirm).toHaveBeenCalled();
+  expect(restoreBackup).toHaveBeenCalled();
+  expect(await screen.findByRole('status')).toHaveTextContent('恢复完成');
+  expect(screen.getByText(/\/tmp\/safety/)).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: '立即重启' }));
+  expect(restartApp).toHaveBeenCalled();
+  confirm.mockRestore();
+});
+
+test('does not restore when the confirmation is dismissed', async () => {
+  const restoreBackup = vi.fn();
+  window.studyCoach = {
+    getSettings: vi.fn().mockResolvedValue(settings),
+    updateSettings: vi.fn(),
+    setApiKey: vi.fn(),
+    restoreBackup
+  } as never;
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+  render(<SettingsPage onClose={() => {}} />);
+  await screen.findByLabelText('模型名称');
+  await userEvent.click(screen.getByRole('button', { name: '从备份恢复…' }));
+
+  expect(restoreBackup).not.toHaveBeenCalled();
+  confirm.mockRestore();
+});
+
 test('clears a previous saved status and validates the model', async () => {
   const update = vi.fn().mockResolvedValue(settings);
   window.studyCoach = {

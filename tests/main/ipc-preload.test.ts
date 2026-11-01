@@ -17,7 +17,9 @@ test('locks the app event channels', () => {
 
 test('locks the app IPC channels', () => {
   expect(APP_IPC_CHANNELS).toEqual({
-    exportBackup: 'study-coach:app:export-backup'
+    exportBackup: 'study-coach:app:export-backup',
+    restoreBackup: 'study-coach:app:restore-backup',
+    restartApp: 'study-coach:app:restart'
   });
 });
 
@@ -35,6 +37,28 @@ test('bridge invokes export backup and returns its result', async () => {
 
   expect(result).toMatchObject({ path: '/tmp/backup' });
   expect(calls).toEqual([{ channel: APP_IPC_CHANNELS.exportBackup, args: [] }]);
+});
+
+test('bridge invokes restore backup and restart', async () => {
+  const calls: string[] = [];
+  const bridge = createStudyCoachBridge(async (channel) => {
+    calls.push(channel);
+    if (channel === APP_IPC_CHANNELS.restoreBackup) {
+      return {
+        path: '/tmp/backup',
+        safetyPath: '/tmp/safety',
+        restored: { vault: true, conversations: true, usage: true }
+      };
+    }
+    return undefined;
+  });
+
+  expect(await bridge.restoreBackup?.()).toMatchObject({ path: '/tmp/backup' });
+  await bridge.restartApp?.();
+  expect(calls).toEqual([
+    APP_IPC_CHANNELS.restoreBackup,
+    APP_IPC_CHANNELS.restartApp
+  ]);
 });
 
 test('bridge subscribes to quick capture events and unsubscribes', () => {

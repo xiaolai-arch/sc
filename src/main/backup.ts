@@ -1,8 +1,8 @@
-import { copyFile, cp, mkdir, realpath, stat, writeFile } from 'node:fs/promises';
+import { copyFile, cp, mkdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import type { BackupResult } from '../shared/ipc';
+import type { BackupResult, RestoreResult } from '../shared/ipc';
 
-export type { BackupCopied, BackupResult } from '../shared/ipc';
+export type { BackupCopied, BackupResult, RestoreResult } from '../shared/ipc';
 
 export interface CreateBackupOptions {
   vaultPath: string;
@@ -148,7 +148,8 @@ export async function createBackup(options: CreateBackupOptions): Promise<Backup
     '',
     '不包含：API Key、secrets/ 或任何凭据。',
     '',
-    '恢复提示：将 vault/ 放回原 vault 路径；state.json 和 usage.json 可放回应用数据目录。',
+    '恢复提示：在「设置 → 数据与备份 → 从备份恢复…」选择本文件夹，可恢复 vault、对话和用量；当前设置与 API Key 保持不变。',
+    '也可以手动将 vault/ 放回原 vault 路径；state.json 和 usage.json 可放回应用数据目录。',
     ''
   ].join('\n');
   await writeFile(join(target, 'README.txt'), readme, 'utf8');
@@ -175,6 +176,159 @@ export async function handleExportBackup(
     vaultPath: paths.vaultPath,
     userDataPath: paths.userDataPath,
     destinationRoot,
+    ...(options.now ? { now: options.now } : {})
+  });
+}
+
+export interface RestoreBackupOptions {
+  backupPath: string;
+  vaultPath: string;
+  userDataPath: string;
+  now?: () => Date;
+}
+
+export type RestoreBackupResult = RestoreResult;
+
+export interface RestoreBackupHandleOptions {
+  pickDirectory: () => Promise<string | null>;
+  getPaths: () => Promise<{ vaultPath: string; userDataPath: string }>;
+  now?: () => Date;
+}
+
+function restoreStamp(date: Date): string {
+  return `restore-safety-${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+    date.getDate()
+  )}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+}
+
+async function swapDirectory(staged: string, target: string): Promise<void> {
+  await rm(target, { recursive: true, force: true });
+  await rename(staged, target);
+}
+
+async function copyFileAtomic(source: string, target: string): Promise<void> {
+  const temp = `${target}.restore-tmp`;
+  await copyFile(source, temp);
+  await rm(target, { force: true });
+  await rename(temp, target);
+}
+
+/**
+ * Restores a backup in place. The current vault, conversations, settings and
+ * usage are snapshotted under `<userData>/restore-safety/<stamp>` first, so a
+ * failed or regretted restore can be recovered by hand. `state.json` is
+ * deliberately not restored: it carries the vault path and provider settings,
+ * and overwriting them could point the app at a stale location. Secrets are
+ * untouched.
+ */
+export async function restoreBackup(options: RestoreBackupOptions): Promise<RestoreBackupResult> {
+  const now = (options.now ?? (() => new Date()))();
+  const backupPath = resolve(options.backupPath);
+  const vaultPath = resolve(options.vaultPath);
+  const userDataPath = resolve(options.userDataPath);
+
+  const [realBackup, realVault, realUserData] = await Promise.all([
+    realPathOrResolve(backupPath),
+    realPathOrResolve(vaultPath),
+    realPathOrResolve(userDataPath)
+  ]);
+  if (isInside(realBackup, realVault) || isInside(realBackup, realUserData)) {
+    throw new Error('备份目录不能位于当前 vault 或应用数据目录内。');
+  }
+
+  const sourceVault = join(realBackup, 'vault');
+  if (!(await isDirectory(sourceVault))) {
+    throw new Error('所选目录不是 ASAKI 备份：缺少 vault 文件夹。');
+  }
+  const realSourceVault = await realPathOrResolve(sourceVault);
+  if (isInside(realSourceVault, realVault)) {
+    throw new Error('备份目录不能位于当前 vault 或应用数据目录内。');
+  }
+
+  const conversationsSource = join(realBackup, 'conversations');
+  const conversationsExists = await isDirectory(conversationsSource);
+  const usageSource = join(realBackup, 'usage.json');
+  const usageExists = await isFile(usageSource);
+
+  const safetyPath = join(userDataPath, 'restore-safety', restoreStamp(now));
+  await mkdir(safetyPath, { recursive: true });
+  if (await isDirectory(vaultPath)) {
+    await cp(vaultPath, join(safetyPath, 'vault'), { recursive: true, dereference: true });
+  }
+  const currentConversations = join(userDataPath, 'conversations');
+  if (await isDirectory(currentConversations)) {
+    await cp(currentConversations, join(safetyPath, 'conversations'), {
+      recursive: true,
+      dereference: true
+    });
+  }
+  for (const name of ['state.json', 'usage.json']) {
+    const source = join(userDataPath, name);
+    if (await isFile(source)) await copyFile(source, join(safetyPath, name));
+  }
+
+  // Stage copies next to their targets so the swap is a same-volume rename.
+  const realTargetVault = await realPathOrResolve(vaultPath);
+  const vaultStage = join(dirname(realTargetVault), `.asaki-restore-vault-${process.pid}`);
+  let conversationsStage: string | null = null;
+  try {
+    await rm(vaultStage, { recursive: true, force: true });
+    await cp(sourceVault, vaultStage, { recursive: true, dereference: true });
+    if (conversationsExists) {
+      conversationsStage = join(userDataPath, `.asaki-restore-conversations-${process.pid}`);
+      await rm(conversationsStage, { recursive: true, force: true });
+      await cp(conversationsSource, conversationsStage, { recursive: true, dereference: true });
+    }
+  } catch (error) {
+    await rm(vaultStage, { recursive: true, force: true });
+    if (conversationsStage) await rm(conversationsStage, { recursive: true, force: true });
+    throw error;
+  }
+
+  try {
+    await swapDirectory(vaultStage, realTargetVault);
+  } catch (error) {
+    await rm(vaultStage, { recursive: true, force: true });
+    if (conversationsStage) await rm(conversationsStage, { recursive: true, force: true });
+    throw error;
+  }
+
+  if (conversationsStage) {
+    try {
+      await swapDirectory(conversationsStage, currentConversations);
+    } catch (error) {
+      // The vault was already replaced; point the user at the safety snapshot.
+      throw new Error(
+        `对话恢复失败，vault 已恢复。恢复前的数据保存在：${safetyPath}（${(error as Error).message}）`
+      );
+    }
+  }
+
+  if (usageExists) {
+    await copyFileAtomic(usageSource, join(userDataPath, 'usage.json'));
+  }
+
+  return {
+    path: realBackup,
+    safetyPath,
+    restored: {
+      vault: true,
+      conversations: conversationsExists,
+      usage: usageExists
+    }
+  };
+}
+
+export async function handleRestoreBackup(
+  options: RestoreBackupHandleOptions
+): Promise<RestoreBackupResult | null> {
+  const backupPath = await options.pickDirectory();
+  if (backupPath === null) return null;
+  const paths = await options.getPaths();
+  return restoreBackup({
+    backupPath,
+    vaultPath: paths.vaultPath,
+    userDataPath: paths.userDataPath,
     ...(options.now ? { now: options.now } : {})
   });
 }
