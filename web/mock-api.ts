@@ -26,6 +26,7 @@ import { BUTLER_TOOL_LABELS } from '../src/shared/butler-stream';
 import type {
   Conversation,
   ConversationMessage,
+  ConversationStep,
   ConversationSummary,
   CreateConversationInput
 } from '../src/shared/conversations';
@@ -302,6 +303,22 @@ export function createMockApi(
     };
     state.notes = [note, ...state.notes];
     return note;
+  }
+
+  function createWorkspaceInternal(input: CreateWorkspaceInput): Workspace {
+    const workspace: Workspace = {
+      id: nextId('workspace'),
+      name: input.name,
+      kind: input.kind,
+      color: input.color ?? '#8e8e93',
+      goal: input.goal,
+      description: input.description,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    state.workspaces = [...state.workspaces, workspace];
+    persist();
+    return workspace;
   }
 
   function recordNoteIfNeeded(input: SendMessageInput): { title: string } | null {
@@ -789,19 +806,7 @@ export function createMockApi(
     },
 
     async createWorkspace(input: CreateWorkspaceInput): Promise<Workspace> {
-      const workspace: Workspace = {
-        id: nextId('workspace'),
-        name: input.name,
-        kind: input.kind,
-        color: input.color ?? '#8e8e93',
-        goal: input.goal,
-        description: input.description,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      state.workspaces = [...state.workspaces, workspace];
-      persist();
-      return structuredClone(workspace);
+      return structuredClone(createWorkspaceInternal(input));
     },
 
     async getWorkspaceSnapshot(workspaceId: string): Promise<WorkspaceSnapshot> {
@@ -942,24 +947,106 @@ export function createMockApi(
     },
 
     async stream(input, onEvent): Promise<SendMessageResult> {
+      const steps: ConversationStep[] = [];
+      const conversation = input.conversationId
+        ? state.conversations.find((entry) => entry.id === input.conversationId)
+        : undefined;
       const wantsNote = /记一下|记录/.test(input.message);
-      const reasoning = wantsNote
-        ? '先确认要记录的内容，然后写入当前工作区。'
-        : '先看今天的任务和最近的记忆，再给出 1-3 个可执行的下一步。';
+      const wantsExamProject = /我想考研/.test(input.message);
+      const reasoning = wantsExamProject
+        ? '先确认目标、科目和每天可用时间，再创建项目并排第一批任务。'
+        : wantsNote
+          ? '先确认要记录的内容，然后写入当前工作区。'
+          : '先看今天的任务和最近的记忆，再给出 1-3 个可执行的下一步。';
 
       for (const chunk of chunkText(reasoning, 4)) {
         onEvent({ type: 'reasoning', text: chunk });
         await sleep(80 * pace);
       }
 
-      if (wantsNote) {
+      let reply = butlerReply(input.message);
+
+      if (wantsExamProject) {
+        const label = '创建项目';
+        const id = `tool-workspace-${Date.now()}`;
+        const step: ConversationStep = {
+          id,
+          name: 'create_workspace',
+          label,
+          status: 'running'
+        };
+        steps.push(step);
+        onEvent({ type: 'tool-start', id, name: 'create_workspace', label });
+        await sleep(300 * pace);
+        const workspace = createWorkspaceInternal({
+          name: '考研',
+          kind: 'exam',
+          goal: '2027 考研上岸',
+          description: '由管家在对话里创建'
+        });
+        if (conversation) {
+          conversation.workspaceId = workspace.id;
+        }
+        state.tasks = [
+          ...state.tasks,
+          {
+            id: nextId('task'),
+            workspaceId: workspace.id,
+            title: '极限基础',
+            subject: '数学',
+            durationMin: 45,
+            acceptance: '完成 10 题并整理错题',
+            status: 'pending'
+          },
+          {
+            id: nextId('task'),
+            workspaceId: workspace.id,
+            title: '阅读理解',
+            subject: '英语',
+            durationMin: 30,
+            acceptance: '精读 1 篇',
+            status: 'pending'
+          },
+          {
+            id: nextId('task'),
+            workspaceId: workspace.id,
+            title: '408 数据结构',
+            subject: '专业课',
+            durationMin: 60,
+            acceptance: '完成第一章框架',
+            status: 'pending'
+          }
+        ];
+        persist();
+        step.status = 'done';
+        onEvent({
+          type: 'tool-result',
+          id,
+          name: 'create_workspace',
+          ok: true,
+          label
+        });
+        reply = '已创建项目「考研」，并放进第一批任务。右侧项目面板可以直接看计划和记录。';
+        await sleep(120 * pace);
+      }
+
+      if (wantsNote && !wantsExamProject) {
         const label = BUTLER_TOOL_LABELS['write_note'] ?? '写入笔记';
         const id = `tool-${Date.now()}`;
+        const step: ConversationStep = {
+          id,
+          name: 'write_note',
+          label,
+          status: 'running'
+        };
+        steps.push(step);
         onEvent({ type: 'narration', text: '我先把这条记下来。' });
         await sleep(120 * pace);
         onEvent({ type: 'tool-start', id, name: 'write_note', label });
         await sleep(400 * pace);
         const recorded = recordNoteIfNeeded(input);
+        step.status = recorded === null ? 'failed' : 'done';
+        if (recorded === null) step.detail = '没有可写入的工作区';
         onEvent({
           type: 'tool-result',
           id,
@@ -971,13 +1058,29 @@ export function createMockApi(
         await sleep(120 * pace);
       }
 
-      const reply = butlerReply(input.message);
       for (const chunk of chunkText(reply, 6)) {
         onEvent({ type: 'text', text: chunk });
         await sleep(40 * pace);
       }
       onEvent({ type: 'done', text: reply });
-      return { text: reply };
+
+      if (conversation) {
+        conversation.messages.push({
+          id: input.assistantMessageId ?? nextId('assistant'),
+          role: 'assistant',
+          text: reply,
+          createdAt: new Date().toISOString(),
+          ...(steps.length > 0 ? { steps: steps.map((step) => ({ ...step })) } : {}),
+          source: 'butler'
+        });
+        conversation.updatedAt = new Date().toISOString();
+        persist();
+      }
+
+      return {
+        text: reply,
+        ...(conversation ? { conversationId: conversation.id } : {})
+      };
     }
   };
 }

@@ -110,6 +110,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   >({});
   const [actionError, setActionError] = useState<string | null>(null);
   const [modelLabel, setModelLabel] = useState('模板计划');
+  const streamGenerationRef = useRef(0);
 
   const currentWorkspace = workspaces.find((workspace) => workspace.id === projectId) ?? null;
   const today = formatLocalDate(new Date());
@@ -162,6 +163,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
 
   async function sendMessage(text: string) {
     if (typing) return;
+    const generation = ++streamGenerationRef.current;
     setActionError(null);
     setTyping(true);
 
@@ -263,6 +265,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
         {
           workspaceId: conversation.workspaceId ?? projectId ?? undefined,
           conversationId: conversation.id,
+          assistantMessageId: assistantId,
           message: text
         } satisfies SendMessageInput,
         (event) => {
@@ -350,19 +353,12 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
       );
 
       flushNow();
-      const finalText =
-        (result.text || assistantText).trim() || '管家暂时没有整理出回复，请再试一次。';
       const finalConversationId = result.conversationId ?? conversation.id;
-      await conversations.append(finalConversationId, {
-        id: assistantId,
-        role: 'assistant',
-        text: finalText,
-        createdAt: new Date().toISOString(),
-        ...(assistantSteps.length > 0
-          ? { steps: toConversationSteps(assistantSteps) }
-          : {}),
-        source: 'butler'
-      });
+      if (generation !== streamGenerationRef.current) {
+        await conversations.refresh();
+        await reload();
+        return;
+      }
       if (assistantReasoning) {
         setReasoningById((current) => ({ ...current, [assistantId]: assistantReasoning }));
         setReasoningMetaById((current) => ({
@@ -377,24 +373,18 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
           }
         }));
       }
+      await conversations.select(finalConversationId);
       await reload();
     } catch (cause) {
       flushNow();
       setActionError(streamError ?? messageOf(cause));
-      const fallback = assistantText.trim() || '管家暂时没有回应，请稍后再试。';
-      try {
-        await conversations.append(conversation.id, {
-          id: assistantId,
-          role: 'assistant',
-          text: fallback,
-          createdAt: new Date().toISOString(),
-          ...(assistantSteps.length > 0
-            ? { steps: toConversationSteps(assistantSteps) }
-            : {}),
-          source: 'butler'
-        });
-      } catch {
-        // The visible error banner already explains the failure.
+      if (generation === streamGenerationRef.current) {
+        try {
+          await conversations.select(conversation.id);
+          await reload();
+        } catch {
+          // The visible error banner already explains the failure.
+        }
       }
     } finally {
       flushNow();
@@ -404,18 +394,21 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   }
 
   function startDraft() {
+    streamGenerationRef.current += 1;
     conversations.startDraft();
     setStreamingMessage(null);
     setActionError(null);
   }
 
   function selectConversation(id: string) {
+    streamGenerationRef.current += 1;
     setStreamingMessage(null);
     setActionError(null);
     void conversations.select(id);
   }
 
   function selectProject(id: string) {
+    streamGenerationRef.current += 1;
     setProjectId(id);
     if (conversations.active?.workspaceId === id) return;
     const recent = conversations.summaries.find((summary) => summary.workspaceId === id);

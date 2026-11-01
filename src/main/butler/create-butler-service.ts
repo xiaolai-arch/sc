@@ -6,6 +6,7 @@ import {
   type ModelClient
 } from '../agent/model-client';
 import { ButlerServiceImpl, type ButlerServiceOptions } from './butler-service';
+import type { ConversationStore } from '../conversations/conversation-store';
 
 export interface CreateButlerServiceOptions {
   /**
@@ -15,6 +16,8 @@ export interface CreateButlerServiceOptions {
   workspaceService?: WorkspaceService | null;
   /** Pre-built model client. Takes precedence over provider/apiKey. */
   modelClient?: ModelClient | null;
+  /** Optional conversation store used to load history and persist replies. */
+  conversationStore?: ConversationStore | null;
   provider?: ProviderConfig;
   /** Kept in memory only; never logged, stored, or echoed in replies. */
   apiKey?: string | null;
@@ -42,6 +45,9 @@ export function createButlerService(
   const serviceOptions: ButlerServiceOptions = {
     workspaceService: options.workspaceService ?? null,
     modelClient,
+    ...(options.conversationStore !== undefined
+      ? { conversationStore: options.conversationStore }
+      : {}),
     ...(options.now ? { now: options.now } : {}),
     ...(options.maxToolSteps !== undefined ? { maxToolSteps: options.maxToolSteps } : {}),
     ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),

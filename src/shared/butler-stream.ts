@@ -31,6 +31,9 @@ export interface StreamingButlerApi {
 }
 
 export const BUTLER_TOOL_LABELS: Record<string, string> = {
+  create_workspace: '创建项目',
+  create_task: '创建任务',
+  set_reminder: '设置提醒',
   get_today_plan: '读取今日计划',
   write_note: '写入笔记',
   update_task: '更新任务',

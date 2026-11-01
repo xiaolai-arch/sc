@@ -121,12 +121,27 @@ export interface SubmitReviewInput {
   answers: ReviewAnswers;
 }
 
+export interface CreateReminderInput {
+  time: string;
+  label: string;
+  enabled?: boolean;
+}
+
+export interface UpdateReminderInput {
+  id: string;
+  time?: string;
+  label?: string;
+  enabled?: boolean;
+}
+
 export interface SendMessageInput {
   workspaceId?: string;
   taskId?: string;
   message: string;
-  /** Conversation to append to. When omitted, the butler creates one. */
+  /** Conversation to append to. When omitted, the call is stateless. */
   conversationId?: string;
+  /** Renderer-provided id so live reasoning can be reattached after reload. */
+  assistantMessageId?: string;
 }
 
 export interface SendMessageResult {
@@ -149,6 +164,8 @@ export interface WorkspaceService {
   updateNote(input: UpdateWorkspaceNoteInput): Promise<WorkspaceNote>;
   getMemory(workspaceId?: string): Promise<MemoryItem[]>;
   getReminders(): Promise<Reminder[]>;
+  createReminder?(input: CreateReminderInput): Promise<Reminder>;
+  updateReminder?(input: UpdateReminderInput): Promise<Reminder>;
   submitReview(input: SubmitReviewInput): Promise<void>;
 }
 

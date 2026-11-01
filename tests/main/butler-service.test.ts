@@ -215,6 +215,9 @@ describe('ButlerServiceImpl replies', () => {
     const request = client.calls[0];
     expect(request?.messages.at(-1)).toEqual({ role: 'user', content: '今天学什么？' });
     expect(request?.tools?.map((tool) => tool.name)).toEqual([
+      'create_workspace',
+      'create_task',
+      'set_reminder',
       'get_today_plan',
       'write_note',
       'update_task',

@@ -28,6 +28,7 @@ export interface ButlerFactoryDependencies {
   workspaceService: WorkspaceService;
   provider: ProviderConfig;
   apiKey: string | null;
+  conversationStore?: ConversationStore;
   modelClient?: ModelClient | null;
 }
 
@@ -169,6 +170,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       workspaceService: dependencies.workspaceService,
       provider: dependencies.provider,
       apiKey: dependencies.apiKey,
+      conversationStore,
       now,
       ...(dependencies.modelClient !== undefined ? { modelClient: dependencies.modelClient } : {})
     });
@@ -213,7 +215,8 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     const dependencies: ButlerFactoryDependencies = {
       workspaceService: workspace,
       provider: nextSettings.provider,
-      apiKey
+      apiKey,
+      conversationStore
     };
     if (options.modelClient !== undefined) dependencies.modelClient = options.modelClient;
     const butler = createButler(nextSettings.vaultPath, dependencies);

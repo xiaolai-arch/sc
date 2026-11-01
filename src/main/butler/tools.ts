@@ -1,5 +1,6 @@
 import { formatLocalDate } from '../../shared/date';
 import type {
+  WorkspaceKind,
   WorkspaceService,
   WorkspaceTaskStatus
 } from '../../shared/workspace';
@@ -40,12 +41,114 @@ const TASK_STATUSES: readonly WorkspaceTaskStatus[] = [
   'skipped'
 ];
 
+const WORKSPACE_KINDS: readonly WorkspaceKind[] = ['exam', 'study', 'project', 'life'];
+
 /**
  * Minimal butler tool set. Every tool delegates to the injected
  * WorkspaceService so the same tools work against the real vault and fakes.
  */
 export function createButlerTools(): ButlerToolDefinition[] {
   return [
+    {
+      name: 'create_workspace',
+      description:
+        '创建一个新的项目（workspace）。当用户说想考研、想学英语或想推进一个项目时，先收集名称、类型、目标和说明，再调用这个工具。',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: '项目名称，例如：考研' },
+          kind: {
+            type: 'string',
+            enum: [...WORKSPACE_KINDS],
+            description: '项目类型：exam / study / project / life'
+          },
+          goal: { type: 'string', description: '这个项目想达成的目标' },
+          description: { type: 'string', description: '补充说明，可以为空' }
+        },
+        required: ['name', 'kind', 'goal'],
+        additionalProperties: false
+      },
+      async execute(input, context) {
+        const name = requiredString(input, 'name');
+        const kind = requiredWorkspaceKind(input);
+        const goal = optionalString(input, 'goal') ?? '';
+        const description = optionalString(input, 'description') ?? '';
+        const workspace = await context.workspace.createWorkspace({
+          name,
+          kind,
+          goal,
+          description
+        });
+        return {
+          workspaceId: workspace.id,
+          name: workspace.name,
+          kind: workspace.kind,
+          goal: workspace.goal
+        };
+      }
+    },
+    {
+      name: 'create_task',
+      description:
+        '给当前项目创建一条任务。需要标题和时长；workspaceId 省略时使用当前对话的项目。',
+      parameters: {
+        type: 'object',
+        properties: {
+          workspaceId: { type: 'string', description: '项目 ID；省略时使用当前项目' },
+          title: { type: 'string', description: '任务标题' },
+          subject: { type: 'string', description: '科目或主题' },
+          durationMin: { type: 'number', minimum: 1, description: '预计时长（分钟）' },
+          acceptance: { type: 'string', description: '验收标准' },
+          due: { type: 'string', description: '可选截止日期，YYYY-MM-DD' }
+        },
+        required: ['title', 'durationMin'],
+        additionalProperties: false
+      },
+      async execute(input, context) {
+        const workspaceId = optionalString(input, 'workspaceId') ?? context.workspaceId;
+        if (!workspaceId) {
+          throw new ToolInputError('缺少 workspaceId：请先创建或选择项目。');
+        }
+        const title = requiredString(input, 'title');
+        const subject = optionalString(input, 'subject') ?? '学习';
+        const durationMin = requiredPositiveNumber(input, 'durationMin');
+        const acceptance = optionalString(input, 'acceptance') ?? '完成并记录结果';
+        const due = optionalString(input, 'due');
+        return context.workspace.createTask({
+          workspaceId,
+          title,
+          subject,
+          durationMin,
+          acceptance,
+          ...(due ? { due } : {})
+        });
+      }
+    },
+    {
+      name: 'set_reminder',
+      description:
+        '创建一个提醒。time 使用 HH:MM（24 小时制），label 是提醒内容。提醒是全局的，不属于某个项目。',
+      parameters: {
+        type: 'object',
+        properties: {
+          time: { type: 'string', description: '提醒时间，HH:MM' },
+          label: { type: 'string', description: '提醒内容' },
+          enabled: { type: 'boolean', description: '是否启用，默认 true' }
+        },
+        required: ['time', 'label'],
+        additionalProperties: false
+      },
+      async execute(input, context) {
+        const createReminder = context.workspace.createReminder;
+        if (!createReminder) {
+          throw new ToolInputError('当前工作区不支持写入提醒。');
+        }
+        const time = requiredString(input, 'time');
+        const label = requiredString(input, 'label');
+        const enabled = typeof input.enabled === 'boolean' ? input.enabled : true;
+        return createReminder.call(context.workspace, { time, label, enabled });
+      }
+    },
     {
       name: 'get_today_plan',
       description:
@@ -341,6 +444,22 @@ function optionalNumber(input: Record<string, unknown>, key: string): number | u
   }
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
     throw new ToolInputError(`参数 ${key} 必须是非负数字。`);
+  }
+  return value;
+}
+
+function requiredWorkspaceKind(input: Record<string, unknown>): WorkspaceKind {
+  const value = requiredString(input, 'kind');
+  if (!(WORKSPACE_KINDS as readonly string[]).includes(value)) {
+    throw new ToolInputError(`参数 kind 必须是 ${WORKSPACE_KINDS.join(' / ')} 之一。`);
+  }
+  return value as WorkspaceKind;
+}
+
+function requiredPositiveNumber(input: Record<string, unknown>, key: string): number {
+  const value = optionalNumber(input, key);
+  if (value === undefined || value <= 0) {
+    throw new ToolInputError(`参数 ${key} 必须是正数。`);
   }
   return value;
 }

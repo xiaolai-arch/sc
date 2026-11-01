@@ -3,11 +3,13 @@ import { posix, resolve } from 'node:path';
 import { formatLocalDate } from '../../shared/date';
 import type {
   CreateNoteInput,
+  CreateReminderInput,
   CreateTaskInput,
   CreateWorkspaceInput,
   MemoryItem,
   Reminder,
   SubmitReviewInput,
+  UpdateReminderInput,
   UpdateWorkspaceNoteInput,
   UpdateWorkspaceTaskInput,
   Workspace,
@@ -37,7 +39,7 @@ import {
   toWorkspaceNote,
   type NoteRecord
 } from './records/notes';
-import { parseRemindersFile } from './records/reminders';
+import { parseRemindersFile, serializeRemindersFile } from './records/reminders';
 import {
   isTaskStatus,
   parseTaskFile,
@@ -63,6 +65,14 @@ function requireString(value: unknown, label: string): string {
     throw new Error(`${label} is required`);
   }
   return value;
+}
+
+function normalizeReminderTime(value: unknown): string {
+  const time = requireString(value, 'Reminder time');
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+    throw new Error('Reminder time must be HH:MM');
+  }
+  return time;
 }
 
 function optionalString(value: unknown): string | undefined {
@@ -371,6 +381,49 @@ export function createWorkspaceService(root: string): WorkspaceService {
     async getReminders(): Promise<Reminder[]> {
       await ensureVault();
       return readReminders();
+    },
+
+    async createReminder(input: CreateReminderInput): Promise<Reminder> {
+      await ensureVault();
+      const time = normalizeReminderTime(input?.time);
+      const label = requireString(input?.label, 'Reminder label');
+      return runExclusively(async () => {
+        const reminders = await readReminders();
+        const reminder: Reminder = {
+          id: newId('rem'),
+          time,
+          label,
+          enabled: input?.enabled ?? true
+        };
+        await writeFileAtomic(
+          remindersFile(vaultRoot),
+          serializeRemindersFile([...reminders, reminder])
+        );
+        return reminder;
+      });
+    },
+
+    async updateReminder(input: UpdateReminderInput): Promise<Reminder> {
+      await ensureVault();
+      const id = requireString(input?.id, 'Reminder id');
+      return runExclusively(async () => {
+        const reminders = await readReminders();
+        const index = reminders.findIndex((reminder) => reminder.id === id);
+        if (index < 0) throw new Error('Reminder not found');
+        const current = reminders[index]!;
+        const next: Reminder = {
+          ...current,
+          ...(input.time !== undefined ? { time: normalizeReminderTime(input.time) } : {}),
+          ...(input.label !== undefined
+            ? { label: requireString(input.label, 'Reminder label') }
+            : {}),
+          ...(input.enabled !== undefined ? { enabled: input.enabled } : {})
+        };
+        const updated = [...reminders];
+        updated[index] = next;
+        await writeFileAtomic(remindersFile(vaultRoot), serializeRemindersFile(updated));
+        return next;
+      });
     },
 
     async submitReview(input: SubmitReviewInput): Promise<void> {
