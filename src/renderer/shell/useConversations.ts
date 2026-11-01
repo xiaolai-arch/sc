@@ -18,6 +18,7 @@ export type ConversationController = {
   create: (input?: CreateConversationInput) => Promise<Conversation>;
   append: (id: string, message: ConversationMessage) => Promise<Conversation>;
   remove: (id: string) => Promise<void>;
+  setModel: (id: string, model: string | null) => Promise<void>;
   rename: (id: string, title: string) => Promise<void>;
   setPinned: (id: string, pinned: boolean) => Promise<void>;
   truncate: (id: string, keepCount: number) => Promise<Conversation>;
@@ -113,6 +114,16 @@ export function useConversations(): ConversationController {
     [refresh]
   );
 
+  const setModel = useCallback(
+    async (id: string, model: string | null) => {
+      const api = apiOrThrow();
+      const conversation = await api.setConversationModel(id, model);
+      setActive((current) => (current?.id === conversation.id ? conversation : current));
+      await refresh();
+    },
+    [refresh]
+  );
+
   const rename = useCallback(
     async (id: string, title: string) => {
       const api = apiOrThrow();
@@ -160,6 +171,7 @@ export function useConversations(): ConversationController {
     create,
     append,
     remove,
+    setModel,
     rename,
     setPinned,
     truncate,

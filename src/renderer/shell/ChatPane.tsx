@@ -32,6 +32,7 @@ type ChatPaneProps = {
   onCancelEdit?: () => void;
   onRegenerate?: (messageId: string) => void;
   onEditMessage?: (messageId: string) => void;
+  onOpenModelPicker?: () => void;
 };
 
 const suggestedPrompts = [
@@ -60,7 +61,8 @@ export function ChatPane({
   editing = false,
   onCancelEdit,
   onRegenerate,
-  onEditMessage
+  onEditMessage,
+  onOpenModelPicker
 }: ChatPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
@@ -238,6 +240,7 @@ export function ChatPane({
         editing={editing}
         {...(onStop ? { onStop } : {})}
         {...(onCancelEdit ? { onCancelEdit } : {})}
+        {...(onOpenModelPicker ? { onOpenModelPicker } : {})}
       />
     </div>
   );

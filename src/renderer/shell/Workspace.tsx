@@ -23,6 +23,7 @@ import {
   type FocusSession
 } from './focus-timer';
 import { LearningPane } from './LearningPane';
+import { ModelPickerDialog } from './ModelPickerDialog';
 import { ProjectPanel, type ProjectPanelTab } from './ProjectPanel';
 import { QuickCaptureDialog } from './QuickCaptureDialog';
 import type { ChatMessage, ChatStep } from './types';
@@ -149,6 +150,9 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   const [focusNotice, setFocusNotice] = useState<string | null>(null);
   const [snoozedUntil, setSnoozedUntil] = useState<string | null>(null);
   const [quickCaptureOpen, setQuickCaptureOpen] = useState(false);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [modelSaving, setModelSaving] = useState(false);
+  const [modelError, setModelError] = useState<string | null>(null);
   const focusSessionCounterRef = useRef(0);
   const recordedFocusSessionsRef = useRef<Set<number>>(new Set());
   const tasksRef = useRef(tasks);
@@ -633,11 +637,35 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
       setStreamingMessage(null);
       setEditingMessageId(null);
       setComposerText('');
+      setModelPickerOpen(false);
+      setModelError(null);
     }
     try {
       await conversations.remove(id);
     } catch (cause) {
       setActionError(messageOf(cause));
+    }
+  }
+
+  function openModelPicker() {
+    if (!conversations.active) return;
+    setModelError(null);
+    setModelPickerOpen(true);
+  }
+
+  async function saveConversationModel(model: string) {
+    const active = conversations.active;
+    if (!active) return;
+    setModelSaving(true);
+    setModelError(null);
+    try {
+      const trimmed = model.trim();
+      await conversations.setModel(active.id, trimmed ? trimmed : null);
+      setModelPickerOpen(false);
+    } catch (cause) {
+      setModelError(messageOf(cause));
+    } finally {
+      setModelSaving(false);
     }
   }
 
@@ -679,6 +707,8 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     setEditingMessageId(null);
     setComposerText('');
     setSidebarOpen(false);
+    setModelPickerOpen(false);
+    setModelError(null);
   }
 
   function selectConversation(id: string) {
@@ -688,6 +718,8 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     setEditingMessageId(null);
     setComposerText('');
     setSidebarOpen(false);
+    setModelPickerOpen(false);
+    setModelError(null);
     void conversations.select(id);
   }
 
@@ -726,7 +758,8 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   }
 
   const bannerError = actionError ?? conversations.error ?? error;
-  const displayModel = hasApiKey ? modelLabel : '模板计划';
+  const displayModel =
+    conversations.active?.model?.trim() || (hasApiKey ? modelLabel : '模板计划');
 
   return (
     <div className="flex h-screen flex-col bg-[#f7f6f3] dark:bg-[#0f0f10]">
@@ -805,6 +838,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
             onEditMessage={editLastUserMessage}
             onOpenSidebar={() => setSidebarOpen(true)}
             sidebarOpen={sidebarOpen}
+            {...(conversations.active ? { onOpenModelPicker: openModelPicker } : {})}
           />
 
           <ProjectPanel
@@ -952,6 +986,19 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
           setQuickCaptureOpen(false);
           void sendMessage(text);
         }}
+      />
+
+      <ModelPickerDialog
+        open={modelPickerOpen}
+        globalModel={modelLabel}
+        initialModel={conversations.active?.model ?? ''}
+        saving={modelSaving}
+        error={modelError}
+        onClose={() => {
+          setModelPickerOpen(false);
+          setModelError(null);
+        }}
+        onSave={(model) => void saveConversationModel(model)}
       />
 
       <Dialog

@@ -14,6 +14,7 @@ type ComposerProps = {
   onStop?: () => void;
   editing?: boolean;
   onCancelEdit?: () => void;
+  onOpenModelPicker?: () => void;
 };
 
 export function Composer({
@@ -24,7 +25,8 @@ export function Composer({
   disabled = false,
   onStop,
   editing = false,
-  onCancelEdit
+  onCancelEdit,
+  onOpenModelPicker
 }: ComposerProps) {
   function send() {
     const trimmed = text.trim();
@@ -83,10 +85,22 @@ export function Composer({
             </button>
           </div>
           <div className="flex min-w-0 items-center gap-3">
-            <span className="hidden min-w-0 items-center gap-1.5 text-[11px] text-gray-500 dark:text-[#8e8e93] sm:flex">
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#34c759]" />
-              <span className="truncate">{modelLabel}</span>
-            </span>
+            {onOpenModelPicker ? (
+              <button
+                type="button"
+                aria-label="设置本对话模型"
+                onClick={onOpenModelPicker}
+                className="hidden min-w-0 items-center gap-1.5 text-[11px] text-gray-500 dark:text-[#8e8e93] transition-colors hover:text-black dark:hover:text-[#f5f5f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 sm:flex"
+              >
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#34c759]" />
+                <span className="truncate">{modelLabel}</span>
+              </button>
+            ) : (
+              <span className="hidden min-w-0 items-center gap-1.5 text-[11px] text-gray-500 dark:text-[#8e8e93] sm:flex">
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#34c759]" />
+                <span className="truncate">{modelLabel}</span>
+              </span>
+            )}
             {disabled && onStop ? (
               <button
                 type="button"
