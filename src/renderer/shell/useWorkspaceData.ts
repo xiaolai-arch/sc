@@ -19,11 +19,13 @@ import type { SearchResult } from '../../shared/search';
 import type { ReviewAnswers } from '../../shared/types';
 import type {
   CreateNoteInput,
+  CreateReminderInput,
   CreateTaskInput,
   MemoryItem,
   Reminder,
   SendMessageInput,
   SendMessageResult,
+  UpdateReminderInput,
   UpdateWorkspaceNoteInput,
   UpdateWorkspaceTaskInput,
   Workspace,
@@ -74,6 +76,8 @@ export type WorkspaceData = WorkspaceDataState & {
   ) => Promise<SendMessageResult>;
   cancelStream: (messageId: string) => Promise<void>;
   submitReview: (date: string, answers: ReviewAnswers, workspaceId?: string) => Promise<void>;
+  createReminder: (input: CreateReminderInput) => Promise<Reminder>;
+  updateReminder: (input: UpdateReminderInput) => Promise<Reminder>;
 };
 
 const EMPTY_PRACTICE: PracticeData = {
@@ -346,6 +350,49 @@ export function useWorkspaceData(): WorkspaceData {
     [reload]
   );
 
+  const createReminder = useCallback(async (input: CreateReminderInput) => {
+    const api = apiOrThrow();
+    if (!api.createReminder) throw new Error('当前存储不支持提醒。');
+    const reminder = await api.createReminder(input);
+    setState((current) => ({ ...current, reminders: [...current.reminders, reminder] }));
+    return reminder;
+  }, []);
+
+  const updateReminder = useCallback(
+    async (input: UpdateReminderInput) => {
+      const api = apiOrThrow();
+      if (!api.updateReminder) throw new Error('当前存储不支持提醒。');
+      // Optimistic flip keeps the switch responsive; reload restores truth on failure.
+      setState((current) => ({
+        ...current,
+        reminders: current.reminders.map((reminder) =>
+          reminder.id === input.id
+            ? {
+                ...reminder,
+                ...(input.time !== undefined ? { time: input.time } : {}),
+                ...(input.label !== undefined ? { label: input.label } : {}),
+                ...(input.enabled !== undefined ? { enabled: input.enabled } : {})
+              }
+            : reminder
+        )
+      }));
+      try {
+        const reminder = await api.updateReminder(input);
+        setState((current) => ({
+          ...current,
+          reminders: current.reminders.map((entry) =>
+            entry.id === reminder.id ? reminder : entry
+          )
+        }));
+        return reminder;
+      } catch (cause) {
+        await reload();
+        throw cause;
+      }
+    },
+    [reload]
+  );
+
   return {
     ...state,
     reload,
@@ -361,6 +408,8 @@ export function useWorkspaceData(): WorkspaceData {
     send,
     stream,
     cancelStream,
-    submitReview
+    submitReview,
+    createReminder,
+    updateReminder
   };
 }

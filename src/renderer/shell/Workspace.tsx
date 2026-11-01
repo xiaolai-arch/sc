@@ -10,6 +10,16 @@ import { SettingsPage } from '../settings/SettingsPage';
 import { Dialog } from '../ui/Dialog';
 import { ChatPane } from './ChatPane';
 import { ConversationSidebar } from './ConversationSidebar';
+import {
+  FOCUS_DURATION_MS,
+  FOCUS_TICK_MS,
+  firstFocusableTask,
+  focusCompletionStatus,
+  nextActualMin,
+  startFocusSession,
+  tickFocus,
+  type FocusSession
+} from './focus-timer';
 import { LearningPane } from './LearningPane';
 import { ProjectPanel, type ProjectPanelTab } from './ProjectPanel';
 import type { ChatMessage, ChatStep } from './types';
@@ -103,7 +113,11 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     reload,
     stream,
     cancelStream,
-    submitPracticeAnswer
+    submitPracticeAnswer,
+    updateTask,
+    createNote,
+    createReminder,
+    updateReminder
   } = useWorkspaceData();
   const conversations = useConversations();
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -118,6 +132,12 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   const [streamingMessage, setStreamingMessage] = useState<ChatMessage | null>(null);
   const [composerText, setComposerText] = useState('');
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [focus, setFocus] = useState<FocusSession | null>(null);
+  const [focusNotice, setFocusNotice] = useState<string | null>(null);
+  const focusSessionCounterRef = useRef(0);
+  const recordedFocusSessionsRef = useRef<Set<number>>(new Set());
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
   const [reasoningById, setReasoningById] = useState<Record<string, string>>({});
   const [reasoningMetaById, setReasoningMetaById] = useState<
     Record<string, { startedAt?: number; endedAt?: number }>
@@ -158,6 +178,38 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   useEffect(() => {
     void loadModelLabel();
   }, [loadModelLabel]);
+
+  useEffect(() => {
+    if (!focus?.running) return undefined;
+    const id = window.setInterval(() => {
+      setFocus((current) => (current && current.running ? tickFocus(current) : current));
+    }, FOCUS_TICK_MS);
+    return () => window.clearInterval(id);
+  }, [focus?.running]);
+
+  useEffect(() => {
+    if (!focus || focus.remainingMs > 0 || focus.recorded) return;
+    if (recordedFocusSessionsRef.current.has(focus.sessionId)) return;
+    recordedFocusSessionsRef.current.add(focus.sessionId);
+    setFocus((current) => (current ? { ...current, recorded: true } : current));
+    const task = tasksRef.current.find((entry) => entry.id === focus.taskId);
+    if (!task) {
+      setFocusNotice('专注完成，但任务已不存在。');
+      return;
+    }
+    void (async () => {
+      try {
+        await updateTask({
+          taskId: task.id,
+          status: focusCompletionStatus(task.status),
+          actualMin: nextActualMin(task.actualMin)
+        });
+        setFocusNotice('专注完成，已记录 25 分钟');
+      } catch (cause) {
+        setFocusNotice(messageOf(cause));
+      }
+    })();
+  }, [focus?.remainingMs, focus?.recorded, focus?.sessionId, updateTask]);
 
   useEffect(() => {
     if (!conversations.active) return;
@@ -485,6 +537,46 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     setComposerText('');
   }
 
+  function startFocusForTask(taskId: string) {
+    const task = tasks.find((entry) => entry.id === taskId);
+    if (!task) return;
+    focusSessionCounterRef.current += 1;
+    setFocus(startFocusSession(focusSessionCounterRef.current, task));
+    setFocusNotice(null);
+  }
+
+  function startDefaultFocus() {
+    const task = firstFocusableTask(tasks);
+    if (task) startFocusForTask(task.id);
+  }
+
+  function pauseFocus() {
+    setFocus((current) =>
+      current && current.running ? { ...current, running: false } : current
+    );
+  }
+
+  function resumeFocus() {
+    setFocus((current) =>
+      current && !current.running && current.remainingMs > 0
+        ? { ...current, running: true }
+        : current
+    );
+  }
+
+  function resetFocus() {
+    if (!focus) return;
+    focusSessionCounterRef.current += 1;
+    setFocus({
+      ...focus,
+      sessionId: focusSessionCounterRef.current,
+      remainingMs: FOCUS_DURATION_MS,
+      running: false,
+      recorded: false
+    });
+    setFocusNotice(null);
+  }
+
   async function renameConversation(id: string, title: string) {
     try {
       await conversations.rename(id, title);
@@ -659,6 +751,19 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               setPracticeSetId(filteredPracticeSets[0]?.id ?? null);
               setPracticeOpen(true);
             }}
+            busy={typing}
+            onUpdateTask={updateTask}
+            onCreateNote={createNote}
+            onCreateReminder={createReminder}
+            onUpdateReminder={updateReminder}
+            focus={focus}
+            focusNotice={focusNotice}
+            canStartFocus={firstFocusableTask(tasks) !== undefined}
+            onStartFocus={startFocusForTask}
+            onStartDefaultFocus={startDefaultFocus}
+            onPauseFocus={pauseFocus}
+            onResumeFocus={resumeFocus}
+            onResetFocus={resetFocus}
           />
         </div>
       </div>

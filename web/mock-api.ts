@@ -7,6 +7,7 @@ import type {
 } from '../src/shared/ipc';
 import type {
   CreateNoteInput,
+  CreateReminderInput,
   CreateTaskInput,
   CreateWorkspaceInput,
   MemoryItem,
@@ -14,6 +15,7 @@ import type {
   SendMessageInput,
   SendMessageResult,
   SubmitReviewInput,
+  UpdateReminderInput,
   UpdateWorkspaceNoteInput,
   UpdateWorkspaceTaskInput,
   Workspace,
@@ -259,6 +261,12 @@ function truncateConversationText(value: string, limit: number): string {
 }
 
 const MOCK_GREETINGS = new Set(['你好', 'hi', 'hello', '在吗', '嗨', '嗯', 'ok']);
+const MOCK_REMINDER_TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function normalizeMockReminderTime(time: string): string {
+  if (!MOCK_REMINDER_TIME.test(time)) throw new Error('提醒时间格式必须是 HH:MM。');
+  return time;
+}
 
 function conversationTitleFromText(text: string): string {
   const normalized = text
@@ -910,6 +918,35 @@ export function createMockApi(
 
     async getReminders(): Promise<Reminder[]> {
       return structuredClone(state.reminders);
+    },
+
+    async createReminder(input: CreateReminderInput): Promise<Reminder> {
+      const time = normalizeMockReminderTime(input.time);
+      const label = input.label.trim();
+      if (!label) throw new Error('提醒内容不能为空。');
+      const reminder: Reminder = {
+        id: nextId('rem'),
+        time,
+        label,
+        enabled: input.enabled ?? true
+      };
+      state.reminders.push(reminder);
+      persist();
+      return structuredClone(reminder);
+    },
+
+    async updateReminder(input: UpdateReminderInput): Promise<Reminder> {
+      const reminder = state.reminders.find((entry) => entry.id === input.id);
+      if (!reminder) throw new Error('提醒不存在');
+      if (input.time !== undefined) reminder.time = normalizeMockReminderTime(input.time);
+      if (input.label !== undefined) {
+        const label = input.label.trim();
+        if (!label) throw new Error('提醒内容不能为空。');
+        reminder.label = label;
+      }
+      if (input.enabled !== undefined) reminder.enabled = input.enabled;
+      persist();
+      return structuredClone(reminder);
     },
 
     async listConversations(): Promise<ConversationSummary[]> {
