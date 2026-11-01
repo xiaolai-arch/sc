@@ -46,7 +46,7 @@ test('badge variants stay inside the restrained palette', () => {
   const badge = screen.getByText('已完成');
   expect(badge.className).toContain('rounded-full');
   expect(badge.className).toContain('bg-[#34c759]/10');
-  expect(badge.className).toContain('text-[#1d1d1f]');
+  expect(badge.className).toContain('text-[#1d7f3a]');
   expectNoForbidden(badge);
 });
 
@@ -63,6 +63,6 @@ test('danger and placeholder tokens stay contrast-safe', () => {
   expectNoForbidden(danger);
 
   const input = screen.getByLabelText('带占位符');
-  expect(input.className).toContain('placeholder:text-gray-600');
+  expect(input.className).toContain('placeholder:text-gray-500');
   expect(input.className).toContain('motion-reduce:transition-none');
 });

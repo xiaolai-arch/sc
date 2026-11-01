@@ -70,15 +70,15 @@ export function Dialog({ open, onClose, title, children }: DialogProps) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 dark:bg-black/50 p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 dark:bg-black/60 p-6">
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="bg-white dark:bg-[#1c1c1e] rounded-2xl shadow-sm w-full max-w-lg p-8 max-h-[90vh] overflow-y-auto"
+        className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-[0_8px_24px_rgba(0,0,0,0.12)] dark:bg-[#1c1c1e] md:p-8"
       >
-        <h2 id={titleId} className="text-xl font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
+        <h2 id={titleId} className="text-2xl font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
           {title}
         </h2>
         <div className="mt-6">{children}</div>

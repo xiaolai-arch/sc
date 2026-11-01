@@ -11,7 +11,7 @@ export function Progress({ value, max, label, ariaLabel }: ProgressProps) {
   return (
     <div>
       {label ? (
-        <div className="mb-2 flex items-center justify-between gap-4 text-sm text-gray-600 dark:text-[#a1a1a6]">
+        <div className="mb-2 flex items-center justify-between gap-4 text-[13px] text-gray-500 dark:text-[#a1a1a6]">
           <span>{label}</span>
           <span>
             {value} / {max}
@@ -24,7 +24,7 @@ export function Progress({ value, max, label, ariaLabel }: ProgressProps) {
         aria-valuenow={value}
         aria-valuemin={0}
         aria-valuemax={max}
-        className="h-2 w-full overflow-hidden rounded-full bg-[#e5e5e7] dark:bg-white/10"
+        className="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-white/10"
       >
         <div
           className="h-full rounded-full bg-[#0071e3] transition-all duration-300 motion-reduce:transition-none"
