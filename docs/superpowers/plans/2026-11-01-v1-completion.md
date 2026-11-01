@@ -84,7 +84,7 @@
 ### Wave 2 (2026-11-01)
 
 - Run: `run_ff9c07a5e79e` resumed; base `8836fae`（264 tests/typecheck green）
-- Module 5 `task_1bde9d51b07f` / zcode / `ctx_2311d116033c` / `v1-search-watcher` — dispatched (wave 2a)
+- Module 5 `task_1bde9d51b07f` / zcode / `ctx_2311d116033c` / `v1-search-watcher` — **done** (commits `35e9225`–`c18a54c`; merged; 297 unit tests/typecheck/build pass; `src/main/search/**` + `src/shared/search.ts`; IPC wiring 与 app-quit dispose 留给 ui-wiring)
 - Module 7 `task_800fc28572f5` / codex / `ctx_f7f1f4670e03` / `v1-packaging-e2e` — **done** (commits `adf4812`–`a01d225`; merged `cbedfce`; 264 unit tests + 1 e2e/typecheck/build/electron-builder pass; one additive `STUDY_COACH_USER_DATA_DIR` hook in `src/main/index.ts`)
 - Module 6 `ui-wiring`（opencode）queued — after module 5 merges
 - Module 8 `legacy-cleanup`（claude）queued — after module 6 merges
