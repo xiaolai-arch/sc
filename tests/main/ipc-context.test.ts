@@ -142,7 +142,15 @@ test('settings updates are persisted and validated', async () => {
 
   const updated = await first.api.updateSettings({
     budget: { proactiveSessionsPerDay: 2, dailyTokens: 50000 },
-    notifications: { enabled: false, morning: '09:10', evening: '21:30', dndStart: '23:00', dndEnd: '07:30' },
+    notifications: {
+      enabled: false,
+      morning: '09:10',
+      evening: '21:30',
+      weekly: '20:00',
+      weeklyEnabled: true,
+      dndStart: '23:00',
+      dndEnd: '07:30'
+    },
     launchAtLogin: true
   });
   expect(updated.budget).toEqual({ proactiveSessionsPerDay: 2, dailyTokens: 50000 });

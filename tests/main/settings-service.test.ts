@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDefaultAppState } from '../../src/main/context';
+import { createDefaultSettings } from '../../src/main/settings/defaults';
 import { SettingsService } from '../../src/main/settings/settings-service';
 import { JsonStateStore } from '../../src/main/state-store';
 
@@ -27,6 +28,8 @@ test('returns documented defaults', async () => {
       enabled: true,
       morning: '08:00',
       evening: '21:30',
+      weekly: '20:00',
+      weeklyEnabled: true,
       dndStart: '23:00',
       dndEnd: '07:30'
     },
@@ -57,6 +60,8 @@ test('merges nested settings and persists them across store instances', async ()
       enabled: false,
       morning: '07:15',
       evening: '21:30',
+      weekly: '20:00',
+      weeklyEnabled: true,
       dndStart: '23:00',
       dndEnd: '07:30'
     });
@@ -97,4 +102,47 @@ test('rejects invalid settings patches without mutating stored values', async ()
   );
   await expect(service.update(null as never)).rejects.toThrow('设置参数无效。');
   expect((await service.get()).vaultPath).toBe('/tmp/study-vault');
+});
+
+test('validates and persists the weekly review settings', async () => {
+  const { service } = memorySettings();
+
+  await expect(
+    service.update({ notifications: { weekly: '7:00' } as never })
+  ).rejects.toThrow('提醒时间格式必须为 HH:MM。');
+  await expect(
+    service.update({ notifications: { weeklyEnabled: 'yes' } as never })
+  ).rejects.toThrow(/布尔值/);
+
+  const updated = await service.update({
+    notifications: { weekly: '19:30', weeklyEnabled: false } as never
+  });
+  expect(updated.notifications).toMatchObject({ weekly: '19:30', weeklyEnabled: false });
+});
+
+test('fills weekly defaults for settings written before the feature existed', async () => {
+  const defaults = createDefaultSettings('/tmp/old-vault');
+  const { weekly: _weekly, weeklyEnabled: _weeklyEnabled, ...oldNotifications } =
+    defaults.notifications;
+  const state = new JsonStateStore({
+    filePath: null,
+    createDefault: () => ({
+      onboarded: true,
+      settings: {
+        ...defaults,
+        notifications: oldNotifications as never
+      }
+    })
+  });
+  const service = new SettingsService(state);
+
+  const loaded = await service.get();
+  expect(loaded.notifications).toMatchObject({ weekly: '20:00', weeklyEnabled: true });
+
+  const updated = await service.update({ notifications: { morning: '07:15' } as never });
+  expect(updated.notifications).toMatchObject({
+    morning: '07:15',
+    weekly: '20:00',
+    weeklyEnabled: true
+  });
 });

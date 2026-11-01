@@ -41,6 +41,8 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
     enabled: true,
     morning: '08:00',
     evening: '21:30',
+    weekly: '20:00',
+    weeklyEnabled: true,
     dndStart: '23:00',
     dndEnd: '07:30'
   });
@@ -69,7 +71,15 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
       }
       setSessions(String(value.budget.proactiveSessionsPerDay));
       setTokens(String(value.budget.dailyTokens));
-      setNotifications(value.notifications);
+      setNotifications({
+        enabled: value.notifications.enabled ?? true,
+        morning: value.notifications.morning ?? '08:00',
+        evening: value.notifications.evening ?? '21:30',
+        weekly: value.notifications.weekly ?? '20:00',
+        weeklyEnabled: value.notifications.weeklyEnabled ?? true,
+        dndStart: value.notifications.dndStart ?? '23:00',
+        dndEnd: value.notifications.dndEnd ?? '07:30'
+      });
       setLaunchAtLogin(value.launchAtLogin);
       setLoaded(true);
     } catch (cause) {
@@ -363,7 +373,7 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
 
           <Card id="settings-notifications">
             <h3 className="text-xl font-semibold tracking-tight text-black md:text-2xl">通知</h3>
-            <p className="mt-2 text-gray-600">设置早间计划与晚间复盘提醒。</p>
+            <p className="mt-2 text-gray-600">设置早间计划、晚间复盘与周日复盘提醒。</p>
             <label className="mt-6 flex min-h-11 items-center gap-3 text-sm font-medium text-gray-600">
               <input
                 type="checkbox"
@@ -420,6 +430,31 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
                   }
                 />
               </div>
+            </div>
+            <label className="mt-5 flex min-h-11 items-center gap-3 text-sm font-medium text-gray-600">
+              <input
+                type="checkbox"
+                checked={notifications.weeklyEnabled}
+                onChange={(event) =>
+                  setNotifications((current) => ({
+                    ...current,
+                    weeklyEnabled: event.target.checked
+                  }))
+                }
+                className="h-5 w-5 rounded accent-[#0071e3]"
+              />
+              周日复盘
+            </label>
+            <div className="mt-3 max-w-xs">
+              <Label htmlFor="settings-weekly">周复盘时间</Label>
+              <Input
+                id="settings-weekly"
+                type="time"
+                value={notifications.weekly}
+                onChange={(event) =>
+                  setNotifications((current) => ({ ...current, weekly: event.target.value }))
+                }
+              />
             </div>
           </Card>
 

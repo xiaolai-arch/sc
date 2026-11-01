@@ -110,6 +110,8 @@ const defaultSettings: AppSettings = {
     enabled: true,
     morning: '08:00',
     evening: '21:30',
+    weekly: '20:00',
+    weeklyEnabled: true,
     dndStart: '23:00',
     dndEnd: '07:30'
   },

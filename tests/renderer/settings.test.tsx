@@ -6,7 +6,15 @@ import { SettingsPage } from '../../src/renderer/settings/SettingsPage';
 const settings = {
   vaultPath: '/tmp/vault',
   provider: { kind: 'anthropic' as const, model: 'claude-sonnet-5-5' },
-  notifications: { enabled: true, morning: '08:00', evening: '21:30', dndStart: '23:00', dndEnd: '07:30' },
+  notifications: {
+    enabled: true,
+    morning: '08:00',
+    evening: '21:30',
+    weekly: '20:00',
+    weeklyEnabled: true,
+    dndStart: '23:00',
+    dndEnd: '07:30'
+  },
   budget: { proactiveSessionsPerDay: 4, dailyTokens: 200000 },
   launchAtLogin: true
 };
@@ -64,6 +72,53 @@ test('requires a base URL for non-Anthropic providers', async () => {
   await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('请填写 Base URL');
   expect(update).not.toHaveBeenCalled();
+});
+
+test('saves the weekly review toggle and time', async () => {
+  const update = vi.fn().mockResolvedValue(settings);
+  window.studyCoach = {
+    getSettings: vi.fn().mockResolvedValue(settings),
+    updateSettings: update,
+    setApiKey: vi.fn()
+  } as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  const toggle = await screen.findByLabelText('周日复盘');
+  expect(toggle).toBeChecked();
+  expect(screen.getByLabelText('周复盘时间')).toHaveValue('20:00');
+
+  await userEvent.clear(screen.getByLabelText('周复盘时间'));
+  await userEvent.type(screen.getByLabelText('周复盘时间'), '19:30');
+  await userEvent.click(toggle);
+  await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+
+  expect(update).toHaveBeenCalledWith(
+    expect.objectContaining({
+      notifications: expect.objectContaining({ weekly: '19:30', weeklyEnabled: false })
+    })
+  );
+});
+
+test('fills weekly defaults for old settings payloads', async () => {
+  const oldSettings = {
+    ...settings,
+    notifications: {
+      enabled: true,
+      morning: '08:00',
+      evening: '21:30',
+      dndStart: '23:00',
+      dndEnd: '07:30'
+    }
+  };
+  window.studyCoach = {
+    getSettings: vi.fn().mockResolvedValue(oldSettings),
+    updateSettings: vi.fn(),
+    setApiKey: vi.fn()
+  } as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  expect(await screen.findByLabelText('周复盘时间')).toHaveValue('20:00');
+  expect(screen.getByLabelText('周日复盘')).toBeChecked();
 });
 
 test('saves a local cli provider without an api key', async () => {

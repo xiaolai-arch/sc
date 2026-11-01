@@ -47,6 +47,9 @@ export interface NotificationSettings {
   enabled: boolean;
   morning: string;
   evening: string;
+  /** Sunday recap time (HH:MM). */
+  weekly: string;
+  weeklyEnabled: boolean;
   dndStart: string;
   dndEnd: string;
 }

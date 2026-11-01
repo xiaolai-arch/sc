@@ -1,9 +1,35 @@
 import type { AppSettings, NotificationSettings, ProviderConfig } from '../../shared/types';
 import type { AppState, JsonStateStore } from '../state-store';
+import { createDefaultSettings } from './defaults';
 
 const PROVIDER_KINDS = ['anthropic', 'openai-compatible', 'ollama', 'local-cli'] as const;
 const LOCAL_CLI_AGENTS = ['codex', 'claude', 'zcode', 'opencode'] as const;
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+const DEFAULT_NOTIFICATIONS = createDefaultSettings('').notifications;
+
+/**
+ * State files written before the weekly recap existed lack these keys. Fill
+ * them on read and before every merge so callers never see a partial object.
+ */
+function normalizeNotifications(value: NotificationSettings | undefined): NotificationSettings {
+  const current = value ?? DEFAULT_NOTIFICATIONS;
+  return {
+    ...DEFAULT_NOTIFICATIONS,
+    ...current,
+    weekly:
+      typeof current.weekly === 'string' && TIME_PATTERN.test(current.weekly)
+        ? current.weekly
+        : DEFAULT_NOTIFICATIONS.weekly,
+    weeklyEnabled:
+      typeof current.weeklyEnabled === 'boolean'
+        ? current.weeklyEnabled
+        : DEFAULT_NOTIFICATIONS.weeklyEnabled
+  };
+}
+
+function normalizeSettings(settings: AppSettings): AppSettings {
+  return { ...settings, notifications: normalizeNotifications(settings.notifications) };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -61,13 +87,19 @@ function validateNotifications(value: unknown): Partial<NotificationSettings> {
     if (typeof value.enabled !== 'boolean') throw new Error('通知开关必须是布尔值。');
     result.enabled = value.enabled;
   }
-  for (const key of ['morning', 'evening', 'dndStart', 'dndEnd'] as const) {
+  for (const key of ['morning', 'evening', 'weekly', 'dndStart', 'dndEnd'] as const) {
     const entry = value[key];
     if (entry === undefined) continue;
     if (typeof entry !== 'string' || !TIME_PATTERN.test(entry)) {
       throw new Error('提醒时间格式必须为 HH:MM。');
     }
     result[key] = entry;
+  }
+  if (value.weeklyEnabled !== undefined) {
+    if (typeof value.weeklyEnabled !== 'boolean') {
+      throw new Error('周日复盘开关必须是布尔值。');
+    }
+    result.weeklyEnabled = value.weeklyEnabled;
   }
   return result;
 }
@@ -124,14 +156,14 @@ export class SettingsService {
 
   async get(): Promise<AppSettings> {
     const snapshot = await this.state.read();
-    return structuredClone(snapshot.settings);
+    return structuredClone(normalizeSettings(snapshot.settings));
   }
 
   async update(patch: Partial<AppSettings>): Promise<AppSettings> {
     const next = await this.state.update((current: AppState) => ({
       ...current,
-      settings: mergeSettings(current.settings, patch)
+      settings: mergeSettings(normalizeSettings(current.settings), patch)
     }));
-    return structuredClone(next.settings);
+    return structuredClone(normalizeSettings(next.settings));
   }
 }
