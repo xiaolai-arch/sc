@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Workspace } from '../../src/renderer/shell/Workspace';
 import { FOCUS_DURATION_MS } from '../../src/renderer/shell/focus-timer';
@@ -14,14 +14,25 @@ function setup() {
   return api;
 }
 
+function navButton(name: string) {
+  return within(screen.getByRole('navigation', { name: '主导航' })).getByRole('button', {
+    name
+  });
+}
+
+async function openProjects() {
+  await screen.findByText('早上好，xiaolai。');
+  await userEvent.click(navButton('项目'));
+}
+
 async function taskStatus(api: ReturnType<typeof setup>, taskId: string) {
   const snapshot = await api.getWorkspaceSnapshot('kaoyan');
   return snapshot.tasks.find((task) => task.id === taskId)?.status;
 }
 
-test('runs start, complete, undo, skip and restore from the plan tab', async () => {
+test('runs start, complete, undo, skip and restore from the plan section', async () => {
   const api = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await openProjects();
 
   await userEvent.click(screen.getByRole('button', { name: '开始：极限与连续' }));
   expect(await screen.findByRole('button', { name: '完成：极限与连续' })).toBeInTheDocument();
@@ -46,7 +57,7 @@ test('runs start, complete, undo, skip and restore from the plan tab', async () 
 
 test('shows an inline error when a task update fails', async () => {
   const api = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await openProjects();
   const spy = vi.spyOn(api, 'updateWorkspaceTask').mockRejectedValueOnce(new Error('保存失败'));
 
   await userEvent.click(screen.getByRole('button', { name: '开始：极限与连续' }));
@@ -58,7 +69,7 @@ test('shows an inline error when a task update fails', async () => {
 
 test('starts, pauses, resumes and resets a focus session', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await openProjects();
 
   await userEvent.click(screen.getByRole('button', { name: '专注：极限与连续' }));
   expect(screen.getByRole('progressbar')).toBeInTheDocument();
@@ -75,27 +86,29 @@ test('starts, pauses, resumes and resets a focus session', async () => {
   expect(screen.getByRole('button', { name: '继续' })).toBeInTheDocument();
 });
 
-test('keeps the focus session while switching tabs', async () => {
+test('keeps the focus session while switching sections', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await openProjects();
   await userEvent.click(screen.getByRole('button', { name: '专注：极限与连续' }));
 
-  await userEvent.click(screen.getByRole('button', { name: '记录' }));
-  await userEvent.click(screen.getByRole('button', { name: '计划' }));
+  await userEvent.click(navButton('记忆'));
+  expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
 
+  await userEvent.click(navButton('项目'));
   expect(screen.getByRole('progressbar')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /暂停|继续/ })).toBeInTheDocument();
 });
 
-test('keeps the focus session while the panel is closed', async () => {
+test('keeps the focus session after visiting the reminders page', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await openProjects();
   await userEvent.click(screen.getByRole('button', { name: '专注：极限与连续' }));
+  expect(screen.getByRole('button', { name: '暂停' })).toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole('button', { name: '关闭项目面板' }));
+  await userEvent.click(navButton('提醒'));
   expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole('button', { name: '打开项目面板' }));
+  await userEvent.click(navButton('项目'));
   expect(screen.getByRole('progressbar')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /暂停|继续/ })).toBeInTheDocument();
 });
@@ -112,6 +125,9 @@ test('records 25 minutes exactly once when focus completes', async () => {
     render(<Workspace hasApiKey={false} onRefresh={vi.fn()} />);
   });
   await act(async () => {});
+  await act(async () => {
+    navButton('项目').click();
+  });
   expect(screen.getByRole('button', { name: '专注：极限与连续' })).toBeInTheDocument();
 
   await act(async () => {
@@ -137,11 +153,10 @@ test('records 25 minutes exactly once when focus completes', async () => {
   vi.useRealTimers();
 });
 
-test('writes a note from the records tab', async () => {
+test('writes a note from the records section', async () => {
   const api = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await openProjects();
   await userEvent.click(screen.getByRole('button', { name: '考研' }));
-  await userEvent.click(screen.getByRole('button', { name: '记录' }));
 
   await userEvent.click(screen.getByRole('button', { name: '写一条记录' }));
   await userEvent.type(screen.getByLabelText('记录正文'), '今天数学卡在极限');
@@ -154,8 +169,7 @@ test('writes a note from the records tab', async () => {
 
 test('disables the quick note form without a project', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
-  await userEvent.click(screen.getByRole('button', { name: '记录' }));
+  await openProjects();
 
   expect(screen.getByRole('button', { name: '写一条记录' })).toBeDisabled();
   expect(screen.getByText('先选择项目')).toBeInTheDocument();
@@ -163,9 +177,8 @@ test('disables the quick note form without a project', async () => {
 
 test('keeps the note input when saving fails', async () => {
   const api = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await openProjects();
   await userEvent.click(screen.getByRole('button', { name: '考研' }));
-  await userEvent.click(screen.getByRole('button', { name: '记录' }));
   const spy = vi.spyOn(api, 'createNote').mockRejectedValueOnce(new Error('保存失败'));
 
   await userEvent.click(screen.getByRole('button', { name: '写一条记录' }));
@@ -180,7 +193,7 @@ test('keeps the note input when saving fails', async () => {
 test('creates a reminder and toggles it off', async () => {
   const api = setup();
   await screen.findByText('早上好，xiaolai。');
-  await userEvent.click(screen.getByRole('button', { name: '提醒' }));
+  await userEvent.click(navButton('提醒'));
 
   expect((screen.getByLabelText('提醒时间') as HTMLInputElement).value).toMatch(
     /^\d{2}:00$/
@@ -210,7 +223,7 @@ test('creates a reminder and toggles it off', async () => {
 test('rolls the reminder switch back when saving fails', async () => {
   const api = setup();
   await screen.findByText('早上好，xiaolai。');
-  await userEvent.click(screen.getByRole('button', { name: '提醒' }));
+  await userEvent.click(navButton('提醒'));
   const spy = vi.spyOn(api, 'updateReminder').mockRejectedValueOnce(new Error('保存失败'));
 
   await userEvent.click(screen.getByRole('switch', { name: '早间计划 提醒开关' }));

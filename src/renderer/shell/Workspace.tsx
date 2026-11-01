@@ -5,7 +5,6 @@ import type { SendMessageInput, WorkspaceNote } from '../../shared/workspace';
 import { SettingsPage } from '../settings/SettingsPage';
 import { Dialog } from '../ui/Dialog';
 import { ChatPane } from './ChatPane';
-import { ConversationSidebar } from './ConversationSidebar';
 import {
   FOCUS_DURATION_MS,
   FOCUS_TICK_MS,
@@ -19,9 +18,14 @@ import {
   type FocusSession
 } from './focus-timer';
 import { LearningPane } from './LearningPane';
+import { MemoryPage } from './MemoryPage';
 import { ModelPickerDialog } from './ModelPickerDialog';
-import { ProjectPanel, type ProjectPanelTab } from './ProjectPanel';
+import { NavigationSidebar, type Section } from './NavigationSidebar';
+import { PageFrame } from './PageFrame';
+import { ProjectsPage } from './ProjectsPage';
 import { QuickCaptureDialog } from './QuickCaptureDialog';
+import { RemindersPage } from './RemindersPage';
+import { ReviewPage } from './ReviewPage';
 import { stepsToTrace } from './trace';
 import type { ChatMessage, ChatTraceItem } from './types';
 import { useConversations } from './useConversations';
@@ -122,11 +126,9 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     deleteMemory
   } = useWorkspaceData();
   const conversations = useConversations();
+  const [section, setSection] = useState<Section>('chat');
   const [projectId, setProjectId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [panelOpen, setPanelOpen] = useState(() => !isNarrowScreen());
-  const [panelTab, setPanelTab] = useState<ProjectPanelTab>('plan');
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [previewNote, setPreviewNote] = useState<WorkspaceNote | null>(null);
   const [practiceOpen, setPracticeOpen] = useState(false);
   const [practiceSetId, setPracticeSetId] = useState<string | null>(null);
@@ -710,14 +712,19 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     }
   }
 
-  function closeMobileDrawers() {
+  function changeSection(next: Section) {
+    setSection(next);
     setSidebarOpen(false);
-    if (isNarrowScreen()) setPanelOpen(false);
   }
 
   function openSettings() {
-    closeMobileDrawers();
-    setSettingsOpen(true);
+    changeSection('settings');
+  }
+
+  /** Every "ask the butler" affordance lands in chat and sends the prompt. */
+  function promptButler(prompt: string) {
+    changeSection('chat');
+    void sendMessage(prompt);
   }
 
   function startDraft() {
@@ -730,6 +737,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     setSidebarOpen(false);
     setModelPickerOpen(false);
     setModelError(null);
+    setSection('chat');
   }
 
   function selectConversation(id: string) {
@@ -741,13 +749,19 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     setSidebarOpen(false);
     setModelPickerOpen(false);
     setModelError(null);
+    setSection('chat');
     void conversations.select(id);
   }
 
-  function selectProject(id: string) {
-    streamGenerationRef.current += 1;
-    setProjectId(id);
+  function selectProject(id: string | null) {
     setSidebarOpen(false);
+    if (id === null) {
+      setProjectId(null);
+      return;
+    }
+    setProjectId(id);
+    // Outside the chat section a project is only a filter; stay on the page.
+    if (section !== 'chat') return;
     if (conversations.active?.workspaceId === id) return;
     const recent = conversations.summaries.find((summary) => summary.workspaceId === id);
     if (recent) {
@@ -804,24 +818,25 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
         </div>
       ) : null}
 
-      <div className="flex min-h-0 flex-1 md:flex-row">
+      <div className="flex min-h-0 flex-1">
         {sidebarOpen && isNarrowScreen() ? (
           <button
             type="button"
-            aria-label="关闭对话列表"
+            aria-label="关闭导航"
             onClick={() => setSidebarOpen(false)}
             className="fixed inset-0 z-30 bg-black/25 dark:bg-black/50 md:hidden"
           />
         ) : null}
-        <ConversationSidebar
+        <NavigationSidebar
+          section={section}
           conversations={conversations.summaries}
           projects={workspaces}
           activeConversationId={conversations.active?.id ?? null}
           selectedProjectId={projectId}
+          onSectionChange={changeSection}
           onNewConversation={startDraft}
           onSelectConversation={selectConversation}
           onSelectProject={selectProject}
-          onOpenSettings={openSettings}
           onRenameConversation={(id, title) => void renameConversation(id, title)}
           onTogglePinned={(id, pinned) => void togglePinnedConversation(id, pinned)}
           onDeleteConversation={(id) => void deleteConversation(id)}
@@ -831,101 +846,125 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
         />
 
         <div className="flex min-h-0 min-w-0 flex-1">
-          {panelOpen && isNarrowScreen() ? (
-            <button
-              type="button"
-              aria-label="关闭项目面板"
-              onClick={() => setPanelOpen(false)}
-              className="fixed inset-0 z-30 bg-black/25 dark:bg-black/50 md:hidden"
+          {section === 'chat' ? (
+            <ChatPane
+              workspace={currentWorkspace}
+              messages={chatMessages}
+              typing={typing}
+              onSend={(text) => void submitComposer(text)}
+              modelLabel={displayModel}
+              hasApiKey={hasApiKey}
+              onOpenSettings={openSettings}
+              dateLabel={dateLabel}
+              onOpenProjects={() => changeSection('projects')}
+              onStop={stopStreaming}
+              composerText={composerText}
+              onComposerTextChange={setComposerText}
+              editing={editingMessageId !== null}
+              onCancelEdit={cancelEdit}
+              onRegenerate={(id) => void regenerateMessage(id)}
+              onEditMessage={editLastUserMessage}
+              onOpenSidebar={() => setSidebarOpen(true)}
+              sidebarOpen={sidebarOpen}
+              typingStatus={streamStatus}
+              {...(conversations.active ? { onOpenModelPicker: openModelPicker } : {})}
             />
           ) : null}
-          <ChatPane
-            workspace={currentWorkspace}
-            messages={chatMessages}
-            typing={typing}
-            onSend={(text) => void submitComposer(text)}
-            modelLabel={displayModel}
-            hasApiKey={hasApiKey}
-            onOpenSettings={openSettings}
-            dateLabel={dateLabel}
-            panelOpen={panelOpen}
-            onTogglePanel={() => setPanelOpen((open) => !open)}
-            onStop={stopStreaming}
-            composerText={composerText}
-            onComposerTextChange={setComposerText}
-            editing={editingMessageId !== null}
-            onCancelEdit={cancelEdit}
-            onRegenerate={(id) => void regenerateMessage(id)}
-            onEditMessage={editLastUserMessage}
-            onOpenSidebar={() => setSidebarOpen(true)}
-            sidebarOpen={sidebarOpen}
-            typingStatus={streamStatus}
-            {...(conversations.active ? { onOpenModelPicker: openModelPicker } : {})}
-          />
 
-          <ProjectPanel
-            open={panelOpen}
-            workspace={currentWorkspace}
-            workspaces={workspaces}
-            tasks={tasks}
-            notes={notes}
-            reviews={reviews}
-            reminders={reminders}
-            memoryRecords={memoryRecords}
-            profile={memoryProfile}
-            tab={panelTab}
-            onTabChange={setPanelTab}
-            onClose={() => setPanelOpen(false)}
-            onSelectWorkspace={(id) => {
-              if (id === '') {
-                setProjectId(null);
-                return;
+          {section === 'projects' ? (
+            <ProjectsPage
+              workspace={currentWorkspace}
+              workspaces={workspaces}
+              tasks={tasks}
+              notes={notes}
+              profile={memoryProfile}
+              onOpenSidebar={() => setSidebarOpen(true)}
+              onOpenChat={() => changeSection('chat')}
+              onSelectWorkspace={selectProject}
+              onUpdateWorkspace={updateWorkspace}
+              onOpenPractice={() => {
+                setPracticeSetId(filteredPracticeSets[0]?.id ?? null);
+                setPracticeOpen(true);
+              }}
+              onPrompt={promptButler}
+              onPreviewNote={setPreviewNote}
+              onCreateNote={createNote}
+              busy={typing}
+              onUpdateTask={updateTask}
+              focus={focus}
+              focusNotice={focusNotice}
+              canStartFocus={firstFocusableTask(tasks) !== undefined}
+              onStartFocus={startFocusForTask}
+              onStartDefaultFocus={startDefaultFocus}
+              onPauseFocus={pauseFocus}
+              onResumeFocus={resumeFocus}
+              onResetFocus={resetFocus}
+            />
+          ) : null}
+
+          {section === 'memory' ? (
+            <MemoryPage
+              workspace={currentWorkspace}
+              memoryRecords={memoryRecords}
+              profile={memoryProfile}
+              onOpenSidebar={() => setSidebarOpen(true)}
+              onUpdateMemory={updateMemory}
+              onDeleteMemory={deleteMemory}
+            />
+          ) : null}
+
+          {section === 'review' ? (
+            <ReviewPage
+              workspace={currentWorkspace}
+              reviews={reviews}
+              onOpenSidebar={() => setSidebarOpen(true)}
+              onPrompt={promptButler}
+            />
+          ) : null}
+
+          {section === 'reminders' ? (
+            <RemindersPage
+              reminders={reminders}
+              onCreateReminder={createReminder}
+              onUpdateReminder={updateReminder}
+              snoozedToday={snoozedUntil === today}
+              onSnoozeCheckIns={() => void snoozeCheckIns()}
+              onOpenSidebar={() => setSidebarOpen(true)}
+              onPrompt={promptButler}
+            />
+          ) : null}
+
+          {section === 'settings' ? (
+            <PageFrame
+              title="设置"
+              subtitle="模型、预算与提醒"
+              onOpenSidebar={() => setSidebarOpen(true)}
+              action={
+                <button
+                  type="button"
+                  onClick={() => {
+                    changeSection('chat');
+                    void loadModelLabel();
+                    onRefresh();
+                  }}
+                  className="rounded-md px-2 py-1 text-[11px] text-gray-500 transition-colors hover:bg-black/[0.04] hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:text-[#8e8e93] dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
+                >
+                  返回对话
+                </button>
               }
-              selectProject(id);
-            }}
-            onPrompt={(prompt) => void sendMessage(prompt)}
-            onPreviewNote={setPreviewNote}
-            onOpenPractice={() => {
-              closeMobileDrawers();
-              setPracticeSetId(filteredPracticeSets[0]?.id ?? null);
-              setPracticeOpen(true);
-            }}
-            busy={typing}
-            onUpdateTask={updateTask}
-            onCreateNote={createNote}
-            onCreateReminder={createReminder}
-            onUpdateReminder={updateReminder}
-            focus={focus}
-            focusNotice={focusNotice}
-            canStartFocus={firstFocusableTask(tasks) !== undefined}
-            onStartFocus={startFocusForTask}
-            onStartDefaultFocus={startDefaultFocus}
-            onPauseFocus={pauseFocus}
-            onResumeFocus={resumeFocus}
-            onResetFocus={resetFocus}
-            onUpdateMemory={updateMemory}
-            onDeleteMemory={deleteMemory}
-            onUpdateWorkspace={updateWorkspace}
-            snoozedToday={snoozedUntil === today}
-            onSnoozeCheckIns={() => void snoozeCheckIns()}
-          />
+            >
+              <SettingsPage
+                page
+                onClose={() => {
+                  changeSection('chat');
+                  void loadModelLabel();
+                  onRefresh();
+                }}
+              />
+            </PageFrame>
+          ) : null}
         </div>
       </div>
-
-      {settingsOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 dark:bg-black/50 p-4">
-          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white dark:bg-[#1c1c1e] p-6 shadow-xl">
-            <SettingsPage
-              embedded
-              onClose={() => {
-                setSettingsOpen(false);
-                void loadModelLabel();
-                onRefresh();
-              }}
-            />
-          </div>
-        </div>
-      ) : null}
 
       {practiceOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 dark:bg-black/50 p-4">
@@ -985,7 +1024,10 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
                       !projectId || mistake.workspaceId === projectId
                   )}
                   onSubmitAnswer={submitPracticeAnswer}
-                  onOpenChat={() => setPracticeOpen(false)}
+                  onOpenChat={() => {
+                    setPracticeOpen(false);
+                    changeSection('chat');
+                  }}
                   onOpenNote={(id) => {
                     const note = notes.find((entry) => entry.id === id);
                     if (note) {
@@ -1006,7 +1048,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
         onClose={() => setQuickCaptureOpen(false)}
         onSubmit={(text) => {
           setQuickCaptureOpen(false);
-          void sendMessage(text);
+          promptButler(text);
         }}
       />
 
@@ -1042,7 +1084,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
                 onClick={() => {
                   const note = previewNote;
                   setPreviewNote(null);
-                  void sendMessage(`帮我改一下笔记《${note.title}》：`);
+                  promptButler(`帮我改一下笔记《${note.title}》：`);
                 }}
                 className="rounded-md bg-[#0071e3] px-3 py-1.5 text-[12px] font-medium text-white"
               >

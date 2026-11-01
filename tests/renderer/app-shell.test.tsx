@@ -12,11 +12,11 @@ test('saving an API key clears the unconfigured banner', async () => {
   render(<App />);
   expect(await screen.findByText('未配置模型，当前使用模板计划。')).toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole('button', { name: '打开设置' }));
+  await userEvent.click(screen.getByRole('button', { name: '设置' }));
   expect(await screen.findByLabelText('模型名称')).toBeInTheDocument();
   await userEvent.type(screen.getByLabelText('API Key'), 'sk-test');
   await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
-  await userEvent.click(await screen.findByRole('button', { name: '关闭' }));
+  await userEvent.click(await screen.findByRole('button', { name: '返回对话' }));
 
   await waitFor(() =>
     expect(screen.queryByText('未配置模型，当前使用模板计划。')).not.toBeInTheDocument()

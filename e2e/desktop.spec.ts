@@ -26,7 +26,8 @@ test.describe('Study Coach desktop', () => {
         await expect(page.getByText(/已创建项目「考研」/).last()).toBeVisible({
           timeout: 30_000
         });
-        await expect(page.getByRole('button', { name: '考研', exact: true })).toBeVisible();
+        await page.getByRole('button', { name: '项目', exact: true }).click();
+        await expect(page.getByRole('heading', { name: '考研', exact: true })).toBeVisible();
         await expect(page.getByText('2027 考研上岸')).toBeVisible();
       });
 
@@ -39,7 +40,9 @@ test.describe('Study Coach desktop', () => {
         await expect(page.getByText(/已创建项目「考研」/).last()).toBeVisible({
           timeout: 30_000
         });
-        await expect(page.getByRole('button', { name: '考研', exact: true })).toBeVisible();
+        await page.getByRole('button', { name: '项目', exact: true }).click();
+        await expect(page.getByRole('heading', { name: '考研', exact: true })).toBeVisible();
+        await expect(page.getByText('2027 考研上岸')).toBeVisible();
       });
 
       await test.step('writes the project to the vault', async () => {

@@ -24,49 +24,45 @@ function sidebar(): HTMLElement {
   return screen.getAllByRole('complementary')[0]!;
 }
 
-function panel(): HTMLElement {
-  return screen.getAllByRole('complementary')[1]!;
-}
-
-test('opens and closes the conversation drawer on narrow screens', async () => {
+test('opens and closes the navigation drawer on narrow screens', async () => {
   setup();
   await screen.findByText('早上好，xiaolai。');
 
   expect(sidebar().className).toContain('-translate-x-full');
-  const open = screen.getByRole('button', { name: '打开对话列表' });
+  const open = screen.getByRole('button', { name: '打开导航' });
   expect(open).toHaveAttribute('aria-expanded', 'false');
 
   await userEvent.click(open);
   expect(sidebar().className).toContain('translate-x-0');
-  expect(screen.getByRole('button', { name: '打开对话列表' })).toHaveAttribute(
+  expect(screen.getByRole('button', { name: '打开导航' })).toHaveAttribute(
     'aria-expanded',
     'true'
   );
 
-  const closers = screen.getAllByRole('button', { name: '关闭对话列表' });
+  const closers = screen.getAllByRole('button', { name: '关闭导航' });
   expect(closers.length).toBeGreaterThanOrEqual(2);
   await userEvent.click(closers[0]!);
   expect(sidebar().className).toContain('-translate-x-full');
 });
 
-test('closes the conversation drawer from its close button', async () => {
+test('closes the navigation drawer from its close button', async () => {
   setup();
   await screen.findByText('早上好，xiaolai。');
 
-  await userEvent.click(screen.getByRole('button', { name: '打开对话列表' }));
-  const closers = screen.getAllByRole('button', { name: '关闭对话列表' });
+  await userEvent.click(screen.getByRole('button', { name: '打开导航' }));
+  const closers = screen.getAllByRole('button', { name: '关闭导航' });
   await userEvent.click(closers[closers.length - 1]!);
 
   expect(sidebar().className).toContain('-translate-x-full');
 });
 
-test('closes the conversation drawer after selecting a conversation', async () => {
+test('closes the navigation drawer after selecting a conversation', async () => {
   setup();
   await screen.findByText('早上好，xiaolai。');
   await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
   await screen.findAllByText(/我先按截止时间和精力排/);
 
-  await userEvent.click(screen.getByRole('button', { name: '打开对话列表' }));
+  await userEvent.click(screen.getByRole('button', { name: '打开导航' }));
   await userEvent.click(
     within(sidebar()).getByRole('button', { name: /帮我排一下今天的优先级/ })
   );
@@ -74,54 +70,55 @@ test('closes the conversation drawer after selecting a conversation', async () =
   expect(sidebar().className).toContain('-translate-x-full');
 });
 
-test('opens and closes the project drawer on narrow screens', async () => {
+test('closes the drawer when switching sections', async () => {
   setup();
   await screen.findByText('早上好，xiaolai。');
-  expect(screen.getAllByRole('complementary')).toHaveLength(1);
 
-  await userEvent.click(screen.getByRole('button', { name: '打开项目面板' }));
-  await waitFor(() => expect(screen.getAllByRole('complementary')).toHaveLength(2));
-  expect(panel().className).toContain('translate-x-0');
+  await userEvent.click(screen.getByRole('button', { name: '打开导航' }));
+  await userEvent.click(within(sidebar()).getByRole('button', { name: '项目' }));
 
-  const closers = screen.getAllByRole('button', { name: '关闭项目面板' });
-  expect(closers.length).toBeGreaterThanOrEqual(2);
-  await userEvent.click(closers[0]!);
-  await waitFor(() => expect(screen.getAllByRole('complementary')).toHaveLength(1));
+  expect(sidebar().className).toContain('-translate-x-full');
+  expect(screen.getByRole('heading', { name: '全部项目' })).toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole('button', { name: '打开项目面板' }));
-  await waitFor(() => expect(screen.getAllByRole('complementary')).toHaveLength(2));
-  const panelClosers = screen.getAllByRole('button', { name: '关闭项目面板' });
-  await userEvent.click(panelClosers[panelClosers.length - 1]!);
-  await waitFor(() => expect(screen.getAllByRole('complementary')).toHaveLength(1));
+  // Other pages have their own menu button that reopens the same drawer.
+  await userEvent.click(screen.getByRole('button', { name: '打开导航' }));
+  expect(sidebar().className).toContain('translate-x-0');
+  await userEvent.click(within(sidebar()).getByRole('button', { name: '记忆' }));
+  expect(sidebar().className).toContain('-translate-x-full');
+  expect(screen.getByText('外刊表达积累有效，继续保持。')).toBeInTheDocument();
 });
 
-test('opens the conversation drawer with the keyboard', async () => {
+test('opens the navigation drawer with the keyboard', async () => {
   setup();
   await screen.findByText('早上好，xiaolai。');
 
-  const open = screen.getByRole('button', { name: '打开对话列表' });
+  const open = screen.getByRole('button', { name: '打开导航' });
   open.focus();
   await userEvent.keyboard('{Enter}');
 
   expect(sidebar().className).toContain('translate-x-0');
 });
 
-test('keeps the desktop three-column layout classes', async () => {
+test('keeps the desktop single-column layout classes', async () => {
   setup(1024);
   await screen.findByText('早上好，xiaolai。');
 
   const aside = sidebar();
-  expect(aside.className).toContain('md:w-[220px]');
+  expect(aside.className).toContain('md:w-[260px]');
   expect(aside.className).toContain('md:static');
   expect(aside.className).toContain('md:translate-x-0');
 
-  const complements = screen.getAllByRole('complementary');
-  expect(complements).toHaveLength(2);
-  expect(complements[1]!.className).toContain('md:w-[300px]');
-  expect(complements[1]!.className).toContain('md:static');
-  expect(complements[1]!.className).toContain('md:translate-x-0');
+  // Only one column exists now: there is no right-side project panel.
+  expect(screen.getAllByRole('complementary')).toHaveLength(1);
+  expect(screen.queryByRole('button', { name: '打开项目面板' })).not.toBeInTheDocument();
 
-  expect(screen.getByRole('button', { name: '打开对话列表' }).className).toContain(
-    'md:hidden'
+  expect(screen.getByRole('button', { name: '打开导航' }).className).toContain('md:hidden');
+  for (const label of ['对话', '项目', '记忆', '复盘', '提醒', '设置']) {
+    expect(within(aside).getByRole('button', { name: label })).toBeInTheDocument();
+  }
+  await waitFor(() =>
+    expect(screen.getByText(/早上好，xiaolai。/).closest('[class*="max-w-"]')?.className).toContain(
+      'max-w-[760px]'
+    )
   );
 });

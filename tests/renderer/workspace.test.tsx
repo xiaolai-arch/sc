@@ -41,14 +41,16 @@ test('starts a new draft and reopens a previous conversation', async () => {
   expect((await screen.findAllByText(/我先按截止时间和精力排/)).length).toBeGreaterThan(0);
 });
 
-test('selects a project and filters the project panel', async () => {
+test('opens the projects page and filters by project', async () => {
   setup();
   await screen.findByText('早上好，xiaolai。');
+  await userEvent.click(screen.getByRole('button', { name: '项目' }));
   expect(await screen.findByText('外刊精读')).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole('button', { name: '考研' }));
 
   expect(await screen.findByText('极限与连续')).toBeInTheDocument();
+  expect(screen.getByText('2027 考研：数学一 / 英语一 / 政治')).toBeInTheDocument();
   await waitFor(() => expect(screen.queryByText('外刊精读')).not.toBeInTheDocument());
 });
 
@@ -58,7 +60,7 @@ test('records a note and previews it from the records tab', async () => {
   await userEvent.click(screen.getByRole('button', { name: '记一下：今天数学卡在极限' }));
   expect((await screen.findAllByText(/记下了/, {}, { timeout: 3000 })).length).toBeGreaterThan(0);
 
-  await userEvent.click(screen.getByRole('button', { name: '记录' }));
+  await userEvent.click(screen.getByRole('button', { name: '项目' }));
   const noteButton = await screen.findByRole(
     'button',
     { name: /^今天数学卡在极限/ },
@@ -81,15 +83,16 @@ test('shows the review and reminder tabs', async () => {
   expect(await screen.findByText('21:30')).toBeInTheDocument();
 });
 
-test('opens the settings modal from the sidebar', async () => {
+test('opens the settings page and returns to chat', async () => {
   setup();
   await screen.findByText('早上好，xiaolai。');
 
-  await userEvent.click(screen.getByRole('button', { name: '打开设置' }));
+  await userEvent.click(screen.getByRole('button', { name: '设置' }));
   expect(await screen.findByLabelText('模型名称')).toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole('button', { name: '关闭' }));
+  await userEvent.click(screen.getByRole('button', { name: '返回对话' }));
   await waitFor(() => expect(screen.queryByLabelText('模型名称')).not.toBeInTheDocument());
+  expect(await screen.findByText('早上好，xiaolai。')).toBeInTheDocument();
 });
 
 test('creates a project through the conversation', async () => {
@@ -102,13 +105,16 @@ test('creates a project through the conversation', async () => {
   expect(
     await screen.findByText(/已(创建|找到)项目「考研」/, {}, { timeout: 3000 })
   ).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '考研' })).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: '项目' }));
+  expect(await screen.findByRole('heading', { name: '考研' })).toBeInTheDocument();
   expect(await screen.findByText('2027 考研：数学一 / 英语一 / 政治')).toBeInTheDocument();
 });
 
-test('opens practice from the project panel', async () => {
+test('opens practice from the projects page', async () => {
   setup();
   await screen.findByText('早上好，xiaolai。');
+  await userEvent.click(screen.getByRole('button', { name: '项目' }));
 
   await userEvent.click(screen.getByRole('button', { name: '练习' }));
   expect((await screen.findAllByText('极限基础 3 题')).length).toBeGreaterThan(0);

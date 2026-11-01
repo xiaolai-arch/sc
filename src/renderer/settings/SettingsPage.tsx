@@ -22,6 +22,8 @@ import { Select } from '../ui/Select';
 type SettingsPageProps = {
   onClose: () => void;
   embedded?: boolean;
+  /** Full-page mode: the surrounding page owns the heading and back button. */
+  page?: boolean;
 };
 
 const providerLabels: Record<ProviderConfig['kind'], string> = {
@@ -39,7 +41,7 @@ const THEME_OPTIONS: Array<{ value: ThemePreference; label: string }> = [
   { value: 'dark', label: '深色' }
 ];
 
-export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
+export function SettingsPage({ onClose, embedded = false, page = false }: SettingsPageProps) {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [kind, setKind] = useState<ProviderConfig['kind']>('anthropic');
@@ -300,7 +302,7 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
     <div>
       <header
         className={
-          embedded
+          embedded || page
             ? 'flex flex-wrap items-center justify-between gap-3'
             : 'flex flex-col gap-6 md:flex-row md:items-end md:justify-between'
         }
@@ -308,21 +310,27 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
         <div>
           <h2
             className={
-              embedded
-                ? 'text-[15px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]'
-                : 'text-3xl font-semibold tracking-tight text-black dark:text-[#f5f5f7] md:text-4xl'
+              page
+                ? 'sr-only'
+                : embedded
+                  ? 'text-[15px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]'
+                  : 'text-3xl font-semibold tracking-tight text-black dark:text-[#f5f5f7] md:text-4xl'
             }
           >
             设置
           </h2>
-          <p className={embedded ? 'mt-0.5 text-[12px] text-gray-500 dark:text-[#8e8e93]' : 'mt-2 text-gray-600 dark:text-[#a1a1a6]'}>
-            管理模型、预算与提醒。
-          </p>
+          {!page ? (
+            <p className={embedded ? 'mt-0.5 text-[12px] text-gray-500 dark:text-[#8e8e93]' : 'mt-2 text-gray-600 dark:text-[#a1a1a6]'}>
+              管理模型、预算与提醒。
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="secondary" size="sm" onClick={onClose}>
-            关闭
-          </Button>
+          {!page ? (
+            <Button variant="secondary" size="sm" onClick={onClose}>
+              关闭
+            </Button>
+          ) : null}
           <Button size="sm" disabled={saving} onClick={() => void save()}>
             {saving ? '正在保存…' : '保存设置'}
           </Button>

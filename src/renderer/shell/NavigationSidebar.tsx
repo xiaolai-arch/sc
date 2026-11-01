@@ -2,24 +2,31 @@ import { useEffect, useRef, useState } from 'react';
 import { cn } from '../ui/cn';
 import { formatLocalDate } from '../../shared/date';
 import {
+  BookOpenIcon,
+  ClockIcon,
   FolderIcon,
   MoreHorizontalIcon,
   PlusIcon,
   SearchIcon,
-  SettingsIcon
+  SettingsIcon,
+  SparklesIcon,
+  ThinkIcon
 } from '../ui/icons';
 import type { ConversationSummary } from '../../shared/conversations';
 import type { Workspace } from '../../shared/workspace';
 
-type ConversationSidebarProps = {
+export type Section = 'chat' | 'projects' | 'memory' | 'review' | 'reminders' | 'settings';
+
+type NavigationSidebarProps = {
+  section: Section;
   conversations: ConversationSummary[];
   projects: Workspace[];
   activeConversationId: string | null;
   selectedProjectId: string | null;
+  onSectionChange: (section: Section) => void;
   onNewConversation: () => void;
   onSelectConversation: (id: string) => void;
-  onSelectProject: (id: string) => void;
-  onOpenSettings: () => void;
+  onSelectProject: (id: string | null) => void;
   onRenameConversation: (id: string, title: string) => void;
   onTogglePinned: (id: string, pinned: boolean) => void;
   onDeleteConversation: (id: string) => void;
@@ -27,6 +34,17 @@ type ConversationSidebarProps = {
   mobileOpen?: boolean;
   onCloseMobile?: () => void;
 };
+
+const NAV_ITEMS: Array<{ id: Section; label: string; Icon: typeof SparklesIcon }> = [
+  { id: 'chat', label: '对话', Icon: SparklesIcon },
+  { id: 'projects', label: '项目', Icon: FolderIcon },
+  { id: 'memory', label: '记忆', Icon: ThinkIcon },
+  { id: 'review', label: '复盘', Icon: BookOpenIcon },
+  { id: 'reminders', label: '提醒', Icon: ClockIcon },
+  { id: 'settings', label: '设置', Icon: SettingsIcon }
+];
+
+const PROJECT_SECTIONS: Section[] = ['projects', 'memory', 'review'];
 
 function timeLabel(value: string): string {
   const date = new Date(value);
@@ -41,22 +59,26 @@ function timeLabel(value: string): string {
 const menuItemClass =
   'flex w-full items-center rounded-md px-2 py-1.5 text-left text-[11px] text-[#3c3c3f] dark:text-[#a1a1a6] hover:bg-[#f1eee8] dark:hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30';
 
-export function ConversationSidebar({
+const contextHeadingClass =
+  'px-2.5 pb-1 pt-2 text-[10px] font-medium tracking-wide text-[#9a9a9e] dark:text-[#8e8e93]';
+
+export function NavigationSidebar({
+  section,
   conversations,
   projects,
   activeConversationId,
   selectedProjectId,
+  onSectionChange,
   onNewConversation,
   onSelectConversation,
   onSelectProject,
-  onOpenSettings,
   onRenameConversation,
   onTogglePinned,
   onDeleteConversation,
   onSearchConversations,
   mobileOpen = false,
   onCloseMobile
-}: ConversationSidebarProps) {
+}: NavigationSidebarProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<ConversationSummary[] | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
@@ -64,6 +86,7 @@ export function ConversationSidebar({
   const [renameText, setRenameText] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const pendingSearchFocusRef = useRef(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -91,14 +114,24 @@ export function ConversationSidebar({
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault();
+      if (!((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k')) return;
+      event.preventDefault();
+      if (section === 'chat') {
         searchRef.current?.focus();
+        return;
       }
+      pendingSearchFocusRef.current = true;
+      onSectionChange('chat');
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [section, onSectionChange]);
+
+  useEffect(() => {
+    if (section !== 'chat' || !pendingSearchFocusRef.current) return;
+    pendingSearchFocusRef.current = false;
+    searchRef.current?.focus();
+  }, [section]);
 
   useEffect(() => {
     if (menuOpenId === null) return undefined;
@@ -160,69 +193,24 @@ export function ConversationSidebar({
     setConfirmDeleteId(conversation.id);
   }
 
-  return (
-    <aside
-      className={cn(
-        'fixed inset-y-0 left-0 z-40 flex w-[260px] max-w-[85vw] shrink-0 flex-col border-r border-[#e8e5e0] dark:border-white/10 bg-[#fbfbfa] dark:bg-[#141415] transition-transform duration-200 motion-reduce:transition-none',
-        mobileOpen ? 'translate-x-0' : '-translate-x-full',
-        'md:static md:z-auto md:h-full md:w-[220px] md:max-w-none md:translate-x-0'
-      )}
-    >
-      <div aria-hidden="true" className="hidden items-center gap-1.5 px-4 pt-4 md:flex">
-        <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" />
-        <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" />
-        <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
-      </div>
-
-      <div className="flex items-center justify-between px-4 pt-3 md:hidden">
-        <span className="text-[12px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">对话</span>
-        <button
-          type="button"
-          aria-label="关闭对话列表"
-          onClick={onCloseMobile}
-          className="flex h-7 items-center justify-center rounded-md px-2 text-[10px] text-[#8a8a8e] dark:text-[#8e8e93] hover:bg-black/[0.04] dark:hover:bg-white/[0.06] hover:text-black dark:hover:text-[#f5f5f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
-        >
-          关闭
-        </button>
-      </div>
-
-      <div className="flex items-center gap-2 px-4 pb-3 pt-3">
-        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#1d1d1f] text-[11px] font-semibold text-white">
-          S
-        </span>
-        <span className="text-[13px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">Study Coach</span>
-      </div>
-
-      <div className="px-3 pb-2">
-        <button
-          type="button"
-          onClick={onNewConversation}
-          className="flex h-9 w-full items-center gap-2 rounded-lg bg-[#0071e3] px-3 text-[12px] font-semibold text-white transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
-        >
-          <PlusIcon className="h-4 w-4" />
-          新对话
-        </button>
-      </div>
-
-      <div className="px-3 pb-2">
-        <div className="relative">
-          <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#9a9a9e] dark:text-[#8e8e93]" />
-          <input
-            ref={searchRef}
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索对话 ⌘K"
-            aria-label="搜索对话"
-            className="h-8 w-full rounded-lg border border-black/[0.08] dark:border-white/10 bg-white dark:bg-[#242426] pl-7 pr-2 text-[11px] text-[#1d1d1f] dark:text-[#f5f5f7] outline-none placeholder:text-[#9a9a9e] focus:border-[#0071e3]/40 focus:ring-2 focus:ring-[#0071e3]/20"
-          />
+  function conversationList() {
+    return (
+      <>
+        <div className="px-1 pb-2">
+          <div className="relative">
+            <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#9a9a9e] dark:text-[#8e8e93]" />
+            <input
+              ref={searchRef}
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="搜索对话 ⌘K"
+              aria-label="搜索对话"
+              className="h-8 w-full rounded-lg border border-black/[0.08] dark:border-white/10 bg-white dark:bg-[#242426] pl-7 pr-2 text-[11px] text-[#1d1d1f] dark:text-[#f5f5f7] outline-none placeholder:text-[#9a9a9e] focus:border-[#0071e3]/40 focus:ring-2 focus:ring-[#0071e3]/20"
+            />
+          </div>
         </div>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-        <p className="px-2.5 pb-1 pt-2 text-[10px] font-medium tracking-wide text-[#9a9a9e] dark:text-[#8e8e93]">
-          最近对话
-        </p>
+        <p className={contextHeadingClass}>最近对话</p>
         {searching && visibleConversations.length === 0 ? (
           <p className="px-2.5 py-2 text-[11px] leading-5 text-[#9a9a9e] dark:text-[#8e8e93]">没有找到对话。</p>
         ) : visibleConversations.length === 0 ? (
@@ -352,16 +340,36 @@ export function ConversationSidebar({
             })}
           </div>
         )}
+      </>
+    );
+  }
 
-        <p className="px-2.5 pb-1 pt-4 text-[10px] font-medium tracking-wide text-[#9a9a9e] dark:text-[#8e8e93]">
-          项目
-        </p>
+  function projectList() {
+    return (
+      <>
+        <p className={contextHeadingClass}>项目</p>
         {projects.length === 0 ? (
           <p className="px-2.5 py-2 text-[11px] leading-5 text-[#9a9a9e] dark:text-[#8e8e93]">
             项目会由管家在对话里创建。
           </p>
         ) : (
           <div className="space-y-0.5">
+            <button
+              type="button"
+              aria-current={selectedProjectId === null ? 'page' : undefined}
+              onClick={() => onSelectProject(null)}
+              className={cn(
+                'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30',
+                selectedProjectId === null
+                  ? 'bg-[#e9e6e0] dark:bg-white/[0.1]'
+                  : 'hover:bg-[#f1eee8] dark:hover:bg-white/[0.06]'
+              )}
+            >
+              <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-[#c9c4bc]" />
+              <span className="min-w-0 flex-1 truncate text-[12px] text-[#3c3c3f] dark:text-[#a1a1a6]">
+                全部项目
+              </span>
+            </button>
             {projects.map((project) => {
               const active = project.id === selectedProjectId;
               return (
@@ -389,6 +397,91 @@ export function ConversationSidebar({
             })}
           </div>
         )}
+      </>
+    );
+  }
+
+  return (
+    <aside
+      aria-label="导航"
+      className={cn(
+        'fixed inset-y-0 left-0 z-40 flex w-[260px] max-w-[85vw] shrink-0 flex-col border-r border-[#e8e5e0] dark:border-white/10 bg-[#fbfbfa] dark:bg-[#141415] transition-transform duration-200 motion-reduce:transition-none',
+        mobileOpen ? 'translate-x-0' : '-translate-x-full',
+        'md:static md:z-auto md:h-full md:w-[260px] md:max-w-none md:translate-x-0'
+      )}
+    >
+      <div aria-hidden="true" className="hidden items-center gap-1.5 px-4 pt-4 md:flex">
+        <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" />
+        <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" />
+        <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
+      </div>
+
+      <div className="flex items-center justify-between px-4 pt-3 md:hidden">
+        <span className="text-[12px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">导航</span>
+        <button
+          type="button"
+          aria-label="关闭导航"
+          onClick={onCloseMobile}
+          className="flex h-7 items-center justify-center rounded-md px-2 text-[10px] text-[#8a8a8e] dark:text-[#8e8e93] hover:bg-black/[0.04] dark:hover:bg-white/[0.06] hover:text-black dark:hover:text-[#f5f5f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+        >
+          关闭
+        </button>
+      </div>
+
+      <div className="flex items-center gap-2 px-4 pb-3 pt-3">
+        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#1d1d1f] text-[11px] font-semibold text-white">
+          S
+        </span>
+        <span className="text-[13px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">Study Coach</span>
+      </div>
+
+      <div className="px-3 pb-2">
+        <button
+          type="button"
+          onClick={onNewConversation}
+          className="flex h-9 w-full items-center gap-2 rounded-lg bg-[#0071e3] px-3 text-[12px] font-semibold text-white transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+        >
+          <PlusIcon className="h-4 w-4" />
+          新对话
+        </button>
+      </div>
+
+      <nav aria-label="主导航" className="space-y-0.5 px-2 pb-2">
+        {NAV_ITEMS.map(({ id, label, Icon }) => {
+          const active = section === id;
+          return (
+            <button
+              key={id}
+              type="button"
+              aria-current={active ? 'page' : undefined}
+              onClick={() => onSectionChange(id)}
+              className={cn(
+                'flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[12px] transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30',
+                active
+                  ? 'bg-[#e9e6e0] dark:bg-white/[0.1] font-medium text-[#1d1d1f] dark:text-[#f5f5f7]'
+                  : 'text-[#3c3c3f] dark:text-[#a1a1a6] hover:bg-[#f1eee8] dark:hover:bg-white/[0.06]'
+              )}
+            >
+              <Icon className="h-4 w-4 shrink-0" />
+              {label}
+            </button>
+          );
+        })}
+      </nav>
+
+      <div className="mx-3 border-t border-[#eeeae4] dark:border-white/10" />
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+        {section === 'chat' ? conversationList() : null}
+        {PROJECT_SECTIONS.includes(section) ? projectList() : null}
+        {section === 'reminders' ? (
+          <>
+            <p className={contextHeadingClass}>全部提醒</p>
+            <p className="px-2.5 py-2 text-[11px] leading-5 text-[#9a9a9e] dark:text-[#8e8e93]">
+              提醒是全局的，不按项目筛选。
+            </p>
+          </>
+        ) : null}
       </div>
 
       <div className="flex items-center gap-2 border-t border-[#eeeae4] dark:border-white/10 px-3 py-3">
@@ -399,7 +492,7 @@ export function ConversationSidebar({
         <button
           type="button"
           aria-label="打开设置"
-          onClick={onOpenSettings}
+          onClick={() => onSectionChange('settings')}
           className="flex h-7 w-7 items-center justify-center rounded-md text-[#8a8a8e] dark:text-[#8e8e93] transition-colors hover:bg-black/[0.04] dark:hover:bg-white/[0.06] hover:text-black dark:hover:text-[#f5f5f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
         >
           <SettingsIcon className="h-4 w-4" />
