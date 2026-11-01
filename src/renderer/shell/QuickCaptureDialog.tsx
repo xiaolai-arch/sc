@@ -40,7 +40,7 @@ export function QuickCaptureDialog({
             submit();
           }
         }}
-        placeholder="记一下今天做了什么，或告诉管家下一步…"
+        placeholder="记一下今天做了什么，或告诉阿咲下一步…"
         className="min-h-[96px] w-full resize-none rounded-lg border border-black/[0.08] dark:border-white/10 bg-white dark:bg-[#242426] px-3 py-2 text-[13px] leading-6 text-[#1d1d1f] dark:text-[#f5f5f7] outline-none placeholder:text-gray-500 focus:border-[#0071e3]/40 focus:ring-2 focus:ring-[#0071e3]/20"
       />
       <div className="mt-4 flex justify-end gap-2">
@@ -57,7 +57,7 @@ export function QuickCaptureDialog({
           disabled={!text.trim() || disabled}
           className="rounded-md bg-[#0071e3] px-3 py-1.5 text-[12px] font-medium text-white disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
         >
-          发送给管家
+          发送给阿咲
         </button>
       </div>
     </Dialog>

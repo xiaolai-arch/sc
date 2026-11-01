@@ -1215,7 +1215,7 @@ export function createMockApi(
             name: '考研',
             kind: 'exam',
             goal: '2027 考研上岸',
-            description: '由管家在对话里创建'
+            description: '由阿咲在对话里创建'
           });
         if (conversation) {
           conversation.workspaceId = workspace.id;

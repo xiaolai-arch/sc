@@ -85,7 +85,7 @@ test('shows the empty state without usage', async () => {
   render(<SettingsPage onClose={() => {}} />);
 
   expect(
-    await screen.findByText('还没有用量记录。和管家对话后这里会显示本地统计。')
+    await screen.findByText('还没有用量记录。和阿咲对话后这里会显示本地统计。')
   ).toBeInTheDocument();
 });
 
@@ -141,6 +141,6 @@ test('clears usage after confirmation', async () => {
 
   await waitFor(() => expect(clear).toHaveBeenCalledTimes(1));
   expect(
-    await screen.findByText('还没有用量记录。和管家对话后这里会显示本地统计。')
+    await screen.findByText('还没有用量记录。和阿咲对话后这里会显示本地统计。')
   ).toBeInTheDocument();
 });

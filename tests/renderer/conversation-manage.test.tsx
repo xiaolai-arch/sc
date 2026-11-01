@@ -59,12 +59,12 @@ test('copies an assistant message and regenerates it without duplicating the use
 test('edits the last user message before resending it', async () => {
   const api = setup();
   await screen.findByText('早上好，xiaolai。');
-  await userEvent.type(screen.getByLabelText('向管家提问'), '记一下：今天数学卡在极限');
+  await userEvent.type(screen.getByLabelText('向阿咲提问'), '记一下：今天数学卡在极限');
   await userEvent.click(screen.getByRole('button', { name: '发送' }));
   await screen.findAllByText(/记下了/);
 
   await userEvent.click(screen.getByRole('button', { name: '编辑' }));
-  const composer = screen.getByLabelText('向管家提问');
+  const composer = screen.getByLabelText('向阿咲提问');
   expect((composer as HTMLTextAreaElement).value).toBe('记一下：今天数学卡在极限');
 
   await userEvent.clear(composer);
@@ -127,7 +127,7 @@ test('deletes a conversation only after confirmation and returns to the draft', 
 test('searches conversations by message body with a debounced input', async () => {
   setup();
   await screen.findByText('早上好，xiaolai。');
-  await userEvent.type(screen.getByLabelText('向管家提问'), '记一下：今天数学卡在极限');
+  await userEvent.type(screen.getByLabelText('向阿咲提问'), '记一下：今天数学卡在极限');
   await userEvent.click(screen.getByRole('button', { name: '发送' }));
   await screen.findAllByText(/记下了/);
 

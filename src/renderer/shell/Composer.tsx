@@ -62,8 +62,8 @@ export function Composer({
             }
           }}
           rows={2}
-          placeholder="向管家提问，或说「记一下…」"
-          aria-label="向管家提问"
+          placeholder="向阿咲提问，或说「记一下…」"
+          aria-label="向阿咲提问"
           className="max-h-32 min-h-[44px] w-full resize-none bg-transparent px-1 py-1 text-[13px] leading-5 text-[#1d1d1f] dark:text-[#f5f5f7] outline-none placeholder:text-gray-500"
         />
         <div className="mt-2 flex items-center justify-between gap-2">

@@ -632,7 +632,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       return active.workspace;
     },
     get butler() {
-      if (!active) throw new Error('管家服务尚未初始化。');
+      if (!active) throw new Error('阿咲服务尚未初始化。');
       return active.butler;
     },
     get practice() {

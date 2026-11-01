@@ -59,10 +59,10 @@ export function LearningPane({
             <div className="rounded-xl border border-black/[0.06] dark:border-white/10 bg-[#fafafa] dark:bg-[#1c1c1e] p-5">
               <p className="text-[14px] font-medium text-black dark:text-[#f5f5f7]">这个工作区还没有练习。</p>
               <p className="mt-1 text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
-                可以让管家当老师讲解，或者先从相关记录开始。
+                可以让阿咲当老师讲解，或者先从相关记录开始。
               </p>
               <Button className="mt-4" size="sm" onClick={onOpenChat}>
-                去问管家
+                去问阿咲
               </Button>
             </div>
             {mistakes.length > 0 ? (
@@ -152,7 +152,7 @@ export function LearningPane({
           <span className="truncate text-[11px] text-gray-500 dark:text-[#8e8e93]">{set.title}</span>
         </div>
         <Button size="sm" variant="secondary" onClick={onOpenChat}>
-          问管家
+          问阿咲
         </Button>
       </header>
 
@@ -177,7 +177,7 @@ export function LearningPane({
                   再练一次
                 </Button>
                 <Button size="sm" variant="secondary" onClick={onOpenChat}>
-                  问管家
+                  问阿咲
                 </Button>
               </div>
             </div>

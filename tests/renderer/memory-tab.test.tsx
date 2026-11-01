@@ -107,7 +107,7 @@ test('shows the empty state when there are no memories', async () => {
   await userEvent.click(screen.getByRole('button', { name: '记忆' }));
 
   expect(
-    screen.getByText('还没有记忆。完成一次复盘后，管家会记住你的卡点和偏好。')
+    screen.getByText('还没有记忆。完成一次复盘后，阿咲会记住你的卡点和偏好。')
   ).toBeInTheDocument();
 });
 

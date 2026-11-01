@@ -215,7 +215,7 @@ export function NavigationSidebar({
           <p className="px-2.5 py-2 text-[11px] leading-5 text-[#9a9a9e] dark:text-[#8e8e93]">没有找到对话。</p>
         ) : visibleConversations.length === 0 ? (
           <p className="px-2.5 py-2 text-[11px] leading-5 text-[#9a9a9e] dark:text-[#8e8e93]">
-            还没有对话。告诉管家你想做什么。
+            还没有对话。告诉阿咲你想做什么。
           </p>
         ) : (
           <div className="space-y-0.5">
@@ -352,7 +352,7 @@ export function NavigationSidebar({
         </p>
         {projects.length === 0 ? (
           <p className="px-2.5 py-2 text-[11px] leading-5 text-[#9a9a9e] dark:text-[#8e8e93]">
-            项目会由管家在对话里创建。
+            项目会由阿咲在对话里创建。
           </p>
         ) : (
           <div className="space-y-0.5">

@@ -774,7 +774,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   if (loading && workspaces.length === 0) {
     return (
       <WorkspaceStatus
-        title="正在准备管家…"
+        title="正在准备阿咲…"
         detail="从本地 vault 读取项目、任务和记录。"
       />
     );
@@ -975,7 +975,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               </div>
               {filteredPracticeSets.length === 0 ? (
                 <p className="px-2 py-2 text-[11px] leading-5 text-[#8a8a8e] dark:text-[#8e8e93]">
-                  这个项目还没有练习集。可以让管家先记一些错题。
+                  这个项目还没有练习集。可以让阿咲先记一些错题。
                 </p>
               ) : (
                 filteredPracticeSets.map((set) => (
@@ -1088,7 +1088,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
                 }}
                 className="rounded-md bg-[#0071e3] px-3 py-1.5 text-[12px] font-medium text-white"
               >
-                让管家改
+                让阿咲改
               </button>
             </div>
           </div>

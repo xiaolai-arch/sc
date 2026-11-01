@@ -41,14 +41,14 @@ const MEMORY_KIND_ORDER: MemoryKind[] = [
 
 export function memorySourceLabel(source: string): string {
   const match = /^review:(\d{4}-\d{2}-\d{2})$/.exec(source);
-  return match ? `来自 ${match[1]} 复盘` : `来自 ${source || '管家记录'}`;
+  return match ? `来自 ${match[1]} 复盘` : `来自 ${source || '阿咲记录'}`;
 }
 
 export function memoryWhyRemembered(record: MemoryRecord): string {
   const label = MEMORY_KIND_LABELS[record.kind];
   const match = /^review:(\d{4})-(\d{2})-(\d{2})$/.exec(record.source);
   if (!match) {
-    return record.source ? `${label} · 来自 ${record.source}` : `${label} · 由管家记录`;
+    return record.source ? `${label} · 来自 ${record.source}` : `${label} · 由阿咲记录`;
   }
   const day = `${match[2]}-${match[3]}`;
   switch (record.kind) {
@@ -246,8 +246,8 @@ export function PlanSection({
       </div>
       {filteredTasks.length === 0 ? (
         <Empty
-          text="这个项目还没有任务。让管家帮你排一个。"
-          action="让管家排计划"
+          text="这个项目还没有任务。让阿咲帮你排一个。"
+          action="让阿咲排计划"
           onAction={() => onPrompt('帮我排一下这个项目的计划')}
         />
       ) : (
@@ -314,7 +314,7 @@ export function PlanSection({
         onClick={() => onPrompt('帮我调整一下今天的任务安排')}
         className="mt-3 text-[11px] font-medium text-[#0071e3] dark:text-[#4da3ff] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
       >
-        让管家调整
+        让阿咲调整
       </button>
     </section>
   );
@@ -434,7 +434,7 @@ export function RecordsSection({
       {filteredNotes.length === 0 ? (
         <Empty
           text="这个项目还没有记录。"
-          action="让管家记一条"
+          action="让阿咲记一条"
           onAction={() => onPrompt('记一下：')}
         />
       ) : (
@@ -461,7 +461,7 @@ export function RecordsSection({
         onClick={() => onPrompt('记一下：')}
         className="mt-3 text-[11px] font-medium text-[#0071e3] dark:text-[#4da3ff] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
       >
-        让管家记一条
+        让阿咲记一条
       </button>
     </section>
   );
@@ -549,7 +549,7 @@ export function MemorySection({
     return (
       <div className="rounded-lg border border-dashed border-[#ddd8d0] dark:border-white/10 px-3 py-5 text-center">
         <p className="text-[11px] leading-5 text-[#8a8a8e] dark:text-[#8e8e93]">
-          还没有记忆。完成一次复盘后，管家会记住你的卡点和偏好。
+          还没有记忆。完成一次复盘后，阿咲会记住你的卡点和偏好。
         </p>
       </div>
     );
@@ -860,7 +860,7 @@ export function RemindersSection({
       {reminders.length === 0 ? (
         <Empty
           text="还没有提醒。"
-          action="让管家设提醒"
+          action="让阿咲设提醒"
           onAction={() => onPrompt('帮我设一个提醒：')}
         />
       ) : (
@@ -909,7 +909,7 @@ export function RemindersSection({
         onClick={() => onPrompt('帮我设一个提醒：')}
         className="mt-3 text-[11px] font-medium text-[#0071e3] dark:text-[#4da3ff] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
       >
-        让管家设提醒
+        让阿咲设提醒
       </button>
 
       <div className="mt-4 rounded-lg border border-[#e5e1da] dark:border-white/10 bg-white dark:bg-[#242426] p-2">

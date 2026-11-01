@@ -114,7 +114,7 @@ export class ProactiveCheckInService {
             ? settings.notifications.evening
             : settings.notifications.weekly,
       title:
-        trigger === 'weekly' ? '管家想和你回顾这一周' : '管家想和你聊聊今天的进度',
+        trigger === 'weekly' ? '阿咲想和你回顾这一周' : '阿咲想和你聊聊今天的进度',
       body: buildCheckInNotificationBody(context, trigger),
       conversationId: conversation.id
     };

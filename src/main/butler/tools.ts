@@ -375,7 +375,7 @@ export function createButlerTools(): ButlerToolDefinition[] {
             const snapshot = await context.workspace.getWorkspaceSnapshot(workspaceId);
             subject = snapshot.workspace.name;
           } catch {
-            subject = '管家记录';
+            subject = '阿咲记录';
           }
         }
 
@@ -428,7 +428,7 @@ export function createButlerTools(): ButlerToolDefinition[] {
     },
     {
       name: 'get_memory',
-      description: '读取管家关于用户的长期记忆，可以按工作区过滤。',
+      description: '读取阿咲关于用户的长期记忆，可以按工作区过滤。',
       parameters: {
         type: 'object',
         properties: {

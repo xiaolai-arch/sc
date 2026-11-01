@@ -107,7 +107,7 @@ test('creates a morning check-in and returns a generic notification', async () =
 
     expect(notification).toMatchObject({
       kind: 'morning-plan',
-      title: '管家想和你聊聊今天的进度',
+      title: '阿咲想和你聊聊今天的进度',
       body: '今天还有 1 个任务没完成，点开看看。',
       conversationId: expect.any(String)
     });

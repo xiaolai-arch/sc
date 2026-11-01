@@ -85,7 +85,7 @@ test('keeps the conversation and project when moving between sections', async ()
   const { api } = setup();
   await mount(api);
 
-  await userEvent.type(screen.getByLabelText('向管家提问'), '我想考研');
+  await userEvent.type(screen.getByLabelText('向阿咲提问'), '我想考研');
   await userEvent.click(screen.getByRole('button', { name: '发送' }));
   expect(
     await screen.findByText(/已(创建|找到)项目「考研」/, {}, { timeout: 3000 })
@@ -113,7 +113,7 @@ test('opens the projects page from the chat header project name', async () => {
   const { api } = setup();
   await mount(api);
 
-  await userEvent.type(screen.getByLabelText('向管家提问'), '我想考研');
+  await userEvent.type(screen.getByLabelText('向阿咲提问'), '我想考研');
   await userEvent.click(screen.getByRole('button', { name: '发送' }));
   await screen.findByText(/已(创建|找到)项目「考研」/, {}, { timeout: 3000 });
 
@@ -127,13 +127,13 @@ test('keeps a composer draft when switching sections', async () => {
   const { api } = setup();
   await mount(api);
 
-  const composer = screen.getByLabelText('向管家提问');
+  const composer = screen.getByLabelText('向阿咲提问');
   await userEvent.type(composer, '先记下这句话');
   await userEvent.click(nav().getByRole('button', { name: '项目' }));
   await screen.findByRole('heading', { name: '全部项目' });
   await userEvent.click(nav().getByRole('button', { name: '对话' }));
 
-  expect(screen.getByLabelText('向管家提问')).toHaveValue('先记下这句话');
+  expect(screen.getByLabelText('向阿咲提问')).toHaveValue('先记下这句话');
 });
 
 test('starts a new conversation from the settings page', async () => {

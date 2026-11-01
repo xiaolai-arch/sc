@@ -16,7 +16,7 @@ test.describe('Study Coach desktop', () => {
       });
 
       await test.step('creates a project through the conversation', async () => {
-        await page.getByLabel('向管家提问').fill('我想考研');
+        await page.getByLabel('向阿咲提问').fill('我想考研');
         await page.getByRole('button', { name: '发送' }).click();
 
         const thinking = page.getByRole('button', { name: /思考/ }).first();

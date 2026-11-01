@@ -171,7 +171,7 @@ test('passes weekly to the check-in callback and forwards its notification', asy
         kind: 'weekly-review',
         date,
         scheduledTime: '20:00',
-        title: '管家想和你回顾这一周',
+        title: '阿咲想和你回顾这一周',
         body: '周日复盘时间到了',
         conversationId: 'weekly-1'
       };
@@ -187,7 +187,7 @@ test('passes weekly to the check-in callback and forwards its notification', asy
     conversationId: 'weekly-1'
   });
   expect(notified).toEqual([
-    { kind: 'weekly-review', title: '管家想和你回顾这一周', conversationId: 'weekly-1' }
+    { kind: 'weekly-review', title: '阿咲想和你回顾这一周', conversationId: 'weekly-1' }
   ]);
 
   now = at(1, 20, 1);

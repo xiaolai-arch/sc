@@ -551,7 +551,7 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
             ) : null}
             {usage === null || usage.totals.calls === 0 ? (
               <p className="mt-4 text-sm text-gray-600 dark:text-[#a1a1a6]">
-                还没有用量记录。和管家对话后这里会显示本地统计。
+                还没有用量记录。和阿咲对话后这里会显示本地统计。
               </p>
             ) : (
               <>

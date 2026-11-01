@@ -381,7 +381,7 @@ interface ButlerStreamPayload {
 }
 
 function requireStreamPayload(value: unknown): ButlerStreamPayload {
-  const payload = requireObject(value, '管家流式请求');
+  const payload = requireObject(value, '阿咲流式请求');
   return {
     requestId: requireString(payload.requestId, '请求 ID'),
     input: requireSend(payload.input)

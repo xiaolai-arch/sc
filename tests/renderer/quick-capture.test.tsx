@@ -42,7 +42,7 @@ test('sends the captured text through the butler conversation', async () => {
 
   act(() => openCapture());
   await userEvent.type(screen.getByLabelText('快速记录内容'), '记一下：今天背了 50 个单词');
-  await userEvent.click(screen.getByRole('button', { name: '发送给管家' }));
+  await userEvent.click(screen.getByRole('button', { name: '发送给阿咲' }));
 
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   expect((await screen.findAllByText('记一下：今天背了 50 个单词')).length).toBeGreaterThan(0);
@@ -54,9 +54,9 @@ test('disables sending empty captures', async () => {
 
   act(() => openCapture());
 
-  expect(screen.getByRole('button', { name: '发送给管家' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '发送给阿咲' })).toBeDisabled();
   await userEvent.type(screen.getByLabelText('快速记录内容'), '   ');
-  expect(screen.getByRole('button', { name: '发送给管家' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '发送给阿咲' })).toBeDisabled();
 });
 
 test('cancels without sending', async () => {
@@ -88,7 +88,7 @@ test('does not start a draft from Cmd+N inside the composer', async () => {
   await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
   await screen.findAllByText(/我先按截止时间和精力排/);
 
-  const composer = screen.getByLabelText('向管家提问');
+  const composer = screen.getByLabelText('向阿咲提问');
   composer.focus();
   fireEvent.keyDown(composer, { key: 'n', metaKey: true });
 

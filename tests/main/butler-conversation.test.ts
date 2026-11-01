@@ -133,7 +133,7 @@ test('loads history and uses the conversation workspace over the send workspace'
     await store.appendMessage(conversation.id, message('u2', 'user', '你好'));
 
     const { service } = fakeWorkspaceService();
-    const client = new FakeModelClient(['你好，我是管家。']);
+    const client = new FakeModelClient(['你好，我是阿咲。']);
     const butler = new ButlerServiceImpl({
       workspaceService: service,
       modelClient: client,
@@ -164,11 +164,11 @@ test('loads history and uses the conversation workspace over the send workspace'
     expect(stored?.messages.map((entry) => entry.id)).toEqual(['u1', 'a1', 'u2', 'a2']);
     expect(stored?.messages[3]).toMatchObject({
       role: 'assistant',
-      text: '你好，我是管家。',
+      text: '你好，我是阿咲。',
       source: 'butler'
     });
     expect(result.conversationId).toBe(conversation.id);
-    expect(result.text).toBe('你好，我是管家。');
+    expect(result.text).toBe('你好，我是阿咲。');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

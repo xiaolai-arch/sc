@@ -34,7 +34,7 @@ test('uses the proactive check-in notification and does not retry it', async () 
         kind: 'morning-plan',
         date,
         scheduledTime: '08:00',
-        title: '管家想和你聊聊今天的进度',
+        title: '阿咲想和你聊聊今天的进度',
         body: '今天还有 1 个任务没完成，点开看看。',
         conversationId: 'check-in-1'
       };
@@ -44,7 +44,7 @@ test('uses the proactive check-in notification and does not retry it', async () 
   const first = await scheduler.tick();
   expect(first.delivered).toHaveLength(1);
   expect(notified).toEqual([
-    { title: '管家想和你聊聊今天的进度', conversationId: 'check-in-1' }
+    { title: '阿咲想和你聊聊今天的进度', conversationId: 'check-in-1' }
   ]);
   expect(calls).toEqual(['morning:2026-10-31']);
 

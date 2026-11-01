@@ -199,7 +199,7 @@ describe('CliAgentClient structured tool protocol', () => {
 
     await client.complete({
       messages: [
-        { role: 'system', content: '你是管家' },
+        { role: 'system', content: '你是阿咲' },
         { role: 'user', content: '记一条笔记' }
       ],
       tools: [

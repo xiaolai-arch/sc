@@ -16,7 +16,7 @@ function setup(streamPace = 0.05) {
 test('shows the welcome draft and sends a message', async () => {
   setup();
   expect(await screen.findByText('早上好，xiaolai。')).toBeInTheDocument();
-  expect(screen.getByText('还没有对话。告诉管家你想做什么。')).toBeInTheDocument();
+  expect(screen.getByText('还没有对话。告诉阿咲你想做什么。')).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
 
@@ -99,7 +99,7 @@ test('creates a project through the conversation', async () => {
   setup();
   await screen.findByText('早上好，xiaolai。');
 
-  await userEvent.type(screen.getByLabelText('向管家提问'), '我想考研');
+  await userEvent.type(screen.getByLabelText('向阿咲提问'), '我想考研');
   await userEvent.click(screen.getByRole('button', { name: '发送' }));
 
   expect(

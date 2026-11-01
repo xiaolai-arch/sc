@@ -93,7 +93,7 @@ export function ChatPane({
               <MenuIcon className="h-4 w-4" />
             </button>
           ) : null}
-          <span className="text-[13px] font-medium text-black dark:text-[#f5f5f7]">管家</span>
+          <span className="text-[13px] font-medium text-black dark:text-[#f5f5f7]">阿咲</span>
           <span className="text-[11px] text-gray-400 dark:text-[#8e8e93]">/</span>
           {workspace && onOpenProjects ? (
             <button
@@ -157,7 +157,7 @@ export function ChatPane({
                 早上好，xiaolai。
               </h2>
               <p className="mt-2 text-[14px] leading-6 text-gray-600 dark:text-[#a1a1a6]">
-                我是你的个人管家。今天想做点什么？
+                我是阿咲，你的个人管家。今天想做点什么？
               </p>
               <div className="mt-6 flex flex-wrap gap-2">
                 {suggestedPrompts.map((prompt) => (
@@ -195,7 +195,7 @@ export function ChatPane({
                   <SparklesIcon className="h-3.5 w-3.5" />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[11px] font-medium text-gray-500 dark:text-[#8e8e93]">Study Coach</p>
+                  <p className="text-[11px] font-medium text-gray-500 dark:text-[#8e8e93]">阿咲</p>
                   <TraceFlow items={message.trace ?? stepsToTrace(message.steps)} />
                   {message.text ? (
                     <div className="mt-1">

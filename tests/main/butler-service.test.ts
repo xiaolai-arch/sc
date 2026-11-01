@@ -275,7 +275,7 @@ describe('ButlerServiceImpl replies', () => {
   });
 
   test('the factory accepts an injected fake model client', async () => {
-    const client = new FakeModelClient(['你好，我是管家。']);
+    const client = new FakeModelClient(['你好，我是阿咲。']);
     const service = createButlerService('/tmp/vault', {
       workspaceService: new MemoryWorkspaceService(),
       modelClient: client,
@@ -284,7 +284,7 @@ describe('ButlerServiceImpl replies', () => {
 
     const result = await service.send({ workspaceId: 'ws-exam', message: '你好' });
 
-    expect(result.text).toBe('你好，我是管家。');
+    expect(result.text).toBe('你好，我是阿咲。');
     expect(client.calls).toHaveLength(1);
   });
 

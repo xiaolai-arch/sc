@@ -87,14 +87,14 @@ export function ProjectsPage({
             先在对话里创建项目
           </p>
           <p className="mt-1 text-[12px] leading-5 text-[#8a8a8e] dark:text-[#8e8e93]">
-            告诉管家你想学什么，他会建好项目并排出第一批任务。
+            告诉阿咲你想学什么，阿咲会建好项目并排出第一批任务。
           </p>
           <button
             type="button"
             onClick={onOpenChat}
             className="mt-4 rounded-md bg-[#0071e3] px-3 py-1.5 text-[12px] font-medium text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
           >
-            去和管家聊
+            去和阿咲聊
           </button>
         </div>
       ) : (
@@ -113,7 +113,7 @@ export function ProjectsPage({
                   ) : null}
                 </div>
                 <p className="mt-1 text-[12px] leading-5 text-[#8a8a8e] dark:text-[#8e8e93]">
-                  {workspace?.goal || '告诉管家你想做什么，他会创建项目。'}
+                  {workspace?.goal || '告诉阿咲你想做什么，阿咲会创建项目。'}
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
