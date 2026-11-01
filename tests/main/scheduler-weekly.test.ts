@@ -103,6 +103,36 @@ test('suppresses a user reminder at the weekly recap time', async () => {
   expect(notified).toEqual(['weekly-review']);
 });
 
+test('fires a colliding reminder on Monday when the weekly recap is enabled', async () => {
+  const now = at(2, 20, 0); // Monday
+  const scheduler = new Scheduler({
+    now: () => now,
+    getSettings: async () => settings(),
+    getReminders: async () => [{ id: 'r1', time: '20:00', label: '拉伸', enabled: true }],
+    notify: () => undefined
+  });
+
+  const result = await scheduler.tick();
+
+  expect(result.delivered).toHaveLength(1);
+  expect(result.delivered[0]).toMatchObject({ kind: 'reminder', reminderId: 'r1' });
+});
+
+test('fires a colliding reminder on Saturday when the weekly recap is enabled', async () => {
+  const now = at(7, 20, 0); // Saturday
+  const scheduler = new Scheduler({
+    now: () => now,
+    getSettings: async () => settings(),
+    getReminders: async () => [{ id: 'r1', time: '20:00', label: '拉伸', enabled: true }],
+    notify: () => undefined
+  });
+
+  const result = await scheduler.tick();
+
+  expect(result.delivered).toHaveLength(1);
+  expect(result.delivered[0]).toMatchObject({ kind: 'reminder', reminderId: 'r1' });
+});
+
 test('keeps the reminder at that time when the weekly recap is disabled', async () => {
   const now = at(1, 20, 0);
   const scheduler = new Scheduler({
