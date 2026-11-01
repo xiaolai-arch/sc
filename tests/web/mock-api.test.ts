@@ -1,25 +1,41 @@
 // @vitest-environment jsdom
-import { createMockApi, DEMO_PROFILE, MOCK_STORAGE_KEY } from '../../web/mock-api';
+import { createMockApi, MOCK_STORAGE_KEY } from '../../web/mock-api';
 import type { ButlerStreamEvent } from '../../src/shared/butler-stream';
 
-test('starts in onboarding and completes it with a demo plan', async () => {
+test('starts in onboarding and completes it with a workspace', async () => {
   localStorage.clear();
   const api = createMockApi(localStorage);
   expect((await api.getBootstrap()).needsOnboarding).toBe(true);
-  await api.completeOnboarding(DEMO_PROFILE);
+  await api.completeWorkspaceOnboarding({
+    name: '我的学习',
+    kind: 'study',
+    goal: '把今天的下一步做完',
+    description: ''
+  });
   const bootstrap = await api.getBootstrap();
   expect(bootstrap.needsOnboarding).toBe(false);
-  const plan = await api.getTodayPlan();
-  expect(plan?.tasks.length).toBeGreaterThan(0);
+  const workspaces = await api.listWorkspaces();
+  expect(workspaces.some((workspace) => workspace.name === '我的学习')).toBe(true);
 });
 
-test('updates a task and keeps settings', async () => {
+test('updates a workspace task and keeps settings', async () => {
   localStorage.clear();
   const api = createMockApi(localStorage);
-  await api.completeOnboarding(DEMO_PROFILE);
-  const plan = await api.getTodayPlan();
-  const updated = await api.updateTask({ taskId: plan!.tasks[0].id, status: 'done' });
-  expect(updated.tasks.find((task) => task.id === plan!.tasks[0].id)?.status).toBe('done');
+  await api.completeWorkspaceOnboarding({
+    name: '我的学习',
+    kind: 'study',
+    goal: 'g',
+    description: ''
+  });
+  const task = await api.createTask({
+    workspaceId: 'kaoyan',
+    title: '极限 10 题',
+    subject: '数学',
+    durationMin: 45,
+    acceptance: '完成 10 题'
+  });
+  const updated = await api.updateWorkspaceTask({ taskId: task.id, status: 'done' });
+  expect(updated.status).toBe('done');
   const settings = await api.getSettings();
   expect(settings.budget.proactiveSessionsPerDay).toBe(4);
 });
@@ -46,8 +62,15 @@ test('falls back to memory when storage is unavailable', async () => {
     }
   } as unknown as Storage;
   const api = createMockApi(blocked);
-  await api.completeOnboarding(DEMO_PROFILE);
-  expect((await api.getTodayPlan())?.tasks.length).toBeGreaterThan(0);
+  await api.completeWorkspaceOnboarding({
+    name: '内存工作区',
+    kind: 'study',
+    goal: 'g',
+    description: ''
+  });
+  expect((await api.listWorkspaces()).some((workspace) => workspace.name === '内存工作区')).toBe(
+    true
+  );
 });
 
 test('seeds workspaces, snapshots, memory and reminders from the demo data', async () => {

@@ -1,13 +1,14 @@
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { AppSettings, DailyPlan, ExamProfile, ReviewAnswers } from '../shared/types';
+import type { AppSettings } from '../shared/types';
 
-/** Everything the desktop shell persists outside of the vault itself. */
+/**
+ * Everything the desktop shell persists outside of the vault itself. Learning
+ * content (tasks, plans, reviews) lives in the vault; only onboarding status and
+ * shell settings stay here.
+ */
 export interface AppState {
-  profile: ExamProfile | null;
   onboarded: boolean;
-  plan: DailyPlan | null;
-  reviews: Record<string, ReviewAnswers>;
   settings: AppSettings;
 }
 
@@ -103,13 +104,7 @@ export class JsonStateStore {
     const defaults = this.createDefault();
     if (!isRecord(value)) return defaults;
     return {
-      profile: value.profile === null || value.profile === undefined ? null : (value.profile as ExamProfile),
-      onboarded:
-        typeof value.onboarded === 'boolean'
-          ? value.onboarded
-          : value.profile !== null && value.profile !== undefined,
-      plan: value.plan === null || value.plan === undefined ? null : (value.plan as DailyPlan),
-      reviews: isRecord(value.reviews) ? (value.reviews as Record<string, ReviewAnswers>) : {},
+      onboarded: typeof value.onboarded === 'boolean' ? value.onboarded : false,
       settings: isRecord(value.settings)
         ? {
             ...defaults.settings,

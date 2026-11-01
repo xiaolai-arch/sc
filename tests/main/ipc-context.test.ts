@@ -72,7 +72,7 @@ async function tempDir(): Promise<string> {
   return dir;
 }
 
-test('bootstrap, onboarding and api key status work end to end', async () => {
+test('bootstrap and api key status work end to end', async () => {
   const dir = await tempDir();
   const context = await contextAt(dir);
 
@@ -82,55 +82,56 @@ test('bootstrap, onboarding and api key status work end to end', async () => {
     hasApiKey: true
   });
 
-  await expect(
-    context.api.completeOnboarding({ examDate: 'bad', subjects: [], dailyMinutes: 10, currentLevel: '' })
-  ).rejects.toThrow();
-
-  await context.api.completeOnboarding({
-    examDate: '2027-12-18',
-    targetSchool: '示例大学',
-    targetMajor: '计算机',
-    subjects: [{ name: '数学' }, { name: '英语' }],
-    dailyMinutes: 120,
-    currentLevel: '基础一般'
-  });
-  expect((await context.api.getBootstrap()).needsOnboarding).toBe(false);
-
   await context.api.setApiKey('sk-test-context');
   expect((await context.api.getBootstrap()).hasApiKey).toBe(true);
   expect(JSON.stringify(await context.api.getSettings())).not.toContain('sk-test-context');
 });
 
-test('generates a template plan, updates a task and reloads it after restart', async () => {
+test('persists workspace tasks in the vault across a context restart', async () => {
   const dir = await tempDir();
-  const first = await contextAt(dir);
-  expect(await first.api.getTodayPlan()).toBeNull();
-  await expect(first.api.updateTask({ taskId: 'missing', status: 'done' })).rejects.toThrow(
-    '今天还没有计划。'
-  );
-
-  await first.api.completeOnboarding({
-    examDate: '2027-12-18',
-    subjects: [{ name: '数学' }, { name: '英语' }],
-    dailyMinutes: 120,
-    currentLevel: '基础一般'
+  const first = await createAppContext({
+    userDataPath: dir,
+    defaultVaultPath: join(dir, 'vault'),
+    secretStore: new InMemorySecretStore(),
+    now: () => new Date(2026, 9, 31, 9, 0, 0)
   });
-  const plan = await first.api.generateTodayPlan();
-  expect(plan.date).toBe('2026-10-31');
-  expect(plan.generatedBy).toBe('template');
-  expect(plan.tasks.map((task) => task.subject)).toEqual(['数学', '英语']);
-  expect(plan.tasks.every((task) => task.durationMin === 60)).toBe(true);
+  await first.api.completeWorkspaceOnboarding({
+    name: '持久化',
+    kind: 'study',
+    goal: 'g',
+    description: 'd'
+  });
+  const workspace = (await first.api.listWorkspaces()).find((entry) => entry.name === '持久化');
+  expect(workspace).toBeDefined();
 
-  const updated = await first.api.updateTask({
-    taskId: plan.tasks[0].id,
+  const task = await first.api.createTask({
+    workspaceId: workspace!.id,
+    title: '整理错题',
+    subject: '数学',
+    durationMin: 30,
+    acceptance: '五道'
+  });
+  const updated = await first.api.updateWorkspaceTask({
+    taskId: task.id,
     status: 'done',
-    actualMin: 45
+    actualMin: 20
   });
-  expect(updated.tasks[0]).toMatchObject({ status: 'done', actualMin: 45 });
+  expect(updated).toMatchObject({ status: 'done', actualMin: 20 });
+  await first.dispose();
 
-  const second = await contextAt(dir);
-  expect(await second.api.getTodayPlan()).toEqual(updated);
+  const second = await createAppContext({
+    userDataPath: dir,
+    defaultVaultPath: join(dir, 'vault'),
+    secretStore: new InMemorySecretStore(),
+    now: () => new Date(2026, 9, 31, 9, 0, 0)
+  });
   expect((await second.api.getBootstrap()).needsOnboarding).toBe(false);
+  const snapshot = await second.api.getWorkspaceSnapshot(workspace!.id);
+  expect(snapshot.tasks.find((entry) => entry.id === task.id)).toMatchObject({
+    status: 'done',
+    actualMin: 20
+  });
+  await second.dispose();
 });
 
 test('settings updates are persisted and validated', async () => {

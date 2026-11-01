@@ -1,26 +1,17 @@
-import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { formatLocalDate } from '../shared/date';
 import type { ListReviewsInput, ReviewRecord, StudyCoachApi } from '../shared/ipc';
 import type { MemoryService } from '../shared/memory';
 import type { WorkspacePlanner } from '../shared/planning';
 import type { PracticeService } from '../shared/practice';
-import { validateExamProfile } from '../shared/profile';
 import type { SearchService } from '../shared/search';
-import type {
-  AppSettings,
-  DailyPlan,
-  ProviderConfig,
-  StudyTask,
-  TaskStatus
-} from '../shared/types';
+import type { AppSettings, ProviderConfig } from '../shared/types';
 import type { ButlerService, SendMessageInput, WorkspaceService } from '../shared/workspace';
 import { createModelClient, NoApiKeyError, type ModelClient } from './agent/model-client';
 import { createButlerService } from './butler/create-butler-service';
 import { createMemoryService } from './memory/create-memory-service';
 import { createPracticeService } from './practice';
 import { createWorkspacePlanner } from './planning';
-import { createTodayPlanPlanner } from './scheduler/planner';
 import { createSearchService } from './search';
 import { createDefaultSettings } from './settings/defaults';
 import { InMemorySecretStore, SafeStorageSecretStore, type SecretStore } from './settings/secret-store';
@@ -107,33 +98,9 @@ interface ActiveServices {
 
 export function createDefaultAppState(vaultPath: string): AppState {
   return {
-    profile: null,
     onboarded: false,
-    plan: null,
-    reviews: {},
     settings: createDefaultSettings(vaultPath)
   };
-}
-
-function buildTemplatePlan(state: AppState, date: string): DailyPlan {
-  const profile = state.profile;
-  const subjects = profile && profile.subjects.length > 0 ? profile.subjects : [{ name: '学习' }];
-  const totalMinutes = profile?.dailyMinutes ?? 120;
-  const perSubject = Math.max(15, Math.floor(totalMinutes / subjects.length));
-  const tasks: StudyTask[] = subjects.map((subject, index) => ({
-    id: randomUUID(),
-    title: `${subject.name}专项练习 ${index + 1}`,
-    subject: subject.name,
-    durationMin: perSubject,
-    materialRefs: [],
-    acceptance: '完成练习并整理错题',
-    status: 'pending'
-  }));
-  return { date, tasks, generatedBy: 'template' };
-}
-
-function isTaskStatus(value: string): value is TaskStatus {
-  return value === 'pending' || value === 'in-progress' || value === 'done' || value === 'skipped';
 }
 
 /**
@@ -401,11 +368,6 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       await state.update((current) => ({ ...current, onboarded: true }));
     },
 
-    async completeOnboarding(profile) {
-      const validated = validateExamProfile(profile);
-      await state.update((current) => ({ ...current, profile: validated, onboarded: true }));
-    },
-
     async getSettings() {
       return settings.get();
     },
@@ -420,50 +382,6 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       await secrets.setApiKey(key);
       // The butler holds the resolved model client, so a key write must rebuild.
       await rebuildServices(await settings.get());
-    },
-
-    async getTodayPlan() {
-      const snapshot = await state.read();
-      if (!snapshot.plan || snapshot.plan.date !== today()) return null;
-      return structuredClone(snapshot.plan);
-    },
-
-    async generateTodayPlan() {
-      const date = today();
-      const snapshot = await state.read();
-      const services = await getServices();
-      // Primary path: the butler/planner. Offline/no-key replies that are not
-      // structured JSON fall back to the deterministic template so the UI keeps
-      // working without a network connection.
-      const planned = await createTodayPlanPlanner({ butler: services.butler }).plan(
-        date,
-        snapshot.profile
-      );
-      const plan = planned ?? buildTemplatePlan(snapshot, date);
-      const next = await state.update((current) => ({ ...current, plan }));
-      return structuredClone(next.plan as DailyPlan);
-    },
-
-    async updateTask(input) {
-      if (!isTaskStatus(input.status)) throw new Error('任务状态无效。');
-      const date = today();
-      const next = await state.update((current) => {
-        if (!current.plan || current.plan.date !== date) {
-          throw new Error('今天还没有计划。');
-        }
-        const task = current.plan.tasks.find((entry) => entry.id === input.taskId);
-        if (!task) throw new Error('任务不存在。');
-        const updated: StudyTask = { ...task, status: input.status };
-        if (input.actualMin !== undefined) updated.actualMin = input.actualMin;
-        return {
-          ...current,
-          plan: {
-            ...current.plan,
-            tasks: current.plan.tasks.map((entry) => (entry.id === task.id ? updated : entry))
-          }
-        };
-      });
-      return structuredClone(next.plan as DailyPlan);
     },
 
     async listWorkspaces() {

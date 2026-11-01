@@ -9,7 +9,7 @@ import type {
 } from './practice';
 import type { PlanWorkspaceInput, WorkspacePlan } from './planning';
 import type { SearchResult } from './search';
-import type { AppSettings, DailyPlan, ExamProfile, ReviewAnswers } from './types';
+import type { AppSettings, ReviewAnswers } from './types';
 import type {
   ButlerService,
   WorkspaceOnboardingInput,
@@ -20,12 +20,6 @@ export interface Bootstrap {
   needsOnboarding: boolean;
   today: string;
   hasApiKey: boolean;
-}
-
-export interface UpdateTaskInput {
-  taskId: string;
-  status: 'pending' | 'in-progress' | 'done' | 'skipped';
-  actualMin?: number;
 }
 
 /** One persisted review entry, as written by `submitReview`. */
@@ -91,13 +85,9 @@ export interface StudyCoachApi
     PlannerApi {
   getBootstrap(): Promise<Bootstrap>;
   completeWorkspaceOnboarding(input: WorkspaceOnboardingInput): Promise<void>;
-  completeOnboarding(profile: ExamProfile): Promise<void>;
   getSettings(): Promise<AppSettings>;
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
   setApiKey(key: string): Promise<void>;
-  getTodayPlan(): Promise<DailyPlan | null>;
-  generateTodayPlan(): Promise<DailyPlan>;
-  updateTask(input: UpdateTaskInput): Promise<DailyPlan>;
   /** Reads persisted review entries (newest first). */
   listReviews(input?: ListReviewsInput): Promise<ReviewRecord[]>;
 }
