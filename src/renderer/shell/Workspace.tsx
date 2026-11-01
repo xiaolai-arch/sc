@@ -32,6 +32,21 @@ function chatMessageId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
+function scheduleFrame(callback: () => void): number {
+  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+    return window.requestAnimationFrame(callback);
+  }
+  return globalThis.setTimeout(callback, 16) as unknown as number;
+}
+
+function cancelFrame(id: number): void {
+  if (typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+    window.cancelAnimationFrame(id);
+    return;
+  }
+  globalThis.clearTimeout(id);
+}
+
 function WorkspaceStatus({
   title,
   detail,
@@ -231,6 +246,47 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
       );
     };
 
+    let pendingReasoning = '';
+    let pendingText = '';
+    let frameId: number | null = null;
+
+    const flush = () => {
+      frameId = null;
+      const reasoning = pendingReasoning;
+      const text = pendingText;
+      pendingReasoning = '';
+      pendingText = '';
+      if (!reasoning && !text) return;
+      updateAssistant((message) => ({
+        ...message,
+        ...(reasoning
+          ? {
+              reasoning: `${message.reasoning ?? ''}${reasoning}`,
+              reasoningStartedAt: message.reasoningStartedAt ?? Date.now()
+            }
+          : {}),
+        ...(text
+          ? {
+              text: `${message.text}${text}`,
+              reasoningEndedAt: message.reasoningEndedAt ?? Date.now()
+            }
+          : {})
+      }));
+    };
+
+    const scheduleFlush = () => {
+      if (frameId !== null) return;
+      frameId = scheduleFrame(flush);
+    };
+
+    const flushNow = () => {
+      if (frameId !== null) {
+        cancelFrame(frameId);
+        frameId = null;
+      }
+      flush();
+    };
+
     try {
       await stream(
         {
@@ -241,13 +297,11 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
         (event) => {
           switch (event.type) {
             case 'reasoning':
-              updateAssistant((message) => ({
-                ...message,
-                reasoning: `${message.reasoning ?? ''}${event.text}`,
-                reasoningStartedAt: message.reasoningStartedAt ?? Date.now()
-              }));
+              pendingReasoning += event.text;
+              scheduleFlush();
               break;
             case 'narration':
+              flushNow();
               updateAssistant((message) => ({
                 ...message,
                 reasoning: message.reasoning
@@ -257,13 +311,11 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               }));
               break;
             case 'text':
-              updateAssistant((message) => ({
-                ...message,
-                text: `${message.text}${event.text}`,
-                reasoningEndedAt: message.reasoningEndedAt ?? Date.now()
-              }));
+              pendingText += event.text;
+              scheduleFlush();
               break;
             case 'tool-start':
+              flushNow();
               updateAssistant((message) => ({
                 ...message,
                 steps: [
@@ -278,6 +330,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               }));
               break;
             case 'tool-result':
+              flushNow();
               updateAssistant((message) => ({
                 ...message,
                 steps: (message.steps ?? []).map((step) =>
@@ -292,9 +345,11 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               }));
               break;
             case 'error':
+              flushNow();
               setActionError(event.message);
               break;
             case 'done':
+              flushNow();
               updateAssistant((message) => ({
                 ...message,
                 text: event.text || message.text,
@@ -306,6 +361,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
         }
       );
     } catch (cause) {
+      flushNow();
       setActionError(messageOf(cause));
       updateAssistant((message) => ({
         ...message,
@@ -313,6 +369,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
         streaming: false
       }));
     } finally {
+      flushNow();
       setTyping(false);
     }
   }
