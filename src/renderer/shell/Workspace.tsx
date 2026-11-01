@@ -6,6 +6,7 @@ import { SettingsPage } from '../settings/SettingsPage';
 import { Dialog } from '../ui/Dialog';
 import { ChatPane } from './ChatPane';
 import { ConversationSidebar } from './ConversationSidebar';
+import { LearningPane } from './LearningPane';
 import { ProjectPanel, type ProjectPanelTab } from './ProjectPanel';
 import type { ChatMessage, ChatStep } from './types';
 import { useConversations } from './useConversations';
@@ -88,13 +89,16 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     tasks,
     notes,
     reviews,
+    practiceSets,
+    practiceMistakes,
     memoryProfile,
     reminders,
     loading,
     error,
     retry,
     reload,
-    stream
+    stream,
+    submitPracticeAnswer
   } = useWorkspaceData();
   const conversations = useConversations();
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -102,6 +106,8 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   const [panelTab, setPanelTab] = useState<ProjectPanelTab>('plan');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [previewNote, setPreviewNote] = useState<WorkspaceNote | null>(null);
+  const [practiceOpen, setPracticeOpen] = useState(false);
+  const [practiceSetId, setPracticeSetId] = useState<string | null>(null);
   const [typing, setTyping] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState<ChatMessage | null>(null);
   const [reasoningById, setReasoningById] = useState<Record<string, string>>({});
@@ -113,6 +119,13 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   const streamGenerationRef = useRef(0);
 
   const currentWorkspace = workspaces.find((workspace) => workspace.id === projectId) ?? null;
+  const filteredPracticeSets = practiceSets.filter(
+    (set) => !projectId || set.workspaceId === projectId
+  );
+  const selectedPracticeSet =
+    filteredPracticeSets.find((set) => set.id === practiceSetId) ??
+    filteredPracticeSets[0] ??
+    null;
   const today = formatLocalDate(new Date());
   const dateLabel = formatChineseDate(today);
 
@@ -512,6 +525,10 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
             }}
             onPrompt={(prompt) => void sendMessage(prompt)}
             onPreviewNote={setPreviewNote}
+            onOpenPractice={() => {
+              setPracticeSetId(filteredPracticeSets[0]?.id ?? null);
+              setPracticeOpen(true);
+            }}
           />
         </div>
       </div>
@@ -527,6 +544,79 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
                 onRefresh();
               }}
             />
+          </div>
+        </div>
+      ) : null}
+
+      {practiceOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 p-4">
+          <div className="flex h-[80vh] w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-xl">
+            <div className="w-56 shrink-0 overflow-y-auto border-r border-[#ece9e4] p-2">
+              <div className="px-2 py-2 text-[11px] font-semibold text-[#1d1d1f]">
+                练习
+              </div>
+              {filteredPracticeSets.length === 0 ? (
+                <p className="px-2 py-2 text-[11px] leading-5 text-[#8a8a8e]">
+                  这个项目还没有练习集。可以让管家先记一些错题。
+                </p>
+              ) : (
+                filteredPracticeSets.map((set) => (
+                  <button
+                    key={set.id}
+                    type="button"
+                    onClick={() => setPracticeSetId(set.id)}
+                    aria-current={selectedPracticeSet?.id === set.id ? 'page' : undefined}
+                    className={`mb-1 flex w-full flex-col rounded-lg px-2 py-2 text-left transition-colors ${
+                      selectedPracticeSet?.id === set.id
+                        ? 'bg-[#e9e6e0]'
+                        : 'hover:bg-[#f1eee8]'
+                    }`}
+                  >
+                    <span className="truncate text-[11px] font-medium text-[#1d1d1f]">
+                      {set.title}
+                    </span>
+                    <span className="mt-0.5 text-[9px] text-[#8a8a8e]">
+                      {set.subject} · {set.questions.length} 题
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+            <div className="flex min-w-0 flex-1 flex-col">
+              <div className="flex h-11 shrink-0 items-center justify-between border-b border-[#ece9e4] px-4">
+                <span className="text-[12px] font-semibold text-[#1d1d1f]">练习</span>
+                <button
+                  type="button"
+                  aria-label="关闭练习"
+                  onClick={() => setPracticeOpen(false)}
+                  className="rounded-md px-2 py-1 text-[11px] text-[#6b6b70] hover:bg-black/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+                >
+                  关闭
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <LearningPane
+                  set={selectedPracticeSet}
+                  workspace={currentWorkspace}
+                  notes={notes.filter(
+                    (note) => !projectId || note.workspaceId === projectId
+                  )}
+                  mistakes={practiceMistakes.filter(
+                    (mistake) =>
+                      !projectId || mistake.workspaceId === projectId
+                  )}
+                  onSubmitAnswer={submitPracticeAnswer}
+                  onOpenChat={() => setPracticeOpen(false)}
+                  onOpenNote={(id) => {
+                    const note = notes.find((entry) => entry.id === id);
+                    if (note) {
+                      setPracticeOpen(false);
+                      setPreviewNote(note);
+                    }
+                  }}
+                />
+              </div>
+            </div>
           </div>
         </div>
       ) : null}

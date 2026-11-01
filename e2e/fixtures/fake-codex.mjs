@@ -15,7 +15,26 @@ for await (const chunk of process.stdin) {
 const jsonMode = process.argv.includes('--json');
 
 let reply;
-if (prompt.includes('只输出一个 JSON 对象')) {
+if (prompt.includes('TOOL RESULT (create_workspace)')) {
+  reply = '已创建项目「考研」。今天先做一次摸底，再排 4 周计划。';
+} else if (prompt.includes('我想考研')) {
+  reply = `\`\`\`json
+${JSON.stringify({
+  text: '我先创建考研项目。',
+  toolCalls: [
+    {
+      name: 'create_workspace',
+      arguments: {
+        name: '考研',
+        kind: 'exam',
+        goal: '2027 考研上岸',
+        description: '由管家在对话里创建'
+      }
+    }
+  ]
+})}
+\`\`\``;
+} else if (prompt.includes('只输出一个 JSON 对象')) {
   // Workspace planner path: a bare JSON object is accepted by the parser.
   reply = JSON.stringify({
     tasks: [
@@ -43,7 +62,9 @@ if (jsonMode) {
     item: {
       id: 'item_0',
       type: 'reasoning',
-      text: '假模型思考：先读取当前任务，再给出下一步。'
+      text: prompt.includes('TOOL RESULT (create_workspace)')
+        ? '假模型思考：项目已经创建，给出下一步。'
+        : '假模型思考：先确认用户目标，再创建项目。'
     }
   });
   emit({

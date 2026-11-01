@@ -90,14 +90,29 @@ function optionalStringArray(value: unknown): string[] | undefined {
  * instance (or an edit made in Obsidian) is picked up immediately. Writes are
  * serialized in-process and land via temp-file + rename.
  */
-export function createWorkspaceService(root: string): WorkspaceService {
+export interface CreateWorkspaceServiceOptions {
+  /** Seed the demo vault on first access. Tests default to true; the app opts out. */
+  seed?: boolean;
+}
+
+export function createWorkspaceService(
+  root: string,
+  options: CreateWorkspaceServiceOptions = {}
+): WorkspaceService {
   const vaultRoot = resolve(root);
   const runExclusively = createMutex();
+  const shouldSeed = options.seed ?? true;
   let seedChecked = false;
 
   async function ensureVault(): Promise<void> {
     if (seedChecked) return;
-    await runExclusively(() => ensureSeeded(vaultRoot));
+    await runExclusively(async () => {
+      if (shouldSeed) {
+        await ensureSeeded(vaultRoot);
+      } else {
+        await fs.mkdir(vaultRoot, { recursive: true });
+      }
+    });
     seedChecked = true;
   }
 

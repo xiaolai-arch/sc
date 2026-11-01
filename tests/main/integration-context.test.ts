@@ -38,18 +38,24 @@ describe('context integration with real vault and butler factories', () => {
       now: fixedNow
     });
 
+    const workspace = await context.api.createWorkspace({
+      name: '数学冲刺',
+      kind: 'study',
+      goal: '2027 考研',
+      description: '每天两小时'
+    });
     const workspaces = await context.api.listWorkspaces();
-    expect(workspaces.map((workspace) => workspace.name)).toEqual(
-      expect.arrayContaining(['考研', '英语', '项目', '生活'])
-    );
+    expect(workspaces.map((entry) => entry.name)).toContain('数学冲刺');
     await expect(stat(join(vaultPath, 'workspaces'))).resolves.toBeTruthy();
-    await expect(stat(join(vaultPath, 'reminders.md'))).resolves.toBeTruthy();
 
-    const reply = await context.api.send({ workspaceId: 'kaoyan', message: '今天学什么？' });
+    const reply = await context.api.send({
+      workspaceId: workspace.id,
+      message: '今天学什么？'
+    });
     expect(reply.text).toBe('先做数学，再做英语。');
     expect(model.calls).toHaveLength(1);
     const system = model.calls[0]?.messages.find((message) => message.role === 'system');
-    expect(system?.content).toContain('考研');
+    expect(system?.content).toContain('数学冲刺');
     expect(system?.content).toContain('2027 考研');
   });
 

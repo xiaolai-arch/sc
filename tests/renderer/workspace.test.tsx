@@ -91,3 +91,26 @@ test('opens the settings modal from the sidebar', async () => {
   await userEvent.click(screen.getByRole('button', { name: '关闭' }));
   await waitFor(() => expect(screen.queryByLabelText('模型名称')).not.toBeInTheDocument());
 });
+
+test('creates a project through the conversation', async () => {
+  setup();
+  await screen.findByText('早上好，xiaolai。');
+
+  await userEvent.type(screen.getByLabelText('向管家提问'), '我想考研');
+  await userEvent.click(screen.getByRole('button', { name: '发送' }));
+
+  expect(
+    await screen.findByText(/已(创建|找到)项目「考研」/, {}, { timeout: 3000 })
+  ).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '考研' })).toBeInTheDocument();
+  expect(await screen.findByText('2027 考研：数学一 / 英语一 / 政治')).toBeInTheDocument();
+});
+
+test('opens practice from the project panel', async () => {
+  setup();
+  await screen.findByText('早上好，xiaolai。');
+
+  await userEvent.click(screen.getByRole('button', { name: '练习' }));
+  expect((await screen.findAllByText('极限基础 3 题')).length).toBeGreaterThan(0);
+  expect(screen.getByRole('button', { name: '关闭练习' })).toBeInTheDocument();
+});

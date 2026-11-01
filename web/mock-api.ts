@@ -982,45 +982,50 @@ export function createMockApi(
         steps.push(step);
         onEvent({ type: 'tool-start', id, name: 'create_workspace', label });
         await sleep(300 * pace);
-        const workspace = createWorkspaceInternal({
-          name: '考研',
-          kind: 'exam',
-          goal: '2027 考研上岸',
-          description: '由管家在对话里创建'
-        });
+        const existing = state.workspaces.find((workspace) => workspace.name === '考研');
+        const workspace =
+          existing ??
+          createWorkspaceInternal({
+            name: '考研',
+            kind: 'exam',
+            goal: '2027 考研上岸',
+            description: '由管家在对话里创建'
+          });
         if (conversation) {
           conversation.workspaceId = workspace.id;
         }
-        state.tasks = [
-          ...state.tasks,
-          {
-            id: nextId('task'),
-            workspaceId: workspace.id,
-            title: '极限基础',
-            subject: '数学',
-            durationMin: 45,
-            acceptance: '完成 10 题并整理错题',
-            status: 'pending'
-          },
-          {
-            id: nextId('task'),
-            workspaceId: workspace.id,
-            title: '阅读理解',
-            subject: '英语',
-            durationMin: 30,
-            acceptance: '精读 1 篇',
-            status: 'pending'
-          },
-          {
-            id: nextId('task'),
-            workspaceId: workspace.id,
-            title: '408 数据结构',
-            subject: '专业课',
-            durationMin: 60,
-            acceptance: '完成第一章框架',
-            status: 'pending'
-          }
-        ];
+        if (!existing) {
+          state.tasks = [
+            ...state.tasks,
+            {
+              id: nextId('task'),
+              workspaceId: workspace.id,
+              title: '极限基础',
+              subject: '数学',
+              durationMin: 45,
+              acceptance: '完成 10 题并整理错题',
+              status: 'pending'
+            },
+            {
+              id: nextId('task'),
+              workspaceId: workspace.id,
+              title: '阅读理解',
+              subject: '英语',
+              durationMin: 30,
+              acceptance: '精读 1 篇',
+              status: 'pending'
+            },
+            {
+              id: nextId('task'),
+              workspaceId: workspace.id,
+              title: '408 数据结构',
+              subject: '专业课',
+              durationMin: 60,
+              acceptance: '完成第一章框架',
+              status: 'pending'
+            }
+          ];
+        }
         persist();
         step.status = 'done';
         onEvent({
@@ -1030,7 +1035,9 @@ export function createMockApi(
           ok: true,
           label
         });
-        reply = '已创建项目「考研」，并放进第一批任务。右侧项目面板可以直接看计划和记录。';
+        reply = existing
+          ? '已找到项目「考研」，右侧项目面板可以看现有计划和记录。'
+          : '已创建项目「考研」，并放进第一批任务。右侧项目面板可以直接看计划和记录。';
         await sleep(120 * pace);
       }
 

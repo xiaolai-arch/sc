@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { formatLocalDate } from '../shared/date';
 import type { Bootstrap } from '../shared/ipc';
-import { WorkspaceOnboarding } from './onboarding/WorkspaceOnboarding';
 import { Workspace } from './shell/Workspace';
 import { PageShell } from './ui/PageShell';
 
@@ -32,12 +31,6 @@ export function App() {
         <PageShell>
           <div className="mx-auto max-w-[980px] px-6 py-20 text-gray-600">正在准备…</div>
         </PageShell>
-      ) : bootstrap.needsOnboarding ? (
-        <WorkspaceOnboarding
-          onComplete={() => {
-            void refresh();
-          }}
-        />
       ) : (
         <Workspace
           hasApiKey={bootstrap.hasApiKey}

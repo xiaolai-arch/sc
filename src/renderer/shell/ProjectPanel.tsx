@@ -21,6 +21,7 @@ type ProjectPanelProps = {
   onSelectWorkspace: (id: string) => void;
   onPrompt: (prompt: string) => void;
   onPreviewNote: (note: WorkspaceNote) => void;
+  onOpenPractice: () => void;
 };
 
 const TABS: Array<{ id: ProjectPanelTab; label: string }> = [
@@ -65,7 +66,8 @@ export function ProjectPanel({
   onClose,
   onSelectWorkspace,
   onPrompt,
-  onPreviewNote
+  onPreviewNote,
+  onOpenPractice
 }: ProjectPanelProps) {
   if (!open) return null;
 
@@ -95,6 +97,13 @@ export function ProjectPanel({
             {workspace?.goal || '告诉管家你想做什么，他会创建项目。'}
           </div>
         </div>
+        <button
+          type="button"
+          onClick={onOpenPractice}
+          className="shrink-0 rounded-md px-2 py-1 text-[10px] font-medium text-[#0071e3] hover:bg-[#e8f2ff] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+        >
+          练习
+        </button>
         <button
           type="button"
           aria-label="关闭项目面板"

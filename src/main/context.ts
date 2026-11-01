@@ -161,7 +161,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
   function createWorkspace(root: string): WorkspaceService {
     if (options.workspaceService) return options.workspaceService;
     if (options.workspaceServiceFactory) return options.workspaceServiceFactory(root);
-    return createWorkspaceService(root);
+    return createWorkspaceService(root, { seed: false });
   }
 
   function createButler(root: string, dependencies: ButlerFactoryDependencies): ButlerService {
