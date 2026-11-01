@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import type { UpdateTaskInput } from '../../shared/ipc';
-import type { StudyTask } from '../../shared/types';
-import type { Workspace, WorkspaceTask } from '../../shared/workspace';
-import { TaskCard } from '../today/TaskCard';
+import type {
+  UpdateWorkspaceTaskInput,
+  Workspace,
+  WorkspaceTask
+} from '../../shared/workspace';
+import { TaskCard } from './TaskCard';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Input } from '../ui/Input';
@@ -30,19 +32,6 @@ function statusDotClass(status: WorkspaceTask['status']) {
   return 'bg-[#d1d1d6]';
 }
 
-function toStudyTask(task: WorkspaceTask): StudyTask {
-  return {
-    id: task.id,
-    title: task.title,
-    subject: task.subject,
-    durationMin: task.durationMin,
-    materialRefs: [],
-    acceptance: task.acceptance,
-    status: task.status,
-    actualMin: task.actualMin
-  };
-}
-
 type PlanPaneProps = {
   workspace: Workspace | null;
   tasks: WorkspaceTask[];
@@ -51,7 +40,7 @@ type PlanPaneProps = {
   startedAt?: Date;
   onStart: () => void;
   onSelectTask: (id: string) => void;
-  onUpdate: (input: UpdateTaskInput) => Promise<void>;
+  onUpdate: (input: UpdateWorkspaceTaskInput) => Promise<void>;
   onCreateTask: (input: NewTaskDraft) => Promise<void>;
   onGeneratePlan: () => Promise<void>;
   showWorkspace: boolean;
@@ -241,7 +230,7 @@ export function PlanPane({
 
           {selectedTask ? (
             <TaskCard
-              task={toStudyTask(selectedTask)}
+              task={selectedTask}
               startedAt={startedAt}
               onStart={onStart}
               onUpdate={onUpdate}
