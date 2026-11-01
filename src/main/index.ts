@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { join } from 'node:path';
-import { createAppContext } from './context';
+import { createAppContext, type AppContext } from './context';
 import { registerIpcHandlers, serializeError } from './ipc';
 import { createContextScheduler } from './scheduler';
 import { DEFAULT_VAULT_DIRECTORY } from './settings/defaults';
@@ -55,6 +55,30 @@ function showWindow(): void {
   mainWindow.focus();
 }
 
+/**
+ * Tray "生成今日计划": ask the workspace planner for tasks in the first
+ * workspace that has none yet, then persist them through the workspace
+ * service. There is no global daily plan any more — the vault tasks are the
+ * only source of truth.
+ */
+async function generateTrayPlan(context: AppContext): Promise<void> {
+  for (const workspace of await context.api.listWorkspaces()) {
+    const snapshot = await context.api.getWorkspaceSnapshot(workspace.id);
+    if (snapshot.tasks.length > 0) continue;
+    const plan = await context.api.planWorkspace({ workspaceId: workspace.id });
+    for (const task of plan.tasks) {
+      await context.api.createTask({
+        workspaceId: workspace.id,
+        title: task.title,
+        subject: task.subject,
+        durationMin: task.durationMin,
+        acceptance: task.acceptance
+      });
+    }
+    return;
+  }
+}
+
 app.whenReady().then(async () => {
   const context = await createAppContext({
     userDataPath: app.getPath('userData'),
@@ -78,12 +102,18 @@ app.whenReady().then(async () => {
     scheduler.start();
 
     const { controller } = await createElectronTray({
-      getPlan: () => context.api.getTodayPlan(),
+      getTasks: async () => {
+        const workspaces = await context.api.listWorkspaces();
+        const snapshots = await Promise.all(
+          workspaces.map((workspace) => context.api.getWorkspaceSnapshot(workspace.id))
+        );
+        return snapshots.flatMap((snapshot) => snapshot.tasks);
+      },
       getSettings: () => context.settings.get(),
       actions: {
         onOpen: showWindow,
         onGeneratePlan: () => {
-          void context.api.generateTodayPlan().catch((error: unknown) => {
+          void generateTrayPlan(context).catch((error: unknown) => {
             console.error('Study Coach tray plan failed:', serializeError(error).message);
           });
         },
