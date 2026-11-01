@@ -14,6 +14,7 @@ import type {
   CreateReminderInput,
   Reminder,
   UpdateReminderInput,
+  UpdateWorkspaceInput,
   UpdateWorkspaceTaskInput,
   Workspace,
   WorkspaceNote,
@@ -57,6 +58,9 @@ type ProjectPanelProps = {
   onResetFocus: () => void;
   onUpdateMemory: (input: UpdateMemoryInput) => Promise<MemoryRecord>;
   onDeleteMemory: (input: DeleteMemoryInput) => Promise<void>;
+  onUpdateWorkspace: (input: UpdateWorkspaceInput) => Promise<Workspace>;
+  snoozedToday: boolean;
+  onSnoozeCheckIns: () => void;
 };
 
 const TABS: Array<{ id: ProjectPanelTab; label: string }> = [
@@ -197,7 +201,10 @@ export function ProjectPanel({
   onResumeFocus,
   onResetFocus,
   onUpdateMemory,
-  onDeleteMemory
+  onDeleteMemory,
+  onUpdateWorkspace,
+  snoozedToday,
+  onSnoozeCheckIns
 }: ProjectPanelProps) {
   const [pendingTaskId, setPendingTaskId] = useState<string | null>(null);
   const [taskError, setTaskError] = useState<{ id: string; message: string } | null>(null);
@@ -218,6 +225,7 @@ export function ProjectPanel({
   const [savingMemory, setSavingMemory] = useState(false);
   const [confirmMemoryId, setConfirmMemoryId] = useState<string | null>(null);
   const [pendingMemoryId, setPendingMemoryId] = useState<string | null>(null);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
 
   if (!open) return null;
 
@@ -304,6 +312,16 @@ export function ProjectPanel({
       setReminderError(messageOf(cause));
     } finally {
       setCreatingReminder(false);
+    }
+  }
+
+  async function updateCheckIn(checkIn: 'daily' | 'off') {
+    if (!workspace) return;
+    setWorkspaceError(null);
+    try {
+      await onUpdateWorkspace({ workspaceId: workspace.id, checkIn });
+    } catch (cause) {
+      setWorkspaceError(messageOf(cause));
     }
   }
 
@@ -424,6 +442,30 @@ export function ProjectPanel({
             </option>
           ))}
         </select>
+        {workspace ? (
+          <div className="mt-1.5 flex items-center justify-between gap-2">
+            <label htmlFor="workspace-check-in" className="text-[10px] text-[#6b6b70]">
+              参与检查
+            </label>
+            <select
+              id="workspace-check-in"
+              aria-label="参与检查"
+              value={workspace.checkIn === 'off' ? 'off' : 'daily'}
+              onChange={(event) =>
+                void updateCheckIn(event.target.value as 'daily' | 'off')
+              }
+              className="h-7 rounded-md border border-[#e5e1da] bg-white px-1.5 text-[10px] text-[#3c3c3f] outline-none focus:border-[#0071e3]"
+            >
+              <option value="daily">每天</option>
+              <option value="off">关闭</option>
+            </select>
+          </div>
+        ) : null}
+        {workspaceError ? (
+          <p role="alert" className="mt-1 text-[10px] text-[#d70015]">
+            {workspaceError}
+          </p>
+        ) : null}
       </div>
 
       <div className="flex shrink-0 gap-1 border-b border-[#ece9e4] px-3 py-2">
@@ -905,6 +947,24 @@ export function ProjectPanel({
             >
               让管家设提醒
             </button>
+
+            <div className="mt-4 rounded-lg border border-[#e5e1da] bg-white p-2">
+              <p className="text-[10px] font-semibold text-[#1d1d1f]">主动检查</p>
+              <p className="mt-0.5 text-[9px] leading-4 text-[#8a8a8e]">
+                仅暂停主动检查，不影响你设的提醒。
+              </p>
+              {snoozedToday ? (
+                <p className="mt-2 text-[10px] text-[#6b6b70]">今天已静音，明天恢复</p>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onSnoozeCheckIns}
+                  className="mt-2 rounded-md bg-[#0071e3] px-2 py-1 text-[10px] font-medium text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+                >
+                  今天别再提醒我
+                </button>
+              )}
+            </div>
           </div>
         ) : null}
       </div>

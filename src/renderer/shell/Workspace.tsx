@@ -117,6 +117,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     cancelStream,
     submitPracticeAnswer,
     updateTask,
+    updateWorkspace,
     createNote,
     createReminder,
     updateReminder,
@@ -139,6 +140,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [focus, setFocus] = useState<FocusSession | null>(null);
   const [focusNotice, setFocusNotice] = useState<string | null>(null);
+  const [snoozedUntil, setSnoozedUntil] = useState<string | null>(null);
   const focusSessionCounterRef = useRef(0);
   const recordedFocusSessionsRef = useRef<Set<number>>(new Set());
   const tasksRef = useRef(tasks);
@@ -175,6 +177,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
           ? settings.provider.model ?? settings.provider.agent
           : settings.provider.model
       );
+      setSnoozedUntil(settings.notifications.snoozedUntil ?? null);
     } catch {
       setModelLabel('模板计划');
     }
@@ -607,6 +610,20 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     }
   }
 
+  async function snoozeCheckIns() {
+    const api = window.studyCoach;
+    if (!api) {
+      setActionError('应用桥接不可用，请刷新页面重试。');
+      return;
+    }
+    try {
+      const settings = await api.updateSettings({ notifications: { snoozedUntil: today } });
+      setSnoozedUntil(settings.notifications.snoozedUntil ?? today);
+    } catch (cause) {
+      setActionError(messageOf(cause));
+    }
+  }
+
   function stopStreaming() {
     if (activeAssistantId) {
       void cancelStream(activeAssistantId);
@@ -767,6 +784,9 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
             onResetFocus={resetFocus}
             onUpdateMemory={updateMemory}
             onDeleteMemory={deleteMemory}
+            onUpdateWorkspace={updateWorkspace}
+            snoozedToday={snoozedUntil === today}
+            onSnoozeCheckIns={() => void snoozeCheckIns()}
           />
         </div>
       </div>

@@ -31,6 +31,7 @@ import type {
   SendMessageInput,
   SendMessageResult,
   UpdateReminderInput,
+  UpdateWorkspaceInput,
   UpdateWorkspaceNoteInput,
   UpdateWorkspaceTaskInput,
   Workspace,
@@ -85,6 +86,7 @@ export type WorkspaceData = WorkspaceDataState & {
   updateReminder: (input: UpdateReminderInput) => Promise<Reminder>;
   updateMemory: (input: UpdateMemoryInput) => Promise<MemoryRecord>;
   deleteMemory: (input: DeleteMemoryInput) => Promise<void>;
+  updateWorkspace: (input: UpdateWorkspaceInput) => Promise<Workspace>;
 };
 
 const EMPTY_PRACTICE: PracticeData = {
@@ -223,6 +225,19 @@ export function useWorkspaceData(): WorkspaceData {
     const task = await apiOrThrow().createTask(input);
     setState((current) => ({ ...current, tasks: [task, ...current.tasks] }));
     return task;
+  }, []);
+
+  const updateWorkspace = useCallback(async (input: UpdateWorkspaceInput) => {
+    const api = apiOrThrow();
+    if (!api.updateWorkspace) throw new Error('当前存储不支持更新项目。');
+    const workspace = await api.updateWorkspace(input);
+    setState((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((entry) =>
+        entry.id === workspace.id ? workspace : entry
+      )
+    }));
+    return workspace;
   }, []);
 
   const updateTask = useCallback(async (input: UpdateWorkspaceTaskInput) => {
@@ -442,6 +457,7 @@ export function useWorkspaceData(): WorkspaceData {
     retry: reload,
     createTask,
     updateTask,
+    updateWorkspace,
     createNote,
     updateNote,
     createPracticeSet,
