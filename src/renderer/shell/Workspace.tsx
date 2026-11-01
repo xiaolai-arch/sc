@@ -1,22 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatChineseDate, formatLocalDate } from '../../shared/date';
-import type { ReviewAnswers } from '../../shared/types';
-import type {
-  CreateNoteInput,
-  UpdateWorkspaceTaskInput,
-  WorkspaceNote
-} from '../../shared/workspace';
+import type { ConversationMessage, ConversationStep } from '../../shared/conversations';
+import type { SendMessageInput, WorkspaceNote } from '../../shared/workspace';
 import { SettingsPage } from '../settings/SettingsPage';
-import { Button } from '../ui/Button';
+import { Dialog } from '../ui/Dialog';
 import { ChatPane } from './ChatPane';
-import { LearningPane, PracticeList } from './LearningPane';
-import { NoteList, NotePane } from './NotePane';
-import { PlanPane } from './PlanPane';
-import type { NewTaskDraft } from './PlanPane';
-import { ReviewList, ReviewPane } from './ReviewPane';
-import { Sidebar } from './Sidebar';
-import { SettingsList, TaskListPane } from './TaskListPane';
-import type { ChatMessage, ShellView } from './types';
+import { ConversationSidebar } from './ConversationSidebar';
+import { ProjectPanel, type ProjectPanelTab } from './ProjectPanel';
+import type { ChatMessage, ChatStep } from './types';
+import { useConversations } from './useConversations';
 import { useWorkspaceData } from './useWorkspaceData';
 
 type WorkspaceProps = {
@@ -61,7 +53,7 @@ function WorkspaceStatus({
   alert?: boolean;
 }) {
   return (
-    <div className="flex h-screen items-center justify-center bg-[#e9e9ec] p-4">
+    <div className="flex h-screen items-center justify-center bg-[#f7f6f3] p-4">
       <div
         role={alert ? 'alert' : 'status'}
         className="w-full max-w-sm rounded-xl border border-black/10 bg-white p-6 text-center shadow-sm"
@@ -69,13 +61,25 @@ function WorkspaceStatus({
         <p className="text-[15px] font-medium text-black">{title}</p>
         {detail ? <p className="mt-2 text-[12px] leading-5 text-gray-600">{detail}</p> : null}
         {actionLabel && onAction ? (
-          <Button className="mt-4" size="sm" onClick={onAction}>
+          <button
+            type="button"
+            onClick={onAction}
+            className="mt-4 rounded-md bg-[#0071e3] px-3 py-1.5 text-[12px] font-medium text-white"
+          >
             {actionLabel}
-          </Button>
+          </button>
         ) : null}
       </div>
     </div>
   );
+}
+
+function toConversationSteps(steps: ChatStep[]): ConversationStep[] {
+  return steps.map((step) => ({ ...step }));
+}
+
+function toChatSteps(steps: ConversationStep[] | undefined): ChatStep[] | undefined {
+  return steps?.map((step) => ({ ...step }));
 }
 
 export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
@@ -83,68 +87,33 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     workspaces,
     tasks,
     notes,
-    memoryRecords,
-    memoryProfile,
     reviews,
+    memoryProfile,
     reminders,
-    practiceSets,
-    practiceMistakes,
-    practiceDue,
-    practiceAttempts,
-    streak,
     loading,
     error,
     retry,
-    createTask,
-    updateTask,
-    createNote,
-    submitPracticeAnswer,
-    generatePlan,
-    searchWorkspace,
-    stream,
-    submitReview
+    reload,
+    stream
   } = useWorkspaceData();
-  const [view, setView] = useState<ShellView>('chat');
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
-  const [selectedSetId, setSelectedSetId] = useState<string | null>(null);
-  const [reviewDate, setReviewDate] = useState(() => formatLocalDate(new Date()));
-  const [savedReviewDates, setSavedReviewDates] = useState<string[]>([]);
-  const [startedAtByTask, setStartedAtByTask] = useState<Record<string, Date>>({});
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const conversations = useConversations();
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelTab, setPanelTab] = useState<ProjectPanelTab>('plan');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [previewNote, setPreviewNote] = useState<WorkspaceNote | null>(null);
   const [typing, setTyping] = useState(false);
-  const [modelLabel, setModelLabel] = useState('模板计划');
+  const [streamingMessage, setStreamingMessage] = useState<ChatMessage | null>(null);
+  const [reasoningById, setReasoningById] = useState<Record<string, string>>({});
+  const [reasoningMetaById, setReasoningMetaById] = useState<
+    Record<string, { startedAt?: number; endedAt?: number }>
+  >({});
   const [actionError, setActionError] = useState<string | null>(null);
+  const [modelLabel, setModelLabel] = useState('模板计划');
 
-  const currentWorkspace = workspaces.find((workspace) => workspace.id === workspaceId) ?? null;
-  const filteredTasks = tasks.filter((task) => !workspaceId || task.workspaceId === workspaceId);
-  const filteredNotes = notes.filter((note) => !workspaceId || note.workspaceId === workspaceId);
-  const filteredSets = practiceSets.filter((set) => !workspaceId || set.workspaceId === workspaceId);
-  const filteredMistakes = practiceMistakes.filter(
-    (mistake) => !workspaceId || mistake.workspaceId === workspaceId
-  );
-  const filteredDue = practiceDue.filter(
-    (mistake) => !workspaceId || mistake.workspaceId === workspaceId
-  );
-  const filteredAttempts = practiceAttempts.filter(
-    (attempt) => !workspaceId || attempt.workspaceId === workspaceId
-  );
-  // Vault-wide reviews (no workspaceId) stay visible in every workspace view.
-  const filteredReviews = reviews.filter(
-    (review) => !workspaceId || review.workspaceId === undefined || review.workspaceId === workspaceId
-  );
-  const filteredMemory = memoryRecords.filter(
-    (item) => !workspaceId || item.workspaceId === workspaceId
-  );
-
-  const selectedTask =
-    filteredTasks.find((task) => task.id === selectedTaskId) ?? filteredTasks[0] ?? null;
-  const selectedNote =
-    filteredNotes.find((note) => note.id === selectedNoteId) ?? filteredNotes[0] ?? null;
-  const selectedSet =
-    filteredSets.find((set) => set.id === selectedSetId) ?? filteredSets[0] ?? null;
+  const currentWorkspace = workspaces.find((workspace) => workspace.id === projectId) ?? null;
   const today = formatLocalDate(new Date());
+  const dateLabel = formatChineseDate(today);
 
   const loadModelLabel = useCallback(async () => {
     const api = window.studyCoach;
@@ -168,87 +137,87 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     void loadModelLabel();
   }, [loadModelLabel]);
 
-  async function handleUpdateTask(input: UpdateWorkspaceTaskInput) {
-    setActionError(null);
-    try {
-      await updateTask(input);
-    } catch (cause) {
-      setActionError(messageOf(cause));
-      throw cause;
-    }
-  }
+  useEffect(() => {
+    if (!conversations.active) return;
+    setProjectId(conversations.active.workspaceId ?? null);
+  }, [conversations.active?.id, conversations.active?.workspaceId]);
 
-  async function handleCreateTask(draft: NewTaskDraft) {
-    const workspace = currentWorkspace ?? workspaces[0];
-    if (!workspace) throw new Error('还没有工作区，暂时不能添加任务。');
-    setActionError(null);
-    try {
-      const task = await createTask({ workspaceId: workspace.id, ...draft });
-      setSelectedTaskId(task.id);
-    } catch (cause) {
-      setActionError(messageOf(cause));
-      throw cause;
-    }
-  }
-
-  async function handleCreateNote(input: CreateNoteInput) {
-    setActionError(null);
-    try {
-      const note: WorkspaceNote = await createNote(input);
-      setSelectedNoteId(note.id);
-      return note;
-    } catch (cause) {
-      setActionError(messageOf(cause));
-      throw cause;
-    }
-  }
-
-  async function handleGeneratePlan() {
-    const workspace = currentWorkspace ?? workspaces[0];
-    if (!workspace) throw new Error('还没有工作区，暂时不能生成计划。');
-    setActionError(null);
-    try {
-      await generatePlan(workspace.id);
-    } catch (cause) {
-      setActionError(messageOf(cause));
-      throw cause;
-    }
-  }
-
-  async function handleSearch(query: string) {
-    const ids = workspaceId !== null ? [workspaceId] : workspaces.map((workspace) => workspace.id);
-    if (ids.length === 0) return [];
-    const batches = await Promise.all(ids.map((id) => searchWorkspace(id, query)));
-    return batches.flat().sort((a, b) => b.score - a.score).slice(0, 20);
-  }
+  const chatMessages: ChatMessage[] = [
+    ...(conversations.active?.messages ?? []).map((message): ChatMessage => {
+      const reasoning = reasoningById[message.id];
+      const meta = reasoningMetaById[message.id];
+      return {
+        id: message.id,
+        role: message.role,
+        text: message.text,
+        ...(reasoning ? { reasoning } : {}),
+        ...(meta?.startedAt !== undefined ? { reasoningStartedAt: meta.startedAt } : {}),
+        ...(meta?.endedAt !== undefined ? { reasoningEndedAt: meta.endedAt } : {}),
+        ...(message.steps ? { steps: toChatSteps(message.steps) } : {}),
+        streaming: false
+      };
+    }),
+    ...(streamingMessage ? [streamingMessage] : [])
+  ];
 
   async function sendMessage(text: string) {
-    const userMessage: ChatMessage = { id: chatMessageId('u'), role: 'user', text };
-    const assistantId = chatMessageId('a');
-    setMessages((current) => [
-      ...current,
-      userMessage,
-      {
-        id: assistantId,
-        role: 'assistant',
-        text: '',
-        reasoning: '',
-        steps: [],
-        streaming: true
-      }
-    ]);
-    setTyping(true);
+    if (typing) return;
     setActionError(null);
+    setTyping(true);
 
-    const updateAssistant = (updater: (message: ChatMessage) => ChatMessage) => {
-      setMessages((current) =>
-        current.map((message) => (message.id === assistantId ? updater(message) : message))
-      );
+    let conversation = conversations.active;
+    try {
+      if (!conversation) {
+        conversation = await conversations.create({
+          workspaceId: projectId ?? undefined
+        });
+      }
+    } catch (cause) {
+      setActionError(messageOf(cause));
+      setTyping(false);
+      return;
+    }
+
+    const userMessage: ConversationMessage = {
+      id: chatMessageId('u'),
+      role: 'user',
+      text,
+      createdAt: new Date().toISOString(),
+      source: 'user'
     };
+    try {
+      await conversations.append(conversation.id, userMessage);
+    } catch (cause) {
+      setActionError(messageOf(cause));
+      setTyping(false);
+      return;
+    }
+
+    const assistantId = chatMessageId('a');
+    setStreamingMessage({
+      id: assistantId,
+      role: 'assistant',
+      text: '',
+      reasoning: '',
+      steps: [],
+      streaming: true
+    });
 
     let pendingReasoning = '';
     let pendingText = '';
     let frameId: number | null = null;
+    let assistantReasoning = '';
+    let assistantText = '';
+    let assistantSteps: ChatStep[] = [];
+    let assistantReasoningStartedAt: number | undefined;
+    let assistantReasoningEndedAt: number | undefined;
+    let streamError: string | null = null;
+
+    const updateStreaming = (updater: (message: ChatMessage) => ChatMessage) => {
+      setStreamingMessage((current) =>
+        current && current.id === assistantId ? updater(current) : current
+      );
+    };
 
     const flush = () => {
       frameId = null;
@@ -257,7 +226,9 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
       pendingReasoning = '';
       pendingText = '';
       if (!reasoning && !text) return;
-      updateAssistant((message) => ({
+      assistantReasoning += reasoning;
+      assistantText += text;
+      updateStreaming((message) => ({
         ...message,
         ...(reasoning
           ? {
@@ -288,21 +259,24 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     };
 
     try {
-      await stream(
+      const result = await stream(
         {
-          workspaceId: workspaceId ?? undefined,
-          taskId: selectedTask?.id,
+          workspaceId: conversation.workspaceId ?? projectId ?? undefined,
+          conversationId: conversation.id,
           message: text
-        },
+        } satisfies SendMessageInput,
         (event) => {
           switch (event.type) {
             case 'reasoning':
+              assistantReasoningStartedAt ??= Date.now();
               pendingReasoning += event.text;
               scheduleFlush();
               break;
             case 'narration':
               flushNow();
-              updateAssistant((message) => ({
+              assistantReasoningStartedAt ??= Date.now();
+              assistantReasoning += assistantReasoning ? `\n\n${event.text}` : event.text;
+              updateStreaming((message) => ({
                 ...message,
                 reasoning: message.reasoning
                   ? `${message.reasoning}\n\n${event.text}`
@@ -311,27 +285,37 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               }));
               break;
             case 'text':
+              assistantReasoningEndedAt ??= Date.now();
               pendingText += event.text;
               scheduleFlush();
               break;
-            case 'tool-start':
+            case 'tool-start': {
               flushNow();
-              updateAssistant((message) => ({
+              const step: ChatStep = {
+                id: event.id,
+                name: event.name,
+                label: event.label,
+                status: 'running'
+              };
+              assistantSteps = [...assistantSteps, step];
+              updateStreaming((message) => ({
                 ...message,
-                steps: [
-                  ...(message.steps ?? []),
-                  {
-                    id: event.id,
-                    name: event.name,
-                    label: event.label,
-                    status: 'running'
-                  }
-                ]
+                steps: [...(message.steps ?? []), step]
               }));
               break;
-            case 'tool-result':
+            }
+            case 'tool-result': {
               flushNow();
-              updateAssistant((message) => ({
+              assistantSteps = assistantSteps.map((step) =>
+                step.id === event.id
+                  ? {
+                      ...step,
+                      status: event.ok ? 'done' : 'failed',
+                      ...(event.detail ? { detail: event.detail } : {})
+                    }
+                  : step
+              );
+              updateStreaming((message) => ({
                 ...message,
                 steps: (message.steps ?? []).map((step) =>
                   step.id === event.id
@@ -344,13 +328,17 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
                 )
               }));
               break;
+            }
             case 'error':
               flushNow();
+              streamError = event.message;
               setActionError(event.message);
               break;
             case 'done':
               flushNow();
-              updateAssistant((message) => ({
+              assistantReasoningEndedAt ??= Date.now();
+              assistantText = event.text || assistantText;
+              updateStreaming((message) => ({
                 ...message,
                 text: event.text || message.text,
                 streaming: false,
@@ -360,48 +348,91 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
           }
         }
       );
+
+      flushNow();
+      const finalText =
+        (result.text || assistantText).trim() || '管家暂时没有整理出回复，请再试一次。';
+      const finalConversationId = result.conversationId ?? conversation.id;
+      await conversations.append(finalConversationId, {
+        id: assistantId,
+        role: 'assistant',
+        text: finalText,
+        createdAt: new Date().toISOString(),
+        ...(assistantSteps.length > 0
+          ? { steps: toConversationSteps(assistantSteps) }
+          : {}),
+        source: 'butler'
+      });
+      if (assistantReasoning) {
+        setReasoningById((current) => ({ ...current, [assistantId]: assistantReasoning }));
+        setReasoningMetaById((current) => ({
+          ...current,
+          [assistantId]: {
+            ...(assistantReasoningStartedAt !== undefined
+              ? { startedAt: assistantReasoningStartedAt }
+              : {}),
+            ...(assistantReasoningEndedAt !== undefined
+              ? { endedAt: assistantReasoningEndedAt }
+              : {})
+          }
+        }));
+      }
+      await reload();
     } catch (cause) {
       flushNow();
-      setActionError(messageOf(cause));
-      updateAssistant((message) => ({
-        ...message,
-        text: message.text || '管家暂时没有回应，请稍后再试。',
-        streaming: false
-      }));
+      setActionError(streamError ?? messageOf(cause));
+      const fallback = assistantText.trim() || '管家暂时没有回应，请稍后再试。';
+      try {
+        await conversations.append(conversation.id, {
+          id: assistantId,
+          role: 'assistant',
+          text: fallback,
+          createdAt: new Date().toISOString(),
+          ...(assistantSteps.length > 0
+            ? { steps: toConversationSteps(assistantSteps) }
+            : {}),
+          source: 'butler'
+        });
+      } catch {
+        // The visible error banner already explains the failure.
+      }
     } finally {
       flushNow();
+      setStreamingMessage(null);
       setTyping(false);
     }
   }
 
-  function handleViewChange(next: ShellView) {
-    setView(next);
-    if (next === 'chat') {
-      void loadModelLabel();
-      onRefresh();
+  function startDraft() {
+    conversations.startDraft();
+    setStreamingMessage(null);
+    setActionError(null);
+  }
+
+  function selectConversation(id: string) {
+    setStreamingMessage(null);
+    setActionError(null);
+    void conversations.select(id);
+  }
+
+  function selectProject(id: string) {
+    setProjectId(id);
+    if (conversations.active?.workspaceId === id) return;
+    const recent = conversations.summaries.find((summary) => summary.workspaceId === id);
+    if (recent) {
+      selectConversation(recent.id);
+      return;
     }
-  }
-
-  function handleWorkspaceChange(next: string | null) {
-    setWorkspaceId(next);
-    setSelectedTaskId(null);
-    setSelectedNoteId(null);
-    setSelectedSetId(null);
-  }
-
-  async function saveReview(answers: ReviewAnswers) {
-    await submitReview(reviewDate, answers, workspaceId ?? undefined);
-    setSavedReviewDates((current) =>
-      current.includes(reviewDate) ? current : [...current, reviewDate]
-    );
-  }
-
-  function handleSection(id: string) {
-    document.getElementById(id)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    startDraft();
   }
 
   if (loading && workspaces.length === 0) {
-    return <WorkspaceStatus title="正在加载工作区…" detail="从本地 vault 读取任务、记录和提醒。" />;
+    return (
+      <WorkspaceStatus
+        title="正在准备管家…"
+        detail="从本地 vault 读取项目、任务和记录。"
+      />
+    );
   }
 
   if (error && workspaces.length === 0) {
@@ -416,169 +447,126 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     );
   }
 
-  const showWorkspace = workspaceId === null;
-  const dateLabel = formatChineseDate(today);
+  const bannerError = actionError ?? conversations.error ?? error;
   const displayModel = hasApiKey ? modelLabel : '模板计划';
-  const bannerError = actionError ?? error;
 
   return (
-    <div className="flex h-screen flex-col bg-[#e9e9ec] md:p-2">
-      <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden border-black/10 bg-white md:rounded-xl md:border md:shadow-sm">
-        {bannerError ? (
-          <div
-            role="alert"
-            className="flex shrink-0 items-center justify-between gap-3 border-b border-[#d70015]/10 bg-[#fdf3f2] px-4 py-2 text-[12px] text-[#d70015]"
+    <div className="flex h-screen flex-col bg-[#f7f6f3]">
+      {bannerError ? (
+        <div
+          role="alert"
+          className="flex shrink-0 items-center justify-between gap-3 border-b border-[#d70015]/10 bg-[#fdf3f2] px-4 py-2 text-[12px] text-[#d70015]"
+        >
+          <span className="min-w-0 truncate">{bannerError}</span>
+          <button
+            type="button"
+            onClick={() => {
+              setActionError(null);
+              void retry();
+              void conversations.refresh();
+            }}
+            className="shrink-0 font-medium text-[#0071e3] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
           >
-            <span className="min-w-0 truncate">{bannerError}</span>
-            <button
-              type="button"
-              onClick={() => {
-                setActionError(null);
-                void retry();
-              }}
-              className="shrink-0 font-medium text-[#0071e3] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
-            >
-              重试
-            </button>
-          </div>
-        ) : null}
-        <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-          <Sidebar
-            view={view}
-            onViewChange={handleViewChange}
-            workspaceId={workspaceId}
-            onWorkspaceChange={handleWorkspaceChange}
-            workspaces={workspaces}
+            重试
+          </button>
+        </div>
+      ) : null}
+
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        <ConversationSidebar
+          conversations={conversations.summaries}
+          projects={workspaces}
+          activeConversationId={conversations.active?.id ?? null}
+          selectedProjectId={projectId}
+          onNewConversation={startDraft}
+          onSelectConversation={selectConversation}
+          onSelectProject={selectProject}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
+
+        <div className="flex min-h-0 min-w-0 flex-1">
+          <ChatPane
+            workspace={currentWorkspace}
+            messages={chatMessages}
+            typing={typing}
+            onSend={(text) => void sendMessage(text)}
+            modelLabel={displayModel}
+            hasApiKey={hasApiKey}
+            onOpenSettings={() => setSettingsOpen(true)}
+            dateLabel={dateLabel}
+            panelOpen={panelOpen}
+            onTogglePanel={() => setPanelOpen((open) => !open)}
           />
 
-          {view === 'today' ? (
-            <TaskListPane
-              tasks={filteredTasks}
-              workspaces={workspaces}
-              selectedTaskId={selectedTask?.id ?? null}
-              onSelectTask={setSelectedTaskId}
-              title="今日安排"
-              showWorkspace={showWorkspace}
-            />
-          ) : view === 'notes' ? (
-            <NoteList
-              notes={filteredNotes}
-              workspaces={workspaces}
-              selectedNoteId={selectedNote?.id ?? null}
-              onSelectNote={setSelectedNoteId}
-              showWorkspace={showWorkspace}
-            />
-          ) : view === 'learn' ? (
-            <PracticeList
-              sets={filteredSets}
-              workspaces={workspaces}
-              selectedSetId={selectedSet?.id ?? null}
-              onSelectSet={setSelectedSetId}
-              showWorkspace={showWorkspace}
-            />
-          ) : view === 'review' ? (
-            <ReviewList
-              today={today}
-              selectedDate={reviewDate}
-              onSelectDate={setReviewDate}
-              savedDates={savedReviewDates}
-            />
-          ) : view === 'settings' ? (
-            <SettingsList onSection={handleSection} />
-          ) : null}
-
-          <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-white">
-            {view === 'chat' ? (
-              <ChatPane
-                workspace={currentWorkspace}
-                messages={messages}
-                typing={typing}
-                onSend={(text) => void sendMessage(text)}
-                modelLabel={displayModel}
-                hasApiKey={hasApiKey}
-                onOpenSettings={() => setView('settings')}
-                dateLabel={dateLabel}
-              />
-            ) : view === 'today' ? (
-              <PlanPane
-                workspace={currentWorkspace}
-                tasks={filteredTasks}
-                workspaces={workspaces}
-                selectedTask={selectedTask}
-                startedAt={selectedTask ? startedAtByTask[selectedTask.id] : undefined}
-                onStart={() => {
-                  if (!selectedTask) return;
-                  setStartedAtByTask((current) => ({ ...current, [selectedTask.id]: new Date() }));
-                }}
-                onSelectTask={setSelectedTaskId}
-                onUpdate={handleUpdateTask}
-                onCreateTask={handleCreateTask}
-                onGeneratePlan={handleGeneratePlan}
-                showWorkspace={showWorkspace}
-                dateLabel={dateLabel}
-                onOpenChat={() => setView('chat')}
-              />
-            ) : view === 'notes' ? (
-              <NotePane
-                note={selectedNote}
-                notes={notes}
-                workspaces={workspaces}
-                workspaceId={workspaceId}
-                tasks={filteredTasks}
-                practiceSets={filteredSets}
-                practiceAttempts={filteredAttempts}
-                reviews={filteredReviews}
-                onSelectNote={setSelectedNoteId}
-                onOpenChat={() => setView('chat')}
-                onCreateNote={handleCreateNote}
-                onSearch={handleSearch}
-              />
-            ) : view === 'learn' ? (
-              <LearningPane
-                set={selectedSet}
-                workspace={currentWorkspace}
-                notes={filteredNotes}
-                mistakes={filteredMistakes}
-                onSubmitAnswer={submitPracticeAnswer}
-                onOpenChat={() => setView('chat')}
-                onOpenNote={(id) => {
-                  setSelectedNoteId(id);
-                  setView('notes');
-                }}
-              />
-            ) : view === 'review' ? (
-              <ReviewPane
-                key={reviewDate}
-                workspace={currentWorkspace}
-                date={reviewDate}
-                dateLabel={formatChineseDate(reviewDate)}
-                memory={filteredMemory}
-                profile={memoryProfile}
-                records={filteredReviews.filter((review) => review.date === reviewDate)}
-                dueMistakes={filteredDue}
-                reminders={reminders}
-                streak={streak}
-                saved={savedReviewDates.includes(reviewDate) || filteredReviews.some((review) => review.date === reviewDate)}
-                onSave={saveReview}
-                onOpenChat={() => setView('chat')}
-              />
-            ) : (
-              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-6">
-                <div className="mx-auto w-full max-w-[820px]">
-                  <SettingsPage
-                    embedded
-                    onClose={() => {
-                      setView('chat');
-                      void loadModelLabel();
-                      onRefresh();
-                    }}
-                  />
-                </div>
-              </div>
-            )}
-          </main>
+          <ProjectPanel
+            open={panelOpen}
+            workspace={currentWorkspace}
+            workspaces={workspaces}
+            tasks={tasks}
+            notes={notes}
+            reviews={reviews}
+            reminders={reminders}
+            profile={memoryProfile}
+            tab={panelTab}
+            onTabChange={setPanelTab}
+            onClose={() => setPanelOpen(false)}
+            onSelectWorkspace={(id) => {
+              if (id === '') {
+                setProjectId(null);
+                return;
+              }
+              selectProject(id);
+            }}
+            onPrompt={(prompt) => void sendMessage(prompt)}
+            onPreviewNote={setPreviewNote}
+          />
         </div>
       </div>
+
+      {settingsOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 p-4">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+            <SettingsPage
+              embedded
+              onClose={() => {
+                setSettingsOpen(false);
+                void loadModelLabel();
+                onRefresh();
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      <Dialog
+        open={previewNote !== null}
+        onClose={() => setPreviewNote(null)}
+        title={previewNote?.title ?? '笔记'}
+      >
+        {previewNote ? (
+          <div>
+            <p className="text-[11px] text-gray-500">
+              {previewNote.subject} · {previewNote.updated}
+            </p>
+            <div className="mt-3 whitespace-pre-wrap text-[13px] leading-6 text-[#1d1d1f]">
+              {previewNote.body}
+            </div>
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  const note = previewNote;
+                  setPreviewNote(null);
+                  void sendMessage(`帮我改一下笔记《${note.title}》：`);
+                }}
+                className="rounded-md bg-[#0071e3] px-3 py-1.5 text-[12px] font-medium text-white"
+              >
+                让管家改
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </Dialog>
     </div>
   );
 }

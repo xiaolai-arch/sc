@@ -189,7 +189,7 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="secondary" size="sm" onClick={onClose}>
-            返回今日
+            关闭
           </Button>
           <Button size="sm" disabled={saving} onClick={() => void save()}>
             {saving ? '正在保存…' : '保存设置'}

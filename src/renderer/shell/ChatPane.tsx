@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { MoreHorizontalIcon, SparklesIcon } from '../ui/icons';
+import { ChevronRightIcon, MoreHorizontalIcon, SparklesIcon } from '../ui/icons';
 import { Composer } from './Composer';
 import { ReasoningBlock } from './ReasoningBlock';
 import type { Workspace } from '../../shared/workspace';
@@ -14,6 +14,8 @@ type ChatPaneProps = {
   hasApiKey: boolean;
   onOpenSettings: () => void;
   dateLabel: string;
+  panelOpen?: boolean;
+  onTogglePanel?: () => void;
 };
 
 const suggestedPrompts = [
@@ -31,7 +33,9 @@ export function ChatPane({
   modelLabel,
   hasApiKey,
   onOpenSettings,
-  dateLabel
+  dateLabel,
+  panelOpen = false,
+  onTogglePanel
 }: ChatPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
@@ -57,13 +61,28 @@ export function ChatPane({
             {workspace?.name ?? '全部工作区'} · {dateLabel}
           </span>
         </div>
-        <button
-          type="button"
-          aria-label="更多"
-          className="flex h-7 w-7 items-center justify-center rounded-md text-gray-500 transition-colors duration-150 hover:bg-black/[0.04] hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
-        >
-          <MoreHorizontalIcon className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          {onTogglePanel ? (
+            <button
+              type="button"
+              aria-label={panelOpen ? '收起项目面板' : '打开项目面板'}
+              onClick={onTogglePanel}
+              className="flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-gray-500 transition-colors duration-150 hover:bg-black/[0.04] hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+            >
+              项目
+              <ChevronRightIcon
+                className={`h-3 w-3 transition-transform ${panelOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            aria-label="更多"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-gray-500 transition-colors duration-150 hover:bg-black/[0.04] hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+          >
+            <MoreHorizontalIcon className="h-4 w-4" />
+          </button>
+        </div>
       </header>
 
       <div
