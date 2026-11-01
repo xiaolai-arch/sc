@@ -58,6 +58,10 @@ test.describe('Study Coach desktop', () => {
         await page.getByRole('button', { name: '帮我排一下今天的优先级' }).click();
 
         await expect(page.getByText('帮我排一下今天的优先级')).toBeVisible();
+        const thinking = page.getByRole('button', { name: /思考了 \d+ 秒/ });
+        await expect(thinking).toBeVisible({ timeout: 30_000 });
+        await thinking.click();
+        await expect(page.getByText(/假模型思考：先读取当前任务/)).toBeVisible();
         await expect(page.getByText(/假模型回复：已读取本地任务/)).toBeVisible({
           timeout: 30_000
         });
