@@ -193,6 +193,15 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
       }
       setApiKey('');
       setStatus('已保存');
+      // Re-price the existing summary with the just-saved prices. A refresh
+      // failure must not turn the successful save into an error.
+      try {
+        if (typeof api.getUsageSummary === 'function') {
+          setUsage(await api.getUsageSummary(7));
+        }
+      } catch (cause) {
+        setUsageError(cause instanceof Error ? cause.message : '用量读取失败。');
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '保存设置失败，请重试。');
     } finally {

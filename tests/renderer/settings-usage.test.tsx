@@ -111,6 +111,25 @@ test('saves token prices with the budget', async () => {
   );
 });
 
+test('refreshes the cost estimate after saving prices', async () => {
+  const getUsage = vi
+    .fn()
+    .mockResolvedValueOnce(usage)
+    .mockResolvedValueOnce({ ...usage, estimatedCost: 0.75 });
+  const update = vi.fn().mockResolvedValue(baseSettings);
+  window.studyCoach = apiStub({ getUsageSummary: getUsage, updateSettings: update }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  expect(await screen.findByText('估算成本 ¥0.25')).toBeInTheDocument();
+  await userEvent.clear(screen.getByLabelText('输入价格（元/百万 token）'));
+  await userEvent.type(screen.getByLabelText('输入价格（元/百万 token）'), '3');
+  await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+
+  expect(await screen.findByText('估算成本 ¥0.75')).toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveTextContent('已保存');
+  expect(getUsage).toHaveBeenCalledTimes(2);
+});
+
 test('clears usage after confirmation', async () => {
   const getUsage = vi.fn().mockResolvedValueOnce(usage).mockResolvedValueOnce(emptyUsage);
   const clear = vi.fn().mockResolvedValue(undefined);
