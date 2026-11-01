@@ -206,13 +206,14 @@ describe('context integration with real vault and butler factories', () => {
   });
 });
 
-  test('context scheduler plans once in the morning and reviews in the evening', async () => {
+  test('context scheduler plans an empty workspace once in the morning and reviews in the evening', async () => {
     const dir = await tempDir();
     const model = new FakeModelClient([
       JSON.stringify({
         tasks: [{ title: '做真题', subject: '数学', durationMin: 60, acceptance: '一套' }]
       })
     ]);
+    let now = new Date(2026, 9, 31, 7, 59, 0);
     const context = await createAppContext({
       userDataPath: join(dir, 'user-data'),
       defaultVaultPath: join(dir, 'vault'),
@@ -220,14 +221,17 @@ describe('context integration with real vault and butler factories', () => {
       modelClient: model,
       now: () => now
     });
-    await context.api.completeOnboarding({
-      examDate: '2027-12-18',
-      subjects: [{ name: '数学' }, { name: '英语' }],
-      dailyMinutes: 120,
-      currentLevel: '基础一般'
+    await context.api.completeWorkspaceOnboarding({
+      name: '数学冲刺',
+      kind: 'study',
+      goal: '考前冲刺',
+      description: '每天两小时'
     });
+    const workspace = (await context.api.listWorkspaces()).find(
+      (entry) => entry.name === '数学冲刺'
+    );
+    expect(workspace).toBeDefined();
 
-    let now = new Date(2026, 9, 31, 7, 59, 0);
     const notifications: string[] = [];
     const reviews: string[] = [];
     const scheduler = createContextScheduler({
@@ -247,11 +251,13 @@ describe('context integration with real vault and butler factories', () => {
     const morning = await scheduler.tick();
     expect(morning.delivered.map((entry) => entry.kind)).toEqual(['morning-plan']);
     expect(model.calls).toHaveLength(1);
-    expect((await context.api.getTodayPlan())?.generatedBy).toBe('agent');
+    const snapshot = await context.api.getWorkspaceSnapshot(workspace!.id);
+    expect(snapshot.tasks.map((task) => task.title)).toContain('做真题');
 
     now = new Date(2026, 9, 31, 8, 1, 0);
     expect((await scheduler.tick()).delivered).toHaveLength(0);
     expect(model.calls).toHaveLength(1);
+    expect((await context.api.getWorkspaceSnapshot(workspace!.id)).tasks).toHaveLength(1);
 
     now = new Date(2026, 9, 31, 21, 30, 0);
     const evening = await scheduler.tick();

@@ -14,4 +14,8 @@ export {
   parseTodayPlanReply,
   type TodayPlanPlanner
 } from './planner';
-export { createContextScheduler, type ContextSchedulerOptions } from './app-scheduler';
+export {
+  createContextScheduler,
+  planFirstEmptyWorkspace,
+  type ContextSchedulerOptions
+} from './app-scheduler';
