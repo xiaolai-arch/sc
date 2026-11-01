@@ -265,7 +265,21 @@ export function createWorkspaceService(
         input?.goal !== undefined ? optionalString(input.goal) : undefined;
       const description =
         input?.description !== undefined ? optionalString(input.description) : undefined;
-      if (name === undefined && goal === undefined && description === undefined) {
+      const rawCheckIn = (input as { checkIn?: unknown } | undefined)?.checkIn;
+      const checkIn =
+        rawCheckIn === undefined
+          ? undefined
+          : rawCheckIn === 'daily' || rawCheckIn === 'off'
+            ? rawCheckIn
+            : (() => {
+                throw new Error('Invalid check-in preference');
+              })();
+      if (
+        name === undefined &&
+        goal === undefined &&
+        description === undefined &&
+        checkIn === undefined
+      ) {
         throw new Error('No workspace fields to update');
       }
       return runExclusively(async () => {
@@ -275,6 +289,7 @@ export function createWorkspaceService(
           ...(name !== undefined ? { name } : {}),
           ...(goal !== undefined ? { goal } : {}),
           ...(description !== undefined ? { description } : {}),
+          ...(checkIn !== undefined ? { checkIn } : {}),
           updatedAt: new Date().toISOString()
         };
         await writeFileAtomic(

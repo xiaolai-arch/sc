@@ -35,6 +35,7 @@ export function parseWorkspaceFile(raw: string, workspaceId: string): Workspace 
     color: asString(meta.color) ?? DEFAULT_COLORS[kind],
     goal: asString(meta.goal) ?? '',
     description: asString(meta.description) ?? '',
+    checkIn: meta.checkIn === 'off' ? 'off' : 'daily',
     createdAt: asString(meta.createdAt),
     updatedAt: asString(meta.updatedAt)
   };
@@ -50,6 +51,7 @@ export function serializeWorkspaceFile(workspace: Workspace): string {
     color: workspace.color,
     goal: workspace.goal,
     description: workspace.description,
+    checkIn: workspace.checkIn ?? 'daily',
     createdAt: workspace.createdAt,
     updatedAt: workspace.updatedAt
   };

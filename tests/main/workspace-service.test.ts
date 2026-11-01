@@ -157,6 +157,45 @@ test('updateWorkspaceTask rejects an unknown task id', async () => {
   ).rejects.toThrow(/not found/i);
 });
 
+test('updates the project check-in preference and persists it', async () => {
+  const service = createWorkspaceService(root);
+  expect((await service.listWorkspaces()).every((workspace) => workspace.checkIn === 'daily')).toBe(
+    true
+  );
+
+  const updated = await service.updateWorkspace?.({ workspaceId: 'kaoyan', checkIn: 'off' });
+  expect(updated?.checkIn).toBe('off');
+  expect(
+    (await service.listWorkspaces()).find((workspace) => workspace.id === 'kaoyan')?.checkIn
+  ).toBe('off');
+
+  const reopened = await createWorkspaceService(root).getWorkspaceSnapshot('kaoyan');
+  expect(reopened.workspace.checkIn).toBe('off');
+
+  const raw = await fs.readFile(
+    join(root, 'workspaces', 'kaoyan', 'workspace.md'),
+    'utf8'
+  );
+  expect(raw).toMatch(/checkIn:\s*['"]?off['"]?/);
+
+  const back = await service.updateWorkspace?.({ workspaceId: 'kaoyan', checkIn: 'daily' });
+  expect(back?.checkIn).toBe('daily');
+});
+
+test('rejects invalid check-in values and empty workspace updates', async () => {
+  const service = createWorkspaceService(root);
+
+  await expect(
+    service.updateWorkspace?.({ workspaceId: 'kaoyan', checkIn: 'weekly' as never })
+  ).rejects.toThrow(/check/i);
+  await expect(service.updateWorkspace?.({ workspaceId: 'kaoyan' })).rejects.toThrow(
+    /No workspace fields/
+  );
+  await expect(
+    service.updateWorkspace?.({ workspaceId: 'ghost', checkIn: 'off' })
+  ).rejects.toThrow(/not found/i);
+});
+
 test('createNote stores body and metadata; updateNote patches them', async () => {
   const service = createWorkspaceService(root);
   const note = await service.createNote({

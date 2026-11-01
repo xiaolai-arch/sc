@@ -3,6 +3,8 @@ import type { ButlerStreamEvent } from './butler-stream';
 
 export type WorkspaceKind = 'exam' | 'study' | 'project' | 'life';
 export type WorkspaceTaskStatus = TaskStatus;
+/** Whether proactive check-ins include this project; undefined means daily. */
+export type WorkspaceCheckIn = 'daily' | 'off';
 
 export interface Workspace {
   id: string;
@@ -11,6 +13,7 @@ export interface Workspace {
   color: string;
   goal: string;
   description: string;
+  checkIn?: WorkspaceCheckIn;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -78,6 +81,7 @@ export interface UpdateWorkspaceInput {
   name?: string;
   goal?: string;
   description?: string;
+  checkIn?: WorkspaceCheckIn;
 }
 
 export interface WorkspaceOnboardingInput {
