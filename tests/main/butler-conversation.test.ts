@@ -244,7 +244,8 @@ test('caps model history to the recent window', async () => {
       );
     }
     const { service } = fakeWorkspaceService();
-    const client = new FakeModelClient(['收到。']);
+    // The first call summarizes the oldest slice; the second is the reply.
+    const client = new FakeModelClient(['用户连续发送了消息 0-12。', '收到。']);
     const butler = new ButlerServiceImpl({
       workspaceService: service,
       modelClient: client,
@@ -258,9 +259,9 @@ test('caps model history to the recent window', async () => {
       message: '最后一条'
     });
 
-    expect(client.calls[0]?.messages.length).toBeLessThanOrEqual(22);
-    expect(client.calls[0]?.messages[1]?.content).toBe('消息 5');
-    expect(client.calls[0]?.messages.at(-1)).toEqual({
+    expect(client.calls[1]?.messages.length).toBeLessThanOrEqual(22);
+    expect(client.calls[1]?.messages[1]?.content).toBe('消息 13');
+    expect(client.calls[1]?.messages.at(-1)).toEqual({
       role: 'user',
       content: '最后一条'
     });
