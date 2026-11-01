@@ -60,6 +60,28 @@ describe('tray summary and notification gating', () => {
     );
   });
 
+  test('offers quick capture from the tray menu', () => {
+    const progress = summarizeWorkspaceTasks(TASKS);
+    let captures = 0;
+    const menu = buildTrayMenuTemplate({
+      progress,
+      notification: 'enabled',
+      onQuickCapture: () => {
+        captures += 1;
+      }
+    });
+
+    const item = menu.find((entry) => entry.label === '快速记一条');
+    expect(item).toBeTruthy();
+    item?.click?.();
+    expect(captures).toBe(1);
+
+    const withoutHandler = buildTrayMenuTemplate({ progress, notification: 'enabled' });
+    expect(() =>
+      withoutHandler.find((entry) => entry.label === '快速记一条')?.click?.()
+    ).not.toThrow();
+  });
+
   test('reflects enabled, DND and disabled notification states', () => {
     const progress = summarizeWorkspaceTasks(TASKS);
     expect(

@@ -22,6 +22,7 @@ export interface TrayMenuOptions {
   progress: TrayProgress;
   notification: NotificationState;
   onOpen?: () => void;
+  onQuickCapture?: () => void;
   onGeneratePlan?: () => void;
   onEveningReview?: () => void;
   onOpenSettings?: () => void;
@@ -43,7 +44,15 @@ export interface TrayControllerOptions {
   getTasks: () => Promise<WorkspaceTask[]>;
   getSettings: () => Promise<AppSettings>;
   now?: () => Date;
-  actions?: Pick<TrayMenuOptions, 'onOpen' | 'onGeneratePlan' | 'onEveningReview' | 'onOpenSettings' | 'onQuit'>;
+  actions?: Pick<
+    TrayMenuOptions,
+    | 'onOpen'
+    | 'onQuickCapture'
+    | 'onGeneratePlan'
+    | 'onEveningReview'
+    | 'onOpenSettings'
+    | 'onQuit'
+  >;
   refreshIntervalMs?: number;
 }
 
@@ -101,6 +110,7 @@ export function buildTrayMenuTemplate(options: TrayMenuOptions): TrayMenuItem[] 
 
   const template: TrayMenuItem[] = [
     { label: '打开学习教练', click: options.onOpen },
+    { label: '快速记一条', click: options.onQuickCapture },
     { type: 'separator' },
     { label: progressLabel, enabled: false },
     { label: nextLabel, enabled: false },
