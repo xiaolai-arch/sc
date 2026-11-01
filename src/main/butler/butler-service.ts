@@ -23,6 +23,12 @@ import type {
 } from '../agent/model-client';
 import { supportsStreaming } from '../agent/model-client';
 import { redactSecrets } from '../ipc';
+import {
+  classifyModelError,
+  ModelRetryError,
+  runWithModelRetry,
+  type ModelErrorKind
+} from '../agent/model-retry';
 import type { ConversationStore } from '../conversations/conversation-store';
 import { gatherContext, type ButlerContext } from './context';
 import { buildSystemPrompt, buildUserPrompt } from './prompt';
@@ -42,6 +48,8 @@ export interface ButlerServiceOptions {
   modelClient?: ModelClient | null;
   /** Builds a client for a conversation-level model override; null falls back. */
   modelClientFor?: (model: string) => ModelClient | null;
+  /** Retry policy for model calls; defaults to one retry after 300ms. */
+  modelRetry?: { attempts?: number; delayMs?: number };
   /** Optional conversation persistence. Null keeps send/stream stateless. */
   conversationStore?: ConversationStore | null;
   memoryService?: MemoryService | null;
@@ -59,6 +67,7 @@ export class ButlerServiceImpl implements ButlerService {
   private readonly workspaceService: WorkspaceService | null;
   private readonly modelClient: ModelClient | null;
   private readonly modelClientFor: ((model: string) => ModelClient | null) | null;
+  private readonly modelRetry: { attempts: number; delayMs: number };
   private readonly conversationStore: ConversationStore | null;
   private readonly memoryService: MemoryService | null;
   private readonly planner: WorkspacePlanner | null;
@@ -72,6 +81,10 @@ export class ButlerServiceImpl implements ButlerService {
     this.workspaceService = options.workspaceService ?? null;
     this.modelClient = options.modelClient ?? null;
     this.modelClientFor = options.modelClientFor ?? null;
+    this.modelRetry = {
+      attempts: options.modelRetry?.attempts ?? 2,
+      delayMs: options.modelRetry?.delayMs ?? 300
+    };
     this.conversationStore = options.conversationStore ?? null;
     this.memoryService = options.memoryService ?? null;
     this.planner = options.planner ?? null;
@@ -109,10 +122,16 @@ export class ButlerServiceImpl implements ButlerService {
     let usage: ModelUsage | undefined;
     let lastText = '';
     let lastToolFailure: string | undefined;
+    let retried = false;
 
     try {
       for (let stepIndex = 0; stepIndex <= this.maxToolSteps; stepIndex += 1) {
-        const response = await this.complete(messages, undefined, client);
+        const outcome = await runWithModelRetry(
+          () => this.complete(messages, undefined, client),
+          { attempts: this.modelRetry.attempts, delayMs: this.modelRetry.delayMs }
+        );
+        if (outcome.attempts > 1) retried = true;
+        const response = outcome.value;
         usage = sumUsage(usage, response.usage);
         if (response.text.trim()) lastText = response.text.trim();
 
@@ -157,8 +176,16 @@ export class ButlerServiceImpl implements ButlerService {
           });
         }
       }
-    } catch {
-      const fallback = this.failureResult(context, input, usage, lastToolFailure);
+    } catch (error) {
+      const attempts = error instanceof ModelRetryError ? error.attempts : 1;
+      const wasRetried = retried || attempts > 1;
+      const fallback = this.failureResult(
+        context,
+        input,
+        usage,
+        lastToolFailure,
+        wasRetried
+      );
       await this.persistAssistant(conversation, input, fallback.text, steps);
       return { ...fallback, ...(conversation ? { conversationId: conversation.id } : {}) };
     }
@@ -205,6 +232,7 @@ export class ButlerServiceImpl implements ButlerService {
     let usage: ModelUsage | undefined;
     let lastToolFailure: string | undefined;
     let streamedSoFar = '';
+    let retried = false;
 
     const finish = async (text: string): Promise<SendMessageResult> => {
       await this.persistAssistant(conversation, input, text, steps);
@@ -219,27 +247,45 @@ export class ButlerServiceImpl implements ButlerService {
     try {
       for (let stepIndex = 0; stepIndex <= this.maxToolSteps; stepIndex += 1) {
         throwIfAborted(signal);
+        let attemptEmitted = false;
         let response: ModelResponse;
         let streamedText = false;
         let streamedTextContent = '';
 
-        if (supportsStreaming(client)) {
-          response = await client.stream(
-            this.buildRequest(messages, signal),
-            (event) => {
-              if (event.type === 'reasoning') {
-                onEvent({ type: 'reasoning', text: event.text });
-              } else {
-                streamedText = true;
-                streamedTextContent += event.text;
-                streamedSoFar += event.text;
-                onEvent({ type: 'text', text: event.text });
-              }
+        const outcome = await runWithModelRetry(
+          () => {
+            attemptEmitted = false;
+            if (supportsStreaming(client)) {
+              return client.stream(
+                this.buildRequest(messages, signal),
+                (event) => {
+                  attemptEmitted = true;
+                  if (event.type === 'reasoning') {
+                    onEvent({ type: 'reasoning', text: event.text });
+                  } else {
+                    streamedText = true;
+                    streamedTextContent += event.text;
+                    streamedSoFar += event.text;
+                    onEvent({ type: 'text', text: event.text });
+                  }
+                }
+              );
             }
-          );
-        } else {
-          response = await this.complete(messages, signal, client);
-        }
+            return this.complete(messages, signal, client);
+          },
+          {
+            attempts: this.modelRetry.attempts,
+            delayMs: this.modelRetry.delayMs,
+            signal,
+            shouldRetry: () => !attemptEmitted,
+            onRetry: ({ attempt }) => {
+              retried = true;
+              onEvent({ type: 'retry', attempt, message: '模型连接失败，正在重试…' });
+            }
+          }
+        );
+        if (outcome.attempts > 1) retried = true;
+        response = outcome.value;
         throwIfAborted(signal);
 
         usage = sumUsage(usage, response.usage);
@@ -311,11 +357,25 @@ export class ButlerServiceImpl implements ButlerService {
           ...(conversation ? { conversationId: conversation.id } : {})
         };
       }
+      const kind = classifyModelError(error, signal);
+      const attempts = error instanceof ModelRetryError ? error.attempts : 1;
+      const wasRetried = retried || attempts > 1;
+      const detail = redactSecrets(error instanceof Error ? error.message : String(error));
       onEvent({
         type: 'error',
-        message: redactSecrets(error instanceof Error ? error.message : String(error))
+        message: describeModelError(kind, wasRetried, detail)
       });
-      const fallback = this.failureResult(context, input, usage, lastToolFailure);
+      if (streamedSoFar.trim()) {
+        const text = `${streamedSoFar.trim()}\n\n（模型连接中断，以上内容可能不完整。）`;
+        await this.persistAssistant(conversation, input, text, steps);
+        onEvent({ type: 'done', text, ...(usage ? { usage } : {}) });
+        return {
+          text,
+          ...(usage ? { usage } : {}),
+          ...(conversation ? { conversationId: conversation.id } : {})
+        };
+      }
+      const fallback = this.failureResult(context, input, usage, lastToolFailure, wasRetried);
       await this.persistAssistant(conversation, input, fallback.text, steps);
       onEvent({
         type: 'done',
@@ -493,15 +553,35 @@ export class ButlerServiceImpl implements ButlerService {
     context: ButlerContext,
     input: SendMessageInput,
     usage: ModelUsage | undefined,
-    toolFailure: string | undefined
+    toolFailure: string | undefined,
+    retried = false
   ): SendMessageResult {
     const options: TemplateOptions = toolFailure
       ? { reason: 'tool-error', toolName: toolFailure }
-      : { reason: 'model-error' };
+      : { reason: 'model-error', ...(retried ? { retried: true } : {}) };
     return {
       text: buildTemplateReply(context, input, options),
       ...(usage ? { usage } : {})
     };
+  }
+}
+
+function describeModelError(
+  kind: ModelErrorKind,
+  retried: boolean,
+  detail: string
+): string {
+  switch (kind) {
+    case 'auth':
+      return `模型认证失败，请检查 API Key 或 CLI 登录：${detail}`;
+    case 'model':
+      return `模型不可用，请检查全局设置或本对话模型：${detail}`;
+    case 'transient':
+      return retried
+        ? `模型连接失败（已自动重试 1 次）：${detail}`
+        : `模型调用失败：${detail}`;
+    default:
+      return `模型调用失败：${detail}`;
   }
 }
 

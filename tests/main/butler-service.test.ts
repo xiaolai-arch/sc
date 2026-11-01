@@ -168,6 +168,7 @@ function makeService(
     workspaceService,
     modelClient,
     now: () => NOW,
+    modelRetry: { delayMs: 0 },
     ...overrides
   });
 }
@@ -513,7 +514,7 @@ describe('ButlerServiceImpl failure degradation', () => {
       message: '你好'
     });
 
-    expect(result.text).toContain('模型暂时不可用');
+    expect(result.text).toContain('已自动重试 1 次');
     expect(result.text).toContain('考研');
     expect(result.usage).toBeUndefined();
   });

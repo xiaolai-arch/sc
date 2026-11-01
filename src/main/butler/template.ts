@@ -11,6 +11,8 @@ export type TemplateReason =
 export interface TemplateOptions {
   reason: TemplateReason;
   toolName?: string;
+  /** Only changes the model-error header when the call was retried. */
+  retried?: boolean;
 }
 
 const MAX_LISTED_TASKS = 3;
@@ -79,7 +81,9 @@ function headerFor(options: TemplateOptions): string {
     case 'no-key':
       return '（还没有配置模型 API Key，我先根据本地记录给你一个简要回复。）';
     case 'model-error':
-      return '（模型暂时不可用，我先根据本地记录给你一个简要回复。）';
+      return options.retried
+        ? '（模型连接失败，已自动重试 1 次；我先根据本地记录给你一个简要回复。）'
+        : '（模型暂时不可用，我先根据本地记录给你一个简要回复。）';
     case 'tool-error':
       return `（我尝试使用「${options.toolName ?? '工具'}」但没有成功，这次没有完成写入或修改。）`;
     case 'tool-limit':

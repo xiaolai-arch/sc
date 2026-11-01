@@ -13,6 +13,7 @@ export type ButlerStreamEvent =
       label: string;
       detail?: string;
     }
+  | { type: 'retry'; attempt: number; message: string }
   | { type: 'error'; message: string }
   | {
       type: 'done';

@@ -172,7 +172,8 @@ function makeService(workspace: CliWorkspaceService, runner: CliRunner): ButlerS
   return new ButlerServiceImpl({
     workspaceService: workspace,
     modelClient: new CliAgentClient({ kind: 'local-cli', agent: 'claude' }, { runner }),
-    now: () => NOW
+    now: () => NOW,
+    modelRetry: { delayMs: 0 }
   });
 }
 
@@ -311,6 +312,7 @@ describe('ButlerServiceImpl with a local CLI agent', () => {
         text: '',
         toolCalls: [{ name: 'get_today_plan', arguments: {} }]
       }),
+      { stdout: '', code: 1 },
       { stdout: '', code: 1 }
     ]);
 
@@ -319,8 +321,8 @@ describe('ButlerServiceImpl with a local CLI agent', () => {
       message: '今天做什么？'
     });
 
-    expect(result.text).toContain('模型暂时不可用');
+    expect(result.text).toContain('已自动重试 1 次');
     expect(result.text).toContain('考研');
-    expect(scripted.callCount).toBe(2);
+    expect(scripted.callCount).toBe(3);
   });
 });
