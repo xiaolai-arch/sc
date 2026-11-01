@@ -44,6 +44,11 @@ export type ProviderConfig =
       effort?: LocalCliEffort;
       /** Claude Code only: run with --bare to skip global hooks/CLAUDE.md. */
       isolate?: boolean;
+      /**
+       * Let the CLI use its own native tools inside the vault (file edits,
+       * search, shell, web) instead of treating it as a one-shot text model.
+       */
+      nativeTools?: boolean;
     };
 
 export interface NotificationSettings {

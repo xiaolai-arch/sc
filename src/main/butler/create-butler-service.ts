@@ -7,6 +7,7 @@ import {
 } from '../agent/model-client';
 import { ButlerServiceImpl, type ButlerServiceOptions } from './butler-service';
 import type { ConversationStore } from '../conversations/conversation-store';
+import type { KnowledgeService } from '../../shared/knowledge';
 import type { MemoryService } from '../../shared/memory';
 import type { WorkspacePlanner } from '../../shared/planning';
 
@@ -24,6 +25,7 @@ export interface CreateButlerServiceOptions {
   conversationStore?: ConversationStore | null;
   memoryService?: MemoryService | null;
   planner?: WorkspacePlanner | null;
+  knowledgeService?: KnowledgeService | null;
   provider?: ProviderConfig;
   /** Kept in memory only; never logged, stored, or echoed in replies. */
   apiKey?: string | null;
@@ -38,7 +40,7 @@ export interface CreateButlerServiceOptions {
  * the IPC module's factory call; the actual vault service is injected.
  */
 export function createButlerService(
-  _workspaceRoot: string,
+  workspaceRoot: string,
   options: CreateButlerServiceOptions = {}
 ): ButlerService {
   const modelClient =
@@ -50,6 +52,7 @@ export function createButlerService(
 
   const serviceOptions: ButlerServiceOptions = {
     workspaceService: options.workspaceService ?? null,
+    workspaceRoot,
     modelClient,
     ...(options.modelClientFor ? { modelClientFor: options.modelClientFor } : {}),
     ...(options.conversationStore !== undefined
@@ -57,6 +60,9 @@ export function createButlerService(
       : {}),
     ...(options.memoryService !== undefined ? { memoryService: options.memoryService } : {}),
     ...(options.planner !== undefined ? { planner: options.planner } : {}),
+    ...(options.knowledgeService !== undefined
+      ? { knowledgeService: options.knowledgeService }
+      : {}),
     ...(options.now ? { now: options.now } : {}),
     ...(options.maxToolSteps !== undefined ? { maxToolSteps: options.maxToolSteps } : {}),
     ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),

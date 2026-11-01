@@ -68,6 +68,50 @@ const AGENT_CONFIG: Record<LocalCliAgent, AgentConfig> = {
   opencode: { args: ['--prompt'], stdin: false }
 };
 
+/**
+ * Native-agent arguments. Unlike the one-shot config above, these let the CLI
+ * use its own tools and keep the process inside the user's vault instead of a
+ * temp directory. Streaming output stays machine-readable where supported.
+ */
+const NATIVE_AGENT_CONFIG: Record<
+  LocalCliAgent,
+  { args: string[]; streamArgs?: string[]; stdin: boolean }
+> = {
+  codex: {
+    args: ['exec', '--skip-git-repo-check', '--sandbox', 'workspace-write', '-'],
+    streamArgs: [
+      'exec',
+      '--json',
+      '--skip-git-repo-check',
+      '--sandbox',
+      'workspace-write',
+      '-'
+    ],
+    stdin: true
+  },
+  claude: {
+    args: ['-p', '--output-format', 'text'],
+    streamArgs: [
+      '-p',
+      '--output-format',
+      'stream-json',
+      '--verbose',
+      '--include-partial-messages'
+    ],
+    stdin: true
+  },
+  zcode: {
+    args: ['-p', '--mode', 'edit'],
+    streamArgs: ['-p', '--json', '--mode', 'edit'],
+    stdin: false
+  },
+  opencode: {
+    args: ['run', '--auto'],
+    streamArgs: ['run', '--format', 'json', '--auto'],
+    stdin: false
+  }
+};
+
 const DEFAULT_TIMEOUT_MS = 180_000;
 
 /**
@@ -77,13 +121,16 @@ const DEFAULT_TIMEOUT_MS = 180_000;
  * - claude: `--model`/`--effort` only when configured; `--bare` when isolated.
  * - opencode: `--model provider/model`; the effort becomes the `#variant`
  *   suffix unless the model already names one.
- * - zcode: unchanged; its model is chosen inside zcode, not per prompt.
+ * - zcode: its model is chosen inside zcode; native mode adds `--cwd`.
+ * - native mode also adds the workspace cwd and non-interactive sandbox flags.
  */
 export function buildAgentArgs(
   provider: LocalCliProvider,
-  baseArgs: readonly string[]
+  baseArgs: readonly string[],
+  options: { webTools?: boolean; nativeTools?: boolean; cwd?: string } = {}
 ): string[] {
   const args = [...baseArgs];
+  const native = options.nativeTools === true;
 
   if (provider.agent === 'codex') {
     const model = provider.model?.trim();
@@ -91,12 +138,15 @@ export function buildAgentArgs(
     const additions: string[] = [];
     if (model) additions.push('-m', model);
     additions.push('-c', `model_reasoning_effort=${effort}`);
+    if (native && options.cwd) additions.push('-C', options.cwd);
     const stdinIndex = args.lastIndexOf('-');
     if (stdinIndex >= 0) {
       args.splice(stdinIndex, 0, ...additions);
     } else {
       args.push(...additions);
     }
+    // `--search` is a global flag, so it must precede the `exec` subcommand.
+    if (options.webTools) args.unshift('--search');
     return args;
   }
 
@@ -104,7 +154,17 @@ export function buildAgentArgs(
     const model = provider.model?.trim();
     if (model) args.push('--model', model);
     if (provider.effort) args.push('--effort', provider.effort);
-    if (provider.isolate) args.push('--bare');
+    if (native) {
+      if (options.cwd) args.push('--add-dir', options.cwd);
+      // `--bare` would strip the native tools this mode depends on.
+      args.push('--permission-mode', 'acceptEdits');
+    } else if (provider.isolate) {
+      args.push('--bare');
+    }
+    // Under `--bare` the web tools are only available when named explicitly.
+    if (options.webTools) {
+      args.push('--tools', 'WebSearch,WebFetch', '--allowedTools', 'WebSearch,WebFetch');
+    }
   }
 
   if (provider.agent === 'opencode') {
@@ -114,6 +174,11 @@ export function buildAgentArgs(
         model.includes('#') || !provider.effort ? model : `${model}#${provider.effort}`;
       args.push('--model', variant);
     }
+  }
+
+  if (provider.agent === 'zcode') {
+    if (native && options.cwd) args.push('--cwd', options.cwd);
+    if (options.webTools) args.push('--browser-use', 'headless');
   }
 
   return args;
@@ -146,6 +211,26 @@ function buildPrompt(request: ModelRequest): string {
     const systemIndex = request.messages.findIndex((message) => message.role === 'system');
     parts.splice(systemIndex >= 0 ? systemIndex + 1 : 0, 0, renderToolSection(request.tools));
   }
+  return parts.join('\n\n');
+}
+
+/**
+ * Native mode deliberately does not inject the JSON tool protocol: the CLI
+ * uses its own file/search/shell/web tools, so the prompt is a normal
+ * conversation plus the scope of the local workspace it may touch.
+ */
+function buildNativePrompt(request: ModelRequest, cwd: string): string {
+  const systemIndex = request.messages.findIndex((message) => message.role === 'system');
+  const environment = [
+    '## 原生 agent 模式',
+    `你正在 ASAKI 的本地工作区中运行，当前目录：${cwd}`,
+    '你可以使用自己的原生文件、搜索、命令行和联网工具来完成任务。',
+    '只读取或修改这个工作区以及 ASAKI 的 vault；不要读取密钥、SSH、浏览器历史等私人数据。',
+    '如果修改 vault，保留现有 markdown/frontmatter 结构，不要重命名或删除无关文件。',
+    '回答用中文，先给结论；如果修改了文件，简短说明改了哪些文件。'
+  ].join('\n');
+  const parts = request.messages.map(renderMessage);
+  parts.splice(systemIndex >= 0 ? systemIndex + 1 : 0, 0, environment);
   return parts.join('\n\n');
 }
 
@@ -547,9 +632,10 @@ type StreamState = {
 };
 
 /**
- * Runs a locally installed CLI agent (codex/claude/zcode/opencode) as a
- * one-shot model client. No API key is involved: the CLI uses its own local
- * credentials. The CLI runs in a temp directory, not in the app repo or vault.
+ * Runs a locally installed CLI agent (codex/claude/zcode/opencode). No API key
+ * is involved: the CLI uses its own local credentials. One-shot mode runs in a
+ * temp directory; native mode runs inside the vault workspace and lets the CLI
+ * use its own file, shell and web tools.
  */
 export class CliAgentClient implements StreamingModelClient {
   constructor(
@@ -563,10 +649,16 @@ export class CliAgentClient implements StreamingModelClient {
   ) {}
 
   async complete(request: ModelRequest): Promise<ModelResponse> {
-    const config = AGENT_CONFIG[this.provider.agent];
+    const native = this.isNative(request);
+    const config = native
+      ? NATIVE_AGENT_CONFIG[this.provider.agent]
+      : AGENT_CONFIG[this.provider.agent];
     const command = this.provider.command?.trim() || this.provider.agent;
-    const prompt = buildPrompt(request);
-    const args = buildAgentArgs(this.provider, config.args);
+    const prompt = native ? buildNativePrompt(request, request.cwd!) : buildPrompt(request);
+    const args = buildAgentArgs(this.provider, config.args, {
+      ...(request.webTools ? { webTools: true } : {}),
+      ...(native ? { nativeTools: true, cwd: request.cwd! } : {})
+    });
     if (!config.stdin) args.push(prompt);
 
     const result = await (this.options.runner ?? defaultRunner)(
@@ -574,7 +666,7 @@ export class CliAgentClient implements StreamingModelClient {
       args,
       config.stdin ? prompt : '',
       {
-        cwd: this.options.cwd ?? tmpdir(),
+        cwd: native ? request.cwd! : (this.options.cwd ?? tmpdir()),
         timeoutMs: this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         ...(request.signal ? { signal: request.signal } : {})
       }
@@ -592,6 +684,12 @@ export class CliAgentClient implements StreamingModelClient {
     const raw = result.stdout.trim();
     const answer =
       this.provider.agent === 'codex' ? extractCodexAnswer(result.stdout) : raw;
+    if (native) {
+      if (!answer) {
+        throw new Error(`本地 CLI agent ${this.provider.agent} 没有返回内容。`);
+      }
+      return { text: answer, usage: { inputTokens: 0, outputTokens: 0 } };
+    }
     const parsed = parseCliResponse(answer);
     if (!parsed.text && !parsed.toolCalls?.length) {
       throw new Error(`本地 CLI agent ${this.provider.agent} 没有返回内容。`);
@@ -604,20 +702,34 @@ export class CliAgentClient implements StreamingModelClient {
     };
   }
 
+  private isNative(request: ModelRequest): boolean {
+    return this.provider.nativeTools === true && Boolean(request.cwd);
+  }
+
   async stream(
     request: ModelRequest,
     onEvent: (event: ModelStreamEvent) => void
   ): Promise<ModelResponse> {
-    const config = AGENT_CONFIG[this.provider.agent];
-    if (!config.streamArgs) {
+    const native = this.isNative(request);
+    const config = native
+      ? NATIVE_AGENT_CONFIG[this.provider.agent]
+      : AGENT_CONFIG[this.provider.agent];
+    if (
+      !config.streamArgs ||
+      (native &&
+        (this.provider.agent === 'opencode' || this.provider.agent === 'zcode'))
+    ) {
       const result = await this.complete(request);
       if (result.text.trim()) onEvent({ type: 'text', text: result.text.trim() });
       return result;
     }
 
     const command = this.provider.command?.trim() || this.provider.agent;
-    const prompt = buildPrompt(request);
-    const args = buildAgentArgs(this.provider, config.streamArgs);
+    const prompt = native ? buildNativePrompt(request, request.cwd!) : buildPrompt(request);
+    const args = buildAgentArgs(this.provider, config.streamArgs, {
+      ...(request.webTools ? { webTools: true } : {}),
+      ...(native ? { nativeTools: true, cwd: request.cwd! } : {})
+    });
     if (!config.stdin) args.push(prompt);
 
     const state: StreamState = {
@@ -631,7 +743,7 @@ export class CliAgentClient implements StreamingModelClient {
       onEvent(event);
     };
     const gate =
-      this.provider.agent === 'claude' ? new EnvelopeTextGate(forward) : null;
+      this.provider.agent === 'claude' && !native ? new EnvelopeTextGate(forward) : null;
 
     const handleLine = (line: string) => {
       const trimmed = line.trim();
@@ -644,9 +756,9 @@ export class CliAgentClient implements StreamingModelClient {
       }
       if (!isRecord(parsed)) return;
       if (this.provider.agent === 'claude') {
-        this.handleClaudeEvent(parsed, gate!, forward, state);
+        this.handleClaudeEvent(parsed, gate, forward, state, native);
       } else {
-        this.handleCodexEvent(parsed, forward, state);
+        this.handleCodexEvent(parsed, forward, state, native);
       }
     };
 
@@ -655,7 +767,7 @@ export class CliAgentClient implements StreamingModelClient {
       args,
       config.stdin ? prompt : '',
       {
-        cwd: this.options.cwd ?? tmpdir(),
+        cwd: native ? request.cwd! : (this.options.cwd ?? tmpdir()),
         timeoutMs: this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         ...(request.signal ? { signal: request.signal } : {})
       },
@@ -674,9 +786,13 @@ export class CliAgentClient implements StreamingModelClient {
     // never produce text deltas. Parse it here instead of spawning the CLI a
     // second time through the fallback path.
     if (!state.text.trim() && !state.toolCalls?.length && state.finalResult) {
-      const parsed = parseCliResponse(state.finalResult);
-      state.text = parsed.text;
-      if (parsed.toolCalls?.length) state.toolCalls = parsed.toolCalls;
+      if (native) {
+        state.text = state.finalResult;
+      } else {
+        const parsed = parseCliResponse(state.finalResult);
+        state.text = parsed.text;
+        if (parsed.toolCalls?.length) state.toolCalls = parsed.toolCalls;
+      }
     }
 
     if (state.explicitFailure) {
@@ -728,9 +844,10 @@ export class CliAgentClient implements StreamingModelClient {
 
   private handleClaudeEvent(
     event: Record<string, unknown>,
-    gate: EnvelopeTextGate,
+    gate: EnvelopeTextGate | null,
     forward: (event: ModelStreamEvent) => void,
-    state: StreamState
+    state: StreamState,
+    native = false
   ) {
     if (event['type'] === 'stream_event') {
       const streamEvent = event['event'];
@@ -742,7 +859,8 @@ export class CliAgentClient implements StreamingModelClient {
         return;
       }
       if (delta['type'] === 'text_delta' && typeof delta['text'] === 'string') {
-        gate.push(delta['text']);
+        if (gate) gate.push(delta['text']);
+        else forward({ type: 'text', text: delta['text'] });
       }
       return;
     }
@@ -765,7 +883,8 @@ export class CliAgentClient implements StreamingModelClient {
   private handleCodexEvent(
     event: Record<string, unknown>,
     forward: (event: ModelStreamEvent) => void,
-    state: StreamState
+    state: StreamState,
+    native = false
   ) {
     if (event['type'] === 'item.completed') {
       const item = event['item'];
@@ -775,6 +894,11 @@ export class CliAgentClient implements StreamingModelClient {
         return;
       }
       if (item['type'] === 'agent_message' && typeof item['text'] === 'string') {
+        if (native) {
+          state.text = item['text'];
+          if (item['text'].trim()) forward({ type: 'text', text: item['text'] });
+          return;
+        }
         const parsed = parseCliResponse(item['text']);
         state.text = parsed.text;
         if (parsed.toolCalls?.length) {

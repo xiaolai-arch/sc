@@ -168,6 +168,7 @@ test('only the model-error template mentions the retry', () => {
     workspaces: [],
     tasks: [],
     memory: [],
+    knowledge: [],
     contextError: false
   };
   const input = { message: 'hi' };

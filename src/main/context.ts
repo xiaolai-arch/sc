@@ -1,18 +1,23 @@
 import { join } from 'node:path';
 import { formatLocalDate } from '../shared/date';
 import type { ListReviewsInput, ReviewRecord, StudyCoachApi } from '../shared/ipc';
+import type { KnowledgeService } from '../shared/knowledge';
 import type { MemoryService } from '../shared/memory';
+import type { LongPlanService } from '../shared/plans';
 import type { WorkspacePlanner } from '../shared/planning';
 import type { PracticeService } from '../shared/practice';
 import type { SearchService } from '../shared/search';
 import type { AppSettings, ProviderConfig } from '../shared/types';
 import { estimateUsageCost, summarizeUsage } from '../shared/usage';
 import type { ButlerService, SendMessageInput, WorkspaceService } from '../shared/workspace';
+import { scanLocalClis } from './agent/local-cli-discovery';
 import { createModelClient, NoApiKeyError, type ModelClient } from './agent/model-client';
 import { createButlerService } from './butler/create-butler-service';
 import { ProactiveCheckInService } from './check-ins/proactive-check-in-service';
 import { ConversationStore } from './conversations/conversation-store';
+import { createKnowledgeService } from './knowledge/create-knowledge-service';
 import { createMemoryService } from './memory/create-memory-service';
+import { createLongPlanService } from './plans/long-plan-service';
 import { createPracticeService } from './practice';
 import { createWorkspacePlanner } from './planning';
 import { createSearchService } from './search';
@@ -34,6 +39,7 @@ export interface ButlerFactoryDependencies {
   apiKey: string | null;
   conversationStore?: ConversationStore;
   memoryService?: MemoryService;
+  knowledgeService?: KnowledgeService;
   planner?: WorkspacePlanner;
   modelClient?: ModelClient | null;
   modelClientFor?: (model: string) => ModelClient | null;
@@ -54,9 +60,16 @@ export interface CreateAppContextOptions {
   butlerService?: ButlerService;
   practiceService?: PracticeService;
   memoryService?: MemoryService;
+  knowledgeService?: KnowledgeService;
   searchService?: SearchService;
   workspacePlanner?: WorkspacePlanner;
+  longPlanService?: LongPlanService;
   workspaceServiceFactory?: (vaultRoot: string) => WorkspaceService;
+  longPlanServiceFactory?: (
+    vaultRoot: string,
+    workspaceService: WorkspaceService,
+    modelClient: ModelClient | null
+  ) => LongPlanService;
   butlerServiceFactory?: (
     vaultRoot: string,
     dependencies: ButlerFactoryDependencies
@@ -85,7 +98,9 @@ export interface AppContext {
   readonly butler: ButlerService;
   readonly practice: PracticeService;
   readonly memory: MemoryService;
+  readonly knowledge: KnowledgeService;
   readonly planner: WorkspacePlanner;
+  readonly longPlans: LongPlanService;
   readonly checkIns: ProactiveCheckInService;
   /** Created lazily so headless/test contexts never start a vault watcher. */
   readonly search: SearchService;
@@ -102,7 +117,9 @@ interface ActiveServices {
   butler: ButlerService;
   practice: PracticeService;
   memory: MemoryService;
+  knowledge: KnowledgeService;
   planner: WorkspacePlanner;
+  longPlans: LongPlanService;
   checkIns: ProactiveCheckInService;
   /** Lazily constructed; only a search call starts the chokidar watcher. */
   readonly search: SearchService;
@@ -183,6 +200,9 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       apiKey: dependencies.apiKey,
       conversationStore,
       ...(dependencies.memoryService ? { memoryService: dependencies.memoryService } : {}),
+      ...(dependencies.knowledgeService
+        ? { knowledgeService: dependencies.knowledgeService }
+        : {}),
       ...(dependencies.planner ? { planner: dependencies.planner } : {}),
       now,
       ...(dependencies.modelClient !== undefined ? { modelClient: dependencies.modelClient } : {}),
@@ -204,6 +224,11 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     return createMemoryService({ root, modelClient, now });
   }
 
+  function createKnowledge(root: string): KnowledgeService {
+    if (options.knowledgeService) return options.knowledgeService;
+    return createKnowledgeService({ root, now });
+  }
+
   function createPlanner(
     root: string,
     workspaceService: WorkspaceService,
@@ -212,6 +237,25 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     if (options.workspacePlanner) return options.workspacePlanner;
     if (options.plannerFactory) return options.plannerFactory(root, workspaceService);
     return createWorkspacePlanner({ modelClient, workspaceService, now });
+  }
+
+  function createLongPlans(
+    root: string,
+    workspaceService: WorkspaceService,
+    modelClient: ModelClient | null,
+    knowledgeService: KnowledgeService
+  ): LongPlanService {
+    if (options.longPlanService) return options.longPlanService;
+    if (options.longPlanServiceFactory) {
+      return options.longPlanServiceFactory(root, workspaceService, modelClient);
+    }
+    return createLongPlanService({
+      root,
+      workspaceService,
+      modelClient,
+      knowledgeService,
+      now
+    });
   }
 
   /** The default search factory is only called when a search IPC arrives. */
@@ -261,13 +305,21 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     }
 
     const memory = createMemory(nextSettings.vaultPath, modelClient);
+    const knowledge = createKnowledge(nextSettings.vaultPath);
     const planner = createPlanner(nextSettings.vaultPath, workspace, modelClient);
+    const longPlans = createLongPlans(
+      nextSettings.vaultPath,
+      workspace,
+      modelClient,
+      knowledge
+    );
     const dependencies: ButlerFactoryDependencies = {
       workspaceService: workspace,
       provider: nextSettings.provider,
       apiKey,
       conversationStore,
       memoryService: memory,
+      knowledgeService: knowledge,
       planner,
       modelClient,
       modelClientFor
@@ -290,7 +342,9 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       butler,
       practice: createPractice(nextSettings.vaultPath),
       memory,
+      knowledge,
       planner,
+      longPlans,
       checkIns,
       get search() {
         if (searchInstance === null) {
@@ -447,6 +501,10 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       await rebuildServices(await settings.get());
     },
 
+    async scanLocalClis() {
+      return scanLocalClis();
+    },
+
     async listWorkspaces() {
       return (await getServices()).workspace.listWorkspaces();
     },
@@ -465,13 +523,37 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       return (await getServices()).workspace.createTask(input);
     },
     async updateWorkspaceTask(input) {
-      return (await getServices()).workspace.updateWorkspaceTask(input);
+      const services = await getServices();
+      const task = await services.workspace.updateWorkspaceTask(input);
+      if (task.status === 'done') {
+        // Knowledge linking is additive metadata; the task write is authoritative.
+        try {
+          await services.knowledge.linkTask(task);
+        } catch {
+          // Keep the persisted task.
+        }
+      }
+      return task;
     },
     async createNote(input) {
-      return (await getServices()).workspace.createNote(input);
+      const services = await getServices();
+      const note = await services.workspace.createNote(input);
+      try {
+        await services.knowledge.linkNote(note);
+      } catch {
+        // Keep the persisted note.
+      }
+      return note;
     },
     async updateNote(input) {
-      return (await getServices()).workspace.updateNote(input);
+      const services = await getServices();
+      const note = await services.workspace.updateNote(input);
+      try {
+        await services.knowledge.linkNote(note);
+      } catch {
+        // Keep the persisted note.
+      }
+      return note;
     },
     async getMemory(workspaceId) {
       return (await getServices()).workspace.getMemory(workspaceId);
@@ -492,6 +574,15 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     async submitReview(input) {
       const services = await getServices();
       await services.workspace.submitReview(input);
+      try {
+        await services.knowledge.linkReview({
+          ...(input.workspaceId !== undefined ? { workspaceId: input.workspaceId } : {}),
+          date: input.date,
+          answers: input.answers
+        });
+      } catch {
+        // Keep the persisted review; knowledge evidence can be linked later.
+      }
       // Memory synthesis is best-effort: the review record is authoritative and
       // must not be lost if the model (or memory file) fails.
       if (input.workspaceId !== undefined && input.answers?.skipped !== true) {
@@ -511,6 +602,21 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     },
     async planWorkspace(input) {
       return (await getServices()).planner.plan(input);
+    },
+    async listLongPlans(workspaceId) {
+      return (await getServices()).longPlans.list(workspaceId);
+    },
+    async getLongPlan(planId) {
+      return (await getServices()).longPlans.get(planId);
+    },
+    async createLongPlan(input) {
+      return (await getServices()).longPlans.create(input);
+    },
+    async setLongPlanItemDone(input) {
+      return (await getServices()).longPlans.setItemDone(input);
+    },
+    async deleteLongPlan(planId) {
+      await (await getServices()).longPlans.delete(planId);
     },
     async listPracticeSets(workspaceId) {
       return (await getServices()).practice.listSets(workspaceId);
@@ -551,6 +657,18 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       const memory = (await getServices()).memory;
       if (!memory.deleteRecord) throw new Error('当前存储不支持编辑记忆。');
       await memory.deleteRecord(input);
+    },
+    async listKnowledgeTopics(workspaceId) {
+      return (await getServices()).knowledge.list(workspaceId);
+    },
+    async createKnowledgeTopic(input) {
+      return (await getServices()).knowledge.create(input);
+    },
+    async updateKnowledgeTopic(input) {
+      return (await getServices()).knowledge.update(input);
+    },
+    async deleteKnowledgeTopic(id) {
+      await (await getServices()).knowledge.delete(id);
     },
     async searchWorkspace(input) {
       return (await getServices()).search.search(input.workspaceId, input.query, input.limit);
@@ -643,9 +761,17 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       if (!active) throw new Error('记忆服务尚未初始化。');
       return active.memory;
     },
+    get knowledge() {
+      if (!active) throw new Error('知识库服务尚未初始化。');
+      return active.knowledge;
+    },
     get planner() {
       if (!active) throw new Error('计划服务尚未初始化。');
       return active.planner;
+    },
+    get longPlans() {
+      if (!active) throw new Error('长期计划服务尚未初始化。');
+      return active.longPlans;
     },
     get checkIns() {
       if (!active) throw new Error('检查服务尚未初始化。');

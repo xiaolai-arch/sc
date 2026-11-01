@@ -88,7 +88,8 @@ function validateProvider(value: unknown): ProviderConfig {
       ...(command ? { command } : {}),
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),
-      ...(value.isolate === true ? { isolate: true } : {})
+      ...(value.isolate === true ? { isolate: true } : {}),
+      ...(value.nativeTools === true ? { nativeTools: true } : {})
     };
   }
   const model = nonEmptyString(value.model, '模型名称');

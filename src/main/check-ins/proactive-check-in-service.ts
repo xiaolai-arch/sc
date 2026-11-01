@@ -52,6 +52,9 @@ function excludeCheckInOff(context: ButlerContext): ButlerContext {
     ...(focusTask ? { focusTask } : {}),
     tasks: context.tasks.filter((task) => !off.has(task.workspaceId)),
     memory: context.memory.filter((item) => !off.has(item.workspaceId)),
+    knowledge: context.knowledge.filter(
+      (topic) => topic.workspaceId === undefined || !off.has(topic.workspaceId)
+    ),
     contextError: context.contextError
   };
 }

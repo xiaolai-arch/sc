@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ButlerService, WorkspaceService } from '../../src/shared/workspace';
+import type { StudyCoachApi } from '../../src/shared/ipc';
 import { createAppContext, type AppContext } from '../../src/main/context';
 import {
   BUTLER_STREAM_CHANNELS,
@@ -128,6 +129,34 @@ test('rejects malformed handler parameters before they reach services', async ()
   await expect(handlers.send({ message: '   ' })).rejects.toThrow('消息内容不能为空。');
   await expect(handlers.setApiKey(42)).rejects.toThrow('API key不能为空。');
   await expect(handlers.createWorkspace(null)).rejects.toThrow('创建工作区参数无效。');
+  await expect(
+    handlers.createLongPlan({ workspaceId: 'ws-1', goal: '学会 Agent', weeks: 0 })
+  ).rejects.toThrow('周数必须在 1 到 16 之间。');
+  await expect(
+    handlers.createLongPlan({
+      workspaceId: 'ws-1',
+      goal: '学会 Agent',
+      weeks: 2,
+      references: 42
+    })
+  ).rejects.toThrow('参考资料无效。');
+  await expect(
+    handlers.createLongPlan({
+      workspaceId: 'ws-1',
+      goal: '学会 Agent',
+      weeks: 2,
+      research: 'yes'
+    })
+  ).rejects.toThrow('联网调研选项无效。');
+  await expect(
+    handlers.setLongPlanItemDone({
+      planId: 'lp-1',
+      weekId: 'w1',
+      itemId: 'w1d1',
+      kind: 'week',
+      done: true
+    })
+  ).rejects.toThrow('条目类型无效。');
 
   expect(workspace.createTask).not.toHaveBeenCalled();
   expect(workspace.updateWorkspaceTask).not.toHaveBeenCalled();
@@ -184,4 +213,35 @@ test('rejected handlers surface a single sanitized error message', async () => {
   const listener = registered.get(IPC_CHANNELS.listWorkspaces);
   expect(listener).toBeDefined();
   await expect(listener!({})).rejects.toThrow('boom');
+});
+
+
+test('rejects invalid knowledge topic payloads before reaching the service', async () => {
+  const { context } = await makeContext();
+  const handlers = createIpcHandlers(context.api);
+
+  await expect(handlers.createKnowledgeTopic({ name: '   ' })).rejects.toThrow(/知识主题名称/);
+  await expect(handlers.createKnowledgeTopic({ name: 'X', status: 'mystery' })).rejects.toThrow(
+    /知识主题状态/
+  );
+  await expect(handlers.createKnowledgeTopic({ name: 'X', level: 0 })).rejects.toThrow(/掌握程度/);
+  await expect(
+    handlers.createKnowledgeTopic({ name: 'X', aliases: ['a'.repeat(41)] })
+  ).rejects.toThrow(/别名/);
+  await expect(handlers.updateKnowledgeTopic({ id: 'kt-1', level: 9 })).rejects.toThrow(
+    /掌握程度/
+  );
+  await expect(handlers.deleteKnowledgeTopic('')).rejects.toThrow(/知识主题 ID/);
+  await expect(handlers.listKnowledgeTopics('ws-1')).resolves.toEqual([]);
+});
+
+test('routes local CLI discovery without parameters', async () => {
+  const scanLocalClis = vi.fn().mockResolvedValue({
+    scannedAt: '2026-11-01T10:00:00.000Z',
+    entries: []
+  });
+  const handlers = createIpcHandlers({ scanLocalClis } as unknown as StudyCoachApi);
+
+  await expect(handlers.scanLocalClis()).resolves.toMatchObject({ entries: [] });
+  expect(scanLocalClis).toHaveBeenCalledWith();
 });

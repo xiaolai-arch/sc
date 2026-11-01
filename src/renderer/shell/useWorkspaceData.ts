@@ -6,6 +6,11 @@ import type {
 import { formatLocalDate, parseLocalDate } from '../../shared/date';
 import type { ReviewRecord, StudyCoachApi } from '../../shared/ipc';
 import type {
+  CreateKnowledgeTopicInput,
+  KnowledgeTopic,
+  UpdateKnowledgeTopicInput
+} from '../../shared/knowledge';
+import type {
   DeleteMemoryInput,
   LearnerProfile,
   MemoryRecord,
@@ -19,6 +24,11 @@ import type {
   SubmitAnswerInput,
   SubmitAnswerResult
 } from '../../shared/practice';
+import type {
+  CreateLongPlanInput,
+  LongPlan,
+  UpdateLongPlanItemInput
+} from '../../shared/plans';
 import type { WorkspacePlan } from '../../shared/planning';
 import type { SearchResult } from '../../shared/search';
 import type { ReviewAnswers } from '../../shared/types';
@@ -55,6 +65,8 @@ type WorkspaceDataState = {
   memoryProfile: LearnerProfile | null;
   reviews: ReviewRecord[];
   reminders: Reminder[];
+  longPlans: LongPlan[];
+  knowledgeTopics: KnowledgeTopic[];
   practiceSets: PracticeSet[];
   practiceMistakes: PracticeMistake[];
   practiceDue: PracticeMistake[];
@@ -87,6 +99,12 @@ export type WorkspaceData = WorkspaceDataState & {
   updateMemory: (input: UpdateMemoryInput) => Promise<MemoryRecord>;
   deleteMemory: (input: DeleteMemoryInput) => Promise<void>;
   updateWorkspace: (input: UpdateWorkspaceInput) => Promise<Workspace>;
+  createLongPlan: (input: CreateLongPlanInput) => Promise<LongPlan>;
+  setLongPlanItemDone: (input: UpdateLongPlanItemInput) => Promise<LongPlan>;
+  deleteLongPlan: (planId: string) => Promise<void>;
+  createKnowledgeTopic: (input: CreateKnowledgeTopicInput) => Promise<KnowledgeTopic>;
+  updateKnowledgeTopic: (input: UpdateKnowledgeTopicInput) => Promise<KnowledgeTopic>;
+  deleteKnowledgeTopic: (topicId: string) => Promise<void>;
 };
 
 const EMPTY_PRACTICE: PracticeData = {
@@ -173,6 +191,8 @@ export function useWorkspaceData(): WorkspaceData {
     memoryProfile: null,
     reviews: [],
     reminders: [],
+    longPlans: [],
+    knowledgeTopics: [],
     ...EMPTY_PRACTICE,
     streak: 0,
     loading: true,
@@ -187,13 +207,16 @@ export function useWorkspaceData(): WorkspaceData {
       const api = apiOrThrow();
       const [workspaces, reminders] = await Promise.all([api.listWorkspaces(), api.getReminders()]);
       const workspaceIds = workspaces.map((workspace) => workspace.id);
-      const [snapshots, practice, memoryRecords, memoryProfile, reviews] = await Promise.all([
-        Promise.all(workspaces.map((workspace) => api.getWorkspaceSnapshot(workspace.id))),
-        loadPractice(api, workspaceIds),
-        api.listMemory().catch(() => [] as MemoryRecord[]),
-        api.getMemoryProfile().catch(() => null),
-        api.listReviews({ limit: 60 }).catch(() => [] as ReviewRecord[])
-      ]);
+      const [snapshots, practice, memoryRecords, memoryProfile, reviews, longPlans, knowledgeTopics] =
+        await Promise.all([
+          Promise.all(workspaces.map((workspace) => api.getWorkspaceSnapshot(workspace.id))),
+          loadPractice(api, workspaceIds),
+          api.listMemory().catch(() => [] as MemoryRecord[]),
+          api.getMemoryProfile().catch(() => null),
+          api.listReviews({ limit: 60 }).catch(() => [] as ReviewRecord[]),
+          api.listLongPlans().catch(() => [] as LongPlan[]),
+          api.listKnowledgeTopics().catch(() => [] as KnowledgeTopic[])
+        ]);
       if (request !== requestRef.current) return;
 
       const snapshotMemory = snapshots.flatMap((snapshot) => snapshot.memory);
@@ -206,6 +229,8 @@ export function useWorkspaceData(): WorkspaceData {
         memoryProfile,
         reviews,
         reminders,
+        longPlans,
+        knowledgeTopics,
         ...practice,
         streak: reviewStreak(reviews, formatLocalDate(new Date())),
         loading: false,
@@ -220,6 +245,15 @@ export function useWorkspaceData(): WorkspaceData {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  /** Tasks, notes and reviews auto-link knowledge evidence on disk. */
+  const refreshKnowledge = useCallback(async () => {
+    const api = apiOrThrow();
+    if (typeof api.listKnowledgeTopics !== 'function') return;
+    const topics = await api.listKnowledgeTopics().catch(() => null);
+    if (topics === null) return;
+    setState((current) => ({ ...current, knowledgeTopics: topics }));
+  }, []);
 
   const createTask = useCallback(async (input: CreateTaskInput) => {
     const task = await apiOrThrow().createTask(input);
@@ -240,29 +274,93 @@ export function useWorkspaceData(): WorkspaceData {
     return workspace;
   }, []);
 
-  const updateTask = useCallback(async (input: UpdateWorkspaceTaskInput) => {
-    const task = await apiOrThrow().updateWorkspaceTask(input);
-    setState((current) => ({
-      ...current,
-      tasks: current.tasks.map((item) => (item.id === task.id ? task : item))
-    }));
-    return task;
+  const createLongPlan = useCallback(async (input: CreateLongPlanInput) => {
+    const plan = await apiOrThrow().createLongPlan(input);
+    setState((current) => ({ ...current, longPlans: [plan, ...current.longPlans] }));
+    return plan;
   }, []);
 
-  const createNote = useCallback(async (input: CreateNoteInput) => {
-    const note = await apiOrThrow().createNote(input);
-    setState((current) => ({ ...current, notes: [note, ...current.notes] }));
-    return note;
-  }, []);
-
-  const updateNote = useCallback(async (input: UpdateWorkspaceNoteInput) => {
-    const note = await apiOrThrow().updateNote(input);
+  const setLongPlanItemDone = useCallback(async (input: UpdateLongPlanItemInput) => {
+    const plan = await apiOrThrow().setLongPlanItemDone(input);
     setState((current) => ({
       ...current,
-      notes: current.notes.map((item) => (item.id === note.id ? note : item))
+      longPlans: current.longPlans.map((entry) => (entry.id === plan.id ? plan : entry))
     }));
-    return note;
+    return plan;
   }, []);
+
+  const deleteLongPlan = useCallback(async (planId: string) => {
+    await apiOrThrow().deleteLongPlan(planId);
+    setState((current) => ({
+      ...current,
+      longPlans: current.longPlans.filter((plan) => plan.id !== planId)
+    }));
+  }, []);
+
+  const createKnowledgeTopic = useCallback(async (input: CreateKnowledgeTopicInput) => {
+    const topic = await apiOrThrow().createKnowledgeTopic(input);
+    setState((current) => ({
+      ...current,
+      knowledgeTopics: [topic, ...current.knowledgeTopics]
+    }));
+    return topic;
+  }, []);
+
+  const updateKnowledgeTopic = useCallback(async (input: UpdateKnowledgeTopicInput) => {
+    const topic = await apiOrThrow().updateKnowledgeTopic(input);
+    setState((current) => ({
+      ...current,
+      knowledgeTopics: current.knowledgeTopics.map((entry) =>
+        entry.id === topic.id ? topic : entry
+      )
+    }));
+    return topic;
+  }, []);
+
+  const deleteKnowledgeTopic = useCallback(async (topicId: string) => {
+    await apiOrThrow().deleteKnowledgeTopic(topicId);
+    setState((current) => ({
+      ...current,
+      knowledgeTopics: current.knowledgeTopics.filter((topic) => topic.id !== topicId)
+    }));
+  }, []);
+
+  const updateTask = useCallback(
+    async (input: UpdateWorkspaceTaskInput) => {
+      const task = await apiOrThrow().updateWorkspaceTask(input);
+      setState((current) => ({
+        ...current,
+        tasks: current.tasks.map((item) => (item.id === task.id ? task : item))
+      }));
+      // Completing a task appends knowledge evidence in the main process.
+      if (task.status === 'done') await refreshKnowledge();
+      return task;
+    },
+    [refreshKnowledge]
+  );
+
+  const createNote = useCallback(
+    async (input: CreateNoteInput) => {
+      const note = await apiOrThrow().createNote(input);
+      setState((current) => ({ ...current, notes: [note, ...current.notes] }));
+      await refreshKnowledge();
+      return note;
+    },
+    [refreshKnowledge]
+  );
+
+  const updateNote = useCallback(
+    async (input: UpdateWorkspaceNoteInput) => {
+      const note = await apiOrThrow().updateNote(input);
+      setState((current) => ({
+        ...current,
+        notes: current.notes.map((item) => (item.id === note.id ? note : item))
+      }));
+      await refreshKnowledge();
+      return note;
+    },
+    [refreshKnowledge]
+  );
 
   const createPracticeSet = useCallback(async (input: CreatePracticeSetInput) => {
     const set = await apiOrThrow().createPracticeSet(input);
@@ -471,6 +569,12 @@ export function useWorkspaceData(): WorkspaceData {
     createReminder,
     updateReminder,
     updateMemory,
-    deleteMemory
+    deleteMemory,
+    createLongPlan,
+    setLongPlanItemDone,
+    deleteLongPlan,
+    createKnowledgeTopic,
+    updateKnowledgeTopic,
+    deleteKnowledgeTopic
   };
 }

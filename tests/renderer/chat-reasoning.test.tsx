@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { sendPrompt } from './send-prompt';
 import { Workspace } from '../../src/renderer/shell/Workspace';
@@ -10,6 +10,13 @@ function setup() {
   window.studyCoach = createMockApi(localStorage, { streamPace: 0.6 });
   window.studyCoachPrototype = { reset: vi.fn() };
   render(<Workspace hasApiKey={false} onRefresh={vi.fn()} />);
+}
+
+/** The turn reloads the vault after streaming; let it settle before teardown. */
+async function waitForIdle() {
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: '发送' })).toBeInTheDocument()
+  );
 }
 
 test('shows live reasoning and collapses after the answer starts', async () => {
@@ -26,6 +33,7 @@ test('shows live reasoning and collapses after the answer starts', async () => {
   await userEvent.click(header);
   expect(header).toHaveAttribute('aria-expanded', 'true');
   expect(screen.getByText(/先看今天的任务和最近的记忆/)).toBeInTheDocument();
+  await waitForIdle();
 });
 
 test('shows tool steps and keeps narration out of the final answer', async () => {
@@ -41,4 +49,5 @@ test('shows tool steps and keeps narration out of the final answer', async () =>
 
   const answer = screen.getByText(/记下了/);
   expect(answer.textContent).not.toContain('我先把这条记下来');
+  await waitForIdle();
 });

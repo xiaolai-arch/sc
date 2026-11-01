@@ -115,7 +115,7 @@ test('keeps the desktop single-column layout classes', async () => {
   expect(screen.queryByRole('button', { name: '打开项目面板' })).not.toBeInTheDocument();
 
   expect(screen.getByRole('button', { name: '打开导航' }).className).toContain('md:hidden');
-  for (const label of ['今日安排', '日常', '记忆', '复盘', '提醒']) {
+  for (const label of ['今日安排', '长期计划', '日常', '知识库', '记忆', '复盘', '提醒']) {
     expect(within(aside).getByRole('button', { name: label })).toBeInTheDocument();
   }
   expect(within(aside).getByRole('button', { name: '打开设置' })).toBeInTheDocument();

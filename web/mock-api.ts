@@ -26,7 +26,13 @@ import type {
   WorkspaceTask
 } from '../src/shared/workspace';
 import type { StreamingButlerApi } from '../src/shared/butler-stream';
+import type {
+  CreateKnowledgeTopicInput,
+  KnowledgeTopic,
+  UpdateKnowledgeTopicInput
+} from '../src/shared/knowledge';
 import type { UsageSummary } from '../src/shared/usage';
+import type { LocalCliScanResult } from '../src/shared/local-cli';
 import { BUTLER_TOOL_LABELS } from '../src/shared/butler-stream';
 import type {
   Conversation,
@@ -54,6 +60,12 @@ import type {
   UpdateMemoryInput
 } from '../src/shared/memory';
 import type { PlanWorkspaceInput, WorkspacePlan } from '../src/shared/planning';
+import type {
+  CreateLongPlanInput,
+  LongPlan,
+  UpdateLongPlanItemInput
+} from '../src/shared/plans';
+import { buildTemplatePlan } from '../src/shared/plan-template';
 import type { SearchResult, SearchResultKind } from '../src/shared/search';
 import { formatLocalDate, parseLocalDate } from '../src/shared/date';
 import type { AppSettings } from '../src/shared/types';
@@ -81,6 +93,8 @@ interface MockState {
   practiceSets: PracticeSet[];
   practiceAttempts: PracticeAttempt[];
   practiceMistakes: PracticeMistake[];
+  plans: LongPlan[];
+  knowledgeTopics: KnowledgeTopic[];
   conversations: Conversation[];
 }
 
@@ -193,6 +207,8 @@ function defaultState(): MockState {
     settings: structuredClone(defaultSettings),
     reviews: [],
     conversations: [],
+    plans: [],
+    knowledgeTopics: [],
     ...seedWorkspaceData()
   };
 }
@@ -235,6 +251,10 @@ function readState(storage: Storage | null): MockState {
       practiceMistakes: Array.isArray(parsed.practiceMistakes)
         ? parsed.practiceMistakes
         : seeded.practiceMistakes,
+      plans: Array.isArray(parsed.plans) ? (parsed.plans as LongPlan[]) : [],
+      knowledgeTopics: Array.isArray(parsed.knowledgeTopics)
+        ? (parsed.knowledgeTopics as KnowledgeTopic[])
+        : [],
       conversations: Array.isArray(parsed.conversations)
         ? (parsed.conversations as Conversation[])
         : []
@@ -592,6 +612,57 @@ export function createMockApi(
       apiKey = key.trim() ? key : null;
     },
 
+    async scanLocalClis(): Promise<LocalCliScanResult> {
+      return {
+        scannedAt: new Date().toISOString(),
+        entries: [
+          {
+            agent: 'codex',
+            label: 'Codex',
+            command: 'codex',
+            installed: true,
+            path: '/usr/local/bin/codex',
+            version: '0.166.0',
+            auth: 'ready',
+            authDetail: '原型演示：已登录',
+            features: ['streaming', 'reasoning', 'native-tools', 'web', 'sessions', 'sandbox']
+          },
+          {
+            agent: 'claude',
+            label: 'Claude Code',
+            command: 'claude',
+            installed: true,
+            path: '/usr/local/bin/claude',
+            version: '2.1.0',
+            auth: 'ready',
+            authDetail: '原型演示：已登录',
+            features: ['streaming', 'reasoning', 'native-tools', 'web', 'sessions', 'mcp', 'skills']
+          },
+          {
+            agent: 'zcode',
+            label: 'ZCode',
+            command: 'zcode',
+            installed: false,
+            auth: 'unknown',
+            features: [],
+            installHint: '安装 zcode 后运行 zcode login'
+          },
+          {
+            agent: 'opencode',
+            label: 'OpenCode',
+            command: 'opencode',
+            installed: true,
+            path: '/opt/homebrew/bin/opencode',
+            version: '2.0.32',
+            auth: 'ready',
+            authDetail: '原型演示：已登录',
+            features: ['streaming', 'native-tools', 'sessions', 'mcp', 'models'],
+            models: ['anthropic/claude-sonnet-5-5', 'openai/gpt-5.6']
+          }
+        ]
+      };
+    },
+
     async submitReview(input: SubmitReviewInput): Promise<void> {
       state.reviews = [
         {
@@ -650,6 +721,83 @@ export function createMockApi(
           }
         ]
       };
+    },
+
+    async listLongPlans(workspaceId?: string): Promise<LongPlan[]> {
+      const plans =
+        workspaceId === undefined
+          ? state.plans
+          : state.plans.filter((plan) => plan.workspaceId === workspaceId);
+      return structuredClone(
+        [...plans].sort(
+          (a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.goal.localeCompare(b.goal)
+        )
+      );
+    },
+
+    async getLongPlan(planId: string): Promise<LongPlan | null> {
+      const plan = state.plans.find((entry) => entry.id === planId);
+      return plan === undefined ? null : structuredClone(plan);
+    },
+
+    async createLongPlan(input: CreateLongPlanInput): Promise<LongPlan> {
+      const workspace = requireWorkspace(input.workspaceId);
+      const goal = input.goal.trim();
+      if (!goal) throw new Error('计划目标不能为空。');
+      if (!Number.isInteger(input.weeks) || input.weeks < 1 || input.weeks > 16) {
+        throw new Error('周数必须在 1 到 16 之间。');
+      }
+      const weeklyHours = input.weeklyHours ?? 10;
+      const generated = buildTemplatePlan({
+        workspace,
+        goal,
+        startDate: input.startDate ?? today(),
+        weeks: input.weeks,
+        weeklyHours
+      });
+      const timestamp = new Date().toISOString();
+      const references = input.references?.trim();
+      const plan: LongPlan = {
+        id: nextId('lp'),
+        workspaceId: workspace.id,
+        goal,
+        startDate: input.startDate ?? today(),
+        weeks: input.weeks,
+        weeklyHours,
+        generatedBy: generated.generatedBy,
+        ...(references ? { references } : {}),
+        // The prototype never calls a model, so it can't verify web sources.
+        sources: [],
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        phases: generated.phases
+      };
+      state.plans = [plan, ...state.plans];
+      persist();
+      return structuredClone(plan);
+    },
+
+    async setLongPlanItemDone(input: UpdateLongPlanItemInput): Promise<LongPlan> {
+      const plan = state.plans.find((entry) => entry.id === input.planId);
+      if (!plan) throw new Error('计划不存在。');
+      const week = plan.phases
+        .flatMap((phase) => phase.weeks)
+        .find((entry) => entry.id === input.weekId);
+      if (!week) throw new Error('周不存在。');
+      const item =
+        input.kind === 'day'
+          ? week.days.find((entry) => entry.id === input.itemId)
+          : week.checks.find((entry) => entry.id === input.itemId);
+      if (!item) throw new Error('计划条目不存在。');
+      item.done = input.done;
+      plan.updatedAt = new Date().toISOString();
+      persist();
+      return structuredClone(plan);
+    },
+
+    async deleteLongPlan(planId: string): Promise<void> {
+      state.plans = state.plans.filter((plan) => plan.id !== planId);
+      persist();
     },
 
     async listPracticeSets(workspaceId: string): Promise<PracticeSet[]> {
@@ -856,6 +1004,76 @@ export function createMockApi(
         (entry) => !(entry.workspaceId === input.workspaceId && entry.id === input.id)
       );
       if (state.memory.length === before) throw new Error('记忆不存在');
+      persist();
+    },
+
+    async listKnowledgeTopics(workspaceId?: string): Promise<KnowledgeTopic[]> {
+      const topics =
+        workspaceId === undefined
+          ? state.knowledgeTopics
+          : state.knowledgeTopics.filter(
+              (topic) => topic.workspaceId === undefined || topic.workspaceId === workspaceId
+            );
+      return structuredClone(
+        [...topics].sort(
+          (a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.name.localeCompare(b.name, 'zh')
+        )
+      );
+    },
+
+    async createKnowledgeTopic(input: CreateKnowledgeTopicInput): Promise<KnowledgeTopic> {
+      const name = input.name.trim();
+      if (!name) throw new Error('知识主题名称不能为空。');
+      if (name.length > 60) throw new Error('知识主题名称不能超过 60 字。');
+      if (
+        input.level !== undefined &&
+        (!Number.isInteger(input.level) || input.level < 1 || input.level > 5)
+      ) {
+        throw new Error('掌握程度必须在 1 到 5 之间。');
+      }
+      const timestamp = new Date().toISOString();
+      const topic: KnowledgeTopic = {
+        id: nextId('kt'),
+        name,
+        aliases: input.aliases ?? [],
+        status: input.status ?? 'learning',
+        ...(input.level !== undefined ? { level: input.level } : {}),
+        ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+        summary: input.summary?.trim() ?? '',
+        evidence: [],
+        createdAt: timestamp,
+        updatedAt: timestamp
+      };
+      state.knowledgeTopics = [topic, ...state.knowledgeTopics];
+      persist();
+      return structuredClone(topic);
+    },
+
+    async updateKnowledgeTopic(input: UpdateKnowledgeTopicInput): Promise<KnowledgeTopic> {
+      const topic = state.knowledgeTopics.find((entry) => entry.id === input.id);
+      if (!topic) throw new Error('知识主题不存在。');
+      if (input.name !== undefined) {
+        const name = input.name.trim();
+        if (!name) throw new Error('知识主题名称不能为空。');
+        if (name.length > 60) throw new Error('知识主题名称不能超过 60 字。');
+        topic.name = name;
+      }
+      if (input.aliases !== undefined) topic.aliases = [...input.aliases];
+      if (input.status !== undefined) topic.status = input.status;
+      if (input.level === null) delete topic.level;
+      else if (input.level !== undefined) topic.level = input.level;
+      if (input.workspaceId === null) delete topic.workspaceId;
+      else if (input.workspaceId !== undefined) topic.workspaceId = input.workspaceId;
+      if (input.summary !== undefined) topic.summary = input.summary.trim();
+      topic.updatedAt = new Date().toISOString();
+      persist();
+      return structuredClone(topic);
+    },
+
+    async deleteKnowledgeTopic(id: string): Promise<void> {
+      const before = state.knowledgeTopics.length;
+      state.knowledgeTopics = state.knowledgeTopics.filter((topic) => topic.id !== id);
+      if (state.knowledgeTopics.length === before) throw new Error('知识主题不存在。');
       persist();
     },
 

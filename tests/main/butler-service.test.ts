@@ -327,7 +327,8 @@ describe('ButlerServiceImpl replies', () => {
       'get_today_plan',
       'write_note',
       'update_task',
-      'get_memory'
+      'get_memory',
+      'record_knowledge'
     ]);
   });
 
@@ -709,4 +710,27 @@ describe('ButlerServiceImpl failure degradation', () => {
     expect(payload).toMatchObject({ ok: false, tool: 'get_today_plan' });
     expect(payload.error).toContain('未连接');
   });
+});
+
+test('passes the workspace directory as cwd to the model client', async () => {
+  const { mkdtemp, mkdir, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = await mkdtemp(join(tmpdir(), 'butler-cwd-'));
+  const workspaceDir = join(root, 'workspaces', 'ws-exam');
+  await mkdir(workspaceDir, { recursive: true });
+  const model = new FakeModelClient(['好的']);
+  const service = new ButlerServiceImpl({
+    workspaceService: new MemoryWorkspaceService(),
+    workspaceRoot: root,
+    modelClient: model,
+    now: () => NOW
+  });
+
+  try {
+    await service.send({ workspaceId: 'ws-exam', message: '你好' });
+    expect(model.calls[0]?.cwd).toBe(workspaceDir);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

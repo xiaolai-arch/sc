@@ -40,6 +40,55 @@ test('updates a workspace task and keeps settings', async () => {
   expect(settings.budget.proactiveSessionsPerDay).toBe(4);
 });
 
+test('creates, tracks and deletes a long-term plan in the prototype', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage);
+  const plan = await api.createLongPlan({
+    workspaceId: 'english',
+    goal: '系统提升英语',
+    weeks: 1,
+    weeklyHours: 6
+  });
+
+  expect(plan.generatedBy).toBe('template');
+  expect(plan.phases.flatMap((phase) => phase.weeks)).toHaveLength(1);
+  const week = plan.phases[0]!.weeks[0]!;
+  expect(week.days).toHaveLength(7);
+
+  const updated = await api.setLongPlanItemDone({
+    planId: plan.id,
+    weekId: week.id,
+    itemId: week.days[0]!.id,
+    kind: 'day',
+    done: true
+  });
+  expect(updated.phases[0]!.weeks[0]!.days[0]!.done).toBe(true);
+  expect((await api.getLongPlan(plan.id))?.phases[0]!.weeks[0]!.days[0]!.done).toBe(true);
+
+  const reloaded = createMockApi(localStorage);
+  expect((await reloaded.listLongPlans('english'))[0]?.id).toBe(plan.id);
+
+  await reloaded.deleteLongPlan(plan.id);
+  expect(await reloaded.listLongPlans('english')).toEqual([]);
+});
+
+test('keeps plan references and never invents sources in the prototype', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage);
+  const plan = await api.createLongPlan({
+    workspaceId: 'english',
+    goal: '系统提升英语',
+    weeks: 1,
+    references: '新概念二：Lesson 1-10',
+    research: true
+  });
+
+  expect(plan.references).toBe('新概念二：Lesson 1-10');
+  expect(plan.sources).toEqual([]);
+  const reloaded = createMockApi(localStorage);
+  expect((await reloaded.getLongPlan(plan.id))?.references).toBe('新概念二：Lesson 1-10');
+});
+
 test('keeps the api key out of storage and flips hasApiKey', async () => {
   localStorage.clear();
   const api = createMockApi(localStorage);
@@ -240,6 +289,34 @@ test('lists review records and plans and searches the mock workspace', async () 
   await expect(api.rebuildSearchIndex()).resolves.toBeUndefined();
 });
 
+test('creates, filters, updates and deletes knowledge topics in the prototype', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage);
+  const global = await api.createKnowledgeTopic({ name: 'LangChain', status: 'mastered' });
+  const scoped = await api.createKnowledgeTopic({ name: 'RAG', workspaceId: 'agent' });
+
+  expect((await api.listKnowledgeTopics('agent')).map((topic) => topic.name).sort()).toEqual([
+    'LangChain',
+    'RAG'
+  ]);
+  expect((await api.listKnowledgeTopics('other')).map((topic) => topic.name)).toEqual([
+    'LangChain'
+  ]);
+
+  const updated = await api.updateKnowledgeTopic({
+    id: scoped.id,
+    status: 'learning',
+    level: 3
+  });
+  expect(updated).toMatchObject({ status: 'learning', level: 3 });
+
+  const reopened = createMockApi(localStorage);
+  expect((await reopened.listKnowledgeTopics()).map((topic) => topic.name)).toContain('LangChain');
+  await reopened.deleteKnowledgeTopic(global.id);
+  expect(await reopened.listKnowledgeTopics('other')).toEqual([]);
+  await expect(reopened.createKnowledgeTopic({ name: '  ' })).rejects.toThrow(/知识主题名称/);
+});
+
 test('streams reasoning, a tool step and the final reply', async () => {
   localStorage.clear();
   const api = createMockApi(localStorage);
@@ -300,4 +377,19 @@ test('creates, lists, appends and deletes conversations', async () => {
   expect((await second.getConversation(created.id))?.messages).toHaveLength(1);
   await second.deleteConversation(created.id);
   expect(await second.getConversation(created.id)).toBeNull();
+});
+
+test('mock scans local CLI agents for the settings panel', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage);
+  const scan = await api.scanLocalClis();
+  expect(scan.entries.map((entry) => entry.agent)).toEqual([
+    'codex',
+    'claude',
+    'zcode',
+    'opencode'
+  ]);
+  expect(scan.entries.find((entry) => entry.agent === 'opencode')?.models).toContain(
+    'anthropic/claude-sonnet-5-5'
+  );
 });

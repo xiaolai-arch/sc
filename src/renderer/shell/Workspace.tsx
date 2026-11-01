@@ -5,6 +5,7 @@ import {
   type Conversation,
   type ConversationMessage
 } from '../../shared/conversations';
+import type { LongPlan, LongPlanDay } from '../../shared/plans';
 import type { SendMessageInput, WorkspaceNote } from '../../shared/workspace';
 import { SettingsPage } from '../settings/SettingsPage';
 import { Dialog } from '../ui/Dialog';
@@ -21,7 +22,9 @@ import {
   tickFocus,
   type FocusSession
 } from './focus-timer';
+import { KnowledgePage } from './KnowledgePage';
 import { LearningPane } from './LearningPane';
+import { LongPlanPage } from './LongPlanPage';
 import { MemoryPage } from './MemoryPage';
 import { ModelPickerDialog } from './ModelPickerDialog';
 import {
@@ -119,6 +122,8 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     practiceMistakes,
     memoryProfile,
     reminders,
+    longPlans,
+    knowledgeTopics,
     loading,
     error,
     retry,
@@ -126,6 +131,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     stream,
     cancelStream,
     submitPracticeAnswer,
+    createTask,
     updateTask,
     updateWorkspace,
     createNote,
@@ -133,7 +139,13 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     updateReminder,
     memoryRecords,
     updateMemory,
-    deleteMemory
+    deleteMemory,
+    createLongPlan,
+    setLongPlanItemDone,
+    deleteLongPlan,
+    createKnowledgeTopic,
+    updateKnowledgeTopic,
+    deleteKnowledgeTopic
   } = useWorkspaceData();
   const conversations = useConversations();
   const [section, setSection] = useState<Section>('chat');
@@ -894,7 +906,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
       selectDaily();
       return;
     }
-    if (next === 'memory' || next === 'review') {
+    if (next === 'knowledge' || next === 'memory' || next === 'review') {
       // These pages have their own workspace filter; keep chat scope intact.
       setProjectId(null);
       changeSection(next);
@@ -991,6 +1003,29 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     setModelError(null);
     setSection('chat');
     void conversations.select(id);
+  }
+
+  /** Turn one long-plan day into ordinary tasks, so 今日安排 can schedule them. */
+  async function addPlanDayToSchedule(plan: LongPlan, day: LongPlanDay) {
+    const workspace = workspaces.find((entry) => entry.id === plan.workspaceId);
+    if (!workspace) throw new Error('计划所属的工作区不存在。');
+    const taskCount = Math.max(1, day.tasks.length);
+    const perTask = Math.max(
+      15,
+      Math.min(120, Math.round((plan.weeklyHours * 60) / 7 / taskCount))
+    );
+    await Promise.all(
+      day.tasks.map((title) =>
+        createTask({
+          workspaceId: plan.workspaceId,
+          title,
+          subject: workspace.name,
+          durationMin: perTask,
+          acceptance: day.output,
+          due: day.date
+        })
+      )
+    );
   }
 
   function selectProject(id: string | null) {
@@ -1125,6 +1160,20 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
             />
           ) : null}
 
+          {section === 'plan' ? (
+            <LongPlanPage
+              plans={longPlans}
+              workspaces={workspaces}
+              defaultWorkspaceId={projectId}
+              today={today}
+              onOpenSidebar={() => setSidebarOpen(true)}
+              onCreatePlan={createLongPlan}
+              onSetItemDone={setLongPlanItemDone}
+              onDeletePlan={deleteLongPlan}
+              onAddDayToSchedule={addPlanDayToSchedule}
+            />
+          ) : null}
+
           {section === 'projects' ? (
             <ProjectsPage
               workspace={currentWorkspace}
@@ -1153,6 +1202,18 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               onPauseFocus={pauseFocus}
               onResumeFocus={resumeFocus}
               onResetFocus={resetFocus}
+            />
+          ) : null}
+
+          {section === 'knowledge' ? (
+            <KnowledgePage
+              topics={knowledgeTopics}
+              workspaces={workspaces}
+              defaultWorkspaceId={projectId}
+              onOpenSidebar={() => setSidebarOpen(true)}
+              onCreateTopic={createKnowledgeTopic}
+              onUpdateTopic={updateKnowledgeTopic}
+              onDeleteTopic={deleteKnowledgeTopic}
             />
           ) : null}
 

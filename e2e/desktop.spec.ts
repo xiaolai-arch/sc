@@ -46,6 +46,48 @@ test.describe('ASAKI desktop', () => {
         await expect(page.getByText('2027 考研上岸')).toBeVisible();
       });
 
+      await test.step('creates a long-term plan and schedules today’s row', async () => {
+        await page.getByRole('button', { name: '长期计划' }).click();
+        await expect(page.getByText('还没有长期计划。')).toBeVisible();
+        await page.getByRole('button', { name: '新建长期计划' }).click();
+        await page.getByLabel('目标').fill('系统学习 AI Agent，能独立做项目');
+        await page.getByLabel('总周数').fill('2');
+        await page.getByRole('button', { name: '生成计划' }).click({ timeout: 60_000 });
+
+        const detail = page.getByRole('region', { name: '计划详情' });
+        await expect(
+          detail.getByRole('heading', { name: '系统学习 AI Agent，能独立做项目' })
+        ).toBeVisible({ timeout: 60_000 });
+        await expect(detail.getByText(/通用框架/)).toBeVisible();
+        await detail.getByRole('button', { name: '加入今日安排' }).click();
+        await expect(detail.getByText('已加入今日安排')).toBeVisible();
+
+        await page.getByRole('button', { name: '今日安排' }).click();
+        await expect(page.getByText('今天的时间表')).toBeVisible();
+        await expect(page.getByText('明确本周目标，列出 3 个要解决的问题')).toBeVisible();
+
+        const plans = await readdir(join(environment.vault, 'workspaces'));
+        const planFiles = await Promise.all(
+          plans.map((id) => readdir(join(environment.vault, 'workspaces', id, 'plans')).catch(() => []))
+        );
+        expect(planFiles.flat().some((name) => name.endsWith('.md'))).toBe(true);
+      });
+
+      await test.step('adds a knowledge topic and persists it', async () => {
+        await page.getByRole('button', { name: '知识库' }).click();
+        await expect(page.getByText('还没有知识主题。')).toBeVisible();
+        await page.getByRole('button', { name: '新增主题' }).click();
+        await page.getByLabel('主题名称').fill('LangChain');
+        await page.getByRole('button', { name: '保存' }).click();
+        await expect(page.getByText('LangChain')).toBeVisible();
+        await expect(page.getByText('在学', { exact: true })).toBeVisible();
+
+        const files = await readdir(join(environment.vault, 'knowledge', 'topics')).catch(
+          () => [] as string[]
+        );
+        expect(files.some((name) => name.endsWith('.md'))).toBe(true);
+      });
+
       await test.step('writes the project to the vault', async () => {
         const workspaces = await readdir(join(environment.vault, 'workspaces'));
         expect(workspaces.length).toBeGreaterThan(0);

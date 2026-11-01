@@ -255,3 +255,78 @@ test('clears the saved key before switching to a different endpoint', async () =
     update.mock.invocationCallOrder[0]!
   );
 });
+
+test('scans local CLIs and selects a detected agent with native tools', async () => {
+  const localSettings = {
+    ...settings,
+    provider: { kind: 'local-cli' as const, agent: 'codex' as const, command: 'codex' }
+  };
+  const update = vi.fn().mockResolvedValue(localSettings);
+  const scanLocalClis = vi.fn().mockResolvedValue({
+    scannedAt: '2026-11-01T10:00:00.000Z',
+    entries: [
+      {
+        agent: 'codex',
+        label: 'Codex',
+        command: 'codex',
+        installed: true,
+        path: '/opt/homebrew/bin/codex',
+        version: '0.166.0',
+        auth: 'ready',
+        authDetail: '已登录',
+        features: ['streaming', 'native-tools', 'sessions']
+      },
+      {
+        agent: 'claude',
+        label: 'Claude Code',
+        command: 'claude',
+        installed: true,
+        path: '/Users/me/.local/bin/claude',
+        version: '2.1.316',
+        auth: 'ready',
+        authDetail: 'OAuth 已登录',
+        features: ['streaming', 'native-tools', 'mcp', 'skills']
+      },
+      {
+        agent: 'zcode',
+        label: 'ZCode',
+        command: 'zcode',
+        installed: false,
+        auth: 'unknown',
+        features: [],
+        installHint: '安装 zcode 后运行 zcode login'
+      }
+    ]
+  });
+  window.studyCoach = {
+    getSettings: vi.fn().mockResolvedValue(localSettings),
+    updateSettings: update,
+    setApiKey: vi.fn(),
+    scanLocalClis
+  } as never;
+
+  render(<SettingsPage onClose={() => {}} />);
+
+  const list = await screen.findByRole('list', { name: '本机 CLI 扫描结果' });
+  expect(list).toHaveTextContent('Codex');
+  expect(list).toHaveTextContent('2.1.316');
+  expect(list).toHaveTextContent('未安装 · 安装 zcode 后运行 zcode login');
+
+  await userEvent.click(screen.getByRole('button', { name: '使用 Claude Code' }));
+  expect(screen.getByLabelText('CLI agent')).toHaveValue('claude');
+  expect(screen.getByLabelText('CLI 命令')).toHaveValue('claude');
+
+  expect(screen.getByLabelText('使用 CLI 原生工具')).toBeChecked();
+  await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+
+  expect(update).toHaveBeenCalledWith(
+    expect.objectContaining({
+      provider: expect.objectContaining({
+        kind: 'local-cli',
+        agent: 'claude',
+        command: 'claude',
+        nativeTools: true
+      })
+    })
+  );
+});

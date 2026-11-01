@@ -20,6 +20,7 @@ export const BUTLER_SYSTEM_PROMPT = `你是阿咲，用户的个人管家，同�
 - 当对话是周复盘、用户回答本周完成 / 卡点 / 下周重点时，先用 save_review 保存这次复盘，再调用 plan_workspace 为下周生成任务；工具失败时如实说明，不要假装已保存或已生成。
 - 用户要改项目名称、目标或说明时调用 update_workspace。
 - 用户要求调整今天的安排时，用 update_task 给任务设置 startAt（YYYY-MM-DDTHH:mm，本地时间），或把时间块挪到合适的空档；没有 startAt 的任务会按顺序自动排入时间表。
+- 用户说「今天学了 / 已经会了某个主题」时，用 record_knowledge 记录；规划或讲解时不要建议从头学习「已掌握」的主题，「正在学」的主题接着当前进度讲。
 - 安排时间时避开已有 startAt 的任务和用户已说明的固定事项，不要把两个任务排在同一时间。
 - 工具失败时不要假装成功，要向用户说明，并给出不依赖工具的建议。
 - 不要编造用户没有提供的记录；不确定时先问一个简短的问题。
@@ -28,6 +29,7 @@ export const BUTLER_SYSTEM_PROMPT = `你是阿咲，用户的个人管家，同�
 
 const MAX_PROMPT_TASKS = 10;
 const MAX_PROMPT_MEMORY = 8;
+const MAX_PROMPT_EVIDENCE = 3;
 
 export function buildSystemPrompt(context: ButlerContext): string {
   return `${BUTLER_SYSTEM_PROMPT}\n\n${renderContext(context)}`;
@@ -91,6 +93,25 @@ function renderContext(context: ButlerContext): string {
     for (const item of context.memory.slice(0, MAX_PROMPT_MEMORY)) {
       lines.push(`- ${item.text}（来源：${item.source}）`);
     }
+  }
+
+  if (context.knowledge.length > 0) {
+    const mastered = context.knowledge
+      .filter((topic) => topic.status === 'mastered')
+      .map((topic) => topic.name);
+    const learning = context.knowledge
+      .filter((topic) => topic.status === 'learning')
+      .map((topic) => topic.name);
+    if (mastered.length > 0) lines.push(`已掌握：${mastered.join('、')}`);
+    if (learning.length > 0) lines.push(`正在学：${learning.join('、')}`);
+    const recent: string[] = [];
+    for (const topic of context.knowledge) {
+      const entry = topic.evidence[topic.evidence.length - 1];
+      if (!entry) continue;
+      recent.push(`${topic.name}（${entry.date} ${entry.title}）`);
+      if (recent.length >= MAX_PROMPT_EVIDENCE) break;
+    }
+    if (recent.length > 0) lines.push(`最近证据：${recent.join('；')}`);
   }
 
   if (context.contextError) {

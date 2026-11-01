@@ -608,3 +608,133 @@ test('does not execute a markerless envelope embedded in prose', () => {
 
   expect(parseCliResponse(answer)).toEqual({ text: answer });
 });
+
+describe('CliAgentClient native agent mode', () => {
+  test('runs codex inside the workspace and skips the JSON tool protocol', async () => {
+    const calls: Array<{
+      args: string[];
+      input: string;
+      cwd: string;
+    }> = [];
+    const runner: CliRunner = async (_command, args, input, options) => {
+      calls.push({ args, input, cwd: options.cwd });
+      return { stdout: '已经把笔记写好了。', stderr: '', code: 0 };
+    };
+    const client = new CliAgentClient(
+      { kind: 'local-cli', agent: 'codex', command: 'codex', nativeTools: true },
+      { runner }
+    );
+
+    const result = await client.complete({
+      cwd: '/tmp/vault/workspaces/ws-1',
+      messages: [
+        { role: 'system', content: '你是阿咲' },
+        { role: 'user', content: '把今天的复盘写成笔记' }
+      ],
+      tools: [
+        {
+          name: 'write_note',
+          description: '写笔记',
+          parameters: { type: 'object', properties: {} }
+        }
+      ]
+    });
+
+    expect(calls[0]?.args).toEqual(
+      expect.arrayContaining([
+        'exec',
+        '--sandbox',
+        'workspace-write',
+        '-C',
+        '/tmp/vault/workspaces/ws-1'
+      ])
+    );
+    expect(calls[0]?.cwd).toBe('/tmp/vault/workspaces/ws-1');
+    expect(calls[0]?.input).toContain('## 原生 agent 模式');
+    expect(calls[0]?.input).toContain('/tmp/vault/workspaces/ws-1');
+    expect(calls[0]?.input).not.toContain('工具调用协议');
+    expect(result).toEqual({
+      text: '已经把笔记写好了。',
+      usage: { inputTokens: 0, outputTokens: 0 }
+    });
+  });
+
+  test('gives claude native file access without --bare', async () => {
+    let args: string[] = [];
+    const client = new CliAgentClient(
+      {
+        kind: 'local-cli',
+        agent: 'claude',
+        command: 'claude',
+        isolate: true,
+        nativeTools: true
+      },
+      {
+        runner: async (_command, nextArgs) => {
+          args = nextArgs;
+          return { stdout: 'done', stderr: '', code: 0 };
+        }
+      }
+    );
+
+    await client.complete({
+      cwd: '/tmp/vault/workspaces/ws-1',
+      messages: [{ role: 'user', content: 'hi' }]
+    });
+
+    expect(args).toEqual(
+      expect.arrayContaining([
+        '--add-dir',
+        '/tmp/vault/workspaces/ws-1',
+        '--permission-mode',
+        'acceptEdits'
+      ])
+    );
+    expect(args).not.toContain('--bare');
+  });
+
+  test('runs opencode as a native agent in the workspace', async () => {
+    let args: string[] = [];
+    let input = '';
+    let cwd = '';
+    const client = new CliAgentClient(
+      { kind: 'local-cli', agent: 'opencode', command: 'opencode', nativeTools: true },
+      {
+        runner: async (_command, nextArgs, nextInput, options) => {
+          args = nextArgs;
+          input = nextInput;
+          cwd = options.cwd;
+          return { stdout: 'done', stderr: '', code: 0 };
+        }
+      }
+    );
+
+    await client.complete({
+      cwd: '/tmp/vault/workspaces/ws-1',
+      messages: [{ role: 'user', content: 'hi' }]
+    });
+
+    expect(args).toEqual(expect.arrayContaining(['run', '--auto']));
+    expect(input).toBe('');
+    expect(args[args.length - 1]).toContain('hi');
+    expect(cwd).toBe('/tmp/vault/workspaces/ws-1');
+  });
+
+  test('falls back to one-shot mode when no workspace cwd is supplied', async () => {
+    let args: string[] = [];
+    const client = new CliAgentClient(
+      { kind: 'local-cli', agent: 'codex', command: 'codex', nativeTools: true },
+      {
+        runner: async (_command, nextArgs) => {
+          args = nextArgs;
+          return { stdout: 'ok', stderr: '', code: 0 };
+        }
+      }
+    );
+
+    await client.complete({ messages: [{ role: 'user', content: 'hi' }] });
+
+    expect(args).not.toContain('--sandbox');
+    expect(args).not.toContain('-C');
+  });
+});

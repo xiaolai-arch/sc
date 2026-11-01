@@ -13,15 +13,34 @@ import {
   PlusIcon,
   SearchIcon,
   SettingsIcon,
+  SparklesIcon,
   SunIcon,
+  TargetIcon,
   ThinkIcon
 } from '../ui/icons';
 import type { ConversationSummary } from '../../shared/conversations';
 import type { Workspace } from '../../shared/workspace';
 
-export type Section = 'chat' | 'projects' | 'schedule' | 'memory' | 'review' | 'reminders' | 'settings';
+export type Section =
+  | 'chat'
+  | 'projects'
+  | 'schedule'
+  | 'plan'
+  | 'knowledge'
+  | 'memory'
+  | 'review'
+  | 'reminders'
+  | 'settings';
 export type ChatScope = 'daily' | 'unfiled' | 'workspace';
-export type NavSection = 'schedule' | 'daily' | 'memory' | 'review' | 'reminders' | 'settings';
+export type NavSection =
+  | 'schedule'
+  | 'plan'
+  | 'daily'
+  | 'knowledge'
+  | 'memory'
+  | 'review'
+  | 'reminders'
+  | 'settings';
 
 type NavigationSidebarProps = {
   section: Section;
@@ -47,7 +66,9 @@ type NavigationSidebarProps = {
 
 const NAV_ITEMS: Array<{ id: NavSection; label: string; Icon: typeof SunIcon }> = [
   { id: 'schedule', label: '今日安排', Icon: CalendarIcon },
+  { id: 'plan', label: '长期计划', Icon: TargetIcon },
   { id: 'daily', label: '日常', Icon: SunIcon },
+  { id: 'knowledge', label: '知识库', Icon: SparklesIcon },
   { id: 'memory', label: '记忆', Icon: ThinkIcon },
   { id: 'review', label: '复盘', Icon: BookOpenIcon },
   { id: 'reminders', label: '提醒', Icon: ClockIcon }

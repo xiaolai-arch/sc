@@ -6,6 +6,11 @@ import type {
   NotificationSettings,
   ProviderConfig
 } from '../../shared/types';
+import type {
+  LocalCliEntry,
+  LocalCliFeature,
+  LocalCliScanResult
+} from '../../shared/local-cli';
 import type { UsageSummary } from '../../shared/usage';
 import {
   loadThemePreference,
@@ -35,6 +40,26 @@ const providerLabels: Record<ProviderConfig['kind'], string> = {
 
 const cliAgents: LocalCliAgent[] = ['codex', 'claude', 'zcode', 'opencode'];
 
+const cliAgentLabels: Record<LocalCliAgent, string> = {
+  codex: 'Codex',
+  claude: 'Claude Code',
+  zcode: 'ZCode',
+  opencode: 'OpenCode'
+};
+
+const cliFeatureLabels: Record<LocalCliFeature, string> = {
+  streaming: '流式',
+  reasoning: '思考',
+  'native-tools': '原生工具',
+  web: '联网',
+  sessions: '会话',
+  mcp: 'MCP',
+  skills: '技能',
+  models: '模型列表',
+  images: '图片',
+  sandbox: '沙箱'
+};
+
 const THEME_OPTIONS: Array<{ value: ThemePreference; label: string }> = [
   { value: 'system', label: '跟随系统' },
   { value: 'light', label: '浅色' },
@@ -48,6 +73,22 @@ function providerEndpoint(provider: ProviderConfig): string {
   return `${provider.kind}:${provider.baseURL}`;
 }
 
+function cliAuthLabel(entry: LocalCliEntry): string {
+  if (entry.auth === 'ready') return '已登录';
+  if (entry.auth === 'missing') return '未登录';
+  return '登录状态未知';
+}
+
+function cliAuthClass(entry: LocalCliEntry): string {
+  if (entry.auth === 'ready') {
+    return 'text-[#1d7a36] dark:text-[#7ee787]';
+  }
+  if (entry.auth === 'missing') {
+    return 'text-[#b25000] dark:text-[#ffa657]';
+  }
+  return 'text-gray-500 dark:text-[#a1a1a6]';
+}
+
 export function SettingsPage({ onClose, embedded = false, page = false }: SettingsPageProps) {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -59,6 +100,10 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
   const [cliCommand, setCliCommand] = useState('codex');
   const [cliEffort, setCliEffort] = useState<LocalCliEffort | ''>('');
   const [cliIsolate, setCliIsolate] = useState(false);
+  const [cliNativeTools, setCliNativeTools] = useState(false);
+  const [cliScan, setCliScan] = useState<LocalCliScanResult | null>(null);
+  const [cliScanning, setCliScanning] = useState(false);
+  const [cliScanError, setCliScanError] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [sessions, setSessions] = useState('4');
   const [tokens, setTokens] = useState('200000');
@@ -90,6 +135,23 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
 
+  const runCliScan = useCallback(async (auto = false) => {
+    const api = window.studyCoach;
+    if (!api || typeof api.scanLocalClis !== 'function') {
+      if (!auto) setCliScanError('当前版本不支持扫描本机 CLI。');
+      return;
+    }
+    setCliScanning(true);
+    setCliScanError(null);
+    try {
+      setCliScan(await api.scanLocalClis());
+    } catch (cause) {
+      setCliScanError(cause instanceof Error ? cause.message : '扫描本机 CLI 失败。');
+    } finally {
+      setCliScanning(false);
+    }
+  }, []);
+
   const load = useCallback(async () => {
     const api = window.studyCoach;
     if (!api) {
@@ -116,6 +178,7 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
         setCliCommand(value.provider.command ?? value.provider.agent);
         setCliEffort(value.provider.effort ?? '');
         setCliIsolate(value.provider.isolate === true);
+        setCliNativeTools(value.provider.nativeTools === true);
       }
       setSessions(String(value.budget.proactiveSessionsPerDay));
       setTokens(String(value.budget.dailyTokens));
@@ -143,6 +206,11 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
     void load();
   }, [load]);
 
+  useEffect(() => {
+    if (!loaded || kind !== 'local-cli' || cliScan || cliScanning) return;
+    void runCliScan(true);
+  }, [loaded, kind, cliScan, cliScanning, runCliScan]);
+
   function updateKind(next: ProviderConfig['kind']) {
     if (next === kind) return;
     setKind(next);
@@ -154,6 +222,16 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
     if (next === 'local-cli' && !cliCommand.trim()) {
       setCliCommand(cliAgent);
     }
+  }
+
+  function useCliEntry(entry: LocalCliEntry) {
+    if (!entry.installed) return;
+    setCliAgent(entry.agent);
+    setCliCommand(entry.command);
+    // A detected CLI is most useful as a full agent; the user can turn it off.
+    setCliNativeTools(true);
+    setCliScanError(null);
+    setStatus(`已选择 ${entry.label}${entry.version ? ` ${entry.version}` : ''}`);
   }
 
   async function save() {
@@ -214,7 +292,10 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
                     ? { effort: cliEffort }
                     : {}
                   : {}),
-                ...(cliAgent === 'claude' && cliIsolate ? { isolate: true } : {})
+                ...(cliAgent === 'claude' && cliIsolate && !cliNativeTools
+                  ? { isolate: true }
+                  : {}),
+                ...(cliNativeTools ? { nativeTools: true } : {})
               }
             : { kind, baseURL, model };
       const endpointChanged =
@@ -347,6 +428,10 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
     }
   }
 
+  const detectedCliModels =
+    kind === 'local-cli'
+      ? (cliScan?.entries.find((entry) => entry.agent === cliAgent)?.models ?? [])
+      : [];
   const today = formatLocalDate(new Date());
   const todayUsage = usage?.days.find((day) => day.date === today) ?? {
     inputTokens: 0,
@@ -443,13 +528,132 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
               {kind === 'local-cli' && cliAgent === 'zcode' ? null : (
                 <div>
                   <Label htmlFor="settings-model">模型名称</Label>
-                  <Input id="settings-model" value={model} onChange={(event) => setModel(event.target.value)} />
+                  <Input
+                    id="settings-model"
+                    value={model}
+                    onChange={(event) => setModel(event.target.value)}
+                    list={detectedCliModels.length > 0 ? 'settings-cli-models' : undefined}
+                  />
+                  {detectedCliModels.length > 0 ? (
+                    <datalist id="settings-cli-models">
+                      {detectedCliModels.map((value) => (
+                        <option key={value} value={value} />
+                      ))}
+                    </datalist>
+                  ) : null}
                 </div>
               )}
             </div>
 
             {kind === 'local-cli' ? (
               <div className="mt-5 grid gap-5 md:grid-cols-2">
+                <div className="rounded-xl border border-black/[0.06] bg-[#f5f5f7]/70 p-4 dark:border-white/[0.08] dark:bg-white/[0.03] md:col-span-2">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">本机 CLI</p>
+                      <p className="mt-1 text-xs leading-5 text-gray-500 dark:text-[#a1a1a6]">
+                        扫描 PATH、Homebrew、nvm/asdf/mise 和登录 shell，检测版本、登录状态与原生能力。
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => void runCliScan()}
+                      disabled={cliScanning}
+                    >
+                      {cliScanning ? '正在扫描…' : cliScan ? '重新扫描' : '扫描本机 CLI'}
+                    </Button>
+                  </div>
+                  {cliScanError ? (
+                    <p role="alert" className="mt-3 text-xs text-[#d70015] dark:text-[#ff7b72]">
+                      {cliScanError}
+                    </p>
+                  ) : null}
+                  {cliScan ? (
+                    <div
+                      className="mt-3 grid gap-2"
+                      role="list"
+                      aria-label="本机 CLI 扫描结果"
+                    >
+                      {cliScan.entries.map((entry) => (
+                        <div
+                          key={entry.agent}
+                          role="listitem"
+                          className="rounded-lg bg-white/80 p-3 dark:bg-black/20"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
+                                {entry.label}
+                                {entry.version ? (
+                                  <span className="rounded-full bg-black/[0.05] px-2 py-0.5 text-[11px] font-normal text-gray-500 dark:bg-white/[0.08] dark:text-[#a1a1a6]">
+                                    {entry.version}
+                                  </span>
+                                ) : null}
+                                {entry.installed ? (
+                                  <span className={`text-[11px] font-normal ${cliAuthClass(entry)}`}>
+                                    {cliAuthLabel(entry)}
+                                  </span>
+                                ) : null}
+                              </p>
+                              <p
+                                className="mt-1 truncate text-xs text-gray-500 dark:text-[#a1a1a6]"
+                                title={entry.installed ? entry.path : entry.installHint}
+                              >
+                                {entry.installed ? entry.path : `未安装 · ${entry.installHint}`}
+                              </p>
+                              {entry.installed && entry.features.length > 0 ? (
+                                <div className="mt-2 flex flex-wrap gap-1">
+                                  {entry.features.map((feature) => (
+                                    <span
+                                      key={feature}
+                                      className="rounded-full bg-[#0071e3]/8 px-2 py-0.5 text-[11px] text-[#0066cc] dark:bg-[#0a84ff]/15 dark:text-[#4da3ff]"
+                                    >
+                                      {cliFeatureLabels[feature]}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : null}
+                              {entry.models?.length ? (
+                                <p className="mt-1 text-[11px] text-gray-500 dark:text-[#8e8e93]">
+                                  {entry.models.length} 个可用模型
+                                </p>
+                              ) : null}
+                              {entry.authDetail && entry.auth !== 'ready' ? (
+                                <p className="mt-1 text-[11px] text-gray-500 dark:text-[#8e8e93]">
+                                  {entry.authDetail}
+                                </p>
+                              ) : null}
+                              {entry.error ? (
+                                <p className="mt-1 text-[11px] text-[#d70015] dark:text-[#ff7b72]">
+                                  {entry.error}
+                                </p>
+                              ) : null}
+                            </div>
+                            <div className="shrink-0">
+                              {entry.installed ? (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  aria-label={`使用 ${entry.label}`}
+                                  onClick={() => useCliEntry(entry)}
+                                >
+                                  使用
+                                </Button>
+                              ) : (
+                                <span className="text-[11px] text-gray-500 dark:text-[#8e8e93]">
+                                  未安装
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
                 <div>
                   <Label htmlFor="settings-cli-agent">CLI agent</Label>
                   <Select
@@ -494,18 +698,35 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
                     </Select>
                   </div>
                 ) : null}
+                <label className="flex items-start gap-3 rounded-xl border border-black/[0.06] p-3 text-sm text-gray-500 dark:border-white/[0.08] dark:text-[#a1a1a6] md:col-span-2">
+                  <input
+                    type="checkbox"
+                    aria-label="使用 CLI 原生工具"
+                    checked={cliNativeTools}
+                    onChange={(event) => setCliNativeTools(event.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded-[4px] accent-[#0071e3]"
+                  />
+                  <span>
+                    使用 CLI 原生工具（完整 agent 模式）
+                    <span className="mt-1 block text-xs text-gray-500 dark:text-[#8e8e93]">
+                      让 CLI 在 vault 中直接读文件、改笔记、运行命令和使用联网工具；关闭时只把它当成一次性文本模型，并在临时目录中运行。
+                    </span>
+                  </span>
+                </label>
                 {cliAgent === 'claude' ? (
                   <label className="flex items-start gap-3 text-sm text-gray-500 dark:text-[#a1a1a6] md:col-span-2">
                     <input
                       type="checkbox"
                       checked={cliIsolate}
+                      disabled={cliNativeTools}
                       onChange={(event) => setCliIsolate(event.target.checked)}
-                      className="mt-0.5 h-4 w-4 rounded-[4px] accent-[#0071e3]"
+                      className="mt-0.5 h-4 w-4 rounded-[4px] accent-[#0071e3] disabled:opacity-40"
                     />
                     <span>
                       隔离 Claude Code 全局配置（--bare）
                       <span className="mt-1 block text-xs text-gray-500 dark:text-[#8e8e93]">
                         跳过 hooks / skills / CLAUDE.md，思考过程不会被本机全局配置污染。需要 API Key，OAuth 登录可能不可用。
+                        {cliNativeTools ? ' 原生工具模式会忽略 --bare。' : ''}
                       </span>
                     </span>
                   </label>
@@ -516,10 +737,10 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
                   </p>
                 ) : null}
                 <p className="text-sm text-gray-500 dark:text-[#a1a1a6] md:col-span-2">
-                  使用本机已登录的 CLI agent，不需要 API key；命令会在临时目录中运行。
+                  使用本机已登录的 CLI agent，不需要 API key。关闭原生工具时命令在临时目录中运行；
+                  开启后 CLI 在当前 vault workspace 中运行，并使用它自己的文件、命令与联网工具。
                   Codex 使用 -c model_reasoning_effort，Claude 使用 --effort，opencode 使用
-                  --model provider/model#variant。
-                  Claude 会逐字返回思考；Codex 的 --json 只在思考完成后返回整段。
+                  --model provider/model#variant。Claude 会逐字返回思考；Codex 的 --json 只在思考完成后返回整段。
                 </p>
               </div>
             ) : null}

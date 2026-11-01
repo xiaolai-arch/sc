@@ -134,6 +134,78 @@ test('persists workspace tasks in the vault across a context restart', async () 
   await second.dispose();
 });
 
+test('auto-links completed tasks, notes and reviews without blocking', async () => {
+  const dir = await tempDir();
+  const { workspace, butler } = services();
+  const linkTask = vi.fn(async () => undefined);
+  const linkNote = vi.fn(async () => undefined);
+  const linkReview = vi.fn(async () => {
+    throw new Error('link failed');
+  });
+  const context = await createAppContext({
+    userDataPath: dir,
+    defaultVaultPath: join(dir, 'vault'),
+    workspaceService: workspace,
+    butlerService: butler,
+    knowledgeService: {
+      list: async () => [],
+      get: async () => null,
+      create: async () => {
+        throw new Error('unused');
+      },
+      update: async () => {
+        throw new Error('unused');
+      },
+      delete: async () => undefined,
+      record: async () => {
+        throw new Error('unused');
+      },
+      linkTask,
+      linkNote,
+      linkReview
+    },
+    secretStore: new InMemorySecretStore(),
+    now: () => new Date(2026, 10, 2, 9, 0, 0)
+  });
+  workspace.updateWorkspaceTask = async (input) => ({
+    id: input.taskId,
+    workspaceId: 'ws-1',
+    title: 't',
+    subject: '',
+    durationMin: 1,
+    acceptance: '',
+    status: 'done'
+  });
+  workspace.createNote = async (input) => ({
+    id: 'n1',
+    workspaceId: input.workspaceId,
+    title: input.title,
+    subject: input.subject,
+    tags: input.tags ?? [],
+    updated: '',
+    summary: input.summary ?? '',
+    body: input.body,
+    related: input.related ?? []
+  });
+
+  await context.api.updateWorkspaceTask({ taskId: 't1', status: 'done' });
+  expect(linkTask).toHaveBeenCalledWith(expect.objectContaining({ id: 't1', status: 'done' }));
+
+  await context.api.createNote({ workspaceId: 'ws-1', title: '向量数据库', subject: '', body: 'b' });
+  expect(linkNote).toHaveBeenCalledWith(expect.objectContaining({ id: 'n1', title: '向量数据库' }));
+
+  await expect(
+    context.api.submitReview({
+      date: '2026-11-02',
+      workspaceId: 'ws-1',
+      answers: { completed: '复习了向量数据库', stuck: '', tomorrow: '' }
+    })
+  ).resolves.toBeUndefined();
+  expect(linkReview).toHaveBeenCalledWith(
+    expect.objectContaining({ workspaceId: 'ws-1', date: '2026-11-02' })
+  );
+});
+
 test('settings updates are persisted and validated', async () => {
   const dir = await tempDir();
   const first = await contextAt(dir);

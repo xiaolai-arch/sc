@@ -1,5 +1,27 @@
 import { createButlerTools, executeButlerTool } from '../../src/main/butler/tools';
+import type { KnowledgeService } from '../../src/shared/knowledge';
 import type { WorkspaceService } from '../../src/shared/workspace';
+
+function knowledgeStub(overrides: Partial<KnowledgeService> = {}): KnowledgeService {
+  return {
+    list: async () => [],
+    get: async () => null,
+    create: async () => {
+      throw new Error('unused');
+    },
+    update: async () => {
+      throw new Error('unused');
+    },
+    delete: async () => undefined,
+    record: async () => {
+      throw new Error('unused');
+    },
+    linkTask: async () => undefined,
+    linkNote: async () => undefined,
+    linkReview: async () => undefined,
+    ...overrides
+  };
+}
 
 const workspaceService = {
   listWorkspaces: async () => [],
@@ -65,6 +87,95 @@ const workspaceService = {
 
 const tools = createButlerTools();
 const context = { workspace: workspaceService, workspaceId: 'ws-exam', now: () => new Date() };
+
+test('record_knowledge creates or appends a topic through the service', async () => {
+  const record = vi.fn(async (input: { name: string; status?: string; note?: string }) => ({
+    id: 'kt-1',
+    name: input.name,
+    aliases: [],
+    status: input.status ?? 'learning',
+    summary: input.note ?? '',
+    evidence: [],
+    createdAt: '',
+    updatedAt: ''
+  }));
+  const result = await executeButlerTool(
+    {
+      id: '1',
+      name: 'record_knowledge',
+      arguments: { name: 'LangGraph', status: 'mastered', note: '今天学了状态图' }
+    },
+    tools,
+    {
+      workspace: workspaceService,
+      knowledge: knowledgeStub({ record: record as unknown as KnowledgeService['record'] }),
+      now: () => new Date('2026-11-02T09:00:00.000Z')
+    }
+  );
+
+  expect(record).toHaveBeenCalledWith({
+    name: 'LangGraph',
+    status: 'mastered',
+    note: '今天学了状态图'
+  });
+  expect(result.content).toContain('已记录');
+});
+
+test('links completed tasks, notes and reviews into the knowledge base', async () => {
+  const linkTask = vi.fn(async () => undefined);
+  const linkNote = vi.fn(async () => undefined);
+  const linkReview = vi.fn(async () => undefined);
+  const workspace = {
+    ...workspaceService,
+    updateWorkspaceTask: async (input: { taskId: string; status?: string }) => ({
+      id: input.taskId,
+      workspaceId: 'ws-exam',
+      title: 'LangChain 练习',
+      subject: '',
+      durationMin: 10,
+      acceptance: '',
+      status: input.status ?? 'pending'
+    }),
+    createNote: async (input: { title: string; body: string }) => ({
+      id: 'n1',
+      workspaceId: 'ws-exam',
+      title: input.title,
+      subject: '',
+      tags: [],
+      updated: '',
+      summary: '',
+      body: input.body,
+      related: []
+    })
+  } as unknown as WorkspaceService;
+  const toolContext = {
+    workspace,
+    workspaceId: 'ws-exam',
+    knowledge: knowledgeStub({ linkTask, linkNote, linkReview }),
+    now: () => new Date('2026-11-02T09:00:00.000Z')
+  };
+
+  await executeButlerTool(
+    { id: '1', name: 'update_task', arguments: { taskId: 't1', status: 'done' } },
+    tools,
+    toolContext
+  );
+  expect(linkTask).toHaveBeenCalledWith(expect.objectContaining({ id: 't1', status: 'done' }));
+
+  await executeButlerTool(
+    { id: '2', name: 'write_note', arguments: { title: '向量数据库', body: '正文' } },
+    tools,
+    toolContext
+  );
+  expect(linkNote).toHaveBeenCalledWith(expect.objectContaining({ id: 'n1' }));
+
+  await executeButlerTool(
+    { id: '3', name: 'save_review', arguments: { completed: '学了向量数据库' } },
+    tools,
+    toolContext
+  );
+  expect(linkReview).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: 'ws-exam' }));
+});
 
 test('creates a workspace through a tool call', async () => {
   const result = await executeButlerTool(

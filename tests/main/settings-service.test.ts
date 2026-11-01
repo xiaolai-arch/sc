@@ -129,7 +129,8 @@ test('validates local CLI effort and keeps configs without effort readable', asy
       agent: 'codex',
       command: 'codex',
       model: 'gpt-x',
-      effort: 'high'
+      effort: 'high',
+      nativeTools: true
     }
   });
   expect(withEffort.provider).toEqual({
@@ -137,7 +138,8 @@ test('validates local CLI effort and keeps configs without effort readable', asy
     agent: 'codex',
     command: 'codex',
     model: 'gpt-x',
-    effort: 'high'
+    effort: 'high',
+    nativeTools: true
   });
 
   await expect(

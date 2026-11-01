@@ -1,5 +1,6 @@
 
 import { formatLocalDate } from '../../shared/date';
+import type { KnowledgeService, KnowledgeStatus } from '../../shared/knowledge';
 import type { MemoryService } from '../../shared/memory';
 import type { WorkspacePlanner } from '../../shared/planning';
 import type {
@@ -15,6 +16,7 @@ export interface ButlerToolContext {
   workspaceId?: string;
   memory?: MemoryService | null;
   planner?: WorkspacePlanner | null;
+  knowledge?: KnowledgeService | null;
   now: () => Date;
   /** Stop generation must prevent starting or continuing tool work. */
   signal?: AbortSignal;
@@ -56,6 +58,29 @@ const TASK_STATUSES: readonly WorkspaceTaskStatus[] = [
 ];
 
 const WORKSPACE_KINDS: readonly WorkspaceKind[] = ['exam', 'study', 'project', 'life'];
+
+const KNOWLEDGE_STATUSES: readonly KnowledgeStatus[] = [
+  'planned',
+  'learning',
+  'mastered',
+  'paused'
+];
+
+const KNOWLEDGE_STATUS_LABELS: Record<KnowledgeStatus, string> = {
+  planned: '计划中',
+  learning: '在学',
+  mastered: '已掌握',
+  paused: '暂停'
+};
+
+/** Evidence linking is additive; a broken knowledge file must not fail the tool. */
+async function linkKnowledge(run: () => Promise<void>): Promise<void> {
+  try {
+    await run();
+  } catch {
+    // Keep the source write.
+  }
+}
 
 /**
  * Minimal butler tool set. Every tool delegates to the injected
@@ -200,6 +225,16 @@ export function createButlerTools(): ButlerToolDefinition[] {
           ...(workspaceId ? { workspaceId } : {}),
           answers
         });
+        if (context.knowledge) {
+          const knowledge = context.knowledge;
+          await linkKnowledge(() =>
+            knowledge.linkReview({
+              ...(workspaceId ? { workspaceId } : {}),
+              date,
+              answers
+            })
+          );
+        }
         if (!context.memory || !workspaceId) {
           return { date, workspaceId: workspaceId ?? null, answers, memory: [], generatedBy: null };
         }
@@ -406,6 +441,10 @@ export function createButlerTools(): ButlerToolDefinition[] {
           ...(tags ? { tags } : {}),
           ...(summary ? { summary } : {})
         });
+        if (context.knowledge) {
+          const knowledge = context.knowledge;
+          await linkKnowledge(() => knowledge.linkNote(note));
+        }
 
         return {
           noteId: note.id,
@@ -447,12 +486,17 @@ export function createButlerTools(): ButlerToolDefinition[] {
           throw new ToolInputError('请提供 status、startAt 或 actualMin 中的至少一项。');
         }
 
-        return context.workspace.updateWorkspaceTask({
+        const task = await context.workspace.updateWorkspaceTask({
           taskId,
           ...(status !== undefined ? { status } : {}),
           ...(startAt !== undefined ? { startAt } : {}),
           ...(actualMin !== undefined ? { actualMin } : {})
         });
+        if (task.status === 'done' && context.knowledge) {
+          const knowledge = context.knowledge;
+          await linkKnowledge(() => knowledge.linkTask(task));
+        }
+        return task;
       }
     },
     {
@@ -475,6 +519,69 @@ export function createButlerTools(): ButlerToolDefinition[] {
           workspaceId: workspaceId ?? null,
           count: items.length,
           items
+        };
+      }
+    },
+    {
+      name: 'record_knowledge',
+      description: '记录用户已经学过或正在学的主题，供长期规划和回答参考。',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: '知识主题名称，例如：LangChain' },
+          status: {
+            type: 'string',
+            enum: [...KNOWLEDGE_STATUSES],
+            description: '掌握状态；新建主题时默认 learning'
+          },
+          level: { type: 'number', minimum: 1, maximum: 5, description: '掌握程度 1-5' },
+          note: { type: 'string', description: '这次提到它的上下文，例如今天学了什么' },
+          workspaceId: {
+            type: 'string',
+            description: '工作区 ID；省略时使用当前工作区，也没有则为全局主题'
+          }
+        },
+        required: ['name'],
+        additionalProperties: false
+      },
+      async execute(input, context) {
+        const name = requiredString(input, 'name');
+        if (!context.knowledge) {
+          throw new ToolInputError('知识库未连接。');
+        }
+        let status: KnowledgeStatus | undefined;
+        if (input.status !== undefined) {
+          if (
+            typeof input.status !== 'string' ||
+            !(KNOWLEDGE_STATUSES as readonly string[]).includes(input.status)
+          ) {
+            throw new ToolInputError(
+              `status 必须是 ${KNOWLEDGE_STATUSES.join(' / ')} 之一。`
+            );
+          }
+          status = input.status as KnowledgeStatus;
+        }
+        const level = optionalNumber(input, 'level');
+        if (
+          level !== undefined &&
+          (!Number.isInteger(level) || level < 1 || level > 5)
+        ) {
+          throw new ToolInputError('level 必须是 1-5 的整数。');
+        }
+        const note = optionalString(input, 'note');
+        const workspaceId = optionalString(input, 'workspaceId') ?? context.workspaceId;
+        const topic = await context.knowledge.record({
+          name,
+          ...(status ? { status } : {}),
+          ...(level !== undefined ? { level } : {}),
+          ...(note ? { note } : {}),
+          ...(workspaceId ? { workspaceId } : {})
+        });
+        throwIfAborted(context.signal);
+        return {
+          ok: true,
+          topic,
+          message: `已记录：${topic.name}（${KNOWLEDGE_STATUS_LABELS[topic.status]}）`
         };
       }
     }

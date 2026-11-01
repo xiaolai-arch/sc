@@ -36,6 +36,16 @@ test('switches across the top sections and marks the active one', async () => {
         expect((await screen.findAllByText('今天的时间表')).length).toBeGreaterThan(0)
     },
     {
+      label: '长期计划',
+      assert: async () =>
+        expect(await screen.findByText('还没有长期计划。')).toBeInTheDocument()
+    },
+    {
+      label: '知识库',
+      assert: async () =>
+        expect(await screen.findByText('还没有知识主题。')).toBeInTheDocument()
+    },
+    {
       label: '记忆',
       assert: async () =>
         expect(

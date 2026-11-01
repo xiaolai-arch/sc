@@ -4,6 +4,7 @@ import type {
   ConversationSummary,
   CreateConversationInput
 } from './conversations';
+import type { KnowledgeApi } from './knowledge';
 import type {
   DeleteMemoryInput,
   LearnerProfile,
@@ -20,6 +21,7 @@ import type {
   SubmitAnswerInput,
   SubmitAnswerResult
 } from './practice';
+import type { LongPlanApi } from './plans';
 import type { PlanWorkspaceInput, WorkspacePlan } from './planning';
 import type { SearchResult } from './search';
 import type {
@@ -28,6 +30,7 @@ import type {
   ProviderConfig,
   ReviewAnswers
 } from './types';
+import type { LocalCliScanResult } from './local-cli';
 import type { UsageSummary } from './usage';
 import type {
   ButlerService,
@@ -173,8 +176,10 @@ export interface StudyCoachApi
     ButlerService,
     PracticeApi,
     MemoryApi,
+    KnowledgeApi,
     SearchApi,
     PlannerApi,
+    LongPlanApi,
     ConversationApi,
     UsageApi {
   getBootstrap(): Promise<Bootstrap>;
@@ -184,4 +189,6 @@ export interface StudyCoachApi
   setApiKey(key: string): Promise<void>;
   /** Reads persisted review entries (newest first). */
   listReviews(input?: ListReviewsInput): Promise<ReviewRecord[]>;
+  /** Discovers installed local CLI agents, their login state and capabilities. */
+  scanLocalClis(): Promise<LocalCliScanResult>;
 }

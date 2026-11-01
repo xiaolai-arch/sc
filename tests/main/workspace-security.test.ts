@@ -106,7 +106,7 @@ test('after every rejected escape nothing was written outside the vault root', a
   expect(
     appeared.filter(
       (name) =>
-        !/^(workspace-|study-coach-|memory-|practice-|search-|settings-)/.test(name)
+        !/^(workspace-|study-coach-|memory-|practice-|search-|settings-|asaki-)/.test(name)
     )
   ).toEqual([]);
 

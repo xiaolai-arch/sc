@@ -27,12 +27,18 @@ import type {
 } from '../shared/workspace';
 import type { CreatePracticeSetInput, SubmitAnswerInput } from '../shared/practice';
 import type {
+  CreateKnowledgeTopicInput,
+  KnowledgeStatus,
+  UpdateKnowledgeTopicInput
+} from '../shared/knowledge';
+import type {
   DeleteMemoryInput,
   MemoryKind,
   SynthesizeMemoryInput,
   UpdateMemoryInput
 } from '../shared/memory';
 import type { PlanWorkspaceInput } from '../shared/planning';
+import type { CreateLongPlanInput, UpdateLongPlanItemInput } from '../shared/plans';
 
 /** Every IPC channel exposed to the preload bridge. */
 export const IPC_CHANNELS = {
@@ -56,6 +62,11 @@ export const IPC_CHANNELS = {
   submitReview: 'study-coach:review:submit',
   listReviews: 'study-coach:review:list',
   planWorkspace: 'study-coach:planning:plan-workspace',
+  listLongPlans: 'study-coach:plans:list',
+  getLongPlan: 'study-coach:plans:get',
+  createLongPlan: 'study-coach:plans:create',
+  setLongPlanItemDone: 'study-coach:plans:set-item-done',
+  deleteLongPlan: 'study-coach:plans:delete',
   listPracticeSets: 'study-coach:practice:list-sets',
   getPracticeSet: 'study-coach:practice:get-set',
   createPracticeSet: 'study-coach:practice:create-set',
@@ -68,6 +79,10 @@ export const IPC_CHANNELS = {
   getMemoryProfile: 'study-coach:memory:profile',
   updateMemory: 'study-coach:memory:update',
   deleteMemory: 'study-coach:memory:delete',
+  listKnowledgeTopics: 'study-coach:knowledge:list',
+  createKnowledgeTopic: 'study-coach:knowledge:create',
+  updateKnowledgeTopic: 'study-coach:knowledge:update',
+  deleteKnowledgeTopic: 'study-coach:knowledge:delete',
   searchWorkspace: 'study-coach:search:query',
   rebuildSearchIndex: 'study-coach:search:rebuild',
   listConversations: 'study-coach:conversations:list',
@@ -82,7 +97,8 @@ export const IPC_CHANNELS = {
   setConversationModel: 'study-coach:conversations:set-model',
   getUsageSummary: 'study-coach:usage:summary',
   clearUsage: 'study-coach:usage:clear',
-  send: 'study-coach:butler:send'
+  send: 'study-coach:butler:send',
+  scanLocalClis: 'study-coach:local-cli:scan'
 } as const;
 
 /** Streaming uses a separate request/event pair so the request map stays stable. */
@@ -481,12 +497,167 @@ function requireDeleteMemory(value: unknown): DeleteMemoryInput {
   };
 }
 
+const KNOWLEDGE_STATUSES: readonly KnowledgeStatus[] = ['planned', 'learning', 'mastered', 'paused'];
+const KNOWLEDGE_NAME_LIMIT = 60;
+const KNOWLEDGE_ALIAS_LIMIT = 40;
+const KNOWLEDGE_MAX_ALIASES = 8;
+
+function optionalKnowledgeStatus(value: unknown): KnowledgeStatus | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !(KNOWLEDGE_STATUSES as readonly string[]).includes(value)) {
+    throw new Error('知识主题状态无效。');
+  }
+  return value as KnowledgeStatus;
+}
+
+function knowledgeLevel(value: unknown, allowNull: boolean): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null && allowNull) return null;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 5) {
+    throw new Error('掌握程度必须在 1 到 5 之间。');
+  }
+  return value;
+}
+
+function knowledgeAliases(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new Error('知识主题别名无效。');
+  const aliases: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string') throw new Error('知识主题别名无效。');
+    const alias = entry.trim();
+    if (!alias) continue;
+    if (alias.length > KNOWLEDGE_ALIAS_LIMIT) {
+      throw new Error(`别名不能超过 ${KNOWLEDGE_ALIAS_LIMIT} 字。`);
+    }
+    aliases.push(alias);
+  }
+  if (aliases.length > KNOWLEDGE_MAX_ALIASES) {
+    throw new Error(`别名最多 ${KNOWLEDGE_MAX_ALIASES} 个。`);
+  }
+  return aliases;
+}
+
+function knowledgeWorkspace(value: unknown, allowNull: boolean): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null && allowNull) return null;
+  if (typeof value !== 'string') throw new Error('所属工作区无效。');
+  return value.trim();
+}
+
+function knowledgeSummary(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') throw new Error('知识主题摘要无效。');
+  return value;
+}
+
+function requireKnowledgeName(value: unknown): string {
+  const name = requireString(value, '知识主题名称').trim();
+  if (name.length > KNOWLEDGE_NAME_LIMIT) {
+    throw new Error(`知识主题名称不能超过 ${KNOWLEDGE_NAME_LIMIT} 字。`);
+  }
+  return name;
+}
+
+function requireCreateKnowledgeTopic(value: unknown): CreateKnowledgeTopicInput {
+  const input = requireObject(value, '创建知识主题');
+  const name = requireKnowledgeName(input.name);
+  const status = optionalKnowledgeStatus(input.status);
+  const level = knowledgeLevel(input.level, false);
+  const aliases = knowledgeAliases(input.aliases);
+  const workspaceId = knowledgeWorkspace(input.workspaceId, false);
+  const summary = knowledgeSummary(input.summary);
+  return {
+    name,
+    ...(status !== undefined ? { status } : {}),
+    ...(typeof level === 'number' ? { level } : {}),
+    ...(aliases !== undefined ? { aliases } : {}),
+    ...(typeof workspaceId === 'string' ? { workspaceId } : {}),
+    ...(summary !== undefined ? { summary } : {})
+  };
+}
+
+function requireUpdateKnowledgeTopic(value: unknown): UpdateKnowledgeTopicInput {
+  const input = requireObject(value, '更新知识主题');
+  const id = requireString(input.id, '知识主题 ID').trim();
+  const status = optionalKnowledgeStatus(input.status);
+  const level = knowledgeLevel(input.level, true);
+  const aliases = knowledgeAliases(input.aliases);
+  const workspaceId = knowledgeWorkspace(input.workspaceId, true);
+  const summary = knowledgeSummary(input.summary);
+  return {
+    id,
+    ...(input.name !== undefined ? { name: requireKnowledgeName(input.name) } : {}),
+    ...(status !== undefined ? { status } : {}),
+    ...(level !== undefined ? { level } : {}),
+    ...(aliases !== undefined ? { aliases } : {}),
+    ...(workspaceId !== undefined ? { workspaceId } : {}),
+    ...(summary !== undefined ? { summary } : {})
+  };
+}
+
 function requirePlanWorkspace(value: unknown): PlanWorkspaceInput {
   const input = requireObject(value, '生成计划');
   requireString(input.workspaceId, '工作区 ID');
   optionalString(input.date, '计划日期');
   optionalPositiveNumber(input.availableMinutes, '可用时长');
   return input as unknown as PlanWorkspaceInput;
+}
+
+function requireCreateLongPlan(value: unknown): CreateLongPlanInput {
+  const input = requireObject(value, '生成长期计划');
+  const workspaceId = requireString(input.workspaceId, '工作区 ID');
+  const goal = requireString(input.goal, '计划目标');
+  if (
+    typeof input.weeks !== 'number' ||
+    !Number.isInteger(input.weeks) ||
+    input.weeks < 1 ||
+    input.weeks > 16
+  ) {
+    throw new Error('周数必须在 1 到 16 之间。');
+  }
+  const startDate =
+    input.startDate === undefined ? undefined : requireString(input.startDate, '起始日期');
+  const weeklyHours =
+    input.weeklyHours === undefined
+      ? undefined
+      : optionalPositiveNumber(input.weeklyHours, '每周投入');
+  const notes = input.notes === undefined ? undefined : requireString(input.notes, '补充说明');
+  let references: string | undefined;
+  if (input.references !== undefined) {
+    if (typeof input.references !== 'string') throw new Error('参考资料无效。');
+    const trimmed = input.references.trim();
+    if (trimmed) references = trimmed;
+  }
+  let research: boolean | undefined;
+  if (input.research !== undefined) {
+    if (typeof input.research !== 'boolean') throw new Error('联网调研选项无效。');
+    research = input.research;
+  }
+  return {
+    workspaceId,
+    goal,
+    weeks: input.weeks,
+    ...(startDate !== undefined ? { startDate } : {}),
+    ...(weeklyHours !== undefined ? { weeklyHours } : {}),
+    ...(notes !== undefined ? { notes } : {}),
+    ...(references !== undefined ? { references } : {}),
+    ...(research !== undefined ? { research } : {})
+  };
+}
+
+function requireLongPlanItemDone(value: unknown): UpdateLongPlanItemInput {
+  const input = requireObject(value, '更新长期计划');
+  const planId = requireString(input.planId, '计划 ID');
+  const weekId = requireString(input.weekId, '周 ID');
+  const itemId = requireString(input.itemId, '条目 ID');
+  if (input.kind !== 'day' && input.kind !== 'check') {
+    throw new Error('条目类型无效。');
+  }
+  if (typeof input.done !== 'boolean') {
+    throw new Error('完成状态无效。');
+  }
+  return { planId, weekId, itemId, kind: input.kind, done: input.done };
 }
 
 function requireUsageDays(value: unknown): number | undefined {
@@ -538,6 +709,7 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
     getSettings: async () => api.getSettings(),
     updateSettings: async (input) =>
       api.updateSettings(requireObject(input, '更新设置') as SettingsPatch),
+    scanLocalClis: async () => api.scanLocalClis(),
     setApiKey: async (input) => api.setApiKey(requireString(input, 'API key')),
     listWorkspaces: async () => api.listWorkspaces(),
     createWorkspace: async (input) => api.createWorkspace(requireCreateWorkspace(input)),
@@ -567,6 +739,12 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
     submitReview: async (input) => api.submitReview(requireReview(input)),
     listReviews: async (input) => api.listReviews(requireListReviews(input)),
     planWorkspace: async (input) => api.planWorkspace(requirePlanWorkspace(input)),
+    listLongPlans: async (input) => api.listLongPlans(optionalString(input, '工作区 ID')),
+    getLongPlan: async (input) => api.getLongPlan(requireString(input, '计划 ID')),
+    createLongPlan: async (input) => api.createLongPlan(requireCreateLongPlan(input)),
+    setLongPlanItemDone: async (input) =>
+      api.setLongPlanItemDone(requireLongPlanItemDone(input)),
+    deleteLongPlan: async (input) => api.deleteLongPlan(requireString(input, '计划 ID')),
     listPracticeSets: async (input) => api.listPracticeSets(requireString(input, '工作区 ID')),
     getPracticeSet: async (input) => api.getPracticeSet(requireString(input, '练习 ID')),
     createPracticeSet: async (input) => api.createPracticeSet(requireCreatePracticeSet(input)),
@@ -580,6 +758,13 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
     getMemoryProfile: async (input) => api.getMemoryProfile(optionalString(input, '工作区 ID')),
     updateMemory: async (input) => api.updateMemory(requireUpdateMemory(input)),
     deleteMemory: async (input) => api.deleteMemory(requireDeleteMemory(input)),
+    listKnowledgeTopics: async (input) => api.listKnowledgeTopics(optionalString(input, '工作区 ID')),
+    createKnowledgeTopic: async (input) =>
+      api.createKnowledgeTopic(requireCreateKnowledgeTopic(input)),
+    updateKnowledgeTopic: async (input) =>
+      api.updateKnowledgeTopic(requireUpdateKnowledgeTopic(input)),
+    deleteKnowledgeTopic: async (input) =>
+      api.deleteKnowledgeTopic(requireString(input, '知识主题 ID').trim()),
     searchWorkspace: async (input) => api.searchWorkspace(requireSearchWorkspace(input)),
     rebuildSearchIndex: async () => api.rebuildSearchIndex(),
     listConversations: async () => api.listConversations(),
@@ -743,6 +928,7 @@ export function createStudyCoachBridge(
     getSettings: () => call(IPC_CHANNELS.getSettings),
     updateSettings: (patch) => call(IPC_CHANNELS.updateSettings, patch),
     setApiKey: (key) => call(IPC_CHANNELS.setApiKey, key),
+    scanLocalClis: () => call(IPC_CHANNELS.scanLocalClis),
     listWorkspaces: () => call(IPC_CHANNELS.listWorkspaces),
     createWorkspace: (input) => call(IPC_CHANNELS.createWorkspace, input),
     updateWorkspace: (input) => call(IPC_CHANNELS.updateWorkspace, input),
@@ -758,6 +944,11 @@ export function createStudyCoachBridge(
     submitReview: (input) => call(IPC_CHANNELS.submitReview, input),
     listReviews: (input) => call(IPC_CHANNELS.listReviews, input),
     planWorkspace: (input) => call(IPC_CHANNELS.planWorkspace, input),
+    listLongPlans: (workspaceId) => call(IPC_CHANNELS.listLongPlans, workspaceId),
+    getLongPlan: (planId) => call(IPC_CHANNELS.getLongPlan, planId),
+    createLongPlan: (input) => call(IPC_CHANNELS.createLongPlan, input),
+    setLongPlanItemDone: (input) => call(IPC_CHANNELS.setLongPlanItemDone, input),
+    deleteLongPlan: (planId) => call(IPC_CHANNELS.deleteLongPlan, planId),
     listPracticeSets: (workspaceId) => call(IPC_CHANNELS.listPracticeSets, workspaceId),
     getPracticeSet: (id) => call(IPC_CHANNELS.getPracticeSet, id),
     createPracticeSet: (input) => call(IPC_CHANNELS.createPracticeSet, input),
@@ -770,6 +961,11 @@ export function createStudyCoachBridge(
     getMemoryProfile: (workspaceId) => call(IPC_CHANNELS.getMemoryProfile, workspaceId),
     updateMemory: (input) => call(IPC_CHANNELS.updateMemory, input),
     deleteMemory: (input) => call(IPC_CHANNELS.deleteMemory, input),
+    listKnowledgeTopics: (workspaceId) =>
+      call(IPC_CHANNELS.listKnowledgeTopics, workspaceId),
+    createKnowledgeTopic: (input) => call(IPC_CHANNELS.createKnowledgeTopic, input),
+    updateKnowledgeTopic: (input) => call(IPC_CHANNELS.updateKnowledgeTopic, input),
+    deleteKnowledgeTopic: (id) => call(IPC_CHANNELS.deleteKnowledgeTopic, id),
     searchWorkspace: (input) => call(IPC_CHANNELS.searchWorkspace, input),
     rebuildSearchIndex: () => call(IPC_CHANNELS.rebuildSearchIndex),
     listConversations: () => call(IPC_CHANNELS.listConversations),

@@ -14,10 +14,12 @@
 ## 功能
 
 - **管家**：每日简报、管家对话、建议提问、连续复盘提醒
+- **长期计划**：按总时长生成「阶段 → 周 → 日」计划；可粘贴参考资料或先联网调研，计划页标注依据来源；勾选每日任务与周验收，可把今天的一行加入今日安排
 - **今日安排**：目标、任务列表、完成状态、计时
 - **记录**：Obsidian 风格笔记、标签、关联笔记
 - **学习**：练习题、答题反馈、错题记录
 - **复盘**：复盘问题、画像与记忆、督促提醒
+- **知识库**：主题 + 证据，自动从任务/笔记/复盘积累，长期规划据此跳过已学内容
 - **设置**：模型、预算、通知、启动
 - **工作区切换**：全部 / 考研 / 英语 / 项目 / 生活
 
@@ -95,8 +97,10 @@ src/
     context.ts    组合 state/settings/secrets/workspace/butler
     workspace/    真实 vault 的读写（markdown + YAML frontmatter）
     planning/     WorkspacePlanner（模型 JSON + 模板回退）
+    plans/        长期计划（阶段/周/日生成、勾选进度、vault 持久化）
     practice/     题库、判分、错题、间隔重复
     memory/       复盘 → 记忆 → 画像
+    knowledge/    知识主题、证据时间线与自动链接（任务/笔记/复盘）
     agent/        Anthropic/OpenAI-compatible/Ollama + 本地 CLI client
     butler/       管家 prompt、上下文和工具循环
     scheduler/    早间/晚间提醒、免打扰
@@ -117,13 +121,19 @@ tests/         Vitest 单元/集成测试
   workspaces/<id>/workspace.md              workspace 资料（名称、目标、类型）
   workspaces/<id>/tasks/YYYY-MM-DD.md       每日任务
   workspaces/<id>/notes/*.md                笔记
+  workspaces/<id>/plans/*.md                长期计划（阶段、周、每日任务、验收）
   workspaces/<id>/memory.md                 管家记忆
   workspaces/<id>/reviews/YYYY-MM-DD.md     按 workspace 的复盘
   reviews/YYYY-MM-DD.md                     vault 级复盘
+  knowledge/topics/*.md                     知识主题（全局或按 workspace，含证据）
   reminders.md                              全局提醒
 ```
 
 frontmatter 是机器可读的事实源，正文是给人看的渲染；索引可以随时重建。默认 vault 是 `~/Documents/StudyCoachVault`（设置里的 `vaultPath`）。主进程每次读取都重新读磁盘，因此外部编辑（包括 Obsidian）会被下一次调用看到。
+
+长期计划的依据同样落盘：用户粘贴的参考资料存进 `references`，联网调研只接受 `http(s)` 来源并存进 `sources`。调研失败、模型或 CLI 不支持联网时计划照常生成，但页面和文件都会标注「模型知识（未联网核实）」，不会伪造来源。
+
+知识库把「学过什么」变成结构化主题：完成任务、写笔记、提交复盘时自动匹配主题并追加证据，管家对话里说「今天学了 LangChain」会调用 `record_knowledge` 记录。活跃主题（已掌握 / 在学）会进入长期规划和管家上下文，规划时跳过已掌握的基础；自动链接失败只影响证据，不会阻断任务、笔记或复盘本身的写入。
 
 ## 用真实 provider / CLI 做本地冒烟测试
 
@@ -139,7 +149,9 @@ claude --version
 npm run dev
 ```
 
-在 Settings 里选择“本地 CLI agent”，agent 选 `codex`/`claude`，命令保留 `codex`/`claude`；保存后回管家发一条消息。应用会以一次性子进程方式调用 CLI，CLI 使用它自己的本地凭据。设置中也可以切换 `zcode`/`opencode`。
+打开 **设置 → 模型 → 本地 CLI agent**，点 **扫描本机 CLI**。应用会检查 PATH、Homebrew、nvm/asdf/mise 和登录 shell，列出 `codex`/`claude`/`zcode`/`opencode` 的安装路径、版本、登录状态以及原生能力（流式、思考、会话、MCP、技能、联网、沙箱、模型列表等）；opencode 还会列出本机可用模型。选中一项即可填入 agent 和命令。
+
+默认把 CLI 当作一次性文本模型：在临时目录中运行，由应用注入工具协议。勾选 **使用 CLI 原生工具** 后切换为完整 agent 模式：CLI 在当前 vault workspace 中运行，直接使用它自己的文件、搜索、命令行和联网工具；Codex 使用 `--sandbox workspace-write`，Claude 使用 `--add-dir` + `--permission-mode acceptEdits`，opencode 使用 `run --auto`，zcode 使用 `--cwd` + `--mode edit`。原始 key/token 不会进入设置、日志或扫描结果。
 
 ### 真实 API provider
 

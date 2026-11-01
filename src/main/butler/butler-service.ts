@@ -1,4 +1,6 @@
+import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
 import type {
   ButlerService,
   SendMessageInput,
@@ -10,6 +12,7 @@ import type {
   ConversationMessage,
   ConversationStep
 } from '../../shared/conversations';
+import type { KnowledgeService } from '../../shared/knowledge';
 import type { MemoryService } from '../../shared/memory';
 import type { WorkspacePlanner } from '../../shared/planning';
 import type { ButlerStreamListener } from '../../shared/butler-stream';
@@ -53,6 +56,8 @@ const SUMMARY_PROMPT = `你是阿咲的对话摘要器。把给出的历史对�
 export interface ButlerServiceOptions {
   /** Injected vault-backed workspace service; null keeps the butler read-only. */
   workspaceService?: WorkspaceService | null;
+  /** Vault root used as the cwd for native local-CLI agents. */
+  workspaceRoot?: string;
   /** Injected model client. Null means template replies only (e.g. no API key). */
   modelClient?: ModelClient | null;
   /** Builds a client for a conversation-level model override; null falls back. */
@@ -63,6 +68,7 @@ export interface ButlerServiceOptions {
   conversationStore?: ConversationStore | null;
   memoryService?: MemoryService | null;
   planner?: WorkspacePlanner | null;
+  knowledgeService?: KnowledgeService | null;
   now?: () => Date;
   /** Maximum number of tool-call rounds before the butler stops. */
   maxToolSteps?: number;
@@ -74,12 +80,14 @@ const DEFAULT_MAX_TOOL_STEPS = 4;
 
 export class ButlerServiceImpl implements ButlerService {
   private readonly workspaceService: WorkspaceService | null;
+  private readonly workspaceRoot: string | null;
   private readonly modelClient: ModelClient | null;
   private readonly modelClientFor: ((model: string) => ModelClient | null) | null;
   private readonly modelRetry: { attempts: number; delayMs: number };
   private readonly conversationStore: ConversationStore | null;
   private readonly memoryService: MemoryService | null;
   private readonly planner: WorkspacePlanner | null;
+  private readonly knowledgeService: KnowledgeService | null;
   private readonly now: () => Date;
   private readonly maxToolSteps: number;
   private readonly temperature: number | undefined;
@@ -88,6 +96,7 @@ export class ButlerServiceImpl implements ButlerService {
 
   constructor(options: ButlerServiceOptions = {}) {
     this.workspaceService = options.workspaceService ?? null;
+    this.workspaceRoot = options.workspaceRoot ?? null;
     this.modelClient = options.modelClient ?? null;
     this.modelClientFor = options.modelClientFor ?? null;
     this.modelRetry = {
@@ -97,6 +106,7 @@ export class ButlerServiceImpl implements ButlerService {
     this.conversationStore = options.conversationStore ?? null;
     this.memoryService = options.memoryService ?? null;
     this.planner = options.planner ?? null;
+    this.knowledgeService = options.knowledgeService ?? null;
     this.now = options.now ?? (() => new Date());
     this.maxToolSteps = Math.max(
       0,
@@ -112,7 +122,13 @@ export class ButlerServiceImpl implements ButlerService {
     const conversation = await this.resolveConversation(input);
     const client = this.clientFor(conversation);
     const effectiveInput = this.effectiveInput(input, conversation);
-    const context = await gatherContext(this.workspaceService, effectiveInput, this.now());
+    const context = await gatherContext(
+      this.workspaceService,
+      effectiveInput,
+      this.now(),
+      this.knowledgeService
+    );
+    const cwd = this.cwdFor(context);
 
     if (!message) {
       const text = buildTemplateReply(context, input, { reason: 'empty-message' });
@@ -137,7 +153,7 @@ export class ButlerServiceImpl implements ButlerService {
     try {
       for (let stepIndex = 0; stepIndex <= this.maxToolSteps; stepIndex += 1) {
         const outcome = await runWithModelRetry(
-          () => this.complete(messages, undefined, client),
+          () => this.complete(messages, undefined, client, true, cwd),
           { attempts: this.modelRetry.attempts, delayMs: this.modelRetry.delayMs }
         );
         if (outcome.attempts > 1) retried = true;
@@ -219,7 +235,13 @@ export class ButlerServiceImpl implements ButlerService {
     const conversation = await this.resolveConversation(input);
     const client = this.clientFor(conversation);
     const effectiveInput = this.effectiveInput(input, conversation);
-    const context = await gatherContext(this.workspaceService, effectiveInput, this.now());
+    const context = await gatherContext(
+      this.workspaceService,
+      effectiveInput,
+      this.now(),
+      this.knowledgeService
+    );
+    const cwd = this.cwdFor(context);
 
     if (!message) {
       const text = buildTemplateReply(context, input, { reason: 'empty-message' });
@@ -269,7 +291,7 @@ export class ButlerServiceImpl implements ButlerService {
             attemptEmitted = false;
             if (supportsStreaming(client)) {
               return client.stream(
-                this.buildRequest(messages, signal),
+                this.buildRequest(messages, signal, cwd),
                 (event) => {
                   attemptEmitted = true;
                   if (event.type === 'reasoning') {
@@ -283,7 +305,7 @@ export class ButlerServiceImpl implements ButlerService {
                 }
               );
             }
-            return this.complete(messages, signal, client);
+            return this.complete(messages, signal, client, true, cwd);
           },
           {
             attempts: this.modelRetry.attempts,
@@ -576,7 +598,11 @@ export class ButlerServiceImpl implements ButlerService {
     }
   }
 
-  private buildRequest(messages: ModelMessage[], signal?: AbortSignal) {
+  private buildRequest(
+    messages: ModelMessage[],
+    signal?: AbortSignal,
+    cwd?: string
+  ) {
     return {
       messages,
       ...(this.workspaceService
@@ -584,6 +610,7 @@ export class ButlerServiceImpl implements ButlerService {
         : {}),
       ...(this.temperature !== undefined ? { temperature: this.temperature } : {}),
       ...(this.maxTokens !== undefined ? { maxTokens: this.maxTokens } : {}),
+      ...(cwd ? { cwd } : {}),
       ...(signal ? { signal } : {})
     };
   }
@@ -592,11 +619,22 @@ export class ButlerServiceImpl implements ButlerService {
     messages: ModelMessage[],
     signal: AbortSignal | undefined,
     client: ModelClient,
-    withTools = true
+    withTools = true,
+    cwd?: string
   ): Promise<ModelResponse> {
-    const request = this.buildRequest(messages, signal);
+    const request = this.buildRequest(messages, signal, cwd);
     if (!withTools) delete request.tools;
     return client.complete(request);
+  }
+
+  /** Native CLI agents run inside the current workspace, or the vault root. */
+  private cwdFor(context: ButlerContext): string | undefined {
+    if (!this.workspaceRoot) return undefined;
+    if (context.workspaceId && /^[A-Za-z0-9_-]+$/.test(context.workspaceId)) {
+      const dir = join(this.workspaceRoot, 'workspaces', context.workspaceId);
+      if (existsSync(dir)) return dir;
+    }
+    return this.workspaceRoot;
   }
 
   private async runTool(
@@ -619,6 +657,7 @@ export class ButlerServiceImpl implements ButlerService {
       workspaceId: context.workspaceId,
       memory: this.memoryService,
       planner: this.planner,
+      knowledge: this.knowledgeService,
       now: this.now,
       ...(signal ? { signal } : {})
     });

@@ -7,9 +7,11 @@ import { isLocalDateTime } from '../../shared/date';
  *   <root>/workspaces/<id>/workspace.md      workspace profile
  *   <root>/workspaces/<id>/tasks/YYYY-MM-DD.md  daily task lists
  *   <root>/workspaces/<id>/notes/*.md        freeform notes
+ *   <root>/workspaces/<id>/plans/*.md        long-term phase/week/day plans
  *   <root>/workspaces/<id>/memory.md         butler memory log
  *   <root>/workspaces/<id>/reviews/YYYY-MM-DD.md  per-workspace reviews
  *   <root>/reviews/YYYY-MM-DD.md             vault-wide reviews
+ *   <root>/knowledge/topics/*.md             knowledge topics (global + per workspace)
  *   <root>/reminders.md                      reminders are vault-global
  *
  * Frontmatter is the machine-readable source of truth; the markdown body is a
@@ -74,6 +76,14 @@ export function notesDir(root: string, workspaceId: string): string {
   return join(workspaceDir(root, workspaceId), 'notes');
 }
 
+export function plansDir(root: string, workspaceId: string): string {
+  return join(workspaceDir(root, workspaceId), 'plans');
+}
+
+export function planFile(root: string, workspaceId: string, planId: string): string {
+  return join(plansDir(root, workspaceId), `${planId}.md`);
+}
+
 export function memoryFile(root: string, workspaceId: string): string {
   return join(workspaceDir(root, workspaceId), 'memory.md');
 }
@@ -90,4 +100,16 @@ export function reviewFile(root: string, workspaceId: string | undefined, date: 
 
 export function remindersFile(root: string): string {
   return join(root, 'reminders.md');
+}
+
+export function knowledgeDir(root: string): string {
+  return join(root, 'knowledge');
+}
+
+export function knowledgeTopicsDir(root: string): string {
+  return join(knowledgeDir(root), 'topics');
+}
+
+export function knowledgeTopicFile(root: string, topicId: string): string {
+  return join(knowledgeTopicsDir(root), `${topicId}.md`);
 }

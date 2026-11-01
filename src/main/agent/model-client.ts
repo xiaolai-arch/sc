@@ -35,6 +35,10 @@ export interface ModelRequest {
   temperature?: number;
   maxTokens?: number;
   tools?: ModelToolDefinition[];
+  /** Ask the provider to expose its native web search/fetch tools (CLI agents only). */
+  webTools?: boolean;
+  /** Working directory for native local-CLI agents (the current vault workspace). */
+  cwd?: string;
   signal?: AbortSignal;
 }
 
