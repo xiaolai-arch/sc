@@ -87,3 +87,24 @@ test('supports legacy usage fields and rejects stream error parts', async () => 
     failing.stream({ messages: [{ role: 'user', content: 'hi' }] }, () => undefined)
   ).rejects.toThrow(/boom/);
 });
+
+test('passes the abort signal into the AI SDK stream options', async () => {
+  const controller = new AbortController();
+  let captured: unknown;
+  const client = new AiSdkModelClient({
+    generate: async () => {
+      throw new Error('generate not expected');
+    },
+    streamGenerate: (options) => {
+      captured = options;
+      return streamOf([{ type: 'text-delta', text: 'ok' }]);
+    },
+    model: {} as never
+  });
+
+  await client.stream(
+    { messages: [{ role: 'user', content: 'hi' }], signal: controller.signal },
+    () => undefined
+  );
+  expect((captured as Record<string, unknown>)['abortSignal']).toBe(controller.signal);
+});

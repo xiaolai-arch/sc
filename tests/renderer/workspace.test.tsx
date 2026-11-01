@@ -4,9 +4,9 @@ import userEvent from '@testing-library/user-event';
 import { Workspace } from '../../src/renderer/shell/Workspace';
 import { createMockApi } from '../../web/mock-api';
 
-function setup() {
+function setup(streamPace = 0.05) {
   localStorage.clear();
-  const api = createMockApi(localStorage);
+  const api = createMockApi(localStorage, { streamPace });
   window.studyCoach = api;
   window.studyCoachPrototype = { reset: vi.fn() };
   render(<Workspace hasApiKey={false} onRefresh={vi.fn()} />);
@@ -113,4 +113,18 @@ test('opens practice from the project panel', async () => {
   await userEvent.click(screen.getByRole('button', { name: '练习' }));
   expect((await screen.findAllByText('极限基础 3 题')).length).toBeGreaterThan(0);
   expect(screen.getByRole('button', { name: '关闭练习' })).toBeInTheDocument();
+});
+
+
+test('stops an in-flight generation', async () => {
+  setup(1);
+  await screen.findByText('早上好，xiaolai。');
+
+  await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
+  const stop = await screen.findByRole('button', { name: '停止生成' });
+  await userEvent.click(stop);
+
+  expect(
+    (await screen.findAllByText('（已停止生成）', {}, { timeout: 3000 })).length
+  ).toBeGreaterThan(0);
 });

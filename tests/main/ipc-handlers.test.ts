@@ -69,11 +69,12 @@ test('registers every channel exactly once', async () => {
     }
   });
 
-  expect(registered.size).toBe(Object.keys(IPC_CHANNELS).length + 1);
+  expect(registered.size).toBe(Object.keys(IPC_CHANNELS).length + 2);
   for (const channel of Object.values(IPC_CHANNELS)) {
     expect(registered.has(channel)).toBe(true);
   }
   expect(registered.has(BUTLER_STREAM_CHANNELS.stream)).toBe(true);
+  expect(registered.has(BUTLER_STREAM_CHANNELS.cancel)).toBe(true);
 });
 
 test('routes every channel to the matching api method', async () => {

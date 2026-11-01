@@ -268,6 +268,7 @@ export function createMockApi(
   options: MockApiOptions = {}
 ): StudyCoachApi & StreamingButlerApi {
   const pace = Math.max(0.01, options.streamPace ?? 0.05);
+  const cancelledStreams = new Set<string>();
   const resolved = resolveStorage(storage);
   let state = readState(resolved);
   let apiKey: string | null = null;
@@ -939,6 +940,10 @@ export function createMockApi(
       persist();
     },
 
+    async cancelStream(messageId: string): Promise<void> {
+      cancelledStreams.add(messageId);
+    },
+
     onConversationOpened() {
       return () => undefined;
     },
@@ -952,6 +957,29 @@ export function createMockApi(
 
     async stream(input, onEvent): Promise<SendMessageResult> {
       const steps: ConversationStep[] = [];
+      const streamId = input.assistantMessageId ?? '';
+      const isCancelled = () => streamId !== '' && cancelledStreams.has(streamId);
+      const finishCanceled = (partial: string): SendMessageResult => {
+        const text = partial.trim() || '（已停止生成）';
+        if (streamId) cancelledStreams.delete(streamId);
+        if (conversation) {
+          conversation.messages.push({
+            id: input.assistantMessageId ?? nextId('assistant'),
+            role: 'assistant',
+            text,
+            createdAt: new Date().toISOString(),
+            ...(steps.length > 0 ? { steps: steps.map((step) => ({ ...step })) } : {}),
+            source: 'butler'
+          });
+          conversation.updatedAt = new Date().toISOString();
+          persist();
+        }
+        onEvent({ type: 'done', text, canceled: true });
+        return {
+          text,
+          ...(conversation ? { conversationId: conversation.id } : {})
+        };
+      };
       const conversation = input.conversationId
         ? state.conversations.find((entry) => entry.id === input.conversationId)
         : undefined;
@@ -964,9 +992,11 @@ export function createMockApi(
           : '先看今天的任务和最近的记忆，再给出 1-3 个可执行的下一步。';
 
       for (const chunk of chunkText(reasoning, 4)) {
+        if (isCancelled()) return finishCanceled('');
         onEvent({ type: 'reasoning', text: chunk });
         await sleep(80 * pace);
       }
+      if (isCancelled()) return finishCanceled('');
 
       let reply = butlerReply(input.message);
 
@@ -1069,10 +1099,14 @@ export function createMockApi(
         await sleep(120 * pace);
       }
 
+      let emitted = '';
       for (const chunk of chunkText(reply, 6)) {
+        if (isCancelled()) return finishCanceled(emitted);
+        emitted += chunk;
         onEvent({ type: 'text', text: chunk });
         await sleep(40 * pace);
       }
+      if (isCancelled()) return finishCanceled(emitted);
       onEvent({ type: 'done', text: reply });
 
       if (conversation) {

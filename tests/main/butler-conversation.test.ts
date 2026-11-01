@@ -312,3 +312,81 @@ test('stream persists the assistant reply with the renderer id', async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+class HangingStreamingClient implements StreamingModelClient {
+  async complete(): Promise<ModelResponse> {
+    throw new Error('complete should not be called');
+  }
+
+  async stream(
+    request: ModelRequest,
+    onEvent: (event: ModelStreamEvent) => void
+  ): Promise<ModelResponse> {
+    onEvent({ type: 'text', text: '部分回答' });
+    await new Promise<void>((_resolve, reject) => {
+      request.signal?.addEventListener(
+        'abort',
+        () => {
+          const error = new Error('Aborted');
+          error.name = 'AbortError';
+          reject(error);
+        },
+        { once: true }
+      );
+    });
+    throw new Error('unreachable');
+  }
+}
+
+test('aborting a stream persists the partial reply and emits a canceled done', async () => {
+  const { dir, store } = await storeInTemp();
+  try {
+    const conversation = await store.create({ workspaceId: 'ws-exam' });
+    await store.appendMessage(conversation.id, message('u1', 'user', '你好'));
+    const { service } = fakeWorkspaceService();
+    const butler = new ButlerServiceImpl({
+      workspaceService: service,
+      modelClient: new HangingStreamingClient(),
+      conversationStore: store,
+      now: () => NOW
+    });
+    const controller = new AbortController();
+    const events: ButlerStreamEvent[] = [];
+    let textSeen: (() => void) | undefined;
+    const seen = new Promise<void>((resolve) => {
+      textSeen = resolve;
+    });
+
+    const promise = butler.stream(
+      {
+        conversationId: conversation.id,
+        assistantMessageId: 'a2',
+        message: '你好'
+      },
+      (event) => {
+        events.push(event);
+        if (event.type === 'text') textSeen?.();
+      },
+      { signal: controller.signal }
+    );
+
+    await seen;
+    controller.abort();
+    const result = await promise;
+
+    expect(events.at(-1)).toMatchObject({
+      type: 'done',
+      text: '部分回答',
+      canceled: true
+    });
+    expect(result.text).toBe('部分回答');
+    const stored = await store.get(conversation.id);
+    expect(stored?.messages.at(-1)).toMatchObject({
+      id: 'a2',
+      role: 'assistant',
+      text: '部分回答'
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

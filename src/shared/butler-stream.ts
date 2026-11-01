@@ -18,6 +18,7 @@ export type ButlerStreamEvent =
       type: 'done';
       text: string;
       usage?: { inputTokens: number; outputTokens: number };
+      canceled?: boolean;
     };
 
 export type ButlerStreamListener = (event: ButlerStreamEvent) => void;

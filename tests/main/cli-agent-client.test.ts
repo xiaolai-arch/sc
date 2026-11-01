@@ -385,3 +385,32 @@ test('adds --bare when claude isolation is enabled', async () => {
   await client.complete({ messages: [{ role: 'user', content: 'hi' }] });
   expect(calls[0]).toContain('--bare');
 });
+
+test('passes the abort signal to the runner and rejects after abort', async () => {
+  const controller = new AbortController();
+  const calls: Array<{ signal?: AbortSignal }> = [];
+  const client = new CliAgentClient(
+    { kind: 'local-cli', agent: 'codex' },
+    {
+      runner: async (_command, _args, _input, options) => {
+        calls.push({ signal: options.signal });
+        return { stdout: 'ok', stderr: '', code: 0 };
+      }
+    }
+  );
+
+  const result = await client.complete({
+    messages: [{ role: 'user', content: 'hi' }],
+    signal: controller.signal
+  });
+  expect(calls[0]?.signal).toBe(controller.signal);
+  expect(result.text).toBe('ok');
+
+  controller.abort();
+  await expect(
+    client.complete({
+      messages: [{ role: 'user', content: 'hi' }],
+      signal: controller.signal
+    })
+  ).rejects.toThrow(/Aborted/);
+});

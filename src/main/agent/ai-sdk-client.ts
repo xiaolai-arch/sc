@@ -154,6 +154,9 @@ export class AiSdkModelClient implements StreamingModelClient {
     if (request.maxTokens !== undefined) {
       options['maxOutputTokens'] = request.maxTokens;
     }
+    if (request.signal !== undefined) {
+      options['abortSignal'] = request.signal;
+    }
     const tools = toAiSdkTools(request.tools);
     if (tools) {
       options['tools'] = tools;

@@ -174,6 +174,7 @@ export interface ButlerService {
   send(input: SendMessageInput): Promise<SendMessageResult>;
   stream(
     input: SendMessageInput,
-    onEvent: (event: ButlerStreamEvent) => void
+    onEvent: (event: ButlerStreamEvent) => void,
+    options?: { signal?: AbortSignal }
   ): Promise<SendMessageResult>;
 }

@@ -1,6 +1,7 @@
 import type { StudyCoachApi } from '../../src/shared/ipc';
 import {
   BUTLER_STREAM_CHANNELS,
+  createButlerCancelHandler,
   createButlerStreamHandler,
   type IpcEventLike
 } from '../../src/main/ipc';
@@ -96,5 +97,43 @@ test('skips events when the sender is already destroyed', async () => {
   await expect(
     handler(event, { requestId: 'req-4', input: { message: '你好' } })
   ).resolves.toEqual({ text: '答' });
+  expect(sent).toHaveLength(0);
+});
+
+test('cancels a stream by assistant message id and clears the registry', async () => {
+  const registry = new Map<string, AbortController>();
+  let aborted = false;
+  const api = {
+    async stream(
+      _input: unknown,
+      _onEvent: unknown,
+      options?: { signal?: AbortSignal }
+    ) {
+      await new Promise<void>((resolve) => {
+        options?.signal?.addEventListener(
+          'abort',
+          () => {
+            aborted = true;
+            resolve();
+          },
+          { once: true }
+        );
+      });
+      return { text: 'stopped' };
+    }
+  } as unknown as StudyCoachApi;
+  const handler = createButlerStreamHandler(api, registry);
+  const { event, sent } = sender();
+
+  const promise = handler(event, {
+    requestId: 'req-cancel',
+    input: { message: '你好', assistantMessageId: 'a1' }
+  });
+  await Promise.resolve();
+  await createButlerCancelHandler(registry)('a1');
+
+  await expect(promise).resolves.toEqual({ text: 'stopped' });
+  expect(aborted).toBe(true);
+  expect(registry.has('a1')).toBe(false);
   expect(sent).toHaveLength(0);
 });

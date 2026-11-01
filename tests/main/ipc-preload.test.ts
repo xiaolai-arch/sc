@@ -180,3 +180,15 @@ test('bridge streams events for the matching requestId and unsubscribes', async 
   ]);
   expect(unsubscribed).toEqual([BUTLER_STREAM_CHANNELS.event]);
 });
+
+test('bridge cancels a stream by assistant message id', async () => {
+  const calls: Array<{ channel: string; args: unknown[] }> = [];
+  const bridge = createStudyCoachBridge(async (channel, ...args) => {
+    calls.push({ channel, args });
+    return null;
+  });
+  await bridge.cancelStream('a1');
+  expect(calls).toEqual([
+    { channel: BUTLER_STREAM_CHANNELS.cancel, args: ['a1'] }
+  ]);
+});

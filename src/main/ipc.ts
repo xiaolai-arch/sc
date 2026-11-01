@@ -62,6 +62,7 @@ export const IPC_CHANNELS = {
 /** Streaming uses a separate request/event pair so the request map stays stable. */
 export const BUTLER_STREAM_CHANNELS = {
   stream: 'study-coach:butler:stream',
+  cancel: 'study-coach:butler:cancel-stream',
   event: 'study-coach:butler:stream-event'
 } as const;
 
@@ -436,17 +437,27 @@ async function invokeSafely(handler: IpcHandler, args: unknown[]): Promise<unkno
  * Streams one butler request to the requesting webContents. Events carry the
  * caller's requestId so a delayed stream cannot leak into another message.
  */
-export function createButlerStreamHandler(api: StudyCoachApi) {
+export function createButlerStreamHandler(
+  api: StudyCoachApi,
+  registry: Map<string, AbortController> = new Map()
+) {
   return async (event: IpcEventLike, value: unknown): Promise<SendMessageResult> => {
     const { requestId, input } = requireStreamPayload(value);
+    const key = input.assistantMessageId?.trim() || requestId;
+    const controller = new AbortController();
+    registry.set(key, controller);
     try {
-      return await api.stream(input, (streamEvent: ButlerStreamEvent) => {
-        if (event.sender.isDestroyed?.()) return;
-        event.sender.send(BUTLER_STREAM_CHANNELS.event, {
-          requestId,
-          event: streamEvent
-        });
-      });
+      return await api.stream(
+        input,
+        (streamEvent: ButlerStreamEvent) => {
+          if (event.sender.isDestroyed?.()) return;
+          event.sender.send(BUTLER_STREAM_CHANNELS.event, {
+            requestId,
+            event: streamEvent
+          });
+        },
+        { signal: controller.signal }
+      );
     } catch (error) {
       if (!event.sender.isDestroyed?.()) {
         event.sender.send(BUTLER_STREAM_CHANNELS.event, {
@@ -455,7 +466,16 @@ export function createButlerStreamHandler(api: StudyCoachApi) {
         });
       }
       throw toSafeError(error);
+    } finally {
+      registry.delete(key);
     }
+  };
+}
+
+export function createButlerCancelHandler(registry: Map<string, AbortController>) {
+  return async (value: unknown): Promise<void> => {
+    const id = requireString(value, '消息 ID');
+    registry.get(id)?.abort();
   };
 }
 
@@ -465,9 +485,14 @@ export function registerIpcHandlers(api: StudyCoachApi, ipcMain: IpcMainLike): v
   for (const name of Object.keys(IPC_CHANNELS) as IpcChannelName[]) {
     ipcMain.handle(IPC_CHANNELS[name], (_event, ...args) => handlers[name](args[0]));
   }
-  const streamHandler = createButlerStreamHandler(api);
+  const registry = new Map<string, AbortController>();
+  const streamHandler = createButlerStreamHandler(api, registry);
   ipcMain.handle(BUTLER_STREAM_CHANNELS.stream, (event, ...args) =>
     streamHandler(event as IpcEventLike, args[0])
+  );
+  const cancelHandler = createButlerCancelHandler(registry);
+  ipcMain.handle(BUTLER_STREAM_CHANNELS.cancel, (_event, ...args) =>
+    cancelHandler(args[0])
   );
 }
 
@@ -519,6 +544,7 @@ export function createStudyCoachBridge(
     appendConversationMessage: (id, message) =>
       call(IPC_CHANNELS.appendConversationMessage, { conversationId: id, message }),
     deleteConversation: (id) => call(IPC_CHANNELS.deleteConversation, id),
+    cancelStream: (messageId) => call(BUTLER_STREAM_CHANNELS.cancel, messageId),
     onConversationOpened(listener) {
       if (!subscribe) return () => undefined;
       return subscribe(CONVERSATION_EVENT_CHANNELS.open, (payload) => {

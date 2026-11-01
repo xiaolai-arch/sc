@@ -72,6 +72,7 @@ export type WorkspaceData = WorkspaceDataState & {
     input: SendMessageInput,
     onEvent: ButlerStreamListener
   ) => Promise<SendMessageResult>;
+  cancelStream: (messageId: string) => Promise<void>;
   submitReview: (date: string, answers: ReviewAnswers, workspaceId?: string) => Promise<void>;
 };
 
@@ -329,6 +330,10 @@ export function useWorkspaceData(): WorkspaceData {
     [reload]
   );
 
+  const cancelStream = useCallback(async (messageId: string) => {
+    await apiOrThrow().cancelStream(messageId);
+  }, []);
+
   const submitReview = useCallback(
     async (date: string, answers: ReviewAnswers, workspaceId?: string) => {
       await apiOrThrow().submitReview({
@@ -355,6 +360,7 @@ export function useWorkspaceData(): WorkspaceData {
     searchWorkspace,
     send,
     stream,
+    cancelStream,
     submitReview
   };
 }

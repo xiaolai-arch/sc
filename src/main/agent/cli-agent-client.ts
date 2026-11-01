@@ -24,16 +24,22 @@ export type CliRunner = (
   command: string,
   args: string[],
   input: string,
-  options: { cwd: string; timeoutMs: number }
+  options: { cwd: string; timeoutMs: number; signal?: AbortSignal }
 ) => Promise<CliRunResult>;
 
 export type CliStreamRunner = (
   command: string,
   args: string[],
   input: string,
-  options: { cwd: string; timeoutMs: number },
+  options: { cwd: string; timeoutMs: number; signal?: AbortSignal },
   onLine: (line: string) => void
 ) => Promise<CliRunResult>;
+
+function abortError(): Error {
+  const error = new Error('Aborted');
+  error.name = 'AbortError';
+  return error;
+}
 
 type AgentConfig = {
   args: string[];
@@ -223,9 +229,13 @@ function defaultRunner(
   command: string,
   args: string[],
   input: string,
-  options: { cwd: string; timeoutMs: number }
+  options: { cwd: string; timeoutMs: number; signal?: AbortSignal }
 ): Promise<CliRunResult> {
   return new Promise((resolve, reject) => {
+    if (options.signal?.aborted) {
+      reject(abortError());
+      return;
+    }
     let child: ReturnType<typeof spawn>;
     try {
       child = spawn(command, args, {
@@ -241,18 +251,26 @@ function defaultRunner(
     let stdout = '';
     let stderr = '';
     let settled = false;
+    const cleanup = () => options.signal?.removeEventListener('abort', onAbort);
     const finish = (result: CliRunResult) => {
       if (settled) return;
       settled = true;
+      cleanup();
       clearTimeout(timer);
       resolve(result);
     };
     const fail = (error: Error) => {
       if (settled) return;
       settled = true;
+      cleanup();
       clearTimeout(timer);
       reject(error);
     };
+    const onAbort = () => {
+      child.kill('SIGTERM');
+      fail(abortError());
+    };
+    options.signal?.addEventListener('abort', onAbort, { once: true });
     const timer = setTimeout(() => {
       child.kill('SIGTERM');
       fail(new Error(`本地 CLI agent 超时（${options.timeoutMs}ms）。`));
@@ -275,10 +293,14 @@ function defaultStreamRunner(
   command: string,
   args: string[],
   input: string,
-  options: { cwd: string; timeoutMs: number },
+  options: { cwd: string; timeoutMs: number; signal?: AbortSignal },
   onLine: (line: string) => void
 ): Promise<CliRunResult> {
   return new Promise((resolve, reject) => {
+    if (options.signal?.aborted) {
+      reject(abortError());
+      return;
+    }
     let child: ReturnType<typeof spawn>;
     try {
       child = spawn(command, args, {
@@ -312,9 +334,11 @@ function defaultStreamRunner(
       }
     };
 
+    const cleanup = () => options.signal?.removeEventListener('abort', onAbort);
     const finish = (result: CliRunResult) => {
       if (settled) return;
       settled = true;
+      cleanup();
       clearTimeout(timer);
       flush('', true);
       resolve(result);
@@ -322,9 +346,15 @@ function defaultStreamRunner(
     const fail = (error: Error) => {
       if (settled) return;
       settled = true;
+      cleanup();
       clearTimeout(timer);
       reject(error);
     };
+    const onAbort = () => {
+      child.kill('SIGTERM');
+      fail(abortError());
+    };
+    options.signal?.addEventListener('abort', onAbort, { once: true });
     const timer = setTimeout(() => {
       child.kill('SIGTERM');
       fail(new Error(`本地 CLI agent 超时（${options.timeoutMs}ms）。`));
@@ -449,9 +479,12 @@ export class CliAgentClient implements StreamingModelClient {
       config.stdin ? prompt : '',
       {
         cwd: this.options.cwd ?? tmpdir(),
-        timeoutMs: this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+        timeoutMs: this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        ...(request.signal ? { signal: request.signal } : {})
       }
     );
+
+    if (request.signal?.aborted) throw abortError();
 
     if (result.code !== 0) {
       const detail = result.stderr.trim().slice(0, 500);
@@ -530,10 +563,13 @@ export class CliAgentClient implements StreamingModelClient {
       config.stdin ? prompt : '',
       {
         cwd: this.options.cwd ?? tmpdir(),
-        timeoutMs: this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+        timeoutMs: this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        ...(request.signal ? { signal: request.signal } : {})
       },
       handleLine
     );
+
+    if (request.signal?.aborted) throw abortError();
 
     const gateResult = gate?.finish();
     if (gateResult) {

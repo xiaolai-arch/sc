@@ -98,6 +98,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     retry,
     reload,
     stream,
+    cancelStream,
     submitPracticeAnswer
   } = useWorkspaceData();
   const conversations = useConversations();
@@ -108,6 +109,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   const [previewNote, setPreviewNote] = useState<WorkspaceNote | null>(null);
   const [practiceOpen, setPracticeOpen] = useState(false);
   const [practiceSetId, setPracticeSetId] = useState<string | null>(null);
+  const [activeAssistantId, setActiveAssistantId] = useState<string | null>(null);
   const [typing, setTyping] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState<ChatMessage | null>(null);
   const [reasoningById, setReasoningById] = useState<Record<string, string>>({});
@@ -209,6 +211,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     }
 
     const assistantId = chatMessageId('a');
+    setActiveAssistantId(assistantId);
     setStreamingMessage({
       id: assistantId,
       role: 'assistant',
@@ -402,7 +405,14 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     } finally {
       flushNow();
       setStreamingMessage(null);
+      setActiveAssistantId(null);
       setTyping(false);
+    }
+  }
+
+  function stopStreaming() {
+    if (activeAssistantId) {
+      void cancelStream(activeAssistantId);
     }
   }
 
@@ -502,6 +512,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
             dateLabel={dateLabel}
             panelOpen={panelOpen}
             onTogglePanel={() => setPanelOpen((open) => !open)}
+            onStop={stopStreaming}
           />
 
           <ProjectPanel

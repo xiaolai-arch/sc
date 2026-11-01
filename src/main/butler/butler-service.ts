@@ -161,8 +161,10 @@ export class ButlerServiceImpl implements ButlerService {
 
   async stream(
     input: SendMessageInput,
-    onEvent: ButlerStreamListener
+    onEvent: ButlerStreamListener,
+    options: { signal?: AbortSignal } = {}
   ): Promise<SendMessageResult> {
+    const signal = options.signal;
     const message = typeof input.message === 'string' ? input.message.trim() : '';
     const conversation = await this.resolveConversation(input);
     const effectiveInput = this.effectiveInput(input, conversation);
@@ -188,6 +190,7 @@ export class ButlerServiceImpl implements ButlerService {
     const steps: ConversationStep[] = [];
     let usage: ModelUsage | undefined;
     let lastToolFailure: string | undefined;
+    let streamedSoFar = '';
 
     const finish = async (text: string): Promise<SendMessageResult> => {
       await this.persistAssistant(conversation, input, text, steps);
@@ -201,26 +204,29 @@ export class ButlerServiceImpl implements ButlerService {
 
     try {
       for (let stepIndex = 0; stepIndex <= this.maxToolSteps; stepIndex += 1) {
+        throwIfAborted(signal);
         let response: ModelResponse;
         let streamedText = false;
         let streamedTextContent = '';
 
         if (supportsStreaming(this.modelClient)) {
           response = await this.modelClient.stream(
-            this.buildRequest(messages),
+            this.buildRequest(messages, signal),
             (event) => {
               if (event.type === 'reasoning') {
                 onEvent({ type: 'reasoning', text: event.text });
               } else {
                 streamedText = true;
                 streamedTextContent += event.text;
+                streamedSoFar += event.text;
                 onEvent({ type: 'text', text: event.text });
               }
             }
           );
         } else {
-          response = await this.complete(messages);
+          response = await this.complete(messages, signal);
         }
+        throwIfAborted(signal);
 
         usage = sumUsage(usage, response.usage);
         const toolCalls = response.toolCalls ?? [];
@@ -250,6 +256,7 @@ export class ButlerServiceImpl implements ButlerService {
         });
 
         for (const call of toolCalls) {
+          throwIfAborted(signal);
           const step = this.startToolStep(call, steps);
           onEvent({ type: 'tool-start', id: call.id, name: call.name, label: step.label });
           const result = await this.runTool(call, context);
@@ -275,6 +282,21 @@ export class ButlerServiceImpl implements ButlerService {
         }
       }
     } catch (error) {
+      if (isAbortError(error) || signal?.aborted) {
+        const text = streamedSoFar.trim() || '（已停止生成）';
+        await this.persistAssistant(conversation, input, text, steps);
+        onEvent({
+          type: 'done',
+          text,
+          canceled: true,
+          ...(usage ? { usage } : {})
+        });
+        return {
+          text,
+          ...(usage ? { usage } : {}),
+          ...(conversation ? { conversationId: conversation.id } : {})
+        };
+      }
       onEvent({
         type: 'error',
         message: redactSecrets(error instanceof Error ? error.message : String(error))
@@ -399,22 +421,26 @@ export class ButlerServiceImpl implements ButlerService {
     }
   }
 
-  private buildRequest(messages: ModelMessage[]) {
+  private buildRequest(messages: ModelMessage[], signal?: AbortSignal) {
     return {
       messages,
       ...(this.workspaceService
         ? { tools: toModelToolDefinitions(this.tools) }
         : {}),
       ...(this.temperature !== undefined ? { temperature: this.temperature } : {}),
-      ...(this.maxTokens !== undefined ? { maxTokens: this.maxTokens } : {})
+      ...(this.maxTokens !== undefined ? { maxTokens: this.maxTokens } : {}),
+      ...(signal ? { signal } : {})
     };
   }
 
-  private async complete(messages: ModelMessage[]): Promise<ModelResponse> {
+  private async complete(
+    messages: ModelMessage[],
+    signal?: AbortSignal
+  ): Promise<ModelResponse> {
     if (!this.modelClient) {
       throw new Error('Model client is not configured.');
     }
-    return this.modelClient.complete(this.buildRequest(messages));
+    return this.modelClient.complete(this.buildRequest(messages, signal));
   }
 
   private async runTool(
@@ -452,6 +478,20 @@ export class ButlerServiceImpl implements ButlerService {
       ...(usage ? { usage } : {})
     };
   }
+}
+
+function abortError(): Error {
+  const error = new Error('Aborted');
+  error.name = 'AbortError';
+  return error;
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortError();
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
 }
 
 function workspaceIdFromToolResult(content: string): string | undefined {

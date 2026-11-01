@@ -35,6 +35,7 @@ export interface ModelRequest {
   temperature?: number;
   maxTokens?: number;
   tools?: ModelToolDefinition[];
+  signal?: AbortSignal;
 }
 
 export interface ModelUsage {

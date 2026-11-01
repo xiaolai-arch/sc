@@ -16,6 +16,7 @@ type ChatPaneProps = {
   dateLabel: string;
   panelOpen?: boolean;
   onTogglePanel?: () => void;
+  onStop?: () => void;
 };
 
 const suggestedPrompts = [
@@ -35,7 +36,8 @@ export function ChatPane({
   onOpenSettings,
   dateLabel,
   panelOpen = false,
-  onTogglePanel
+  onTogglePanel,
+  onStop
 }: ChatPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
@@ -172,7 +174,12 @@ export function ChatPane({
         </div>
       </div>
 
-      <Composer modelLabel={modelLabel} onSend={onSend} disabled={typing} />
+      <Composer
+        modelLabel={modelLabel}
+        onSend={onSend}
+        disabled={typing}
+        {...(onStop ? { onStop } : {})}
+      />
     </div>
   );
 }

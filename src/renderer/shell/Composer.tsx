@@ -10,9 +10,15 @@ type ComposerProps = {
   modelLabel: string;
   onSend: (text: string) => void;
   disabled?: boolean;
+  onStop?: () => void;
 };
 
-export function Composer({ modelLabel, onSend, disabled = false }: ComposerProps) {
+export function Composer({
+  modelLabel,
+  onSend,
+  disabled = false,
+  onStop
+}: ComposerProps) {
   const [text, setText] = useState('');
 
   function send() {
@@ -62,15 +68,26 @@ export function Composer({ modelLabel, onSend, disabled = false }: ComposerProps
               <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#34c759]" />
               <span className="truncate">{modelLabel}</span>
             </span>
-            <button
-              type="button"
-              aria-label="发送"
-              disabled={!text.trim() || disabled}
-              onClick={send}
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-[#0071e3] text-white transition-all duration-300 hover:opacity-80 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none"
-            >
-              <SendIcon className="h-4 w-4" />
-            </button>
+            {disabled && onStop ? (
+              <button
+                type="button"
+                aria-label="停止生成"
+                onClick={onStop}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1d1d1f] text-white transition-all duration-300 hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none"
+              >
+                <span aria-hidden="true" className="h-3 w-3 rounded-sm bg-white" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                aria-label="发送"
+                disabled={!text.trim() || disabled}
+                onClick={send}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-[#0071e3] text-white transition-all duration-300 hover:opacity-80 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none"
+              >
+                <SendIcon className="h-4 w-4" />
+              </button>
+            )}
           </div>
         </div>
       </div>
