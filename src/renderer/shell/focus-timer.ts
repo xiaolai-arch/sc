@@ -12,11 +12,14 @@ export type FocusSession = {
   remainingMs: number;
   running: boolean;
   recorded: boolean;
+  /** Wall-clock timestamp of the last settlement; paused time is excluded. */
+  lastTickAt: number;
 };
 
 export function startFocusSession(
   sessionId: number,
-  task: Pick<WorkspaceTask, 'id' | 'title'>
+  task: Pick<WorkspaceTask, 'id' | 'title'>,
+  now: number = Date.now()
 ): FocusSession {
   return {
     sessionId,
@@ -24,21 +27,47 @@ export function startFocusSession(
     taskTitle: task.title,
     remainingMs: FOCUS_DURATION_MS,
     running: true,
-    recorded: false
+    recorded: false,
+    lastTickAt: now
   };
 }
 
+/**
+ * Settles against the wall clock. A delayed tick (background throttling or
+ * system sleep) subtracts the real elapsed time instead of one second.
+ */
 export function tickFocus(
   session: FocusSession,
-  deltaMs: number = FOCUS_TICK_MS
+  now: number = Date.now()
 ): FocusSession {
   if (!session.running) return session;
-  const remainingMs = Math.max(0, session.remainingMs - Math.max(0, deltaMs));
+  const elapsed = Math.max(0, now - session.lastTickAt);
+  if (elapsed === 0) return session;
+  const remainingMs = Math.max(0, session.remainingMs - elapsed);
   return {
     ...session,
     remainingMs,
-    running: remainingMs > 0
+    running: remainingMs > 0,
+    lastTickAt: now
   };
+}
+
+/** Settles elapsed time first, then stops the clock. */
+export function pauseFocusSession(
+  session: FocusSession,
+  now: number = Date.now()
+): FocusSession {
+  const settled = tickFocus(session, now);
+  return settled.running ? { ...settled, running: false } : settled;
+}
+
+/** Paused time never counts; the clock restarts at `now`. */
+export function resumeFocusSession(
+  session: FocusSession,
+  now: number = Date.now()
+): FocusSession {
+  if (session.running || session.remainingMs <= 0) return session;
+  return { ...session, running: true, lastTickAt: now };
 }
 
 export function formatFocusTime(remainingMs: number): string {

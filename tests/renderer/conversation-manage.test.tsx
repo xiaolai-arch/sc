@@ -146,9 +146,14 @@ test('searches conversations by message body with a debounced input', async () =
 test('focuses the conversation search with Cmd+K', async () => {
   setup();
   await screen.findByText('早上好，xiaolai。');
+  const search = screen.getByLabelText('搜索对话');
 
-  fireEvent.keyDown(window, { key: 'k', metaKey: true });
-  expect(screen.getByLabelText('搜索对话')).toHaveFocus();
+  // The window listener is installed by a mount effect that can land after the
+  // welcome text; retry the keydown until the focus change proves it is ready.
+  await waitFor(() => {
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    expect(search).toHaveFocus();
+  });
 });
 
 test('closes the conversation menu when clicking outside', async () => {

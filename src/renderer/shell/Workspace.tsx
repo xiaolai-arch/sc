@@ -16,6 +16,8 @@ import {
   firstFocusableTask,
   focusCompletionStatus,
   nextActualMin,
+  pauseFocusSession,
+  resumeFocusSession,
   startFocusSession,
   tickFocus,
   type FocusSession
@@ -551,17 +553,11 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   }
 
   function pauseFocus() {
-    setFocus((current) =>
-      current && current.running ? { ...current, running: false } : current
-    );
+    setFocus((current) => (current ? pauseFocusSession(current) : current));
   }
 
   function resumeFocus() {
-    setFocus((current) =>
-      current && !current.running && current.remainingMs > 0
-        ? { ...current, running: true }
-        : current
-    );
+    setFocus((current) => (current ? resumeFocusSession(current) : current));
   }
 
   function resetFocus() {
@@ -572,7 +568,8 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
       sessionId: focusSessionCounterRef.current,
       remainingMs: FOCUS_DURATION_MS,
       running: false,
-      recorded: false
+      recorded: false,
+      lastTickAt: Date.now()
     });
     setFocusNotice(null);
   }
