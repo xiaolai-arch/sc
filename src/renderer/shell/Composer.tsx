@@ -15,6 +15,8 @@ type ComposerProps = {
   editing?: boolean;
   onCancelEdit?: () => void;
   onOpenModelPicker?: () => void;
+  /** Centered hero variant used by the empty conversation screen. */
+  hero?: boolean;
 };
 
 export function Composer({
@@ -26,7 +28,8 @@ export function Composer({
   onStop,
   editing = false,
   onCancelEdit,
-  onOpenModelPicker
+  onOpenModelPicker,
+  hero = false
 }: ComposerProps) {
   function send() {
     const trimmed = text.trim();
@@ -36,8 +39,12 @@ export function Composer({
   }
 
   return (
-    <div className="shrink-0 px-4 pb-4 pt-2 md:px-6">
-      <div className="mx-auto w-full max-w-[760px] rounded-2xl border border-black/[0.08] dark:border-white/10 bg-white dark:bg-[#1c1c1e] p-3 shadow-sm">
+    <div className={hero ? 'w-full' : 'shrink-0 px-4 pb-4 pt-2 md:px-6'}>
+      <div
+        className={`mx-auto w-full max-w-[760px] rounded-2xl border border-black/[0.08] dark:border-white/10 bg-white dark:bg-[#1c1c1e] shadow-sm ${
+          hero ? 'p-4' : 'p-3'
+        }`}
+      >
         {editing ? (
           <div className="mb-2 flex items-center justify-between rounded-md bg-[#f2f7fd] dark:bg-[#16202b] px-2 py-1 text-[11px] text-gray-600 dark:text-[#a1a1a6]">
             <span>正在编辑已发送的消息</span>
@@ -61,10 +68,12 @@ export function Composer({
               send();
             }
           }}
-          rows={2}
+          rows={hero ? 3 : 2}
           placeholder="向阿咲提问，或说「记一下…」"
           aria-label="向阿咲提问"
-          className="max-h-32 min-h-[44px] w-full resize-none bg-transparent px-1 py-1 text-[13px] leading-5 text-[#1d1d1f] dark:text-[#f5f5f7] outline-none placeholder:text-gray-500"
+          className={`max-h-40 w-full resize-none bg-transparent px-1 py-1 text-[#1d1d1f] leading-6 outline-none placeholder:text-gray-500 dark:text-[#f5f5f7] ${
+            hero ? 'min-h-[72px] text-[14px]' : 'min-h-[44px] text-[13px] leading-5'
+          }`}
         />
         <div className="mt-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-1">

@@ -1,5 +1,10 @@
 import { useEffect, useRef } from 'react';
-import { MenuIcon, MoreHorizontalIcon, SparklesIcon } from '../ui/icons';
+import {
+  FolderIcon,
+  MenuIcon,
+  MoreHorizontalIcon,
+  SparklesIcon
+} from '../ui/icons';
 import { Composer } from './Composer';
 import { MarkdownText } from './MarkdownText';
 import { MessageActions } from './MessageActions';
@@ -78,9 +83,28 @@ export function ChatPane({
     }
   }, [messages, typing, lastRole]);
 
+  const modelBanner = !hasApiKey ? (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-[#0071e3]/15 bg-[#f2f7fd] px-3 py-2 dark:bg-[#16202b]">
+      <p className="text-[12px] text-gray-600 dark:text-[#a1a1a6]">
+        未配置模型，当前使用模板计划。
+      </p>
+      <button
+        type="button"
+        onClick={onOpenSettings}
+        className="shrink-0 text-[12px] font-medium text-[#0071e3] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:text-[#4da3ff]"
+      >
+        去设置
+      </button>
+    </div>
+  ) : null;
+
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col bg-white dark:bg-[#131315]">
-      <header className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-black/[0.06] dark:border-white/10 px-4 md:px-5">
+      <header
+        className={`flex h-11 shrink-0 items-center justify-between gap-3 border-b border-black/[0.06] px-4 dark:border-white/10 md:px-5 ${
+          showWelcome ? 'md:hidden' : ''
+        }`}
+      >
         <div className="flex min-w-0 items-center gap-2">
           {onOpenSidebar ? (
             <button
@@ -124,6 +148,77 @@ export function ChatPane({
         </div>
       </header>
 
+      {showWelcome ? (
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
+          {modelBanner ? (
+            <div className="mx-auto w-full max-w-[760px] px-4 pt-4 md:px-0">
+              {modelBanner}
+            </div>
+          ) : null}
+          <div className="flex flex-1 items-center justify-center px-4 py-10 md:px-6">
+            <div className="w-full max-w-[760px] -translate-y-[3vh]">
+              <div className="flex flex-col items-center text-center">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#1d1d1f] text-white dark:bg-[#f5f5f7] dark:text-[#1d1d1f]">
+                    <SparklesIcon className="h-6 w-6" />
+                  </span>
+                  <span className="text-[30px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
+                    阿咲
+                  </span>
+                </div>
+                <h1 className="mt-6 text-[22px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
+                  早上好，xiaolai。
+                </h1>
+                <p className="mt-2 text-[13px] leading-6 text-gray-500 dark:text-[#8e8e93]">
+                  今天想推进什么？把目标交给阿咲，他会帮你拆成下一步。
+                </p>
+              </div>
+
+              <div className="mt-8 flex items-center justify-center gap-1.5 text-[12px] text-gray-500 dark:text-[#8e8e93]">
+                <FolderIcon className="h-3.5 w-3.5" />
+                {workspace && onOpenProjects ? (
+                  <button
+                    type="button"
+                    onClick={onOpenProjects}
+                    className="rounded px-1 py-0.5 transition-colors hover:text-[#0071e3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:hover:text-[#4da3ff]"
+                  >
+                    {workspace.name}
+                  </button>
+                ) : (
+                  <span>{workspace?.name ?? '全部工作区'}</span>
+                )}
+              </div>
+
+              <div className="mt-2">
+                <Composer
+                  hero
+                  modelLabel={modelLabel}
+                  text={composerText}
+                  onTextChange={onComposerTextChange}
+                  onSend={onSend}
+                  disabled={typing}
+                />
+              </div>
+
+              <div className="mt-3 flex flex-wrap justify-center gap-2">
+                {suggestedPrompts.map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    onClick={() => onSend(prompt)}
+                    className="rounded-full border border-black/[0.08] bg-white px-3 py-1.5 text-[11px] text-gray-500 transition-colors duration-150 hover:bg-[#f7f7f8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:border-white/10 dark:bg-[#1c1c1e] dark:text-[#a1a1a6] dark:hover:bg-white/[0.06]"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {!showWelcome ? (
+      <div className="flex min-h-0 flex-1 flex-col">
       <div
         ref={scrollRef}
         onScroll={() => {
@@ -135,44 +230,7 @@ export function ChatPane({
         className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-6"
       >
         <div className="mx-auto w-full max-w-[760px] space-y-6">
-          {!hasApiKey ? (
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-[#0071e3]/15 bg-[#f2f7fd] dark:bg-[#16202b] px-3 py-2">
-              <p className="text-[12px] text-gray-600 dark:text-[#a1a1a6]">未配置模型，当前使用模板计划。</p>
-              <button
-                type="button"
-                onClick={onOpenSettings}
-                className="shrink-0 text-[12px] font-medium text-[#0071e3] dark:text-[#4da3ff] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
-              >
-                去设置
-              </button>
-            </div>
-          ) : null}
-
-          {showWelcome ? (
-            <div className="pt-12">
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#0071e3] text-white">
-                <SparklesIcon className="h-4 w-4" />
-              </span>
-              <h2 className="mt-5 text-[24px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
-                早上好，xiaolai。
-              </h2>
-              <p className="mt-2 text-[14px] leading-6 text-gray-600 dark:text-[#a1a1a6]">
-                我是阿咲，你的个人管家。今天想做点什么？
-              </p>
-              <div className="mt-6 flex flex-wrap gap-2">
-                {suggestedPrompts.map((prompt) => (
-                  <button
-                    key={prompt}
-                    type="button"
-                    onClick={() => onSend(prompt)}
-                    className="rounded-full border border-black/[0.08] dark:border-white/10 bg-white dark:bg-[#1c1c1e] px-3.5 py-2 text-[12px] text-gray-600 dark:text-[#a1a1a6] transition-colors duration-150 hover:bg-[#f7f7f8] dark:hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
-                  >
-                    {prompt}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
+          {modelBanner}
 
           {messages.map((message) =>
             message.role === 'user' ? (
@@ -212,7 +270,7 @@ export function ChatPane({
           )}
 
           {typing && (typingStatus || !messages.some((message) => message.streaming)) ? (
-            <p className="ml-9 text-[12px] text-gray-500 dark:text-[#8e8e93]" role="status">
+            <p className="text-[12px] text-gray-500 dark:text-[#8e8e93]" role="status">
               {typingStatus ?? '正在输入…'}
             </p>
           ) : null}
@@ -230,6 +288,8 @@ export function ChatPane({
         {...(onCancelEdit ? { onCancelEdit } : {})}
         {...(onOpenModelPicker ? { onOpenModelPicker } : {})}
       />
+      </div>
+      ) : null}
     </div>
   );
 }
