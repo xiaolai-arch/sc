@@ -251,3 +251,90 @@ test('malformed fenced block is returned as plain text', async () => {
   expect(events).toEqual([]);
   expect(result.text).toBe(answer);
 });
+
+test('codex stream passes model and effort before the stdin placeholder', async () => {
+  const calls: string[][] = [];
+  const client = new CliAgentClient(
+    {
+      kind: 'local-cli',
+      agent: 'codex',
+      command: 'codex',
+      model: 'gpt-x',
+      effort: 'low'
+    },
+    {
+      streamRunner: async (_command, args, _input, _options, onLine) => {
+        calls.push(args);
+        onLine(codexMessage('好的'));
+        return { stdout: '', stderr: '', code: 0 };
+      }
+    }
+  );
+
+  await client.stream({ messages: [{ role: 'user', content: 'hi' }] }, () => undefined);
+
+  expect(calls[0]).toEqual([
+    'exec',
+    '--json',
+    '--skip-git-repo-check',
+    '-m',
+    'gpt-x',
+    '-c',
+    'model_reasoning_effort=low',
+    '-'
+  ]);
+});
+
+test('codex stream keeps the medium effort default', async () => {
+  const calls: string[][] = [];
+  const client = new CliAgentClient(
+    { kind: 'local-cli', agent: 'codex', command: 'codex' },
+    {
+      streamRunner: async (_command, args, _input, _options, onLine) => {
+        calls.push(args);
+        onLine(codexMessage('好的'));
+        return { stdout: '', stderr: '', code: 0 };
+      }
+    }
+  );
+
+  await client.stream({ messages: [{ role: 'user', content: 'hi' }] }, () => undefined);
+
+  expect(calls[0]).toContain('model_reasoning_effort=medium');
+});
+
+test('claude stream passes model, effort and isolate flags', async () => {
+  const calls: string[][] = [];
+  const client = new CliAgentClient(
+    {
+      kind: 'local-cli',
+      agent: 'claude',
+      command: 'claude',
+      model: 'claude-x',
+      effort: 'high',
+      isolate: true
+    },
+    {
+      streamRunner: async (_command, args, _input, _options, onLine) => {
+        calls.push(args);
+        onLine(claudeResult('好的'));
+        return { stdout: '', stderr: '', code: 0 };
+      }
+    }
+  );
+
+  await client.stream({ messages: [{ role: 'user', content: 'hi' }] }, () => undefined);
+
+  expect(calls[0]).toEqual([
+    '-p',
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    '--include-partial-messages',
+    '--model',
+    'claude-x',
+    '--effort',
+    'high',
+    '--bare'
+  ]);
+});

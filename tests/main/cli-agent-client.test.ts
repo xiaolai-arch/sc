@@ -29,7 +29,13 @@ test('runs codex in one-shot mode with the prompt on stdin', async () => {
   });
 
   expect(calls[0]?.command).toBe('codex');
-  expect(calls[0]?.args).toEqual(['exec', '--skip-git-repo-check', '-']);
+  expect(calls[0]?.args).toEqual([
+    'exec',
+    '--skip-git-repo-check',
+    '-c',
+    'model_reasoning_effort=medium',
+    '-'
+  ]);
   expect(calls[0]?.input).toContain('SYSTEM:\n你是学习教练');
   expect(calls[0]?.input).toContain('USER:\n你好');
   expect(result.text).toBe('hello from codex');
@@ -384,6 +390,116 @@ test('adds --bare when claude isolation is enabled', async () => {
 
   await client.complete({ messages: [{ role: 'user', content: 'hi' }] });
   expect(calls[0]).toContain('--bare');
+});
+
+test('passes codex model and effort before the stdin placeholder', async () => {
+  const calls: string[][] = [];
+  const client = new CliAgentClient(
+    {
+      kind: 'local-cli',
+      agent: 'codex',
+      command: 'codex',
+      model: 'gpt-x',
+      effort: 'low'
+    },
+    {
+      runner: async (_command, args) => {
+        calls.push(args);
+        return { stdout: 'ok', stderr: '', code: 0 };
+      }
+    }
+  );
+
+  await client.complete({ messages: [{ role: 'user', content: 'hi' }] });
+
+  expect(calls[0]).toEqual([
+    'exec',
+    '--skip-git-repo-check',
+    '-m',
+    'gpt-x',
+    '-c',
+    'model_reasoning_effort=low',
+    '-'
+  ]);
+});
+
+test('passes claude model, effort and bare flags', async () => {
+  const calls: string[][] = [];
+  const client = new CliAgentClient(
+    {
+      kind: 'local-cli',
+      agent: 'claude',
+      command: 'claude',
+      model: 'claude-x',
+      effort: 'high',
+      isolate: true
+    },
+    {
+      runner: async (_command, args) => {
+        calls.push(args);
+        return { stdout: 'ok', stderr: '', code: 0 };
+      }
+    }
+  );
+
+  await client.complete({ messages: [{ role: 'user', content: 'hi' }] });
+
+  expect(calls[0]).toEqual([
+    '-p',
+    '--output-format',
+    'text',
+    '--model',
+    'claude-x',
+    '--effort',
+    'high',
+    '--bare'
+  ]);
+});
+
+test('omits claude effort when it is not configured', async () => {
+  const calls: string[][] = [];
+  const client = new CliAgentClient(
+    {
+      kind: 'local-cli',
+      agent: 'claude',
+      command: 'claude',
+      model: 'claude-x'
+    },
+    {
+      runner: async (_command, args) => {
+        calls.push(args);
+        return { stdout: 'ok', stderr: '', code: 0 };
+      }
+    }
+  );
+
+  await client.complete({ messages: [{ role: 'user', content: 'hi' }] });
+
+  expect(calls[0]).toEqual(['-p', '--output-format', 'text', '--model', 'claude-x']);
+  expect(calls[0]).not.toContain('--effort');
+});
+
+test('ignores model and effort for zcode', async () => {
+  const calls: string[][] = [];
+  const client = new CliAgentClient(
+    {
+      kind: 'local-cli',
+      agent: 'zcode',
+      command: 'zcode',
+      model: 'ignored',
+      effort: 'high'
+    },
+    {
+      runner: async (_command, args) => {
+        calls.push(args);
+        return { stdout: 'ok', stderr: '', code: 0 };
+      }
+    }
+  );
+
+  await client.complete({ messages: [{ role: 'user', content: 'hi' }] });
+
+  expect(calls[0]).toEqual(['-p', 'USER:\nhi']);
 });
 
 test('passes the abort signal to the runner and rejects after abort', async () => {

@@ -50,14 +50,7 @@ type AgentConfig = {
 const AGENT_CONFIG: Record<LocalCliAgent, AgentConfig> = {
   codex: {
     args: ['exec', '--skip-git-repo-check', '-'],
-    streamArgs: [
-      'exec',
-      '--json',
-      '--skip-git-repo-check',
-      '-c',
-      'model_reasoning_effort=medium',
-      '-'
-    ],
+    streamArgs: ['exec', '--json', '--skip-git-repo-check', '-'],
     stdin: true
   },
   claude: {
@@ -76,6 +69,44 @@ const AGENT_CONFIG: Record<LocalCliAgent, AgentConfig> = {
 };
 
 const DEFAULT_TIMEOUT_MS = 180_000;
+
+/**
+ * Applies the provider's model/effort to the base CLI arguments.
+ * - codex: model and reasoning effort go before the stdin placeholder `-`;
+ *   effort defaults to `medium`, preserving the previous behavior.
+ * - claude: `--model`/`--effort` only when configured; `--bare` when isolated.
+ * - zcode/opencode: unchanged.
+ */
+export function buildAgentArgs(
+  provider: LocalCliProvider,
+  baseArgs: readonly string[]
+): string[] {
+  const args = [...baseArgs];
+
+  if (provider.agent === 'codex') {
+    const model = provider.model?.trim();
+    const effort = provider.effort ?? 'medium';
+    const additions: string[] = [];
+    if (model) additions.push('-m', model);
+    additions.push('-c', `model_reasoning_effort=${effort}`);
+    const stdinIndex = args.lastIndexOf('-');
+    if (stdinIndex >= 0) {
+      args.splice(stdinIndex, 0, ...additions);
+    } else {
+      args.push(...additions);
+    }
+    return args;
+  }
+
+  if (provider.agent === 'claude') {
+    const model = provider.model?.trim();
+    if (model) args.push('--model', model);
+    if (provider.effort) args.push('--effort', provider.effort);
+    if (provider.isolate) args.push('--bare');
+  }
+
+  return args;
+}
 
 /**
  * Local CLI agents do not receive a native tool schema, so the protocol is
@@ -467,10 +498,7 @@ export class CliAgentClient implements StreamingModelClient {
     const config = AGENT_CONFIG[this.provider.agent];
     const command = this.provider.command?.trim() || this.provider.agent;
     const prompt = buildPrompt(request);
-    const args = [...config.args];
-    if (this.provider.agent === 'claude' && this.provider.isolate) {
-      args.push('--bare');
-    }
+    const args = buildAgentArgs(this.provider, config.args);
     if (!config.stdin) args.push(prompt);
 
     const result = await (this.options.runner ?? defaultRunner)(
@@ -521,10 +549,7 @@ export class CliAgentClient implements StreamingModelClient {
 
     const command = this.provider.command?.trim() || this.provider.agent;
     const prompt = buildPrompt(request);
-    const args = [...config.streamArgs];
-    if (this.provider.agent === 'claude' && this.provider.isolate) {
-      args.push('--bare');
-    }
+    const args = buildAgentArgs(this.provider, config.streamArgs);
     if (!config.stdin) args.push(prompt);
 
     const state: StreamState = {
