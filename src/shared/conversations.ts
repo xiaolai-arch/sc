@@ -25,6 +25,8 @@ export type Conversation = {
   title: string;
   kind: ConversationKind;
   workspaceId?: string;
+  /** Pinned conversations sort ahead of recent ones and survive restarts. */
+  pinned?: boolean;
   createdAt: string;
   updatedAt: string;
   messages: ConversationMessage[];
@@ -35,6 +37,7 @@ export type ConversationSummary = {
   title: string;
   kind: ConversationKind;
   workspaceId?: string;
+  pinned?: boolean;
   updatedAt: string;
   preview: string;
 };

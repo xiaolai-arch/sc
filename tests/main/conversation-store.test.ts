@@ -186,3 +186,141 @@ test('writes conversation files with owner-only permissions', async () => {
   const stats = await stat(join(dir, `${created.id}.json`));
   expect(stats.mode & 0o777).toBe(0o600);
 });
+
+test('renames a conversation and rejects an empty title', async () => {
+  const dir = await tempDir();
+  const store = new ConversationStore(dir, {
+    now: () => new Date('2026-11-01T09:00:00.000Z')
+  });
+  const created = await store.create();
+  await store.appendMessage(
+    created.id,
+    message('m1', 'user', '你好', '2026-11-01T09:01:00.000Z')
+  );
+
+  const renamed = await store.rename(created.id, '  数学复盘  ');
+  expect(renamed.title).toBe('数学复盘');
+  expect((await store.get(created.id))?.title).toBe('数学复盘');
+  await expect(store.rename(created.id, '   ')).rejects.toThrow(/标题/);
+});
+
+test('keeps a manually renamed title when later messages arrive', async () => {
+  const dir = await tempDir();
+  const store = new ConversationStore(dir, {
+    now: () => new Date('2026-11-01T09:00:00.000Z')
+  });
+  const created = await store.create();
+  await store.appendMessage(
+    created.id,
+    message('m1', 'user', '帮我排计划', '2026-11-01T09:01:00.000Z')
+  );
+  await store.rename(created.id, '我的周计划');
+
+  const updated = await store.appendMessage(
+    created.id,
+    message('m2', 'user', '再调整一下', '2026-11-01T09:02:00.000Z')
+  );
+  expect(updated.title).toBe('我的周计划');
+});
+
+test('sorts pinned conversations before newer unpinned ones', async () => {
+  const dir = await tempDir();
+  let now = new Date('2026-11-01T09:00:00.000Z');
+  const store = new ConversationStore(dir, { now: () => now });
+  const older = await store.create();
+  await store.appendMessage(
+    older.id,
+    message('m1', 'user', '旧对话', '2026-11-01T09:01:00.000Z')
+  );
+  now = new Date('2026-11-01T10:00:00.000Z');
+  const newer = await store.create();
+  await store.appendMessage(
+    newer.id,
+    message('m2', 'user', '新对话', '2026-11-01T10:01:00.000Z')
+  );
+
+  await store.setPinned(older.id, true);
+  expect((await store.list()).map((summary) => summary.id)).toEqual([older.id, newer.id]);
+  expect((await store.list())[0]?.pinned).toBe(true);
+
+  const reopened = new ConversationStore(dir, { now: () => now });
+  expect((await reopened.list())[0]?.id).toBe(older.id);
+
+  await store.setPinned(older.id, false);
+  expect((await store.list()).map((summary) => summary.id)).toEqual([newer.id, older.id]);
+});
+
+test('truncates trailing messages and rejects invalid keep counts', async () => {
+  const dir = await tempDir();
+  const store = new ConversationStore(dir, {
+    now: () => new Date('2026-11-01T09:00:00.000Z')
+  });
+  const created = await store.create();
+  for (const [id, role, text] of [
+    ['m1', 'user', '第一条'],
+    ['m2', 'assistant', '第二条'],
+    ['m3', 'user', '第三条'],
+    ['m4', 'assistant', '第四条']
+  ] as const) {
+    await store.appendMessage(
+      created.id,
+      message(id, role, text, '2026-11-01T09:01:00.000Z')
+    );
+  }
+
+  const truncated = await store.truncateMessages(created.id, 2);
+  expect(truncated.messages.map((entry) => entry.id)).toEqual(['m1', 'm2']);
+  expect((await store.get(created.id))?.messages).toHaveLength(2);
+  await expect(store.truncateMessages(created.id, -1)).rejects.toThrow(/保留/);
+  await expect(store.truncateMessages(created.id, 1.5)).rejects.toThrow(/保留/);
+});
+
+test('searches titles and message bodies case-insensitively', async () => {
+  const dir = await tempDir();
+  const store = new ConversationStore(dir, {
+    now: () => new Date('2026-11-01T09:00:00.000Z')
+  });
+  const math = await store.create({ title: '数学计划' });
+  await store.appendMessage(
+    math.id,
+    message('m1', 'user', '今天练极限', '2026-11-01T09:01:00.000Z')
+  );
+  const english = await store.create({ title: 'English' });
+  await store.appendMessage(
+    english.id,
+    message('m2', 'user', 'Linear Algebra 第 3 章', '2026-11-01T10:01:00.000Z')
+  );
+
+  expect((await store.search('极限')).map((summary) => summary.id)).toEqual([math.id]);
+  expect((await store.search('数学')).map((summary) => summary.id)).toEqual([math.id]);
+  expect((await store.search('linear')).map((summary) => summary.id)).toEqual([english.id]);
+  expect(await store.search('   ')).toEqual(await store.list());
+  expect(await store.search('不存在')).toEqual([]);
+});
+
+test('skips greetings and punctuation-only messages for the auto title', async () => {
+  const dir = await tempDir();
+  const store = new ConversationStore(dir, {
+    now: () => new Date('2026-11-01T09:00:00.000Z')
+  });
+  const created = await store.create();
+  for (const [id, text] of [
+    ['m1', '你好'],
+    ['m2', 'HI!'],
+    ['m3', '在吗？'],
+    ['m4', '😀'],
+    ['m5', '……']
+  ] as const) {
+    const updated = await store.appendMessage(
+      created.id,
+      message(id, 'user', text, '2026-11-01T09:01:00.000Z')
+    );
+    expect(updated.title).toBe('新对话');
+  }
+
+  const titled = await store.appendMessage(
+    created.id,
+    message('m6', 'user', '帮我安排明天的复习', '2026-11-01T09:02:00.000Z')
+  );
+  expect(titled.title).toBe('帮我安排明天的复习');
+});

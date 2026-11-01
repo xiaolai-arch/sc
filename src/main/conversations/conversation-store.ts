@@ -13,6 +13,7 @@ const DEFAULT_TITLE = '新对话';
 const TITLE_LIMIT = 24;
 const PREVIEW_LIMIT = 80;
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
+const GREETING_TEXTS = new Set(['你好', 'hi', 'hello', '在吗', '嗨', '嗯', 'ok']);
 
 export interface ConversationStoreOptions {
   now?: () => Date;
@@ -37,8 +38,20 @@ function truncate(value: string, limit: number): string {
 }
 
 function titleFromText(text: string): string | undefined {
+  // Titles come from the first message with substance: greetings, punctuation
+  // and emoji-only messages stay on the default title until something useful.
+  const normalized = text
+    .toLowerCase()
+    .replace(/[\s\p{P}\p{S}]/gu, '');
+  if (normalized.length === 0 || GREETING_TEXTS.has(normalized)) return undefined;
   const title = truncate(text, TITLE_LIMIT);
   return title.length > 0 ? title : undefined;
+}
+
+function compareSummaries(a: ConversationSummary, b: ConversationSummary): number {
+  const pinned = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned));
+  if (pinned !== 0) return pinned;
+  return b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id);
 }
 
 function normalizeStep(value: unknown): ConversationStep | null {
@@ -116,6 +129,7 @@ function normalizeConversation(value: unknown): Conversation | null {
     title,
     kind,
     ...(workspaceId ? { workspaceId } : {}),
+    ...(value['pinned'] === true ? { pinned: true } : {}),
     createdAt,
     updatedAt,
     messages
@@ -129,6 +143,7 @@ function toSummary(conversation: Conversation): ConversationSummary {
     title: conversation.title,
     kind: conversation.kind,
     ...(conversation.workspaceId ? { workspaceId: conversation.workspaceId } : {}),
+    ...(conversation.pinned ? { pinned: true } : {}),
     updatedAt: conversation.updatedAt,
     preview: last ? truncate(last.text, PREVIEW_LIMIT) : ''
   };
@@ -153,17 +168,23 @@ export class ConversationStore {
 
   async list(): Promise<ConversationSummary[]> {
     await this.queue;
-    const entries = await readdir(this.directory, { withFileTypes: true }).catch(() => []);
-    const summaries: ConversationSummary[] = [];
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
-      const conversation = await this.readFile(entry.name.slice(0, -5));
-      if (conversation === null || conversation.messages.length === 0) continue;
-      summaries.push(toSummary(conversation));
-    }
-    return summaries.sort(
-      (a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id)
-    );
+    return (await this.collectConversations()).map(toSummary).sort(compareSummaries);
+  }
+
+  async search(query: string): Promise<ConversationSummary[]> {
+    await this.queue;
+    const needle = query.trim().toLowerCase();
+    const conversations = await this.collectConversations();
+    const matched = needle
+      ? conversations.filter(
+          (conversation) =>
+            conversation.title.toLowerCase().includes(needle) ||
+            conversation.messages.some((message) =>
+              message.text.toLowerCase().includes(needle)
+            )
+        )
+      : conversations;
+    return matched.map(toSummary).sort(compareSummaries);
   }
 
   async get(id: string): Promise<Conversation | null> {
@@ -228,12 +249,63 @@ export class ConversationStore {
     });
   }
 
+  async rename(id: string, title: string): Promise<Conversation> {
+    return this.runExclusive(async () => {
+      const conversation = await this.readFile(assertSafeId(id));
+      if (conversation === null) throw new Error(`Conversation not found: ${id}`);
+      const trimmed = title.trim();
+      if (trimmed.length === 0) throw new Error('对话标题不能为空。');
+      conversation.title = truncate(trimmed, TITLE_LIMIT);
+      conversation.updatedAt = this.now().toISOString();
+      await this.writeFile(conversation);
+      return clone(conversation);
+    });
+  }
+
+  async setPinned(id: string, pinned: boolean): Promise<Conversation> {
+    return this.runExclusive(async () => {
+      const conversation = await this.readFile(assertSafeId(id));
+      if (conversation === null) throw new Error(`Conversation not found: ${id}`);
+      if (pinned) conversation.pinned = true;
+      else delete conversation.pinned;
+      await this.writeFile(conversation);
+      return clone(conversation);
+    });
+  }
+
+  async truncateMessages(id: string, keepCount: number): Promise<Conversation> {
+    if (!Number.isInteger(keepCount) || keepCount < 0) {
+      throw new Error('保留消息数无效。');
+    }
+    return this.runExclusive(async () => {
+      const conversation = await this.readFile(assertSafeId(id));
+      if (conversation === null) throw new Error(`Conversation not found: ${id}`);
+      if (keepCount >= conversation.messages.length) return clone(conversation);
+      conversation.messages = conversation.messages.slice(0, keepCount);
+      conversation.updatedAt = this.now().toISOString();
+      await this.writeFile(conversation);
+      return clone(conversation);
+    });
+  }
+
   async linkWorkspace(id: string, workspaceId: string): Promise<Conversation> {
     return this.update(id, (conversation) => ({ ...conversation, workspaceId }));
   }
 
   private filePath(id: string): string {
     return join(this.directory, `${id}.json`);
+  }
+
+  private async collectConversations(): Promise<Conversation[]> {
+    const entries = await readdir(this.directory, { withFileTypes: true }).catch(() => []);
+    const conversations: Conversation[] = [];
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+      const conversation = await this.readFile(entry.name.slice(0, -5));
+      if (conversation === null || conversation.messages.length === 0) continue;
+      conversations.push(conversation);
+    }
+    return conversations;
   }
 
   private async readFile(id: string): Promise<Conversation | null> {
