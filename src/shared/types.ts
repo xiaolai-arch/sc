@@ -29,6 +29,7 @@ export interface StudyTask {
 }
 
 export type LocalCliAgent = 'codex' | 'claude' | 'zcode' | 'opencode';
+export type LocalCliEffort = 'low' | 'medium' | 'high';
 
 export type ProviderConfig =
   | { kind: 'anthropic'; model: string }
@@ -39,6 +40,8 @@ export type ProviderConfig =
       agent: LocalCliAgent;
       command?: string;
       model?: string;
+      /** Reasoning effort for codex/claude; unset keeps each CLI's default. */
+      effort?: LocalCliEffort;
       /** Claude Code only: run with --bare to skip global hooks/CLAUDE.md. */
       isolate?: boolean;
     };

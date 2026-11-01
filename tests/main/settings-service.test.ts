@@ -120,6 +120,38 @@ test('validates and persists the weekly review settings', async () => {
   expect(updated.notifications).toMatchObject({ weekly: '19:30', weeklyEnabled: false });
 });
 
+test('validates local CLI effort and keeps configs without effort readable', async () => {
+  const { service } = memorySettings();
+
+  const withEffort = await service.update({
+    provider: {
+      kind: 'local-cli',
+      agent: 'codex',
+      command: 'codex',
+      model: 'gpt-x',
+      effort: 'high'
+    }
+  });
+  expect(withEffort.provider).toEqual({
+    kind: 'local-cli',
+    agent: 'codex',
+    command: 'codex',
+    model: 'gpt-x',
+    effort: 'high'
+  });
+
+  await expect(
+    service.update({
+      provider: { kind: 'local-cli', agent: 'codex', effort: 'max' } as never
+    })
+  ).rejects.toThrow(/推理强度/);
+
+  const plain = await service.update({
+    provider: { kind: 'local-cli', agent: 'claude', command: 'claude' }
+  });
+  expect(plain.provider).toEqual({ kind: 'local-cli', agent: 'claude', command: 'claude' });
+});
+
 test('accepts non-negative token prices and rejects invalid ones', async () => {
   const { service } = memorySettings();
 

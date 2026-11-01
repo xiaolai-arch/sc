@@ -1,10 +1,16 @@
-import type { AppSettings, NotificationSettings, ProviderConfig } from '../../shared/types';
+import type {
+  AppSettings,
+  LocalCliEffort,
+  NotificationSettings,
+  ProviderConfig
+} from '../../shared/types';
 import type { SettingsPatch } from '../../shared/ipc';
 import type { AppState, JsonStateStore } from '../state-store';
 import { createDefaultSettings } from './defaults';
 
 const PROVIDER_KINDS = ['anthropic', 'openai-compatible', 'ollama', 'local-cli'] as const;
 const LOCAL_CLI_AGENTS = ['codex', 'claude', 'zcode', 'opencode'] as const;
+const LOCAL_CLI_EFFORTS = ['low', 'medium', 'high'] as const;
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const DEFAULT_NOTIFICATIONS = createDefaultSettings('').notifications;
@@ -66,11 +72,22 @@ function validateProvider(value: unknown): ProviderConfig {
       typeof value.model === 'string' && value.model.trim().length > 0
         ? value.model.trim()
         : undefined;
+    let effort: LocalCliEffort | undefined;
+    if (value.effort !== undefined) {
+      if (
+        typeof value.effort !== 'string' ||
+        !(LOCAL_CLI_EFFORTS as readonly string[]).includes(value.effort)
+      ) {
+        throw new Error('推理强度无效。');
+      }
+      effort = value.effort as LocalCliEffort;
+    }
     return {
       kind: 'local-cli',
       agent: agent as (typeof LOCAL_CLI_AGENTS)[number],
       ...(command ? { command } : {}),
       ...(model ? { model } : {}),
+      ...(effort ? { effort } : {}),
       ...(value.isolate === true ? { isolate: true } : {})
     };
   }
