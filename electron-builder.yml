@@ -17,6 +17,9 @@ asar: true
 
 mac:
   category: public.app-category.education
+  icon: build/icon.icns
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
   # arm64-only for v1. `dir` is the fast local verification target; zip and dmg
   # are the distributable artifacts.
   target:
@@ -28,6 +31,7 @@ mac:
       arch: [arm64]
   # Signing is optional. Set CSC_LINK/CSC_KEY_PASSWORD (or CSC_NAME) in the
   # environment to sign; otherwise electron-builder produces an unsigned build.
+  # For notarization set APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID.
   hardenedRuntime: true
   gatekeeperAssess: false
 
