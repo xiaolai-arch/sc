@@ -1,125 +1,155 @@
-# Module 6 — ui-wiring (v1) report
+# Module 8 — legacy-cleanup (v1) report
 
-**Base:** `feat/v1-completion` @ `ab9e122`
-**Worktree:** `v1-ui-wiring`
-**Scope:** shared IPC contracts, main composition root/IPC/preload bridge, renderer shell + pages, browser mock API, tests.
+**Base:** `feat/v1-completion` @ `6025859` (module 6 merge `ea7b2da` plus the
+butler reasoning-stream commits `227ce1b`/`6025859`)
+**Worktree:** `v1-legacy-cleanup`
+**Scope:** legacy `ExamProfile`/`DailyPlan` convergence onto the generic
+workspace model; removal of the orphaned today/review/exam-onboarding UI; tray
+and scheduler migration; browser mock and e2e fixture alignment.
 
 ## What changed
 
-### 1. Typed IPC surface (`src/shared/ipc.ts`)
+### 1. Orphaned legacy UI removed / migrated
 
-`StudyCoachApi` now exposes the services that Wave 1/2 built, using their own
-shared record types:
+- `TaskCard`, `Timer` and `timer-logic` moved from `src/renderer/today/` to
+  `src/renderer/shell/` because `PlanPane` (live) still uses them. `TaskCard` is
+  now typed on `WorkspaceTask`/`UpdateWorkspaceTaskInput`, so `PlanPane` passes
+  workspace tasks directly and the `toStudyTask` conversion is gone.
+- Deleted `src/renderer/today/TodayPage.tsx` and
+  `src/renderer/review/ReviewDialog.tsx` (nothing mounted them since module 6).
+- Deleted `src/renderer/onboarding/Onboarding.tsx`, the exam-profile onboarding
+  form that only fed the removed `completeOnboarding` API.
 
-- **Planner:** `planWorkspace(input)` → `WorkspacePlan` (`src/shared/planning.ts`).
-- **Practice:** `listPracticeSets`, `getPracticeSet`, `createPracticeSet`,
-  `submitPracticeAnswer`, `getPracticeMistakes`, `getPracticeDue`,
-  `listPracticeAttempts` (`src/shared/practice.ts`).
-- **Memory:** `listMemory`, `synthesizeMemory`, `getMemoryProfile`
-  (`src/shared/memory.ts`).
-- **Search:** `searchWorkspace`, `rebuildSearchIndex`
-  (`src/shared/search.ts`); `dispose()` stays main-only.
-- **Reviews:** `listReviews(input?)` reads persisted review entries
-  (`ReviewRecord` = review answers + `date`/`submittedAt`/`workspaceId`).
+### 2. Legacy type/API surface retired
 
-### 2. Composition root (`src/main/context.ts`, `src/main/index.ts`)
+- Removed `ExamProfile`, `SubjectConfig` and `DailyPlan` from
+  `src/shared/types.ts`; deleted `src/shared/profile.ts` and
+  `src/shared/demo.ts`.
+- Removed `completeOnboarding`, `getTodayPlan`, `generateTodayPlan`,
+  `updateTask` and `UpdateTaskInput` from `StudyCoachApi`, the IPC channel
+  table/handlers, the preload bridge and the context implementation.
+- Deleted `src/main/scheduler/planner.ts` (the butler-backed TodayPlanPlanner)
+  and its re-exports.
+- `AppState` is now `{ onboarded, settings }`. Learning content lives only in
+  the vault. Old `state.json` files still hydrate because unknown keys are
+  ignored and are rewritten without the legacy fields.
 
-- Builds practice/memory/planner per vault (alongside workspace/butler) and
-  rebuilds them when vault/provider/key changes.
-- `createSearchService` is registered lazily: the first search/IPC call starts
-  the chokidar watcher, so headless/test contexts never leave watchers behind.
-  Rebuilds dispose the previous instance; `AppContext.dispose()` stops it and
-  `src/main/index.ts` calls it on `before-quit` (the module-5 follow-up).
-- `submitReview` persists the review and, for workspace-scoped, non-skipped
-  reviews, synthesizes memory best-effort (review record wins if synthesis
-  fails).
-- `listReviews` reads vault-wide `reviews/` plus `workspaces/<id>/reviews/`,
-  newest first, with a clamped limit and path-safe workspace ids.
-- Planner/memory receive the same resolved model client as the butler (injected
-  fake in tests; missing key → template/rules fallback). No keys are logged or
-  persisted.
+### 3. Live consumers migrated to workspace/planning services
 
-### 3. IPC + preload (`src/main/ipc.ts`)
+- **Tray:** `TrayControllerOptions.getPlan(): DailyPlan | null` became
+  `getTasks(): WorkspaceTask[]`; `summarizeTodayPlan` became
+  `summarizeWorkspaceTasks`. `src/main/index.ts` aggregates tasks across all
+  workspaces and the “生成今日计划” action calls the workspace planner.
+- **Scheduler:** `createContextScheduler`'s morning hook now calls the shared
+  `planFirstEmptyWorkspace(context)` helper: it plans into the first workspace
+  with no tasks and persists the returned tasks via the workspace service. The
+  tray action uses the same helper, so task generation has one code path.
+- **Web mock:** `web/mock-api.ts` now implements only the post-cleanup
+  `StudyCoachApi` (onboarding is workspace-based; tasks go through
+  `createTask`/`updateWorkspaceTask`; reviews/practice/memory/search unchanged).
+- **E2E:** `e2e/support/launch.ts` seeds a state file with only
+  `onboarded`/`settings`; `e2e/fixtures/fake-codex.mjs` comments now describe
+  the workspace planner. No selectors or user flows changed.
 
-14 new channels with argument validators (workspace ids, dates, choices,
-question arrays, search queries/limits) and bridge mappings. `src/preload` is
-unchanged because it reuses `createStudyCoachBridge`.
+### 4. Tests
 
-### 4. Renderer wiring
+Deleted with the code they covered:
 
-- `useWorkspaceData` now loads real practice sets/mistakes/due/attempts, memory
-  records, learner profile and persisted reviews, and exposes
-  `generatePlan`, `submitPracticeAnswer`, `createPracticeSet`,
-  `searchWorkspace`, and workspace-scoped `submitReview`.
-- **今日安排:** `PlanPane` adds “生成今日任务”, which calls the planner and
-  creates the returned tasks in the current workspace (existing titles are
-  skipped so repeated clicks do not duplicate).
-- **学习:** `LearningPane` submits each answer over IPC; correctness,
-  explanation and the updated mistake book/due date come from the service.
-  Mistakes and today’s due list are shown.
-- **复盘:** `ReviewPane` shows the learner profile summary, real memory entries,
-  today’s due mistakes, and the persisted review entry for the selected date;
-  saves are attributed to the selected workspace.
-- **记录:** `NotePane` shows a “最近活动” summary of tasks/practice/review
-  records and a vault-wide search box. Note hits open in the reader; task,
-  practice, memory and review hits stay informational.
-- Streak is derived from persisted review dates instead of demo data.
+- `tests/renderer/today.test.tsx` (7), `tests/renderer/review.test.tsx` (7),
+  `tests/renderer/onboarding.test.tsx` (2)
+- `tests/main/scheduler-planner.test.ts` (5), `tests/shared/profile.test.ts` (2)
 
-### 5. Browser mock (`web/mock-api.ts`)
+Migrated/kept behavior tests:
 
-The mock now mirrors the extended contract with persistent (localStorage) state:
-seeded practice sets, answer scoring plus 1/3/7-day mistakes, memory synthesis
-and profile, review records, template planning, and simple in-memory full-text
-search. All existing prototype behaviors (onboarding, notes, butler replies,
-settings, API-key non-persistence) are preserved.
+- `tests/renderer/timer.test.ts` now imports the shell `timer-logic`; task
+  completion and review saving remain covered by `tests/renderer/workspace.test.tsx`.
+- `tests/main/integration-tray.test.ts` asserts summary/tooltip/menu/DND/failure
+  behavior over `WorkspaceTask[]`.
+- `tests/main/integration-context.test.ts` covers model-backed workspace
+  planning and morning planning into an empty workspace (plus no duplicate
+  model call on the next tick).
+- `tests/main/ipc-context.test.ts` covers bootstrap/API-key handling and task
+  persistence in a real vault across a context restart.
+- `tests/main/ipc-preload.test.ts` locks the 30-channel post-cleanup surface.
+- `tests/web/mock-api.test.ts` covers workspace onboarding and workspace task
+  updates.
+
+## Removed public API/type surface (explicit)
+
+| Kind | Name | Where |
+| --- | --- | --- |
+| type | `ExamProfile` | `src/shared/types.ts` |
+| type | `SubjectConfig` | `src/shared/types.ts` |
+| type | `DailyPlan` | `src/shared/types.ts` |
+| type | `UpdateTaskInput` | `src/shared/ipc.ts` |
+| API method | `StudyCoachApi.completeOnboarding(profile)` | `src/shared/ipc.ts` |
+| API method | `StudyCoachApi.getTodayPlan()` | `src/shared/ipc.ts` |
+| API method | `StudyCoachApi.generateTodayPlan()` | `src/shared/ipc.ts` |
+| API method | `StudyCoachApi.updateTask(input)` | `src/shared/ipc.ts` |
+| function | `validateExamProfile` | `src/shared/profile.ts` (file deleted) |
+| constant | `DEMO_PROFILE` | `src/shared/demo.ts` (file deleted) |
+| interface | `TodayPlanPlanner` | `src/main/scheduler/planner.ts` (file deleted) |
+| interface | `TodayPlanPlannerOptions` | `src/main/scheduler/planner.ts` (file deleted) |
+| function | `buildTodayPlanPrompt` | `src/main/scheduler/planner.ts` (file deleted) |
+| function | `parseTodayPlanReply` | `src/main/scheduler/planner.ts` (file deleted) |
+| function | `createTodayPlanPlanner` | `src/main/scheduler/planner.ts` (file deleted) |
+| IPC channel | `study-coach:bootstrap:complete-onboarding` | `src/main/ipc.ts` |
+| IPC channel | `study-coach:today-plan:get` | `src/main/ipc.ts` |
+| IPC channel | `study-coach:today-plan:generate` | `src/main/ipc.ts` |
+| IPC channel | `study-coach:today-plan:update-task` | `src/main/ipc.ts` |
+| state field | `AppState.profile` | `src/main/state-store.ts` |
+| state field | `AppState.plan` | `src/main/state-store.ts` |
+| state field | `AppState.reviews` | `src/main/state-store.ts` |
+| function | `summarizeTodayPlan` → `summarizeWorkspaceTasks` | `src/main/tray.ts` |
+| option | `TrayControllerOptions.getPlan` → `getTasks` | `src/main/tray.ts` |
+| component | `TodayPage` | `src/renderer/today/TodayPage.tsx` (deleted) |
+| component | `ReviewDialog` | `src/renderer/review/ReviewDialog.tsx` (deleted) |
+| component | `Onboarding` (exam profile) | `src/renderer/onboarding/Onboarding.tsx` (deleted) |
+| export | `DEMO_PLAN`, `DEMO_PROFILE` re-export | `web/mock-api.ts` |
+
+`TaskCard`, `Timer` and `timer-logic` still exist but moved from
+`src/renderer/today/` to `src/renderer/shell/`; `TaskCard` now takes
+`WorkspaceTask` + `UpdateWorkspaceTaskInput` instead of `StudyTask` +
+`UpdateTaskInput`.
+
+Added: `summarizeWorkspaceTasks` (`src/main/tray.ts`) and
+`planFirstEmptyWorkspace` (`src/main/scheduler/app-scheduler.ts`, re-exported
+from `src/main/scheduler/index.ts`).
 
 ## Commits
 
-- `2dd1e0c` feat(ipc): expose planner, practice, memory and search contracts
-- `83d0a40` feat(renderer): consume planner, practice, memory, search and reviews
-- `a5163e3` feat(renderer): add vault search to records and dedupe generated tasks
+- `47614fc` refactor(renderer): converge task card and timer into the workspace shell
+- `37d5335` refactor(main): drive the tray from workspace tasks and the planner
+- `385e8ee` refactor(main): plan the morning through the workspace planner
+- `5fe1070` refactor: remove the legacy exam-profile and daily-plan surface
+- (this report)
 
-## Verification
+## Verification (final tree)
 
 - `npm run typecheck` — pass (node + web).
-- `npm test` — **310 tests pass** (41 files; base was 297).
+- `npm test` — **310 tests pass** (40 files; base was 333, minus the 23 retired
+  legacy tests).
 - `npm run build` — pass (main/preload/renderer bundles).
-- `npm run test:e2e` — **1 passed** (`e2e/desktop.spec.ts`, real Electron +
-  fake codex). No e2e selector changes were required; legacy pages were kept.
-
-New/updated tests:
-
-- `tests/main/ipc-services.test.ts` (new): channel routing/validation, review →
-  memory synthesis, best-effort synthesis failure, lazy search + dispose,
-  vault review reading.
-- `tests/main/ipc-preload.test.ts`: locked channel table and bridge argument
-  forwarding for the new surface.
-- `tests/renderer/workspace.test.tsx`: planner-generated tasks, real practice
-  scoring/mistake book, activity summary and vault search.
-- `tests/web/mock-api.test.ts`: practice/mistake/due/attempts, memory
-  synthesis/profile, review listing, planning and search in mock mode.
+- `npm run test:e2e` — **1 passed** (`e2e/desktop.spec.ts`, real Electron with
+  the fake CLI; onboarding → today task → butler reasoning).
 
 ## Risks / follow-ups
 
-- **Planner model path:** production planner/memory reuse the butler’s resolved
-  model client. Without credentials they degrade to the deterministic template /
-  rule summaries. With a `local-cli` provider, pressing “生成今日任务” or saving
-  a review may spawn the configured CLI (same trust boundary as chat).
-- **Memory scope:** only workspace-scoped, non-skipped reviews synthesize
-  memory (vault-wide reviews are recorded but not attributed to a workspace).
-- **Profile scope:** the header profile is aggregated across all workspaces even
-  when a workspace filter is active; memory entries themselves are filtered.
-- **Plan dedupe:** dedupe is by trimmed task title within the workspace; a
-  re-worded model plan can still add new tasks.
-- **Search scope:** the IPC search operation is per workspace; the 记录 page
-  aggregates results across all workspaces when “全部工作区” is selected.
-- **Legacy surfaces:** old `ExamProfile`/`DailyPlan`/`TodayPage`/`ReviewDialog`
-  remain in place for module 8; `generateTodayPlan` still uses the legacy
-  scheduler planner. The new workspace Today view is the one wired to the
-  workspace planner.
-- **Test-only stabilization:** `tests/main/workspace-security.test.ts` already
-  whitelisted concurrent `workspace-*`/`study-coach-*` mkdtemp entries; it now
-  also ignores the other suites’ documented `memory-*`, `practice-*`,
-  `search-*`, `settings-*` prefixes to remove a pre-existing parallel flake.
-- No files under `src/main/{planning,practice,memory,search,workspace,agent,butler}/**`
-  were modified; no dependencies were added.
+- **Tray scope:** the tray summarizes every task returned by all workspace
+  snapshots, matching the in-app 今日安排 view. `WorkspaceTask.due` is not used
+  to filter by date; a workspace with old open tasks keeps contributing to the
+  count until tasks are completed/skipped.
+- **Morning automation:** `planFirstEmptyWorkspace` only plans a workspace that
+  has zero tasks. It does not regenerate stale or partially-used task lists;
+  users regenerate explicitly from 今日安排.
+- **Old state files:** `profile`/`plan`/`reviews` keys in an existing
+  `state.json` are ignored and dropped on the next write. `onboarded` must be an
+  explicit boolean (workspace onboarding has written it since module 6); a very
+  old state file that implied onboarding from `profile` alone will show
+  onboarding once.
+- **Removed UI:** any external automation that invoked the deleted IPC channels
+  will get “no handler”; the renderer/preload/web mock were updated together.
+- No new dependencies; no network in tests. `src/shared/butler-stream.ts`,
+  `src/renderer/shell/{ReasoningBlock,ChatPane,types}.tsx|ts`,
+  `src/main/agent/**` and `src/main/butler/**` are untouched from the base
+  commit.
