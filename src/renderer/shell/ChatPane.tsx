@@ -1,5 +1,10 @@
 import { useEffect, useRef } from 'react';
-import { ChevronRightIcon, MoreHorizontalIcon, SparklesIcon } from '../ui/icons';
+import {
+  ChevronRightIcon,
+  MenuIcon,
+  MoreHorizontalIcon,
+  SparklesIcon
+} from '../ui/icons';
 import { Composer } from './Composer';
 import { MarkdownText } from './MarkdownText';
 import { MessageActions } from './MessageActions';
@@ -19,6 +24,8 @@ type ChatPaneProps = {
   panelOpen?: boolean;
   onTogglePanel?: () => void;
   onStop?: () => void;
+  onOpenSidebar?: () => void;
+  sidebarOpen?: boolean;
   composerText: string;
   onComposerTextChange: (text: string) => void;
   editing?: boolean;
@@ -46,6 +53,8 @@ export function ChatPane({
   panelOpen = false,
   onTogglePanel,
   onStop,
+  onOpenSidebar,
+  sidebarOpen = false,
   composerText,
   onComposerTextChange,
   editing = false,
@@ -75,6 +84,17 @@ export function ChatPane({
     <div className="flex h-full min-w-0 flex-1 flex-col bg-white">
       <header className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-black/[0.06] px-4 md:px-5">
         <div className="flex min-w-0 items-center gap-2">
+          {onOpenSidebar ? (
+            <button
+              type="button"
+              aria-label="打开对话列表"
+              aria-expanded={sidebarOpen}
+              onClick={onOpenSidebar}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-500 transition-colors duration-150 hover:bg-black/[0.04] hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 md:hidden"
+            >
+              <MenuIcon className="h-4 w-4" />
+            </button>
+          ) : null}
           <span className="text-[13px] font-medium text-black">管家</span>
           <span className="text-[11px] text-gray-400">/</span>
           <span className="truncate text-[11px] text-gray-500">

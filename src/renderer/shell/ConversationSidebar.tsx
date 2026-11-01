@@ -24,6 +24,8 @@ type ConversationSidebarProps = {
   onTogglePinned: (id: string, pinned: boolean) => void;
   onDeleteConversation: (id: string) => void;
   onSearchConversations: (query: string) => Promise<ConversationSummary[]>;
+  mobileOpen?: boolean;
+  onCloseMobile?: () => void;
 };
 
 function timeLabel(value: string): string {
@@ -51,7 +53,9 @@ export function ConversationSidebar({
   onRenameConversation,
   onTogglePinned,
   onDeleteConversation,
-  onSearchConversations
+  onSearchConversations,
+  mobileOpen = false,
+  onCloseMobile
 }: ConversationSidebarProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<ConversationSummary[] | null>(null);
@@ -157,11 +161,29 @@ export function ConversationSidebar({
   }
 
   return (
-    <aside className="flex w-full shrink-0 flex-col border-b border-black/[0.06] bg-[#fbfbfa] md:h-full md:w-[220px] md:border-b-0 md:border-r md:border-[#e8e5e0]">
+    <aside
+      className={cn(
+        'fixed inset-y-0 left-0 z-40 flex w-[260px] max-w-[85vw] shrink-0 flex-col border-r border-[#e8e5e0] bg-[#fbfbfa] transition-transform duration-200 motion-reduce:transition-none',
+        mobileOpen ? 'translate-x-0' : '-translate-x-full',
+        'md:static md:z-auto md:h-full md:w-[220px] md:max-w-none md:translate-x-0'
+      )}
+    >
       <div aria-hidden="true" className="hidden items-center gap-1.5 px-4 pt-4 md:flex">
         <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" />
         <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" />
         <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
+      </div>
+
+      <div className="flex items-center justify-between px-4 pt-3 md:hidden">
+        <span className="text-[12px] font-semibold tracking-tight text-black">对话</span>
+        <button
+          type="button"
+          aria-label="关闭对话列表"
+          onClick={onCloseMobile}
+          className="flex h-7 items-center justify-center rounded-md px-2 text-[10px] text-[#8a8a8e] hover:bg-black/[0.04] hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+        >
+          关闭
+        </button>
       </div>
 
       <div className="flex items-center gap-2 px-4 pb-3 pt-3">

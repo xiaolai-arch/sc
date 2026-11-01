@@ -394,7 +394,7 @@ export function ProjectPanel({
   }
 
   return (
-    <aside className="flex h-full w-full shrink-0 flex-col border-l border-[#e8e5e0] bg-[#fdfdfc] md:w-[300px]">
+    <aside className="fixed inset-y-0 right-0 z-40 flex w-[300px] max-w-[85vw] shrink-0 flex-col border-l border-[#e8e5e0] bg-[#fdfdfc] transition-transform duration-200 motion-reduce:transition-none md:static md:z-auto md:h-full md:w-[300px] md:max-w-none md:translate-x-0">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-[#ece9e4] px-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">

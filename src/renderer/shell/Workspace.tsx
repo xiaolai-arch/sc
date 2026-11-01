@@ -38,6 +38,11 @@ function messageOf(cause: unknown) {
   return cause instanceof Error ? cause.message : '操作失败，请重试。';
 }
 
+/** True when Tailwind's `md` breakpoint (768px) is not met. */
+function isNarrowScreen(): boolean {
+  return typeof window !== 'undefined' && window.innerWidth < 768;
+}
+
 function chatMessageId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
@@ -128,7 +133,8 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   } = useWorkspaceData();
   const conversations = useConversations();
   const [projectId, setProjectId] = useState<string | null>(null);
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(() => !isNarrowScreen());
   const [panelTab, setPanelTab] = useState<ProjectPanelTab>('plan');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [previewNote, setPreviewNote] = useState<WorkspaceNote | null>(null);
@@ -655,6 +661,16 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     }
   }
 
+  function closeMobileDrawers() {
+    setSidebarOpen(false);
+    if (isNarrowScreen()) setPanelOpen(false);
+  }
+
+  function openSettings() {
+    closeMobileDrawers();
+    setSettingsOpen(true);
+  }
+
   function startDraft() {
     streamGenerationRef.current += 1;
     conversations.startDraft();
@@ -662,6 +678,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     setActionError(null);
     setEditingMessageId(null);
     setComposerText('');
+    setSidebarOpen(false);
   }
 
   function selectConversation(id: string) {
@@ -670,12 +687,14 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     setActionError(null);
     setEditingMessageId(null);
     setComposerText('');
+    setSidebarOpen(false);
     void conversations.select(id);
   }
 
   function selectProject(id: string) {
     streamGenerationRef.current += 1;
     setProjectId(id);
+    setSidebarOpen(false);
     if (conversations.active?.workspaceId === id) return;
     const recent = conversations.summaries.find((summary) => summary.workspaceId === id);
     if (recent) {
@@ -731,7 +750,15 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
         </div>
       ) : null}
 
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+      <div className="flex min-h-0 flex-1 md:flex-row">
+        {sidebarOpen && isNarrowScreen() ? (
+          <button
+            type="button"
+            aria-label="关闭对话列表"
+            onClick={() => setSidebarOpen(false)}
+            className="fixed inset-0 z-30 bg-black/25 md:hidden"
+          />
+        ) : null}
         <ConversationSidebar
           conversations={conversations.summaries}
           projects={workspaces}
@@ -740,14 +767,24 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
           onNewConversation={startDraft}
           onSelectConversation={selectConversation}
           onSelectProject={selectProject}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={openSettings}
           onRenameConversation={(id, title) => void renameConversation(id, title)}
           onTogglePinned={(id, pinned) => void togglePinnedConversation(id, pinned)}
           onDeleteConversation={(id) => void deleteConversation(id)}
           onSearchConversations={conversations.search}
+          mobileOpen={sidebarOpen}
+          onCloseMobile={() => setSidebarOpen(false)}
         />
 
         <div className="flex min-h-0 min-w-0 flex-1">
+          {panelOpen && isNarrowScreen() ? (
+            <button
+              type="button"
+              aria-label="关闭项目面板"
+              onClick={() => setPanelOpen(false)}
+              className="fixed inset-0 z-30 bg-black/25 md:hidden"
+            />
+          ) : null}
           <ChatPane
             workspace={currentWorkspace}
             messages={chatMessages}
@@ -755,7 +792,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
             onSend={(text) => void submitComposer(text)}
             modelLabel={displayModel}
             hasApiKey={hasApiKey}
-            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenSettings={openSettings}
             dateLabel={dateLabel}
             panelOpen={panelOpen}
             onTogglePanel={() => setPanelOpen((open) => !open)}
@@ -766,6 +803,8 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
             onCancelEdit={cancelEdit}
             onRegenerate={(id) => void regenerateMessage(id)}
             onEditMessage={editLastUserMessage}
+            onOpenSidebar={() => setSidebarOpen(true)}
+            sidebarOpen={sidebarOpen}
           />
 
           <ProjectPanel
@@ -791,6 +830,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
             onPrompt={(prompt) => void sendMessage(prompt)}
             onPreviewNote={setPreviewNote}
             onOpenPractice={() => {
+              closeMobileDrawers();
               setPracticeSetId(filteredPracticeSets[0]?.id ?? null);
               setPracticeOpen(true);
             }}
