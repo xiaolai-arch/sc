@@ -9,7 +9,7 @@ type MessageActionsProps = {
 };
 
 const actionClass =
-  'rounded px-1.5 py-0.5 text-[11px] text-gray-500 dark:text-[#8e8e93] transition-colors hover:bg-black/[0.05] dark:hover:bg-white/[0.06] hover:text-black dark:hover:text-[#f5f5f7] disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30';
+  'rounded-full px-2.5 py-1 text-[12px] font-medium text-gray-500 transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:bg-black/[0.04] hover:text-black hover:opacity-80 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#8e8e93] dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]';
 
 export function MessageActions({
   text,

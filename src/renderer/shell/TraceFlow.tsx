@@ -9,7 +9,7 @@ type TraceFlowProps = {
 };
 
 const rowClass =
-  'flex w-full min-h-[26px] items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30';
+  'flex w-full min-h-[26px] items-center gap-1.5 rounded-xl px-1.5 py-0.5 text-left transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30';
 
 const rowHoverClass =
   'hover:bg-black/[0.03] dark:hover:bg-white/[0.04]';
@@ -71,7 +71,7 @@ function ReasoningRow({
     return (
       <div className={rowClass}>
         <ThinkIcon className="h-3.5 w-3.5 shrink-0 animate-pulse text-[#0071e3] dark:text-[#4da3ff]" />
-        <span className="shrink-0 text-[12px] font-medium text-gray-600 dark:text-[#a1a1a6]">
+        <span className="shrink-0 text-[13px] font-medium text-gray-500 dark:text-[#a1a1a6]">
           思考
         </span>
         <span
@@ -106,7 +106,7 @@ function ReasoningRow({
               : 'text-gray-400 dark:text-[#8e8e93]'
           )}
         />
-        <span className="shrink-0 text-[12px] font-medium text-gray-600 dark:text-[#a1a1a6]">
+        <span className="shrink-0 text-[13px] font-medium text-gray-500 dark:text-[#a1a1a6]">
           思考
         </span>
         {!open ? (
@@ -129,7 +129,7 @@ function ReasoningRow({
         )}
         <ChevronDownIcon
           className={cn(
-            'h-3 w-3 shrink-0 text-gray-400 transition-transform duration-150 dark:text-[#8e8e93]',
+            'h-3 w-3 shrink-0 text-gray-400 transition-transform duration-300 dark:text-[#8e8e93]',
             open && 'rotate-180'
           )}
         />
@@ -137,7 +137,7 @@ function ReasoningRow({
       {open ? (
         <div
           id={panelId}
-          className="mt-1 pb-1 pl-[22px] pr-1 text-[12px] leading-5 text-gray-600 dark:text-[#a1a1a6]"
+          className="mt-1 pb-1 pl-[22px] pr-1 text-[12px] leading-5 text-gray-500 [&_li]:text-[12px] [&_li]:leading-5 [&_p]:text-[12px] [&_p]:leading-5 dark:text-[#a1a1a6]"
         >
           <MarkdownText text={item.text} />
         </div>
@@ -173,7 +173,7 @@ function ToolRow({ item }: { item: Extract<ChatTraceItem, { kind: 'tool' }> }) {
               : 'text-gray-400 dark:text-[#8e8e93]'
         )}
       />
-      <span className="shrink-0 text-[12px] font-medium text-gray-600 dark:text-[#a1a1a6]">
+      <span className="shrink-0 text-[13px] font-medium text-gray-500 dark:text-[#a1a1a6]">
         {item.label || item.name}
       </span>
       {!open ? (
@@ -201,7 +201,7 @@ function ToolRow({ item }: { item: Extract<ChatTraceItem, { kind: 'tool' }> }) {
       {expandable ? (
         <ChevronDownIcon
           className={cn(
-            'h-3 w-3 shrink-0 text-gray-400 transition-transform duration-150 dark:text-[#8e8e93]',
+            'h-3 w-3 shrink-0 text-gray-400 transition-transform duration-300 dark:text-[#8e8e93]',
             open && 'rotate-180'
           )}
         />
@@ -228,7 +228,7 @@ function ToolRow({ item }: { item: Extract<ChatTraceItem, { kind: 'tool' }> }) {
       {open && expandable ? (
         <pre
           id={panelId}
-          className="mt-1 whitespace-pre-wrap break-words pb-1 pl-[22px] pr-1 font-sans text-[12px] leading-5 text-gray-600 dark:text-[#a1a1a6]"
+          className="mt-1 whitespace-pre-wrap break-words pb-1 pl-[22px] pr-1 font-sans text-[12px] leading-5 text-gray-500 dark:text-[#a1a1a6]"
         >
           {detail}
         </pre>

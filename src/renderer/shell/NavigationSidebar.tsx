@@ -57,10 +57,10 @@ function timeLabel(value: string): string {
 }
 
 const menuItemClass =
-  'flex w-full items-center rounded-md px-2 py-1.5 text-left text-[11px] text-[#3c3c3f] dark:text-[#a1a1a6] hover:bg-[#f1eee8] dark:hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30';
+  'flex w-full items-center rounded-xl px-2 py-2 text-left text-[13px] text-gray-700 transition-colors duration-200 hover:bg-black/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:text-[#a1a1a6] dark:hover:bg-white/[0.06]';
 
 const contextHeadingClass =
-  'px-2.5 pb-1 pt-2 text-[10px] font-medium tracking-wide text-[#9a9a9e] dark:text-[#8e8e93]';
+  'px-2.5 pb-1 pt-2 text-[11px] font-medium tracking-wide text-gray-400 dark:text-[#8e8e93]';
 
 export function NavigationSidebar({
   section,
@@ -198,7 +198,7 @@ export function NavigationSidebar({
       <>
         <div className="px-1 pb-2">
           <div className="relative">
-            <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#9a9a9e] dark:text-[#8e8e93]" />
+            <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400 dark:text-[#8e8e93]" />
             <input
               ref={searchRef}
               type="search"
@@ -206,15 +206,15 @@ export function NavigationSidebar({
               onChange={(event) => setQuery(event.target.value)}
               placeholder="搜索对话 ⌘K"
               aria-label="搜索对话"
-              className="h-8 w-full rounded-lg border border-black/[0.08] dark:border-white/10 bg-white dark:bg-[#242426] pl-7 pr-2 text-[11px] text-[#1d1d1f] dark:text-[#f5f5f7] outline-none placeholder:text-[#9a9a9e] focus:border-[#0071e3]/40 focus:ring-2 focus:ring-[#0071e3]/20"
+              className="h-9 w-full rounded-xl border-0 bg-white py-2 pl-7 pr-2 text-[13px] text-[#1d1d1f] outline-none transition-all duration-200 placeholder:text-gray-400 focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#f5f5f7]"
             />
           </div>
         </div>
         <p className={contextHeadingClass}>最近对话</p>
         {searching && visibleConversations.length === 0 ? (
-          <p className="px-2.5 py-2 text-[11px] leading-5 text-[#9a9a9e] dark:text-[#8e8e93]">没有找到对话。</p>
+          <p className="px-2.5 py-2 text-[12px] leading-5 text-gray-400 dark:text-[#8e8e93]">没有找到对话。</p>
         ) : visibleConversations.length === 0 ? (
-          <p className="px-2.5 py-2 text-[11px] leading-5 text-[#9a9a9e] dark:text-[#8e8e93]">
+          <p className="px-2.5 py-2 text-[12px] leading-5 text-gray-400 dark:text-[#8e8e93]">
             还没有对话。告诉阿咲你想做什么。
           </p>
         ) : (
@@ -240,7 +240,7 @@ export function NavigationSidebar({
                           setRenameText('');
                         }
                       }}
-                      className="h-8 w-full rounded-lg border border-[#0071e3]/40 bg-white dark:bg-[#242426] px-2 text-[12px] text-[#1d1d1f] dark:text-[#f5f5f7] outline-none focus:ring-2 focus:ring-[#0071e3]/20"
+                      className="h-9 w-full rounded-xl border-0 bg-white px-3 text-[13px] text-[#1d1d1f] outline-none ring-2 ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#f5f5f7]"
                     />
                   </div>
                 );
@@ -255,28 +255,28 @@ export function NavigationSidebar({
                       onSelectConversation(conversation.id);
                     }}
                     className={cn(
-                      'flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30',
-                      active ? 'bg-[#e9e6e0] dark:bg-white/[0.1]' : 'hover:bg-[#f1eee8] dark:hover:bg-white/[0.06]'
+                      'flex w-full items-start gap-2 rounded-xl px-2.5 py-2 text-left transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30',
+                      active ? 'bg-black/[0.06] dark:bg-white/[0.1]' : 'hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'
                     )}
                   >
-                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-white/80 dark:bg-white/[0.08] text-[10px] text-[#6b6b70] dark:text-[#a1a1a6]">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white dark:bg-white/[0.08] text-[11px] text-gray-500 dark:text-[#a1a1a6]">
                       {conversation.kind === 'check-in' ? '☾' : '✦'}
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline gap-1.5">
-                        <span className="truncate text-[12px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
+                        <span className="truncate text-[13px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
                           {conversation.pinned ? '📌 ' : ''}
                           {conversation.title}
                         </span>
-                        <span className="ml-auto shrink-0 text-[9px] text-[#9a9a9e] dark:text-[#8e8e93]">
+                        <span className="ml-auto shrink-0 text-[11px] text-gray-400 dark:text-[#8e8e93]">
                           {timeLabel(conversation.updatedAt)}
                         </span>
                       </span>
-                      <span className="mt-0.5 block truncate text-[10px] text-[#8a8a8e] dark:text-[#8e8e93]">
+                      <span className="mt-0.5 block truncate text-[12px] text-gray-500 dark:text-[#8e8e93]">
                         {conversation.preview || '还没有消息'}
                       </span>
                       {project ? (
-                        <span className="mt-1 inline-block rounded-full bg-[#f1eee8] dark:bg-white/[0.08] px-1.5 py-0.5 text-[9px] text-[#6b6b70] dark:text-[#a1a1a6]">
+                        <span className="mt-1 inline-block rounded-full bg-[#f5f5f7] px-2 py-0.5 text-[11px] text-gray-500 dark:bg-white/[0.08] dark:text-[#a1a1a6]">
                           {project}
                         </span>
                       ) : null}
@@ -295,7 +295,7 @@ export function NavigationSidebar({
                         return current === conversation.id ? null : conversation.id;
                       })
                     }
-                    className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-md text-[#8a8a8e] dark:text-[#8e8e93] opacity-0 transition-opacity hover:bg-black/[0.05] dark:hover:bg-white/[0.06] hover:text-black dark:hover:text-[#f5f5f7] focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 group-hover:opacity-100"
+                    className="absolute right-1 top-1 flex h-7 w-7 items-center justify-center rounded-full text-gray-500 opacity-0 transition-all duration-300 hover:bg-black/[0.05] hover:opacity-80 hover:text-black active:scale-[0.98] focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 group-hover:opacity-100 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#8e8e93] dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
                   >
                     <MoreHorizontalIcon className="h-3.5 w-3.5" />
                   </button>
@@ -304,7 +304,7 @@ export function NavigationSidebar({
                     <div
                       ref={menuRef}
                       role="menu"
-                      className="absolute right-1 top-7 z-10 w-28 rounded-lg border border-black/[0.08] dark:border-white/10 bg-white dark:bg-[#1c1c1e] p-1 shadow-lg"
+                      className="absolute right-1 top-8 z-10 w-32 rounded-2xl border border-gray-200/70 bg-white p-1 shadow-[0_8px_24px_rgba(0,0,0,0.12)] dark:border-white/10 dark:bg-[#1c1c1e]"
                     >
                       <button
                         type="button"
@@ -351,7 +351,7 @@ export function NavigationSidebar({
           {section === 'projects' ? '项目列表' : '按项目筛选'}
         </p>
         {projects.length === 0 ? (
-          <p className="px-2.5 py-2 text-[11px] leading-5 text-[#9a9a9e] dark:text-[#8e8e93]">
+          <p className="px-2.5 py-2 text-[12px] leading-5 text-gray-400 dark:text-[#8e8e93]">
             项目会由阿咲在对话里创建。
           </p>
         ) : (
@@ -361,14 +361,14 @@ export function NavigationSidebar({
               aria-current={selectedProjectId === null ? 'page' : undefined}
               onClick={() => onSelectProject(null)}
               className={cn(
-                'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30',
+                'flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30',
                 selectedProjectId === null
-                  ? 'bg-[#e9e6e0] dark:bg-white/[0.1]'
-                  : 'hover:bg-[#f1eee8] dark:hover:bg-white/[0.06]'
+                  ? 'bg-black/[0.06] dark:bg-white/[0.1]'
+                  : 'hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'
               )}
             >
-              <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-[#c9c4bc]" />
-              <span className="min-w-0 flex-1 truncate text-[12px] text-[#3c3c3f] dark:text-[#a1a1a6]">
+              <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-gray-300 dark:bg-white/30" />
+              <span className="min-w-0 flex-1 truncate text-[13px] text-gray-700 dark:text-[#a1a1a6]">
                 全部项目
               </span>
             </button>
@@ -381,19 +381,21 @@ export function NavigationSidebar({
                   aria-current={active ? 'page' : undefined}
                   onClick={() => onSelectProject(project.id)}
                   className={cn(
-                    'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30',
-                    active ? 'bg-[#e9e6e0] dark:bg-white/[0.1]' : 'hover:bg-[#f1eee8] dark:hover:bg-white/[0.06]'
+                    'flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30',
+                    active ? 'bg-black/[0.06] dark:bg-white/[0.1]' : 'hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'
                   )}
                 >
                   <span
                     aria-hidden="true"
-                    className="h-2 w-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: project.color }}
+                    className={cn(
+                      'h-2 w-2 shrink-0 rounded-full',
+                      active ? 'bg-[#0071e3]' : 'bg-gray-300 dark:bg-white/30'
+                    )}
                   />
-                  <span className="min-w-0 flex-1 truncate text-[12px] text-[#3c3c3f] dark:text-[#a1a1a6]">
+                  <span className="min-w-0 flex-1 truncate text-[13px] text-gray-700 dark:text-[#a1a1a6]">
                     {project.name}
                   </span>
-                  <FolderIcon className="h-3.5 w-3.5 shrink-0 text-[#9a9a9e] dark:text-[#8e8e93]" />
+                  <FolderIcon className="h-3.5 w-3.5 shrink-0 text-gray-400 dark:text-[#8e8e93]" />
                 </button>
               );
             })}
@@ -407,35 +409,35 @@ export function NavigationSidebar({
     <aside
       aria-label="导航"
       className={cn(
-        'fixed inset-y-0 left-0 z-40 flex w-[260px] max-w-[85vw] shrink-0 flex-col border-r border-[#e8e5e0] dark:border-white/10 bg-[#fbfbfa] dark:bg-[#141415] transition-transform duration-200 motion-reduce:transition-none',
+        'fixed inset-y-0 left-0 z-40 flex w-[260px] max-w-[85vw] shrink-0 flex-col border-r border-gray-200/70 bg-[#f5f5f7] transition-transform duration-200 motion-reduce:transition-none dark:border-white/10 dark:bg-[#0f0f10]',
         mobileOpen ? 'translate-x-0' : '-translate-x-full',
         'md:static md:z-auto md:h-full md:w-[260px] md:max-w-none md:translate-x-0'
       )}
     >
       <div className="flex items-center justify-between px-4 pt-3 md:hidden">
-        <span className="text-[12px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">导航</span>
+        <span className="text-[13px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">导航</span>
         <button
           type="button"
           aria-label="关闭导航"
           onClick={onCloseMobile}
-          className="flex h-7 items-center justify-center rounded-md px-2 text-[10px] text-[#8a8a8e] dark:text-[#8e8e93] hover:bg-black/[0.04] dark:hover:bg-white/[0.06] hover:text-black dark:hover:text-[#f5f5f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+          className="flex h-8 items-center justify-center rounded-full px-3 text-[12px] font-medium text-gray-500 transition-all duration-300 hover:bg-black/[0.04] hover:opacity-80 hover:text-black active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#8e8e93] dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
         >
           关闭
         </button>
       </div>
 
       <div className="flex items-center gap-2 px-4 pb-3 pt-3">
-        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#1d1d1f] text-[11px] font-semibold text-white">
+        <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-[#1d1d1f] text-[12px] font-semibold text-white">
           S
         </span>
-        <span className="text-[13px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">Study Coach</span>
+        <span className="text-[15px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">Study Coach</span>
       </div>
 
-      <div className="px-3 pb-2">
+      <div className="px-3 pb-3">
         <button
           type="button"
           onClick={onNewConversation}
-          className="flex h-9 w-full items-center gap-2 rounded-lg bg-[#0071e3] px-3 text-[12px] font-semibold text-white transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+          className="flex h-10 w-full items-center justify-center gap-2 rounded-full bg-[#0071e3] px-3 text-[13px] font-medium text-white transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100"
         >
           <PlusIcon className="h-4 w-4" />
           新对话
@@ -452,10 +454,10 @@ export function NavigationSidebar({
               aria-current={active ? 'page' : undefined}
               onClick={() => onSectionChange(id)}
               className={cn(
-                'flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[12px] transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30',
+                'flex h-9 w-full items-center gap-2.5 rounded-xl px-2.5 text-left text-[13px] transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30',
                 active
-                  ? 'bg-[#e8f2ff] dark:bg-[#0a84ff]/15 font-medium text-[#0071e3] dark:text-[#4da3ff]'
-                  : 'text-[#3c3c3f] dark:text-[#a1a1a6] hover:bg-[#f1eee8] dark:hover:bg-white/[0.06]'
+                  ? 'bg-[#0071e3]/10 font-medium text-[#0071e3] dark:bg-[#0a84ff]/15 dark:text-[#4da3ff]'
+                  : 'text-gray-700 hover:bg-black/[0.04] dark:text-[#a1a1a6] dark:hover:bg-white/[0.06]'
               )}
             >
               <Icon className="h-4 w-4 shrink-0" />
@@ -465,7 +467,7 @@ export function NavigationSidebar({
         })}
       </nav>
 
-      <div className="mx-3 border-t border-[#eeeae4] dark:border-white/10" />
+      <div className="mx-3 border-t border-gray-200/70 dark:border-white/10" />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {section === 'chat' ? conversationList() : null}
@@ -473,23 +475,23 @@ export function NavigationSidebar({
         {section === 'reminders' ? (
           <>
             <p className={contextHeadingClass}>全部提醒</p>
-            <p className="px-2.5 py-2 text-[11px] leading-5 text-[#9a9a9e] dark:text-[#8e8e93]">
+            <p className="px-2.5 py-2 text-[12px] leading-5 text-gray-400 dark:text-[#8e8e93]">
               提醒是全局的，不按项目筛选。
             </p>
           </>
         ) : null}
       </div>
 
-      <div className="flex items-center gap-2 border-t border-[#eeeae4] dark:border-white/10 px-3 py-3">
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#1d1d1f] text-[10px] text-white">
+      <div className="flex items-center gap-2 border-t border-gray-200/70 px-3 py-3 dark:border-white/10">
+        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#1d1d1f] text-[11px] text-white">
           x
         </span>
-        <span className="min-w-0 flex-1 truncate text-[11px] text-[#5f5f63] dark:text-[#a1a1a6]">xiaolai</span>
+        <span className="min-w-0 flex-1 truncate text-[13px] text-gray-500 dark:text-[#a1a1a6]">xiaolai</span>
         <button
           type="button"
           aria-label="打开设置"
           onClick={() => onSectionChange('settings')}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-[#8a8a8e] dark:text-[#8e8e93] transition-colors hover:bg-black/[0.04] dark:hover:bg-white/[0.06] hover:text-black dark:hover:text-[#f5f5f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+          className="flex h-8 w-8 items-center justify-center rounded-full text-gray-500 transition-all duration-300 hover:bg-black/[0.04] hover:opacity-80 hover:text-black active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#8e8e93] dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
         >
           <SettingsIcon className="h-4 w-4" />
         </button>

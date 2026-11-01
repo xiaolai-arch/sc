@@ -78,18 +78,18 @@ function WorkspaceStatus({
   alert?: boolean;
 }) {
   return (
-    <div className="flex h-screen items-center justify-center bg-[#f7f6f3] dark:bg-[#0f0f10] p-4">
+    <div className="flex h-screen items-center justify-center bg-[#f5f5f7] p-4 dark:bg-[#0f0f10]">
       <div
         role={alert ? 'alert' : 'status'}
-        className="w-full max-w-sm rounded-xl border border-black/10 dark:border-white/10 bg-white dark:bg-[#1c1c1e] p-6 text-center shadow-sm"
+        className="w-full max-w-sm rounded-2xl bg-white p-8 text-center shadow-sm dark:bg-[#1c1c1e]"
       >
-        <p className="text-[15px] font-medium text-black dark:text-[#f5f5f7]">{title}</p>
-        {detail ? <p className="mt-2 text-[12px] leading-5 text-gray-600 dark:text-[#a1a1a6]">{detail}</p> : null}
+        <p className="text-[16px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">{title}</p>
+        {detail ? <p className="mt-2 text-[13px] leading-6 text-gray-500 dark:text-[#a1a1a6]">{detail}</p> : null}
         {actionLabel && onAction ? (
           <button
             type="button"
             onClick={onAction}
-            className="mt-4 rounded-md bg-[#0071e3] px-3 py-1.5 text-[12px] font-medium text-white"
+            className="mt-5 rounded-full bg-[#0071e3] px-4 py-2 text-[13px] font-medium text-white transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100"
           >
             {actionLabel}
           </button>
@@ -797,11 +797,11 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     conversations.active?.model?.trim() || (hasApiKey ? modelLabel : '模板计划');
 
   return (
-    <div className="flex h-screen flex-col bg-[#f7f6f3] dark:bg-[#0f0f10]">
+    <div className="flex h-screen flex-col bg-[#f5f5f7] dark:bg-[#0f0f10]">
       {bannerError ? (
         <div
           role="alert"
-          className="flex shrink-0 items-center justify-between gap-3 border-b border-[#d70015]/10 dark:border-[#ff7b72]/20 bg-[#fdf3f2] dark:bg-[#3a1c1e] px-4 py-2 text-[12px] text-[#d70015] dark:text-[#ff7b72]"
+          className="flex shrink-0 items-center justify-between gap-3 bg-[#ff3b30]/10 px-4 py-2.5 text-[13px] text-[#d70015] dark:bg-[#ff3b30]/15 dark:text-[#ff7b72]"
         >
           <span className="min-w-0 truncate">{bannerError}</span>
           <button
@@ -811,7 +811,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               void retry();
               void conversations.refresh();
             }}
-            className="shrink-0 font-medium text-[#0071e3] dark:text-[#4da3ff] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+            className="shrink-0 rounded-full px-2 py-1 font-medium text-[#0071e3] transition-all duration-300 hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#4da3ff]"
           >
             重试
           </button>
@@ -947,7 +947,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
                     void loadModelLabel();
                     onRefresh();
                   }}
-                  className="rounded-md px-2 py-1 text-[11px] text-gray-500 transition-colors hover:bg-black/[0.04] hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:text-[#8e8e93] dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
+                  className="rounded-full px-3 py-1.5 text-[13px] font-medium text-gray-500 transition-all duration-300 hover:bg-black/[0.04] hover:text-black hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#8e8e93] dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
                 >
                   返回对话
                 </button>
@@ -967,14 +967,14 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
       </div>
 
       {practiceOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 dark:bg-black/50 p-4">
-          <div className="flex h-[80vh] w-full max-w-4xl overflow-hidden rounded-2xl bg-white dark:bg-[#1c1c1e] shadow-xl">
-            <div className="w-56 shrink-0 overflow-y-auto border-r border-[#ece9e4] dark:border-white/10 p-2">
-              <div className="px-2 py-2 text-[11px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 dark:bg-black/60">
+          <div className="flex h-[80vh] w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-[0_8px_24px_rgba(0,0,0,0.12)] dark:bg-[#1c1c1e]">
+            <div className="w-60 shrink-0 overflow-y-auto border-r border-gray-200/70 p-2 dark:border-white/10">
+              <div className="px-2 py-2 text-[13px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">
                 练习
               </div>
               {filteredPracticeSets.length === 0 ? (
-                <p className="px-2 py-2 text-[11px] leading-5 text-[#8a8a8e] dark:text-[#8e8e93]">
+                <p className="px-2 py-2 text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
                   这个项目还没有练习集。可以让阿咲先记一些错题。
                 </p>
               ) : (
@@ -984,16 +984,16 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
                     type="button"
                     onClick={() => setPracticeSetId(set.id)}
                     aria-current={selectedPracticeSet?.id === set.id ? 'page' : undefined}
-                    className={`mb-1 flex w-full flex-col rounded-lg px-2 py-2 text-left transition-colors ${
+                    className={`mb-1 flex w-full flex-col rounded-xl px-3 py-2 text-left transition-colors duration-200 ${
                       selectedPracticeSet?.id === set.id
-                        ? 'bg-[#e9e6e0] dark:bg-white/[0.1]'
-                        : 'hover:bg-[#f1eee8] dark:hover:bg-white/[0.06]'
+                        ? 'bg-black/[0.06] dark:bg-white/[0.1]'
+                        : 'hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'
                     }`}
                   >
-                    <span className="truncate text-[11px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
+                    <span className="truncate text-[13px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
                       {set.title}
                     </span>
-                    <span className="mt-0.5 text-[9px] text-[#8a8a8e] dark:text-[#8e8e93]">
+                    <span className="mt-0.5 text-[12px] text-gray-500 dark:text-[#8e8e93]">
                       {set.subject} · {set.questions.length} 题
                     </span>
                   </button>
@@ -1001,13 +1001,13 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               )}
             </div>
             <div className="flex min-w-0 flex-1 flex-col">
-              <div className="flex h-11 shrink-0 items-center justify-between border-b border-[#ece9e4] dark:border-white/10 px-4">
-                <span className="text-[12px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">练习</span>
+              <div className="flex h-14 shrink-0 items-center justify-between border-b border-gray-200/70 px-4 dark:border-white/10">
+                <span className="text-[14px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">练习</span>
                 <button
                   type="button"
                   aria-label="关闭练习"
                   onClick={() => setPracticeOpen(false)}
-                  className="rounded-md px-2 py-1 text-[11px] text-[#6b6b70] dark:text-[#a1a1a6] hover:bg-black/[0.04] dark:hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+                  className="rounded-full px-3 py-1.5 text-[13px] font-medium text-gray-500 transition-all duration-300 hover:bg-black/[0.04] hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#a1a1a6] dark:hover:bg-white/[0.06]"
                 >
                   关闭
                 </button>
@@ -1072,10 +1072,10 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
       >
         {previewNote ? (
           <div>
-            <p className="text-[11px] text-gray-500 dark:text-[#8e8e93]">
+            <p className="text-[12px] text-gray-500 dark:text-[#8e8e93]">
               {previewNote.subject} · {previewNote.updated}
             </p>
-            <div className="mt-3 whitespace-pre-wrap text-[13px] leading-6 text-[#1d1d1f] dark:text-[#f5f5f7]">
+            <div className="mt-3 whitespace-pre-wrap text-[14px] leading-6 text-[#1d1d1f] dark:text-[#f5f5f7]">
               {previewNote.body}
             </div>
             <div className="mt-5 flex justify-end">
@@ -1086,7 +1086,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
                   setPreviewNote(null);
                   promptButler(`帮我改一下笔记《${note.title}》：`);
                 }}
-                className="rounded-md bg-[#0071e3] px-3 py-1.5 text-[12px] font-medium text-white"
+                className="rounded-full bg-[#0071e3] px-4 py-2 text-[13px] font-medium text-white transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100"
               >
                 让阿咲改
               </button>

@@ -68,26 +68,26 @@ export function memoryWhyRemembered(record: MemoryRecord): string {
 function memoryKindClass(kind: MemoryKind): string {
   switch (kind) {
     case 'weakness':
-      return 'bg-[#fdf3f2] dark:bg-[#3a1c1e] text-[#d70015] dark:text-[#ff7b72]';
+      return 'bg-[#ff3b30]/10 text-[#d70015] dark:bg-[#ff3b30]/20 dark:text-[#ff7b72]';
     case 'strength':
-      return 'bg-[#eefaf0] dark:bg-[#12301c] text-[#1d7f3a] dark:text-[#7ee2a0]';
+      return 'bg-[#34c759]/10 text-[#1d7f3a] dark:bg-[#34c759]/20 dark:text-[#7ee2a0]';
     case 'preference':
-      return 'bg-[#f2f7fd] dark:bg-[#16202b] text-[#0071e3] dark:text-[#4da3ff]';
+      return 'bg-[#0071e3]/10 text-[#0071e3] dark:bg-[#0a84ff]/20 dark:text-[#4da3ff]';
     case 'plan':
-      return 'bg-[#f4f1fb] dark:bg-[#2a2340] text-[#6b4fbb] dark:text-[#c9b8ff]';
+      return 'bg-[#f5f5f7] text-gray-500 dark:bg-white/[0.08] dark:text-[#a1a1a6]';
     default:
-      return 'bg-[#f1eee8] dark:bg-white/[0.08] text-[#6b6b70] dark:text-[#a1a1a6]';
+      return 'bg-[#f5f5f7] text-gray-500 dark:bg-white/[0.08] dark:text-[#a1a1a6]';
   }
 }
 
 const actionClass =
-  'rounded px-1.5 py-0.5 text-[10px] text-[#6b6b70] dark:text-[#a1a1a6] transition-colors hover:bg-black/[0.05] dark:hover:bg-white/[0.06] hover:text-black dark:hover:text-[#f5f5f7] disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30';
+  'rounded-full px-2.5 py-1 text-[13px] font-medium text-gray-500 transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:bg-black/[0.04] hover:text-black hover:opacity-80 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#a1a1a6] dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]';
 
 const primaryButtonClass =
-  'rounded-md bg-[#0071e3] px-2 py-1 text-[10px] font-medium text-white disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30';
+  'rounded-full bg-[#0071e3] px-3 py-1.5 text-[13px] font-medium text-white transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:opacity-80 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100';
 
 const inputClass =
-  'h-7 min-w-0 rounded-md border border-[#e5e1da] dark:border-white/10 bg-white dark:bg-[#242426] px-2 text-[10px] text-[#1d1d1f] dark:text-[#f5f5f7] outline-none placeholder:text-[#9a9a9e] focus:border-[#0071e3]/40 focus:ring-2 focus:ring-[#0071e3]/20';
+  'h-9 min-w-0 rounded-xl border-0 bg-[#f5f5f7] px-3 text-[13px] text-[#1d1d1f] outline-none transition-all duration-200 [color-scheme:light] placeholder:text-gray-400 focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#f5f5f7] dark:[color-scheme:dark]';
 
 function messageOf(cause: unknown) {
   return cause instanceof Error ? cause.message : '操作失败，请重试。';
@@ -104,17 +104,17 @@ export function nextReminderTime(now: Date = new Date()): string {
 function statusDot(status: WorkspaceTask['status']) {
   if (status === 'done') return 'bg-[#34c759]';
   if (status === 'in-progress') return 'bg-[#0071e3]';
-  return 'bg-[#c9c4bc]';
+  return 'bg-gray-300 dark:bg-white/30';
 }
 
 function Empty({ text, action, onAction }: { text: string; action: string; onAction: () => void }) {
   return (
-    <div className="rounded-lg border border-dashed border-[#ddd8d0] dark:border-white/10 px-3 py-5 text-center">
-      <p className="text-[11px] leading-5 text-[#8a8a8e] dark:text-[#8e8e93]">{text}</p>
+    <div className="rounded-2xl border border-dashed border-gray-300/80 px-4 py-6 text-center dark:border-white/10">
+      <p className="text-[13px] leading-6 text-gray-500 dark:text-[#8e8e93]">{text}</p>
       <button
         type="button"
         onClick={onAction}
-        className="mt-2 text-[11px] font-medium text-[#0071e3] dark:text-[#4da3ff] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+        className="mt-3 rounded-full px-3 py-1.5 text-[13px] font-medium text-[#0071e3] transition-all duration-300 hover:bg-[#0071e3]/10 hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#4da3ff] dark:hover:bg-[#0a84ff]/20"
       >
         {action}
       </button>
@@ -124,7 +124,9 @@ function Empty({ text, action, onAction }: { text: string; action: string; onAct
 
 function SectionHeading({ title }: { title: string }) {
   return (
-    <h3 className="mb-2 text-[13px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">{title}</h3>
+    <h3 className="mb-3 text-[16px] font-semibold tracking-tight text-[#1d1d1f] dark:text-[#f5f5f7]">
+      {title}
+    </h3>
   );
 }
 
@@ -231,12 +233,12 @@ export function PlanSection({
       />
 
       <div className="mb-2 flex items-baseline justify-between">
-        <span className="text-[11px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">今天</span>
-        <span className="text-[10px] text-[#8a8a8e] dark:text-[#8e8e93]">
+        <span className="text-[13px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">今天</span>
+        <span className="text-[12px] text-gray-500 dark:text-[#8e8e93]">
           {done} / {filteredTasks.length} 完成
         </span>
       </div>
-      <div className="mb-3 h-1 overflow-hidden rounded-full bg-[#ece9e4] dark:bg-white/10">
+      <div className="mb-3 h-1 overflow-hidden rounded-full bg-gray-200 dark:bg-white/10">
         <div
           className="h-full rounded-full bg-[#0071e3]"
           style={{
@@ -251,7 +253,7 @@ export function PlanSection({
           onAction={() => onPrompt('帮我排一下这个项目的计划')}
         />
       ) : (
-        <div className="divide-y divide-[#f0ece6] dark:divide-white/[0.08]">
+        <div className="divide-y divide-gray-100 dark:divide-white/[0.08]">
           {filteredTasks.map((task) => (
             <div key={task.id} className="py-2">
               <div className="flex items-start gap-2">
@@ -265,15 +267,15 @@ export function PlanSection({
                 <div className="min-w-0 flex-1">
                   <p
                     className={cn(
-                      'text-[11px] leading-5',
+                      'text-[14px] leading-6',
                       task.status === 'done'
-                        ? 'text-[#9a9a9e] dark:text-[#8e8e93] line-through'
+                        ? 'text-gray-400 line-through dark:text-[#8e8e93]'
                         : 'text-[#1d1d1f] dark:text-[#f5f5f7]'
                     )}
                   >
                     {task.title}
                   </p>
-                  <p className="mt-0.5 truncate text-[9px] text-[#8a8a8e] dark:text-[#8e8e93]">
+                  <p className="mt-0.5 truncate text-[12px] text-gray-500 dark:text-[#8e8e93]">
                     {task.subject} · {task.durationMin} 分钟
                     {typeof task.actualMin === 'number' ? ` · 已练 ${task.actualMin} 分钟` : ''}
                   </p>
@@ -301,7 +303,7 @@ export function PlanSection({
                 </button>
               </div>
               {taskError?.id === task.id ? (
-                <p role="alert" className="mt-1 pl-3.5 text-[10px] text-[#d70015] dark:text-[#ff7b72]">
+                <p role="alert" className="mt-1 pl-3.5 text-[12px] text-[#d70015] dark:text-[#ff7b72]">
                   {taskError.message}
                 </p>
               ) : null}
@@ -312,7 +314,7 @@ export function PlanSection({
       <button
         type="button"
         onClick={() => onPrompt('帮我调整一下今天的任务安排')}
-        className="mt-3 text-[11px] font-medium text-[#0071e3] dark:text-[#4da3ff] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+        className="mt-3 rounded-full px-3 py-1.5 text-[13px] font-medium text-[#0071e3] transition-all duration-300 hover:bg-[#0071e3]/10 hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#4da3ff] dark:hover:bg-[#0a84ff]/20"
       >
         让阿咲调整
       </button>
@@ -383,10 +385,10 @@ export function RecordsSection({
           写一条记录
         </button>
         {!workspace ? (
-          <p className="mt-1 text-[10px] text-[#8a8a8e] dark:text-[#8e8e93]">先选择项目</p>
+          <p className="mt-2 text-[12px] text-gray-500 dark:text-[#8e8e93]">先选择项目</p>
         ) : null}
         {noteFormOpen && workspace ? (
-          <div className="mt-2 rounded-lg border border-[#e5e1da] dark:border-white/10 bg-white dark:bg-[#242426] p-2">
+          <div className="mt-2 rounded-xl bg-[#f5f5f7] p-3 dark:bg-white/[0.06]">
             <input
               aria-label="记录标题"
               placeholder="标题（可选）"
@@ -400,10 +402,10 @@ export function RecordsSection({
               placeholder="记下今天发生了什么…"
               value={noteBody}
               onChange={(event) => setNoteBody(event.target.value)}
-              className="mt-1 w-full resize-none rounded-md border border-[#e5e1da] dark:border-white/10 bg-white dark:bg-[#242426] px-2 py-1.5 text-[10px] leading-5 text-[#1d1d1f] dark:text-[#f5f5f7] outline-none placeholder:text-[#9a9a9e] focus:border-[#0071e3]/40 focus:ring-2 focus:ring-[#0071e3]/20"
+              className="mt-2 w-full resize-none rounded-xl border-0 bg-white px-3 py-2 text-[13px] leading-6 text-[#1d1d1f] outline-none transition-all duration-200 placeholder:text-gray-400 focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#f5f5f7]"
             />
             {noteError ? (
-              <p role="alert" className="mt-1 text-[10px] text-[#d70015] dark:text-[#ff7b72]">
+              <p role="alert" className="mt-1 text-[12px] text-[#d70015] dark:text-[#ff7b72]">
                 {noteError}
               </p>
             ) : null}
@@ -438,7 +440,7 @@ export function RecordsSection({
           onAction={() => onPrompt('记一下：')}
         />
       ) : (
-        <div className="divide-y divide-[#f0ece6] dark:divide-white/[0.08]">
+        <div className="divide-y divide-gray-100 dark:divide-white/[0.08]">
           {filteredNotes.slice(0, 10).map((note) => (
             <button
               key={note.id}
@@ -446,10 +448,10 @@ export function RecordsSection({
               onClick={() => onPreviewNote(note)}
               className="flex w-full flex-col gap-0.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
             >
-              <span className="truncate text-[11px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
+              <span className="truncate text-[14px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
                 {note.title}
               </span>
-              <span className="truncate text-[9px] text-[#8a8a8e] dark:text-[#8e8e93]">
+              <span className="truncate text-[12px] text-gray-500 dark:text-[#8e8e93]">
                 {note.subject} · {note.updated}
               </span>
             </button>
@@ -459,7 +461,7 @@ export function RecordsSection({
       <button
         type="button"
         onClick={() => onPrompt('记一下：')}
-        className="mt-3 text-[11px] font-medium text-[#0071e3] dark:text-[#4da3ff] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+        className="mt-3 rounded-full px-3 py-1.5 text-[13px] font-medium text-[#0071e3] transition-all duration-300 hover:bg-[#0071e3]/10 hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#4da3ff] dark:hover:bg-[#0a84ff]/20"
       >
         让阿咲记一条
       </button>
@@ -547,8 +549,8 @@ export function MemorySection({
 
   if (filteredMemories.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-[#ddd8d0] dark:border-white/10 px-3 py-5 text-center">
-        <p className="text-[11px] leading-5 text-[#8a8a8e] dark:text-[#8e8e93]">
+      <div className="rounded-2xl border border-dashed border-gray-300/80 px-4 py-6 text-center dark:border-white/10">
+        <p className="text-[13px] leading-6 text-gray-500 dark:text-[#8e8e93]">
           还没有记忆。完成一次复盘后，阿咲会记住你的卡点和偏好。
         </p>
       </div>
@@ -563,12 +565,12 @@ export function MemorySection({
         return (
           <div
             key={memory.id}
-            className="rounded-lg border border-[#e5e1da] dark:border-white/10 bg-white dark:bg-[#242426] p-2"
+            className="rounded-2xl bg-white p-4 shadow-sm dark:bg-[#1c1c1e]"
           >
             <div className="flex items-center justify-between gap-1">
               <span
                 className={cn(
-                  'rounded-full px-1.5 py-0.5 text-[9px] font-medium',
+                  'rounded-full px-2 py-1 text-[11px] font-medium',
                   memoryKindClass(memory.kind)
                 )}
               >
@@ -609,7 +611,7 @@ export function MemorySection({
                   rows={3}
                   value={memoryText}
                   onChange={(event) => setMemoryText(event.target.value)}
-                  className="w-full resize-none rounded-md border border-[#e5e1da] dark:border-white/10 bg-white dark:bg-[#242426] px-2 py-1.5 text-[10px] leading-5 text-[#1d1d1f] dark:text-[#f5f5f7] outline-none focus:border-[#0071e3]/40 focus:ring-2 focus:ring-[#0071e3]/20"
+                  className="w-full resize-none rounded-xl border-0 bg-[#f5f5f7] px-3 py-2 text-[13px] leading-6 text-[#1d1d1f] outline-none transition-all duration-200 focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#f5f5f7]"
                 />
                 <select
                   aria-label="记忆类型"
@@ -626,11 +628,11 @@ export function MemorySection({
                   ))}
                 </select>
                 {memoryError?.id === memory.id ? (
-                  <p role="alert" className="mt-1 text-[10px] text-[#d70015] dark:text-[#ff7b72]">
+                  <p role="alert" className="mt-1 text-[12px] text-[#d70015] dark:text-[#ff7b72]">
                     {memoryError.message}
                   </p>
                 ) : null}
-                <div className="mt-1 flex justify-end gap-1">
+                <div className="mt-2 flex justify-end gap-1">
                   <button
                     type="button"
                     onClick={cancelMemoryEdit}
@@ -650,17 +652,17 @@ export function MemorySection({
               </div>
             ) : (
               <>
-                <p className="mt-1 text-[11px] leading-5 text-[#1d1d1f] dark:text-[#f5f5f7]">
+                <p className="mt-2 text-[14px] leading-6 text-[#1d1d1f] dark:text-[#f5f5f7]">
                   {memory.text}
                 </p>
-                <p className="mt-1 text-[9px] text-[#8a8a8e] dark:text-[#8e8e93]">
+                <p className="mt-1.5 text-[12px] text-gray-500 dark:text-[#8e8e93]">
                   {memorySourceLabel(memory.source)}
                 </p>
-                <p className="text-[9px] text-[#9a9a9e] dark:text-[#8e8e93]">
+                <p className="text-[12px] text-gray-400 dark:text-[#8e8e93]">
                   {memoryWhyRemembered(memory)}
                 </p>
                 {memoryError?.id === memory.id ? (
-                  <p role="alert" className="mt-1 text-[10px] text-[#d70015] dark:text-[#ff7b72]">
+                  <p role="alert" className="mt-1 text-[12px] text-[#d70015] dark:text-[#ff7b72]">
                     {memoryError.message}
                   </p>
                 ) : null}
@@ -694,7 +696,7 @@ export function ReviewSection({ workspace, reviews, onPrompt }: ReviewSectionPro
         <button
           type="button"
           onClick={() => onPrompt('我们开始今天复盘')}
-          className="mt-3 text-[11px] font-medium text-[#0071e3] dark:text-[#4da3ff] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+          className="mt-3 rounded-full px-3 py-1.5 text-[13px] font-medium text-[#0071e3] transition-all duration-300 hover:bg-[#0071e3]/10 hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#4da3ff] dark:hover:bg-[#0a84ff]/20"
         >
           开始复盘
         </button>
@@ -705,35 +707,35 @@ export function ReviewSection({ workspace, reviews, onPrompt }: ReviewSectionPro
   return (
     <div>
       {latestReview ? (
-        <div className="rounded-lg bg-white dark:bg-[#242426] p-3 shadow-sm">
+        <div className="rounded-2xl bg-white p-5 shadow-sm dark:bg-[#1c1c1e]">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">
+            <span className="text-[14px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">
               {latestReview.date}
             </span>
-            <span className="text-[9px] text-[#8a8a8e] dark:text-[#8e8e93]">最近一次</span>
+            <span className="text-[11px] text-gray-500 dark:text-[#8e8e93]">最近一次</span>
           </div>
-          <p className="mt-2 line-clamp-3 text-[10px] leading-5 text-[#5f5f63] dark:text-[#a1a1a6]">
+          <p className="mt-2 line-clamp-3 text-[13px] leading-6 text-gray-500 dark:text-[#a1a1a6]">
             {latestReview.completed || '没有填写完成内容'}
           </p>
           {latestReview.stuck ? (
-            <p className="mt-1 line-clamp-2 text-[10px] leading-5 text-[#d70015] dark:text-[#ff7b72]">
+            <p className="mt-1 line-clamp-2 text-[13px] leading-6 text-[#d70015] dark:text-[#ff7b72]">
               卡点：{latestReview.stuck}
             </p>
           ) : null}
         </div>
       ) : null}
 
-      <h3 className="mb-2 mt-4 text-[11px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">
+      <h3 className="mb-2 mt-6 text-[16px] font-semibold tracking-tight text-[#1d1d1f] dark:text-[#f5f5f7]">
         最近复盘
       </h3>
-      <div className="divide-y divide-[#f0ece6] dark:divide-white/[0.08]">
+      <div className="divide-y divide-gray-100 dark:divide-white/[0.08]">
         {filteredReviews.map((review) => (
-          <div key={`${review.date}-${review.submittedAt}`} className="py-2">
+          <div key={`${review.date}-${review.submittedAt}`} className="py-3">
             <div className="flex items-baseline justify-between gap-2">
-              <span className="text-[11px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
+              <span className="text-[14px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
                 {review.date}
               </span>
-              <span className="text-[9px] text-[#8a8a8e] dark:text-[#8e8e93]">
+              <span className="text-[11px] text-gray-500 dark:text-[#8e8e93]">
                 {review.workspaceId
                   ? workspace?.id === review.workspaceId
                     ? workspace.name
@@ -741,13 +743,13 @@ export function ReviewSection({ workspace, reviews, onPrompt }: ReviewSectionPro
                   : '全局复盘'}
               </span>
             </div>
-            <p className="mt-1 text-[10px] leading-5 text-[#5f5f63] dark:text-[#a1a1a6]">
+            <p className="mt-1 text-[13px] leading-6 text-gray-500 dark:text-[#a1a1a6]">
               完成：{review.completed || '—'}
             </p>
-            <p className="text-[10px] leading-5 text-[#d70015] dark:text-[#ff7b72]">
+            <p className="text-[13px] leading-6 text-[#d70015] dark:text-[#ff7b72]">
               卡点：{review.stuck || '—'}
             </p>
-            <p className="text-[10px] leading-5 text-[#0071e3] dark:text-[#4da3ff]">
+            <p className="text-[13px] leading-6 text-[#0071e3] dark:text-[#4da3ff]">
               明天：{review.tomorrow || '—'}
             </p>
           </div>
@@ -756,7 +758,7 @@ export function ReviewSection({ workspace, reviews, onPrompt }: ReviewSectionPro
       <button
         type="button"
         onClick={() => onPrompt('我们开始今天复盘')}
-        className="mt-3 text-[11px] font-medium text-[#0071e3] dark:text-[#4da3ff] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+        className="mt-3 rounded-full px-3 py-1.5 text-[13px] font-medium text-[#0071e3] transition-all duration-300 hover:bg-[#0071e3]/10 hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#4da3ff] dark:hover:bg-[#0a84ff]/20"
       >
         开始复盘
       </button>
@@ -822,9 +824,9 @@ export function RemindersSection({
           event.preventDefault();
           void addReminder();
         }}
-        className="mb-3 rounded-lg border border-[#e5e1da] dark:border-white/10 bg-white dark:bg-[#242426] p-2"
+        className="mb-4 rounded-2xl bg-[#f5f5f7] p-4 dark:bg-white/[0.06]"
       >
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
           <input
             type="time"
             aria-label="提醒时间"
@@ -841,11 +843,11 @@ export function RemindersSection({
           />
         </div>
         {reminderError ? (
-          <p role="alert" className="mt-1 text-[10px] text-[#d70015] dark:text-[#ff7b72]">
+          <p role="alert" className="mt-1 text-[12px] text-[#d70015] dark:text-[#ff7b72]">
             {reminderError}
           </p>
         ) : null}
-        <div className="mt-2 flex justify-end">
+        <div className="mt-3 flex justify-end">
           <button
             type="submit"
             disabled={!reminderLabel.trim() || creatingReminder}
@@ -856,7 +858,7 @@ export function RemindersSection({
         </div>
       </form>
 
-      <p className="mb-2 text-[9px] text-[#8a8a8e] dark:text-[#8e8e93]">全部提醒</p>
+      <p className="mb-2 text-[12px] text-gray-500 dark:text-[#8e8e93]">全部提醒</p>
       {reminders.length === 0 ? (
         <Empty
           text="还没有提醒。"
@@ -864,20 +866,20 @@ export function RemindersSection({
           onAction={() => onPrompt('帮我设一个提醒：')}
         />
       ) : (
-        <div className="divide-y divide-[#f0ece6] dark:divide-white/[0.08]">
+        <div className="divide-y divide-gray-100 dark:divide-white/[0.08]">
           {reminders.map((reminder) => (
             <div key={reminder.id} className="flex items-center gap-2 py-2">
               <span
                 aria-hidden="true"
                 className={cn(
                   'h-1.5 w-1.5 shrink-0 rounded-full',
-                  reminder.enabled ? 'bg-[#34c759]' : 'bg-[#c9c4bc]'
+                  reminder.enabled ? 'bg-[#34c759]' : 'bg-gray-300'
                 )}
               />
-              <span className="w-10 shrink-0 text-[10px] tabular-nums text-[#6b6b70] dark:text-[#a1a1a6]">
+              <span className="w-10 shrink-0 text-[12px] tabular-nums text-gray-500 dark:text-[#a1a1a6]">
                 {reminder.time}
               </span>
-              <span className="min-w-0 flex-1 truncate text-[10px] text-[#1d1d1f] dark:text-[#f5f5f7]">
+              <span className="min-w-0 flex-1 truncate text-[13px] text-[#1d1d1f] dark:text-[#f5f5f7]">
                 {reminder.label}
               </span>
               <button
@@ -888,15 +890,15 @@ export function RemindersSection({
                 disabled={pendingReminderId === reminder.id}
                 onClick={() => void toggleReminder(reminder)}
                 className={cn(
-                  'relative h-4 w-7 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30',
-                  reminder.enabled ? 'bg-[#0071e3]' : 'bg-[#d8d4cc]'
+                  'relative h-5 w-9 shrink-0 rounded-full transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100',
+                  reminder.enabled ? 'bg-[#0071e3]' : 'bg-gray-300 dark:bg-white/20'
                 )}
               >
                 <span
                   aria-hidden="true"
                   className={cn(
-                    'absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform',
-                    reminder.enabled ? 'translate-x-3.5' : 'translate-x-0.5'
+                    'absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform duration-300 motion-reduce:transition-none',
+                    reminder.enabled ? 'translate-x-[18px]' : 'translate-x-0.5'
                   )}
                 />
               </button>
@@ -907,23 +909,23 @@ export function RemindersSection({
       <button
         type="button"
         onClick={() => onPrompt('帮我设一个提醒：')}
-        className="mt-3 text-[11px] font-medium text-[#0071e3] dark:text-[#4da3ff] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+        className="mt-3 rounded-full px-3 py-1.5 text-[13px] font-medium text-[#0071e3] transition-all duration-300 hover:bg-[#0071e3]/10 hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#4da3ff] dark:hover:bg-[#0a84ff]/20"
       >
         让阿咲设提醒
       </button>
 
-      <div className="mt-4 rounded-lg border border-[#e5e1da] dark:border-white/10 bg-white dark:bg-[#242426] p-2">
-        <p className="text-[10px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">主动检查</p>
-        <p className="mt-0.5 text-[9px] leading-4 text-[#8a8a8e] dark:text-[#8e8e93]">
+      <div className="mt-5 rounded-2xl bg-[#f5f5f7] p-4 dark:bg-white/[0.06]">
+        <p className="text-[13px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">主动检查</p>
+        <p className="mt-1 text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
           仅暂停主动检查，不影响你设的提醒。
         </p>
         {snoozedToday ? (
-          <p className="mt-2 text-[10px] text-[#6b6b70] dark:text-[#a1a1a6]">今天已静音，明天恢复</p>
+          <p className="mt-2 text-[12px] text-gray-500 dark:text-[#a1a1a6]">今天已静音，明天恢复</p>
         ) : (
           <button
             type="button"
             onClick={onSnoozeCheckIns}
-            className="mt-2 rounded-md bg-[#0071e3] px-2 py-1 text-[10px] font-medium text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+            className="mt-3 rounded-full bg-[#0071e3] px-3 py-1.5 text-[13px] font-medium text-white transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100"
           >
             今天别再提醒我
           </button>
@@ -941,16 +943,16 @@ export type MemoryProfileSummaryProps = {
 export function MemoryProfileSummary({ profile }: MemoryProfileSummaryProps) {
   if (!profile) return null;
   return (
-    <div className="mb-4 rounded-xl border border-[#e5e1da] dark:border-white/10 bg-[#fbfaf8] dark:bg-[#1c1c1e] p-3">
-      <p className="text-[12px] leading-5 text-[#5f5f63] dark:text-[#a1a1a6]">{profile.summary}</p>
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        <span className="rounded-full bg-[#fdf3f2] dark:bg-[#3a1c1e] px-2 py-0.5 text-[9px] text-[#d70015] dark:text-[#ff7b72]">
+    <div className="mb-5 rounded-2xl bg-[#f5f5f7] p-5 dark:bg-white/[0.06]">
+      <p className="text-[13px] leading-6 text-gray-500 dark:text-[#a1a1a6]">{profile.summary}</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <span className="rounded-full bg-[#ff3b30]/10 px-2.5 py-1 text-[11px] text-[#d70015] dark:bg-[#ff3b30]/20 dark:text-[#ff7b72]">
           {profile.weaknesses.length} 个薄弱点
         </span>
-        <span className="rounded-full bg-[#eefaf0] dark:bg-[#12301c] px-2 py-0.5 text-[9px] text-[#1d7f3a] dark:text-[#7ee2a0]">
+        <span className="rounded-full bg-[#34c759]/10 px-2.5 py-1 text-[11px] text-[#1d7f3a] dark:bg-[#34c759]/20 dark:text-[#7ee2a0]">
           {profile.strengths.length} 个优势
         </span>
-        <span className="rounded-full bg-[#f2f7fd] dark:bg-[#16202b] px-2 py-0.5 text-[9px] text-[#0071e3] dark:text-[#4da3ff]">
+        <span className="rounded-full bg-[#0071e3]/10 px-2.5 py-1 text-[11px] text-[#0071e3] dark:bg-[#0a84ff]/20 dark:text-[#4da3ff]">
           {profile.preferences.length} 个偏好
         </span>
       </div>

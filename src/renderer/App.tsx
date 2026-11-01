@@ -32,7 +32,7 @@ export function App() {
       <h1 className="sr-only">Study Coach</h1>
       {bootstrap === null ? (
         <PageShell>
-          <div className="mx-auto max-w-[980px] px-6 py-20 text-gray-600 dark:text-[#a1a1a6]">正在准备…</div>
+          <div className="mx-auto max-w-[980px] px-6 py-20 text-gray-500 dark:text-[#a1a1a6]">正在准备…</div>
         </PageShell>
       ) : (
         <Workspace
