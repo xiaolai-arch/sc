@@ -92,6 +92,8 @@ export interface ConversationApi {
     message: ConversationMessage
   ): Promise<Conversation>;
   deleteConversation(id: string): Promise<void>;
+  /** Proactive check-ins ask the renderer to open a conversation. */
+  onConversationOpened(listener: (conversationId: string) => void): () => void;
 }
 
 export interface StudyCoachApi

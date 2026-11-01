@@ -2,7 +2,7 @@ import type { AppContext } from '../context';
 import { Scheduler, type SchedulerNotification, type SchedulerOptions } from './scheduler';
 
 export interface ContextSchedulerOptions {
-  context: Pick<AppContext, 'api' | 'settings' | 'workspace'>;
+  context: Pick<AppContext, 'api' | 'settings' | 'workspace' | 'checkIns'>;
   notify: (notification: SchedulerNotification) => void | Promise<void>;
   /** Optional evening hook (e.g. open the review dialog or prime memory). */
   onEveningReview?: (date: string) => void | Promise<void>;
@@ -49,9 +49,7 @@ export function createContextScheduler(options: ContextSchedulerOptions): Schedu
     getSettings: () => options.context.settings.get(),
     getReminders: () => options.context.workspace.getReminders(),
     notify: options.notify,
-    onMorningPlan: async () => {
-      await planFirstEmptyWorkspace(options.context);
-    },
+    onCheckIn: (kind, date) => options.context.checkIns.check(kind, date),
     ...(options.onEveningReview ? { onEveningReview: options.onEveningReview } : {}),
     ...(options.onError ? { onError: options.onError } : {}),
     ...(options.now ? { now: options.now } : {})

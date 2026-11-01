@@ -18,6 +18,7 @@ export interface SchedulerNotification {
   title: string;
   body: string;
   reminderId?: string;
+  conversationId?: string;
 }
 
 export interface SuppressedTrigger {
@@ -43,6 +44,14 @@ export interface SchedulerOptions {
   onMorningPlan?: (date: string) => void | Promise<void>;
   /** Called once before the evening notification is shown. */
   onEveningReview?: (date: string) => void | Promise<void>;
+  /**
+   * Generates the proactive check-in. Returning null means intentionally
+   * skipped (budget/duplicate); the trigger is consumed without a notification.
+   */
+  onCheckIn?: (
+    kind: 'morning' | 'evening',
+    date: string
+  ) => Promise<SchedulerNotification | null> | SchedulerNotification | null;
   onError?: (error: unknown) => void;
 }
 
@@ -53,6 +62,7 @@ interface Trigger {
   title: string;
   body: string;
   reminderId?: string;
+  conversationId?: string;
 }
 
 const SNOOZE_INTERVAL_MS = 30_000;
@@ -115,6 +125,12 @@ export class Scheduler {
   private readonly notify: (notification: SchedulerNotification) => void | Promise<void>;
   private readonly onMorningPlan: ((date: string) => void | Promise<void>) | undefined;
   private readonly onEveningReview: ((date: string) => void | Promise<void>) | undefined;
+  private readonly onCheckIn:
+    | ((
+        kind: 'morning' | 'evening',
+        date: string
+      ) => Promise<SchedulerNotification | null> | SchedulerNotification | null)
+    | undefined;
   private readonly onError: ((error: unknown) => void) | undefined;
   private readonly delivered = new Set<string>();
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -127,6 +143,7 @@ export class Scheduler {
     this.notify = options.notify;
     this.onMorningPlan = options.onMorningPlan;
     this.onEveningReview = options.onEveningReview;
+    this.onCheckIn = options.onCheckIn;
     this.onError = options.onError;
   }
 
@@ -165,7 +182,7 @@ export class Scheduler {
         continue;
       }
 
-      const notification: SchedulerNotification = {
+      let notification: SchedulerNotification = {
         key,
         kind: trigger.kind,
         date,
@@ -176,8 +193,29 @@ export class Scheduler {
       };
 
       try {
-        if (trigger.kind === 'morning-plan') await this.onMorningPlan?.(date);
-        if (trigger.kind === 'evening-review') await this.onEveningReview?.(date);
+        if (trigger.kind === 'morning-plan' || trigger.kind === 'evening-review') {
+          if (this.onCheckIn) {
+            const generated = await this.onCheckIn(
+              trigger.kind === 'morning-plan' ? 'morning' : 'evening',
+              date
+            );
+            if (generated === null) {
+              // The check-in service decided to skip (duplicate or budget).
+              this.delivered.add(key);
+              continue;
+            }
+            notification = {
+              ...generated,
+              key,
+              kind: trigger.kind,
+              date,
+              scheduledTime: trigger.time
+            };
+          } else {
+            if (trigger.kind === 'morning-plan') await this.onMorningPlan?.(date);
+            if (trigger.kind === 'evening-review') await this.onEveningReview?.(date);
+          }
+        }
         await this.notify(notification);
         this.delivered.add(key);
         result.delivered.push(notification);

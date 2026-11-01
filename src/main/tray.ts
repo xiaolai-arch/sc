@@ -194,16 +194,20 @@ export async function createElectronTray(
 }
 
 /** Electron notification sink used by the scheduler during app startup. */
-export async function createElectronNotificationSink(): Promise<
-  (notification: SchedulerNotification) => void
-> {
+export async function createElectronNotificationSink(
+  onClick?: (notification: SchedulerNotification) => void
+): Promise<(notification: SchedulerNotification) => void> {
   const electron = await import('electron');
   return (notification) => {
     if (!electron.Notification.isSupported()) return;
-    new electron.Notification({
+    const native = new electron.Notification({
       title: notification.title,
       body: notification.body
-    }).show();
+    });
+    if (onClick) {
+      native.on('click', () => onClick(notification));
+    }
+    native.show();
   };
 }
 

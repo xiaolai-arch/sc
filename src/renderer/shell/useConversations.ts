@@ -67,6 +67,14 @@ export function useConversations(): ConversationController {
     }
   }, []);
 
+  useEffect(() => {
+    const api = window.studyCoach;
+    if (!api?.onConversationOpened) return undefined;
+    return api.onConversationOpened((id) => {
+      void select(id);
+    });
+  }, [select]);
+
   const startDraft = useCallback(() => {
     setActive(null);
     setError(null);

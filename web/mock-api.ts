@@ -939,6 +939,10 @@ export function createMockApi(
       persist();
     },
 
+    onConversationOpened() {
+      return () => undefined;
+    },
+
     async send(input: SendMessageInput): Promise<SendMessageResult> {
       recordNoteIfNeeded(input);
       return {

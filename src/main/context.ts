@@ -9,6 +9,7 @@ import type { AppSettings, ProviderConfig } from '../shared/types';
 import type { ButlerService, SendMessageInput, WorkspaceService } from '../shared/workspace';
 import { createModelClient, NoApiKeyError, type ModelClient } from './agent/model-client';
 import { createButlerService } from './butler/create-butler-service';
+import { ProactiveCheckInService } from './check-ins/proactive-check-in-service';
 import { ConversationStore } from './conversations/conversation-store';
 import { createMemoryService } from './memory/create-memory-service';
 import { createPracticeService } from './practice';
@@ -78,6 +79,7 @@ export interface AppContext {
   readonly practice: PracticeService;
   readonly memory: MemoryService;
   readonly planner: WorkspacePlanner;
+  readonly checkIns: ProactiveCheckInService;
   /** Created lazily so headless/test contexts never start a vault watcher. */
   readonly search: SearchService;
   /** Rebuilds workspace/butler from the persisted settings and secret store. */
@@ -94,6 +96,7 @@ interface ActiveServices {
   practice: PracticeService;
   memory: MemoryService;
   planner: WorkspacePlanner;
+  checkIns: ProactiveCheckInService;
   /** Lazily constructed; only a search call starts the chokidar watcher. */
   readonly search: SearchService;
   dispose(): Promise<void>;
@@ -226,6 +229,14 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
         ? options.modelClient
         : resolveModelClient(nextSettings.provider, apiKey);
 
+    const checkIns = new ProactiveCheckInService({
+      conversationStore,
+      workspaceService: workspace,
+      modelClient,
+      getSettings: () => settings.get(),
+      now
+    });
+
     let searchInstance: SearchService | null = null;
     return {
       vaultPath: nextSettings.vaultPath,
@@ -235,6 +246,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       practice: createPractice(nextSettings.vaultPath),
       memory: createMemory(nextSettings.vaultPath, modelClient),
       planner: createPlanner(nextSettings.vaultPath, workspace, modelClient),
+      checkIns,
       get search() {
         if (searchInstance === null) {
           searchInstance = createSearch(nextSettings.vaultPath, workspace);
@@ -491,6 +503,9 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     async deleteConversation(id) {
       await conversationStore.delete(id);
     },
+    onConversationOpened() {
+      return () => undefined;
+    },
     async send(input: SendMessageInput) {
       return (await getServices()).butler.send(input);
     },
@@ -524,6 +539,10 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     get planner() {
       if (!active) throw new Error('计划服务尚未初始化。');
       return active.planner;
+    },
+    get checkIns() {
+      if (!active) throw new Error('检查服务尚未初始化。');
+      return active.checkIns;
     },
     get search() {
       if (!active) throw new Error('搜索服务尚未初始化。');

@@ -65,6 +65,12 @@ export const BUTLER_STREAM_CHANNELS = {
   event: 'study-coach:butler:stream-event'
 } as const;
 
+/** Outbound conversation events (proactive check-ins). */
+export const CONVERSATION_EVENT_CHANNELS = {
+  changed: 'study-coach:conversations:changed',
+  open: 'study-coach:conversations:open'
+} as const;
+
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
 export type IpcChannelName = keyof typeof IPC_CHANNELS;
 
@@ -513,6 +519,14 @@ export function createStudyCoachBridge(
     appendConversationMessage: (id, message) =>
       call(IPC_CHANNELS.appendConversationMessage, { conversationId: id, message }),
     deleteConversation: (id) => call(IPC_CHANNELS.deleteConversation, id),
+    onConversationOpened(listener) {
+      if (!subscribe) return () => undefined;
+      return subscribe(CONVERSATION_EVENT_CHANNELS.open, (payload) => {
+        if (isRecord(payload) && typeof payload['conversationId'] === 'string') {
+          listener(payload['conversationId']);
+        }
+      });
+    },
     send: (input) => call(IPC_CHANNELS.send, input),
     async stream(input, onEvent) {
       const requestId = createRequestId();

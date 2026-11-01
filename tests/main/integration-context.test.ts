@@ -213,12 +213,11 @@ describe('context integration with real vault and butler factories', () => {
   });
 });
 
-  test('context scheduler plans an empty workspace once in the morning and reviews in the evening', async () => {
+  test('context scheduler creates proactive check-ins without auto-planning tasks', async () => {
     const dir = await tempDir();
     const model = new FakeModelClient([
-      JSON.stringify({
-        tasks: [{ title: '做真题', subject: '数学', durationMin: 60, acceptance: '一套' }]
-      })
+      '早上好，先做今天的任务。',
+      '晚上好，今天感觉怎么样？'
     ]);
     let now = new Date(2026, 9, 31, 7, 59, 0);
     const context = await createAppContext({
@@ -240,15 +239,11 @@ describe('context integration with real vault and butler factories', () => {
     expect(workspace).toBeDefined();
 
     const notifications: string[] = [];
-    const reviews: string[] = [];
     const scheduler = createContextScheduler({
       context,
       now: () => now,
       notify: (notification) => {
         notifications.push(notification.kind);
-      },
-      onEveningReview: (date) => {
-        reviews.push(date);
       }
     });
 
@@ -258,17 +253,17 @@ describe('context integration with real vault and butler factories', () => {
     const morning = await scheduler.tick();
     expect(morning.delivered.map((entry) => entry.kind)).toEqual(['morning-plan']);
     expect(model.calls).toHaveLength(1);
-    const snapshot = await context.api.getWorkspaceSnapshot(workspace!.id);
-    expect(snapshot.tasks.map((task) => task.title)).toContain('做真题');
+    const conversations = await context.api.listConversations();
+    expect(conversations.some((entry) => entry.kind === 'check-in')).toBe(true);
+    expect((await context.api.getWorkspaceSnapshot(workspace!.id)).tasks).toHaveLength(0);
 
     now = new Date(2026, 9, 31, 8, 1, 0);
     expect((await scheduler.tick()).delivered).toHaveLength(0);
     expect(model.calls).toHaveLength(1);
-    expect((await context.api.getWorkspaceSnapshot(workspace!.id)).tasks).toHaveLength(1);
 
     now = new Date(2026, 9, 31, 21, 30, 0);
     const evening = await scheduler.tick();
     expect(evening.delivered.map((entry) => entry.kind)).toEqual(['evening-review']);
-    expect(reviews).toEqual(['2026-10-31']);
+    expect(model.calls).toHaveLength(2);
     expect(notifications).toEqual(['morning-plan', 'evening-review']);
   });

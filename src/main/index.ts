@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { join } from 'node:path';
 import { createAppContext } from './context';
-import { registerIpcHandlers, serializeError } from './ipc';
+import { CONVERSATION_EVENT_CHANNELS, registerIpcHandlers, serializeError } from './ipc';
 import { createContextScheduler, planFirstEmptyWorkspace } from './scheduler';
 import { DEFAULT_VAULT_DIRECTORY } from './settings/defaults';
 import { createElectronNotificationSink, createElectronTray } from './tray';
@@ -55,6 +55,21 @@ function showWindow(): void {
   mainWindow.focus();
 }
 
+function openConversation(conversationId: string): void {
+  showWindow();
+  const send = () => {
+    if (mainWindow === null) return;
+    mainWindow.webContents.send(CONVERSATION_EVENT_CHANNELS.open, { conversationId });
+  };
+  if (mainWindow?.webContents.isLoading()) {
+    mainWindow.webContents.once('did-finish-load', () => {
+      setTimeout(send, 300);
+    });
+  } else {
+    send();
+  }
+}
+
 
 app.whenReady().then(async () => {
   const context = await createAppContext({
@@ -68,7 +83,13 @@ app.whenReady().then(async () => {
   let trayController: { destroy(): void } | null = null;
 
   try {
-    const notify = await createElectronNotificationSink();
+    const notify = await createElectronNotificationSink((notification) => {
+      if (notification.conversationId) {
+        openConversation(notification.conversationId);
+      } else {
+        showWindow();
+      }
+    });
     scheduler = createContextScheduler({
       context,
       notify,
@@ -130,7 +151,6 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+  // Keep the scheduler alive in the tray so proactive check-ins can arrive.
+  // Quitting is explicit through the tray menu.
 });
