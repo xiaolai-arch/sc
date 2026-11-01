@@ -7,7 +7,11 @@ import {
   type NotificationState
 } from './time';
 
-export type SchedulerTriggerKind = 'morning-plan' | 'evening-review' | 'reminder';
+export type SchedulerTriggerKind =
+  | 'morning-plan'
+  | 'evening-review'
+  | 'weekly-review'
+  | 'reminder';
 
 export interface SchedulerNotification {
   /** Stable per calendar day so a trigger can only be delivered once. */
@@ -49,7 +53,7 @@ export interface SchedulerOptions {
    * skipped (budget/duplicate); the trigger is consumed without a notification.
    */
   onCheckIn?: (
-    kind: 'morning' | 'evening',
+    kind: 'morning' | 'evening' | 'weekly',
     date: string
   ) => Promise<SchedulerNotification | null> | SchedulerNotification | null;
   onError?: (error: unknown) => void;
@@ -59,6 +63,8 @@ interface Trigger {
   kind: SchedulerTriggerKind;
   id: string;
   time: string;
+  /** 0 = Sunday; omitted means every day. */
+  dayOfWeek?: number;
   title: string;
   body: string;
   reminderId?: string;
@@ -88,6 +94,17 @@ function buildTriggers(settings: AppSettings, reminders: Reminder[]): Trigger[] 
       body: '花三分钟记录完成、卡点与明天的第一步。'
     }
   ];
+
+  if (settings.notifications.weeklyEnabled) {
+    triggers.push({
+      kind: 'weekly-review',
+      id: 'weekly',
+      time: settings.notifications.weekly,
+      dayOfWeek: 0,
+      title: '周日复盘时间到了',
+      body: '回顾本周的完成与卡点，一起安排下周重点。'
+    });
+  }
 
   // The seed vault mirrors the built-in morning/evening check-ins as
   // reminders. The check-ins stay authoritative, so a reminder at the same
@@ -127,7 +144,7 @@ export class Scheduler {
   private readonly onEveningReview: ((date: string) => void | Promise<void>) | undefined;
   private readonly onCheckIn:
     | ((
-        kind: 'morning' | 'evening',
+        kind: 'morning' | 'evening' | 'weekly',
         date: string
       ) => Promise<SchedulerNotification | null> | SchedulerNotification | null)
     | undefined;
@@ -173,6 +190,7 @@ export class Scheduler {
     const state = notificationState(settings, at);
 
     for (const trigger of buildTriggers(settings, reminders)) {
+      if (trigger.dayOfWeek !== undefined && at.getDay() !== trigger.dayOfWeek) continue;
       if (!isTimeReached(at, trigger.time)) continue;
       const key = keyFor(date, trigger);
       if (this.delivered.has(key)) continue;
@@ -193,12 +211,19 @@ export class Scheduler {
       };
 
       try {
-        if (trigger.kind === 'morning-plan' || trigger.kind === 'evening-review') {
+        if (
+          trigger.kind === 'morning-plan' ||
+          trigger.kind === 'evening-review' ||
+          trigger.kind === 'weekly-review'
+        ) {
           if (this.onCheckIn) {
-            const generated = await this.onCheckIn(
-              trigger.kind === 'morning-plan' ? 'morning' : 'evening',
-              date
-            );
+            const kind =
+              trigger.kind === 'morning-plan'
+                ? 'morning'
+                : trigger.kind === 'evening-review'
+                  ? 'evening'
+                  : 'weekly';
+            const generated = await this.onCheckIn(kind, date);
             if (generated === null) {
               // The check-in service decided to skip (duplicate or budget).
               this.delivered.add(key);
