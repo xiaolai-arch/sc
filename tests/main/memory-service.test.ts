@@ -285,6 +285,96 @@ describe('workspace filtering', () => {
   });
 });
 
+describe('updateRecord and deleteRecord', () => {
+  test('updates text and kind while preserving traceability', async () => {
+    const service = createMemoryService({ root });
+    const { items } = await service.synthesizeFromReview({
+      workspaceId,
+      date: '2026-11-16',
+      answers: answers('完成两套卷子', '中值定理总卡住', '专项练中值定理')
+    });
+    const target = items.find((item) => item.kind === 'weakness');
+    expect(target).toBeDefined();
+
+    const updated = await service.updateRecord!({
+      workspaceId,
+      id: target!.id,
+      text: '  中值定理已掌握  ',
+      kind: 'strength'
+    });
+
+    expect(updated).toMatchObject({
+      id: target!.id,
+      workspaceId,
+      source: target!.source,
+      createdAt: target!.createdAt,
+      text: '中值定理已掌握',
+      kind: 'strength'
+    });
+
+    const reopened = createMemoryService({ root });
+    const persisted = (await reopened.list(workspaceId)).find((item) => item.id === target!.id);
+    expect(persisted).toMatchObject({ text: '中值定理已掌握', kind: 'strength' });
+  });
+
+  test('rejects empty text, bad kinds, unknown records and unsafe ids', async () => {
+    const service = createMemoryService({ root });
+    const { items } = await service.synthesizeFromReview({
+      workspaceId,
+      date: '2026-11-17',
+      answers: answers('a', 'b', 'c')
+    });
+    const target = items[0]!;
+
+    await expect(
+      service.updateRecord!({ workspaceId, id: target.id, text: '   ' })
+    ).rejects.toThrow(/text/i);
+    await expect(
+      service.updateRecord!({ workspaceId, id: target.id, kind: 'mystery' as never })
+    ).rejects.toThrow(/kind/i);
+    await expect(
+      service.updateRecord!({ workspaceId, id: 'm-missing' })
+    ).rejects.toThrow(/记忆不存在/);
+    await expect(
+      service.updateRecord!({ workspaceId: '../evil', id: target.id })
+    ).rejects.toThrow(/Invalid workspace id/);
+    await expect(
+      service.updateRecord!({ workspaceId, id: ' ' })
+    ).rejects.toThrow(/id/i);
+  });
+
+  test('deletes records and rewrites valid frontmatter when the list empties', async () => {
+    const service = createMemoryService({ root });
+    const { items } = await service.synthesizeFromReview({
+      workspaceId,
+      date: '2026-11-18',
+      answers: answers('完成一套卷子', '线代秩的概念混乱', '')
+    });
+    expect(items).toHaveLength(2);
+
+    await service.deleteRecord!({ workspaceId, id: items[0]!.id });
+    const remaining = await service.list(workspaceId);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]!.id).toBe(items[1]!.id);
+
+    await service.deleteRecord!({ workspaceId, id: remaining[0]!.id });
+    expect(await service.list(workspaceId)).toEqual([]);
+
+    const raw = await fs.readFile(join(root, 'workspaces', workspaceId, 'memory.md'), 'utf8');
+    expect(raw.startsWith('---\n')).toBe(true);
+    const { meta } = parseNote(raw);
+    expect(meta.items).toEqual([]);
+    expect(await createMemoryService({ root }).list(workspaceId)).toEqual([]);
+
+    await expect(
+      service.deleteRecord!({ workspaceId, id: 'm-missing' })
+    ).rejects.toThrow(/记忆不存在/);
+    await expect(
+      service.deleteRecord!({ workspaceId: '../evil', id: 'x' })
+    ).rejects.toThrow(/Invalid workspace id/);
+  });
+});
+
 describe('path and input safety', () => {
   test('rejects workspace ids that could escape the vault', async () => {
     const service = createMemoryService({ root });

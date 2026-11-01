@@ -1,8 +1,11 @@
 import type {
+  DeleteMemoryInput,
+  MemoryKind,
   MemoryRecord,
   MemoryService,
   MemorySynthesisResult,
-  SynthesizeMemoryInput
+  SynthesizeMemoryInput,
+  UpdateMemoryInput
 } from '../../shared/memory';
 import type { ModelClient } from '../agent/model-client';
 import { createMutex, listDirectories, readFileOrNull, writeFileAtomic } from '../workspace/fs-utils';
@@ -16,7 +19,7 @@ import {
 } from '../workspace/paths';
 import { parseWorkspaceFile } from '../workspace/records/workspace';
 import { buildProfile } from './profile';
-import { parseMemoryRecords, serializeMemoryRecords } from './records';
+import { isMemoryKind, parseMemoryRecords, serializeMemoryRecords } from './records';
 import { synthesizeByModel, synthesizeByRules, type ReviewSynthesisSource } from './synthesize';
 
 export interface MemoryServiceOptions {
@@ -31,6 +34,32 @@ export interface MemoryServiceOptions {
 
 function byNewestFirst(a: MemoryRecord, b: MemoryRecord): number {
   return (b.createdAt ?? '').localeCompare(a.createdAt ?? '') || b.id.localeCompare(a.id);
+}
+
+function requireWorkspaceId(value: unknown): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error('Workspace id is required');
+  }
+  return assertSafeSegment(value, 'workspace id');
+}
+
+function requireMemoryId(value: unknown): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error('Memory id is required');
+  }
+  return value.trim();
+}
+
+function requireMemoryText(value: unknown): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error('Memory text is required');
+  }
+  return value.trim();
+}
+
+function requireMemoryKind(value: unknown): MemoryKind {
+  if (!isMemoryKind(value)) throw new Error('Invalid memory kind');
+  return value;
 }
 
 /**
@@ -137,6 +166,47 @@ export function createMemoryService(options: MemoryServiceOptions): MemoryServic
 
     async getProfile(workspaceId?: string) {
       return buildProfile(await collectRecords(workspaceId), now(), workspaceId);
+    },
+
+    async updateRecord(input: UpdateMemoryInput): Promise<MemoryRecord> {
+      const workspaceId = requireWorkspaceId(input?.workspaceId);
+      const id = requireMemoryId(input?.id);
+      const text = input.text !== undefined ? requireMemoryText(input.text) : undefined;
+      const kind = input.kind !== undefined ? requireMemoryKind(input.kind) : undefined;
+
+      return runExclusively(async () => {
+        const records = await readRecords(workspaceId);
+        const index = records.findIndex((record) => record.id === id);
+        if (index < 0) throw new Error('记忆不存在');
+        const current = records[index]!;
+        const next: MemoryRecord = {
+          ...current,
+          ...(text !== undefined ? { text } : {}),
+          ...(kind !== undefined ? { kind } : {})
+        };
+        const updated = [...records];
+        updated[index] = next;
+        await writeFileAtomic(
+          memoryFile(vaultRoot, workspaceId),
+          serializeMemoryRecords(updated)
+        );
+        return next;
+      });
+    },
+
+    async deleteRecord(input: DeleteMemoryInput): Promise<void> {
+      const workspaceId = requireWorkspaceId(input?.workspaceId);
+      const id = requireMemoryId(input?.id);
+
+      await runExclusively(async () => {
+        const records = await readRecords(workspaceId);
+        const remaining = records.filter((record) => record.id !== id);
+        if (remaining.length === records.length) throw new Error('记忆不存在');
+        await writeFileAtomic(
+          memoryFile(vaultRoot, workspaceId),
+          serializeMemoryRecords(remaining)
+        );
+      });
     }
   };
 }

@@ -16,6 +16,18 @@ export interface SynthesizeMemoryInput {
   answers: ReviewAnswers;
 }
 
+export interface UpdateMemoryInput {
+  workspaceId: string;
+  id: string;
+  text?: string;
+  kind?: MemoryKind;
+}
+
+export interface DeleteMemoryInput {
+  workspaceId: string;
+  id: string;
+}
+
 export interface MemorySynthesisResult {
   /** The items appended by this call (0–3). */
   items: MemoryRecord[];
@@ -45,4 +57,6 @@ export interface MemoryService {
   list(workspaceId?: string): Promise<MemoryRecord[]>;
   synthesizeFromReview(input: SynthesizeMemoryInput): Promise<MemorySynthesisResult>;
   getProfile(workspaceId?: string): Promise<LearnerProfile>;
+  updateRecord?(input: UpdateMemoryInput): Promise<MemoryRecord>;
+  deleteRecord?(input: DeleteMemoryInput): Promise<void>;
 }
