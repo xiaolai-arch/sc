@@ -122,7 +122,8 @@ const TOOL_PROTOCOL = [
   '- text：要展示给用户的文字，可以为空字符串。',
   '- toolCalls[].name：下面的工具名之一。',
   '- toolCalls[].arguments：JSON 对象，字段遵循对应工具的参数 schema。',
-  '- 一次可以调用多个工具；不要编造工具结果，工具结果会由系统在下一轮提供。'
+  '- 一次可以调用多个工具；不要编造工具结果，工具结果会由系统在下一轮提供。',
+  '- 调用工具时，整条回复必须只有这个 fenced JSON 代码块；代码块前后不要写任何文字、标题或解释。'
 ].join('\n');
 
 function buildPrompt(request: ModelRequest): string {
@@ -408,38 +409,40 @@ function defaultStreamRunner(
 
 /**
  * Buffers text until it can tell whether the CLI is emitting a plain answer
- * or the fenced JSON tool envelope. Plain text is forwarded immediately; an
- * envelope is held until `finish()` so raw JSON never reaches the user.
+ * or the fenced JSON tool envelope. A fenced block or a JSON-looking answer is
+ * held until `finish()` so raw JSON never reaches the user; long plain answers
+ * start streaming once the hold window is exceeded.
  */
 export class EnvelopeTextGate {
+  private static readonly STREAM_THRESHOLD = 800;
   private buffer = '';
-  private decided = false;
   private streaming = false;
   private forwarded = '';
+  private sawFence = false;
 
   constructor(private readonly onEvent: (event: ModelStreamEvent) => void) {}
 
   push(delta: string) {
-    if (this.decided) {
-      if (this.streaming) {
-        this.forwarded += delta;
-        this.onEvent({ type: 'text', text: delta });
-      } else {
-        this.buffer += delta;
-      }
+    if (this.streaming) {
+      this.forwarded += delta;
+      this.onEvent({ type: 'text', text: delta });
       return;
     }
 
     this.buffer += delta;
-    const first = this.buffer.trimStart()[0];
-    if (first === undefined) return;
-    if (first !== '{' && first !== '`') {
-      this.decided = true;
-      this.streaming = true;
-      this.forwarded = this.buffer;
-      this.onEvent({ type: 'text', text: this.buffer });
-      this.buffer = '';
+    // Hold anything that could be a tool envelope: a fenced block anywhere, or
+    // a response that starts as JSON. This also handles a prose preamble
+    // followed by the fenced envelope.
+    if (this.buffer.includes('```')) this.sawFence = true;
+    if (this.sawFence || this.buffer.trimStart().startsWith('{')) {
+      return;
     }
+    if (this.buffer.length < EnvelopeTextGate.STREAM_THRESHOLD) return;
+
+    this.streaming = true;
+    this.forwarded = this.buffer;
+    this.onEvent({ type: 'text', text: this.buffer });
+    this.buffer = '';
   }
 
   finish(): { text: string; toolCalls?: ModelToolCall[]; streamed: boolean } {
@@ -447,6 +450,12 @@ export class EnvelopeTextGate {
       return { text: this.forwarded, streamed: true };
     }
     const parsed = parseCliResponse(this.buffer);
+    // Plain answers are held during the envelope probe; emit them once at the
+    // end so callers still receive a text event. Fenced content and tool
+    // envelopes stay silent so raw JSON/code never leaks as a live answer.
+    if (!this.sawFence && !parsed.toolCalls?.length && parsed.text.trim()) {
+      this.onEvent({ type: 'text', text: parsed.text });
+    }
     return {
       text: parsed.text,
       streamed: false,

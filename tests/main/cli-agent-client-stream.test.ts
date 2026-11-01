@@ -338,3 +338,30 @@ test('claude stream passes model, effort and isolate flags', async () => {
     '--bare'
   ]);
 });
+
+test('claude holds a prose preamble before a fenced tool envelope', async () => {
+  const events: ModelStreamEvent[] = [];
+  const prose = '晚上好，我先看一下。\n';
+  const answer = `${prose}${envelope('我先读计划', [
+    { name: 'get_today_plan', arguments: {} }
+  ])}`;
+  const client = new CliAgentClient(
+    { kind: 'local-cli', agent: 'claude', command: 'claude' },
+    {
+      streamRunner: scriptedStream([
+        claudeText(prose),
+        claudeText(envelope('我先读计划', [{ name: 'get_today_plan', arguments: {} }])),
+        claudeResult(answer)
+      ])
+    }
+  );
+
+  const result = await client.stream(
+    { messages: [{ role: 'user', content: '我现在需要干什么' }] },
+    (event) => events.push(event)
+  );
+
+  expect(events).toEqual([]);
+  expect(result.text).toBe('我先读计划');
+  expect(result.toolCalls?.[0]?.name).toBe('get_today_plan');
+});
