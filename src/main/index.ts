@@ -1,8 +1,10 @@
-import { app, BrowserWindow, globalShortcut, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain } from 'electron';
 import { join } from 'node:path';
+import { handleExportBackup } from './backup';
 import { createAppContext } from './context';
 import {
   APP_EVENT_CHANNELS,
+  APP_IPC_CHANNELS,
   CONVERSATION_EVENT_CHANNELS,
   registerIpcHandlers,
   serializeError
@@ -99,6 +101,36 @@ app.whenReady().then(async () => {
   });
   registerIpcHandlers(context.api, ipcMain);
   createWindow();
+
+  ipcMain.handle(APP_IPC_CHANNELS.exportBackup, async () => {
+    try {
+      return await handleExportBackup({
+        pickDirectory: async () => {
+          const options = {
+            title: '选择备份保存位置',
+            properties: ['openDirectory', 'createDirectory'] as const
+          };
+          const selection = mainWindow
+            ? await dialog.showOpenDialog(mainWindow, {
+                ...options,
+                properties: [...options.properties]
+              })
+            : await dialog.showOpenDialog({
+                ...options,
+                properties: [...options.properties]
+              });
+          return selection.canceled ? null : (selection.filePaths[0] ?? null);
+        },
+        getPaths: async () => {
+          const current = await context.settings.get();
+          return { vaultPath: current.vaultPath, userDataPath: app.getPath('userData') };
+        }
+      });
+    } catch (error) {
+      // Same sanitized envelope as the regular IPC handlers.
+      throw new Error(serializeError(error).message);
+    }
+  });
 
   const shortcuts = registerAppShortcuts(globalShortcut, [
     { accelerator: 'CommandOrControl+Shift+Space', run: openQuickCapture }

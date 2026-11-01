@@ -1,5 +1,5 @@
 import type { AppSettings } from '../shared/types';
-import type { SettingsPatch, StudyCoachApi } from '../shared/ipc';
+import type { BackupResult, SettingsPatch, StudyCoachApi } from '../shared/ipc';
 import type { ButlerStreamEvent } from '../shared/butler-stream';
 import type {
   ConversationMessage,
@@ -94,6 +94,11 @@ export const CONVERSATION_EVENT_CHANNELS = {
 /** Outbound app events (global shortcut, tray). */
 export const APP_EVENT_CHANNELS = {
   quickCapture: 'study-coach:app:quick-capture'
+} as const;
+
+/** Renderer-initiated app actions that live outside the handler table. */
+export const APP_IPC_CHANNELS = {
+  exportBackup: 'study-coach:app:export-backup'
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
@@ -755,6 +760,7 @@ export function createStudyCoachBridge(
       if (!subscribe) return () => undefined;
       return subscribe(APP_EVENT_CHANNELS.quickCapture, () => listener());
     },
+    exportBackup: () => call<BackupResult | null>(APP_IPC_CHANNELS.exportBackup),
     send: (input) => call(IPC_CHANNELS.send, input),
     async stream(input, onEvent) {
       const requestId = createRequestId();

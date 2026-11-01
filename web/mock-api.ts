@@ -1126,6 +1126,11 @@ export function createMockApi(
       // The browser prototype keeps no usage history.
     },
 
+    async exportBackup() {
+      // The browser prototype has no native directory picker.
+      return null;
+    },
+
     async send(input: SendMessageInput): Promise<SendMessageResult> {
       recordNoteIfNeeded(input);
       return {

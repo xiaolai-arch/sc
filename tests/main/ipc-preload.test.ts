@@ -1,6 +1,7 @@
 import type { StudyCoachApi } from '../../src/shared/ipc';
 import {
   APP_EVENT_CHANNELS,
+  APP_IPC_CHANNELS,
   BUTLER_STREAM_CHANNELS,
   IPC_CHANNELS,
   createStudyCoachBridge,
@@ -12,6 +13,28 @@ test('locks the app event channels', () => {
   expect(APP_EVENT_CHANNELS).toEqual({
     quickCapture: 'study-coach:app:quick-capture'
   });
+});
+
+test('locks the app IPC channels', () => {
+  expect(APP_IPC_CHANNELS).toEqual({
+    exportBackup: 'study-coach:app:export-backup'
+  });
+});
+
+test('bridge invokes export backup and returns its result', async () => {
+  const calls: Array<{ channel: string; args: unknown[] }> = [];
+  const bridge = createStudyCoachBridge(async (channel, ...args) => {
+    calls.push({ channel, args });
+    return {
+      path: '/tmp/backup',
+      copied: { vault: true, conversations: true, state: true, usage: true }
+    };
+  });
+
+  const result = await bridge.exportBackup?.();
+
+  expect(result).toMatchObject({ path: '/tmp/backup' });
+  expect(calls).toEqual([{ channel: APP_IPC_CHANNELS.exportBackup, args: [] }]);
 });
 
 test('bridge subscribes to quick capture events and unsubscribes', () => {
