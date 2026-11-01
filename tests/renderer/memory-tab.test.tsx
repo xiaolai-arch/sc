@@ -5,7 +5,7 @@ import {
   MEMORY_KIND_LABELS,
   memorySourceLabel,
   memoryWhyRemembered
-} from '../../src/renderer/shell/ProjectPanel';
+} from '../../src/renderer/shell/ProjectSections';
 import { Workspace } from '../../src/renderer/shell/Workspace';
 import { createMockApi } from '../../web/mock-api';
 
