@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { createMockApi, DEMO_PROFILE, MOCK_STORAGE_KEY } from '../../web/mock-api';
+import type { ButlerStreamEvent } from '../../src/shared/butler-stream';
 
 test('starts in onboarding and completes it with a demo plan', async () => {
   localStorage.clear();
@@ -214,4 +215,38 @@ test('lists review records and plans and searches the mock workspace', async () 
   expect(found[0]?.snippet).toContain('洛必达');
   expect(await api.searchWorkspace({ workspaceId: 'kaoyan', query: '  ' })).toEqual([]);
   await expect(api.rebuildSearchIndex()).resolves.toBeUndefined();
+});
+
+test('streams reasoning, a tool step and the final reply', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage);
+  const events: ButlerStreamEvent[] = [];
+  const result = await api.stream(
+    { workspaceId: 'kaoyan', message: '记一下：今天数学卡在极限' },
+    (event) => events.push(event)
+  );
+
+  expect(events.some((event) => event.type === 'reasoning')).toBe(true);
+  expect(events.some((event) => event.type === 'narration')).toBe(true);
+  expect(
+    events.some((event) => event.type === 'tool-start' && event.name === 'write_note')
+  ).toBe(true);
+  expect(events.at(-1)).toEqual({ type: 'done', text: result.text });
+
+  const snapshot = await api.getWorkspaceSnapshot('kaoyan');
+  expect(snapshot.notes.some((note) => note.title.includes('今天数学卡在极限'))).toBe(true);
+});
+
+test('streams a plain answer without a tool step', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage);
+  const events: ButlerStreamEvent[] = [];
+  const result = await api.stream(
+    { workspaceId: 'kaoyan', message: '帮我排一下今天的优先级' },
+    (event) => events.push(event)
+  );
+
+  expect(events.some((event) => event.type === 'tool-start')).toBe(false);
+  expect(events.filter((event) => event.type === 'text').length).toBeGreaterThan(1);
+  expect(result.text.length).toBeGreaterThan(0);
 });

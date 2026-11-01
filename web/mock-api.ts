@@ -22,6 +22,8 @@ import type {
   WorkspaceSnapshot,
   WorkspaceTask
 } from '../src/shared/workspace';
+import type { StreamingButlerApi } from '../src/shared/butler-stream';
+import { BUTLER_TOOL_LABELS } from '../src/shared/butler-stream';
 import type {
   CreatePracticeSetInput,
   PracticeAttempt,
@@ -277,7 +279,27 @@ function butlerReply(text: string) {
   return '收到。目前是原型模式；接入模型后，我会结合你的计划、记录和复盘回答。';
 }
 
-export function createMockApi(storage?: Storage): StudyCoachApi {
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+function chunkText(text: string, size: number): string[] {
+  const chars = Array.from(text);
+  const chunks: string[] = [];
+  for (let index = 0; index < chars.length; index += size) {
+    chunks.push(chars.slice(index, index + size).join(''));
+  }
+  return chunks;
+}
+
+export type MockApiOptions = {
+  /** Multiplier for stream pacing. Tests use the fast default; the web demo passes 1. */
+  streamPace?: number;
+};
+
+export function createMockApi(
+  storage?: Storage,
+  options: MockApiOptions = {}
+): StudyCoachApi & StreamingButlerApi {
+  const pace = Math.max(0.01, options.streamPace ?? 0.05);
   const resolved = resolveStorage(storage);
   let state = readState(resolved);
   let apiKey: string | null = null;
@@ -313,6 +335,26 @@ export function createMockApi(storage?: Storage): StudyCoachApi {
     };
     state.notes = [note, ...state.notes];
     return note;
+  }
+
+  function recordNoteIfNeeded(input: SendMessageInput): { title: string } | null {
+    if (!/记一下|记录/.test(input.message)) return null;
+    const workspace = input.workspaceId
+      ? state.workspaces.find((entry) => entry.id === input.workspaceId)
+      : state.workspaces[0];
+    if (!workspace) return null;
+    const title =
+      input.message.replace(/^(记一下|记录)[：:\s]*/, '').slice(0, 28) || '随手记';
+    createNoteInternal({
+      workspaceId: workspace.id,
+      title,
+      subject: workspace.name,
+      tags: ['随手记'],
+      summary: input.message,
+      body: input.message
+    });
+    persist();
+    return { title };
   }
 
   function synthesize(input: SynthesizeMemoryInput): MemorySynthesisResult {
@@ -896,27 +938,49 @@ export function createMockApi(storage?: Storage): StudyCoachApi {
     },
 
     async send(input: SendMessageInput): Promise<SendMessageResult> {
-      if (/记一下|记录/.test(input.message)) {
-        const workspace = input.workspaceId
-          ? state.workspaces.find((entry) => entry.id === input.workspaceId)
-          : state.workspaces[0];
-        if (workspace) {
-          const title =
-            input.message.replace(/^(记一下|记录)[：:\s]*/, '').slice(0, 28) || '随手记';
-          createNoteInternal({
-            workspaceId: workspace.id,
-            title,
-            subject: workspace.name,
-            tags: ['随手记'],
-            summary: input.message,
-            body: input.message
-          });
-          persist();
-        }
-      }
+      recordNoteIfNeeded(input);
       return {
         text: butlerReply(input.message)
       };
+    },
+
+    async stream(input, onEvent): Promise<SendMessageResult> {
+      const wantsNote = /记一下|记录/.test(input.message);
+      const reasoning = wantsNote
+        ? '先确认要记录的内容，然后写入当前工作区。'
+        : '先看今天的任务和最近的记忆，再给出 1-3 个可执行的下一步。';
+
+      for (const chunk of chunkText(reasoning, 4)) {
+        onEvent({ type: 'reasoning', text: chunk });
+        await sleep(80 * pace);
+      }
+
+      if (wantsNote) {
+        const label = BUTLER_TOOL_LABELS['write_note'] ?? '写入笔记';
+        const id = `tool-${Date.now()}`;
+        onEvent({ type: 'narration', text: '我先把这条记下来。' });
+        await sleep(120 * pace);
+        onEvent({ type: 'tool-start', id, name: 'write_note', label });
+        await sleep(400 * pace);
+        const recorded = recordNoteIfNeeded(input);
+        onEvent({
+          type: 'tool-result',
+          id,
+          name: 'write_note',
+          ok: recorded !== null,
+          label,
+          ...(recorded === null ? { detail: '没有可写入的工作区' } : {})
+        });
+        await sleep(120 * pace);
+      }
+
+      const reply = butlerReply(input.message);
+      for (const chunk of chunkText(reply, 6)) {
+        onEvent({ type: 'text', text: chunk });
+        await sleep(40 * pace);
+      }
+      onEvent({ type: 'done', text: reply });
+      return { text: reply };
     }
   };
 }

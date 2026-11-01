@@ -5,7 +5,7 @@ import { createMockApi, resetMockData } from './mock-api';
 import '../src/renderer/styles.css';
 
 if (!window.studyCoach) {
-  window.studyCoach = createMockApi();
+  window.studyCoach = createMockApi(undefined, { streamPace: 1 });
 }
 
 window.studyCoachPrototype = {

@@ -140,15 +140,16 @@ test('creates a note through the notes surface', async () => {
 
 test('sends a butler message through the API and renders the reply', async () => {
   const api = setup();
-  const send = vi.spyOn(api, 'send');
+  const stream = vi.spyOn(api, 'stream');
   await screen.findByText('早上好，xiaolai。');
   await userEvent.type(screen.getByLabelText('向管家提问'), '教我一下洛必达法则');
   await userEvent.click(screen.getByRole('button', { name: '发送' }));
 
   expect(await screen.findByText('教我一下洛必达法则')).toBeInTheDocument();
   expect(await screen.findByText(/洛必达法则要先确认/)).toBeInTheDocument();
-  expect(send).toHaveBeenCalledWith(
-    expect.objectContaining({ message: '教我一下洛必达法则' })
+  expect(stream).toHaveBeenCalledWith(
+    expect.objectContaining({ message: '教我一下洛必达法则' }),
+    expect.any(Function)
   );
 });
 

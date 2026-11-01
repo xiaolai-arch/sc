@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type {
+  ButlerStreamListener,
+  StreamingButlerApi
+} from '../../shared/butler-stream';
 import { formatLocalDate, parseLocalDate } from '../../shared/date';
 import type { ReviewRecord, StudyCoachApi } from '../../shared/ipc';
 import type { LearnerProfile, MemoryRecord } from '../../shared/memory';
@@ -64,6 +68,10 @@ export type WorkspaceData = WorkspaceDataState & {
   generatePlan: (workspaceId: string) => Promise<WorkspacePlan>;
   searchWorkspace: (workspaceId: string, query: string, limit?: number) => Promise<SearchResult[]>;
   send: (input: SendMessageInput) => Promise<SendMessageResult>;
+  stream: (
+    input: SendMessageInput,
+    onEvent: ButlerStreamListener
+  ) => Promise<SendMessageResult>;
   submitReview: (date: string, answers: ReviewAnswers, workspaceId?: string) => Promise<void>;
 };
 
@@ -299,6 +307,28 @@ export function useWorkspaceData(): WorkspaceData {
     [reload]
   );
 
+  const stream = useCallback(
+    async (input: SendMessageInput, onEvent: ButlerStreamListener) => {
+      const api = apiOrThrow() as StudyCoachApi & Partial<StreamingButlerApi>;
+      let result: SendMessageResult;
+      if (typeof api.stream === 'function') {
+        result = await api.stream(input, onEvent);
+      } else {
+        result = await api.send(input);
+        onEvent({ type: 'text', text: result.text });
+        onEvent({
+          type: 'done',
+          text: result.text,
+          ...(result.usage ? { usage: result.usage } : {})
+        });
+      }
+      // A butler reply may have written a note or changed a task through tools.
+      await reload();
+      return result;
+    },
+    [reload]
+  );
+
   const submitReview = useCallback(
     async (date: string, answers: ReviewAnswers, workspaceId?: string) => {
       await apiOrThrow().submitReview({
@@ -324,6 +354,7 @@ export function useWorkspaceData(): WorkspaceData {
     generatePlan,
     searchWorkspace,
     send,
+    stream,
     submitReview
   };
 }

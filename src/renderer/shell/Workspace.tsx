@@ -25,6 +25,10 @@ function messageOf(cause: unknown) {
   return cause instanceof Error ? cause.message : '操作失败，请重试。';
 }
 
+function chatMessageId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
 function WorkspaceStatus({
   title,
   detail,
@@ -79,7 +83,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     submitPracticeAnswer,
     generatePlan,
     searchWorkspace,
-    send,
+    stream,
     submitReview
   } = useWorkspaceData();
   const [view, setView] = useState<ShellView>('chat');
@@ -201,30 +205,110 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   }
 
   async function sendMessage(text: string) {
-    const userMessage: ChatMessage = { id: `u-${Date.now()}`, role: 'user', text };
-    setMessages((current) => [...current, userMessage]);
+    const userMessage: ChatMessage = { id: chatMessageId('u'), role: 'user', text };
+    const assistantId = chatMessageId('a');
+    setMessages((current) => [
+      ...current,
+      userMessage,
+      {
+        id: assistantId,
+        role: 'assistant',
+        text: '',
+        reasoning: '',
+        steps: [],
+        streaming: true
+      }
+    ]);
     setTyping(true);
     setActionError(null);
+
+    const updateAssistant = (updater: (message: ChatMessage) => ChatMessage) => {
+      setMessages((current) =>
+        current.map((message) => (message.id === assistantId ? updater(message) : message))
+      );
+    };
+
     try {
-      const result = await send({
-        workspaceId: workspaceId ?? undefined,
-        taskId: selectedTask?.id,
-        message: text
-      });
-      setMessages((current) => [
-        ...current,
-        { id: `a-${Date.now()}`, role: 'assistant', text: result.text }
-      ]);
-    } catch (cause) {
-      setMessages((current) => [
-        ...current,
+      await stream(
         {
-          id: `a-${Date.now()}`,
-          role: 'assistant',
-          text: '管家暂时没有回应，请稍后再试。'
+          workspaceId: workspaceId ?? undefined,
+          taskId: selectedTask?.id,
+          message: text
+        },
+        (event) => {
+          switch (event.type) {
+            case 'reasoning':
+              updateAssistant((message) => ({
+                ...message,
+                reasoning: `${message.reasoning ?? ''}${event.text}`,
+                reasoningStartedAt: message.reasoningStartedAt ?? Date.now()
+              }));
+              break;
+            case 'narration':
+              updateAssistant((message) => ({
+                ...message,
+                reasoning: message.reasoning
+                  ? `${message.reasoning}\n\n${event.text}`
+                  : event.text,
+                reasoningStartedAt: message.reasoningStartedAt ?? Date.now()
+              }));
+              break;
+            case 'text':
+              updateAssistant((message) => ({
+                ...message,
+                text: `${message.text}${event.text}`,
+                reasoningEndedAt: message.reasoningEndedAt ?? Date.now()
+              }));
+              break;
+            case 'tool-start':
+              updateAssistant((message) => ({
+                ...message,
+                steps: [
+                  ...(message.steps ?? []),
+                  {
+                    id: event.id,
+                    name: event.name,
+                    label: event.label,
+                    status: 'running'
+                  }
+                ]
+              }));
+              break;
+            case 'tool-result':
+              updateAssistant((message) => ({
+                ...message,
+                steps: (message.steps ?? []).map((step) =>
+                  step.id === event.id
+                    ? {
+                        ...step,
+                        status: event.ok ? 'done' : 'failed',
+                        ...(event.detail ? { detail: event.detail } : {})
+                      }
+                    : step
+                )
+              }));
+              break;
+            case 'error':
+              setActionError(event.message);
+              break;
+            case 'done':
+              updateAssistant((message) => ({
+                ...message,
+                text: event.text || message.text,
+                streaming: false,
+                reasoningEndedAt: message.reasoningEndedAt ?? Date.now()
+              }));
+              break;
+          }
         }
-      ]);
+      );
+    } catch (cause) {
       setActionError(messageOf(cause));
+      updateAssistant((message) => ({
+        ...message,
+        text: message.text || '管家暂时没有回应，请稍后再试。',
+        streaming: false
+      }));
     } finally {
       setTyping(false);
     }
