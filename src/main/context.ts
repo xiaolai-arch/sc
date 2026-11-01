@@ -415,6 +415,11 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     async createWorkspace(input) {
       return (await getServices()).workspace.createWorkspace(input);
     },
+    async updateWorkspace(input) {
+      const workspace = (await getServices()).workspace;
+      if (!workspace.updateWorkspace) throw new Error('当前存储不支持更新项目。');
+      return workspace.updateWorkspace(input);
+    },
     async getWorkspaceSnapshot(workspaceId) {
       return (await getServices()).workspace.getWorkspaceSnapshot(workspaceId);
     },

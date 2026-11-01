@@ -1,5 +1,5 @@
 import type { AppSettings } from '../shared/types';
-import type { StudyCoachApi } from '../shared/ipc';
+import type { SettingsPatch, StudyCoachApi } from '../shared/ipc';
 import type { ButlerStreamEvent } from '../shared/butler-stream';
 import type {
   ConversationMessage,
@@ -14,6 +14,7 @@ import type {
   SendMessageResult,
   SubmitReviewInput,
   UpdateReminderInput,
+  UpdateWorkspaceInput,
   UpdateWorkspaceNoteInput,
   UpdateWorkspaceTaskInput,
   WorkspaceOnboardingInput
@@ -36,6 +37,7 @@ export const IPC_CHANNELS = {
   setApiKey: 'study-coach:settings:set-api-key',
   listWorkspaces: 'study-coach:workspaces:list',
   createWorkspace: 'study-coach:workspaces:create',
+  updateWorkspace: 'study-coach:workspaces:update',
   getWorkspaceSnapshot: 'study-coach:workspaces:snapshot',
   createTask: 'study-coach:workspaces:create-task',
   updateWorkspaceTask: 'study-coach:workspaces:update-task',
@@ -147,6 +149,23 @@ function requireCreateWorkspace(value: unknown): CreateWorkspaceInput {
   requireString(input.goal, '工作区目标');
   requireString(input.description, '工作区描述');
   return input as unknown as CreateWorkspaceInput;
+}
+
+function requireUpdateWorkspace(value: unknown): UpdateWorkspaceInput {
+  const input = requireObject(value, '更新项目');
+  const checkIn = input.checkIn;
+  if (checkIn !== undefined && checkIn !== 'daily' && checkIn !== 'off') {
+    throw new Error('检查频率无效。');
+  }
+  const goal = optionalString(input.goal, '工作区目标');
+  const description = optionalString(input.description, '工作区描述');
+  return {
+    workspaceId: requireString(input.workspaceId, '工作区 ID'),
+    ...(input.name !== undefined ? { name: requireString(input.name, '工作区名称') } : {}),
+    ...(input.goal !== undefined ? { goal: goal ?? '' } : {}),
+    ...(input.description !== undefined ? { description: description ?? '' } : {}),
+    ...(checkIn !== undefined ? { checkIn: checkIn as 'daily' | 'off' } : {})
+  };
 }
 
 function requireCreateTask(value: unknown): CreateTaskInput {
@@ -462,10 +481,15 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
       ),
     getSettings: async () => api.getSettings(),
     updateSettings: async (input) =>
-      api.updateSettings(requireObject(input, '更新设置') as Partial<AppSettings>),
+      api.updateSettings(requireObject(input, '更新设置') as SettingsPatch),
     setApiKey: async (input) => api.setApiKey(requireString(input, 'API key')),
     listWorkspaces: async () => api.listWorkspaces(),
     createWorkspace: async (input) => api.createWorkspace(requireCreateWorkspace(input)),
+    updateWorkspace: async (input) => {
+      const parsed = requireUpdateWorkspace(input);
+      if (!api.updateWorkspace) throw new Error('当前存储不支持更新项目。');
+      return api.updateWorkspace(parsed);
+    },
     getWorkspaceSnapshot: async (input) =>
       api.getWorkspaceSnapshot(requireString(input, '工作区 ID')),
     createTask: async (input) => api.createTask(requireCreateTask(input)),
@@ -659,6 +683,7 @@ export function createStudyCoachBridge(
     setApiKey: (key) => call(IPC_CHANNELS.setApiKey, key),
     listWorkspaces: () => call(IPC_CHANNELS.listWorkspaces),
     createWorkspace: (input) => call(IPC_CHANNELS.createWorkspace, input),
+    updateWorkspace: (input) => call(IPC_CHANNELS.updateWorkspace, input),
     getWorkspaceSnapshot: (workspaceId) => call(IPC_CHANNELS.getWorkspaceSnapshot, workspaceId),
     createTask: (input) => call(IPC_CHANNELS.createTask, input),
     updateWorkspaceTask: (input) => call(IPC_CHANNELS.updateWorkspaceTask, input),

@@ -3,6 +3,7 @@ import type {
   ListReviewsInput,
   ReviewRecord,
   SearchWorkspaceInput,
+  SettingsPatch,
   StudyCoachApi
 } from '../src/shared/ipc';
 import type {
@@ -16,6 +17,7 @@ import type {
   SendMessageResult,
   SubmitReviewInput,
   UpdateReminderInput,
+  UpdateWorkspaceInput,
   UpdateWorkspaceNoteInput,
   UpdateWorkspaceTaskInput,
   Workspace,
@@ -573,7 +575,7 @@ export function createMockApi(
       return structuredClone(state.settings);
     },
 
-    async updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
+    async updateSettings(patch: SettingsPatch): Promise<AppSettings> {
       state.settings = {
         ...state.settings,
         ...patch,
@@ -887,6 +889,18 @@ export function createMockApi(
 
     async createWorkspace(input: CreateWorkspaceInput): Promise<Workspace> {
       return structuredClone(createWorkspaceInternal(input));
+    },
+
+    async updateWorkspace(input: UpdateWorkspaceInput): Promise<Workspace> {
+      const workspace = state.workspaces.find((entry) => entry.id === input.workspaceId);
+      if (!workspace) throw new Error('项目不存在');
+      if (input.name !== undefined) workspace.name = input.name;
+      if (input.goal !== undefined) workspace.goal = input.goal;
+      if (input.description !== undefined) workspace.description = input.description;
+      if (input.checkIn !== undefined) workspace.checkIn = input.checkIn;
+      workspace.updatedAt = new Date().toISOString();
+      persist();
+      return structuredClone(workspace);
     },
 
     async getWorkspaceSnapshot(workspaceId: string): Promise<WorkspaceSnapshot> {

@@ -50,6 +50,8 @@ export interface NotificationSettings {
   /** Sunday recap time (HH:MM). */
   weekly: string;
   weeklyEnabled: boolean;
+  /** Local date (YYYY-MM-DD) that pauses proactive check-ins; '' clears it. */
+  snoozedUntil?: string;
   dndStart: string;
   dndEnd: string;
 }

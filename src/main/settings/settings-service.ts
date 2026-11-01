@@ -1,10 +1,12 @@
 import type { AppSettings, NotificationSettings, ProviderConfig } from '../../shared/types';
+import type { SettingsPatch } from '../../shared/ipc';
 import type { AppState, JsonStateStore } from '../state-store';
 import { createDefaultSettings } from './defaults';
 
 const PROVIDER_KINDS = ['anthropic', 'openai-compatible', 'ollama', 'local-cli'] as const;
 const LOCAL_CLI_AGENTS = ['codex', 'claude', 'zcode', 'opencode'] as const;
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const DEFAULT_NOTIFICATIONS = createDefaultSettings('').notifications;
 
 /**
@@ -101,6 +103,16 @@ function validateNotifications(value: unknown): Partial<NotificationSettings> {
     }
     result.weeklyEnabled = value.weeklyEnabled;
   }
+  if (value.snoozedUntil !== undefined) {
+    if (typeof value.snoozedUntil !== 'string') {
+      throw new Error('静音日期格式无效。');
+    }
+    const trimmed = value.snoozedUntil.trim();
+    if (trimmed !== '' && !DATE_PATTERN.test(trimmed)) {
+      throw new Error('静音日期格式必须为 YYYY-MM-DD。');
+    }
+    result.snoozedUntil = trimmed;
+  }
   return result;
 }
 
@@ -159,7 +171,7 @@ export class SettingsService {
     return structuredClone(normalizeSettings(snapshot.settings));
   }
 
-  async update(patch: Partial<AppSettings>): Promise<AppSettings> {
+  async update(patch: SettingsPatch): Promise<AppSettings> {
     const next = await this.state.update((current: AppState) => ({
       ...current,
       settings: mergeSettings(normalizeSettings(current.settings), patch)

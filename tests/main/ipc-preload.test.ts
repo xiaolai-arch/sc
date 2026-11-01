@@ -16,6 +16,7 @@ test('locks the public channel names', () => {
     setApiKey: 'study-coach:settings:set-api-key',
     listWorkspaces: 'study-coach:workspaces:list',
     createWorkspace: 'study-coach:workspaces:create',
+    updateWorkspace: 'study-coach:workspaces:update',
     getWorkspaceSnapshot: 'study-coach:workspaces:snapshot',
     createTask: 'study-coach:workspaces:create-task',
     updateWorkspaceTask: 'study-coach:workspaces:update-task',
@@ -76,6 +77,7 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
   await bridge.setApiKey('k');
   await bridge.listWorkspaces();
   await bridge.createWorkspace({ name: 'n', kind: 'exam', goal: 'g', description: 'd' });
+  await bridge.updateWorkspace?.({ workspaceId: 'ws-1', checkIn: 'off' });
   await bridge.getWorkspaceSnapshot('ws-1');
   await bridge.createTask({ workspaceId: 'ws-1', title: 't', subject: 's', durationMin: 30, acceptance: 'a' });
   await bridge.updateWorkspaceTask({ taskId: 't1', status: 'done' });
@@ -135,33 +137,37 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
   expect(calls[0]).toEqual({ channel: IPC_CHANNELS.getBootstrap, args: [] });
   expect(calls[1]?.channel).toBe(IPC_CHANNELS.completeWorkspaceOnboarding);
   expect(calls[4]).toEqual({ channel: IPC_CHANNELS.setApiKey, args: ['k'] });
-  expect(calls[7]).toEqual({ channel: IPC_CHANNELS.getWorkspaceSnapshot, args: ['ws-1'] });
-  expect(calls[12]).toEqual({ channel: IPC_CHANNELS.getMemory, args: ['ws-1'] });
-  expect(calls[14]).toEqual({
+  expect(calls[7]).toEqual({
+    channel: IPC_CHANNELS.updateWorkspace,
+    args: [{ workspaceId: 'ws-1', checkIn: 'off' }]
+  });
+  expect(calls[8]).toEqual({ channel: IPC_CHANNELS.getWorkspaceSnapshot, args: ['ws-1'] });
+  expect(calls[13]).toEqual({ channel: IPC_CHANNELS.getMemory, args: ['ws-1'] });
+  expect(calls[15]).toEqual({
     channel: IPC_CHANNELS.createReminder,
     args: [{ time: '21:30', label: '复盘' }]
   });
-  expect(calls[15]).toEqual({
+  expect(calls[16]).toEqual({
     channel: IPC_CHANNELS.updateReminder,
     args: [{ id: 'r1', enabled: false }]
   });
-  expect(calls[17]).toEqual({
+  expect(calls[18]).toEqual({
     channel: IPC_CHANNELS.listReviews,
     args: [{ workspaceId: 'ws-1', limit: 5 }]
   });
-  expect(calls[29]).toEqual({
+  expect(calls[30]).toEqual({
     channel: IPC_CHANNELS.updateMemory,
     args: [{ workspaceId: 'ws-1', id: 'm1', text: '新内容', kind: 'strength' }]
   });
-  expect(calls[30]).toEqual({
+  expect(calls[31]).toEqual({
     channel: IPC_CHANNELS.deleteMemory,
     args: [{ workspaceId: 'ws-1', id: 'm1' }]
   });
-  expect(calls[31]).toEqual({
+  expect(calls[32]).toEqual({
     channel: IPC_CHANNELS.searchWorkspace,
     args: [{ workspaceId: 'ws-1', query: '极限', limit: 5 }]
   });
-  expect(calls[36]).toEqual({
+  expect(calls[37]).toEqual({
     channel: IPC_CHANNELS.appendConversationMessage,
     args: [
       {
@@ -175,23 +181,23 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
       }
     ]
   });
-  expect(calls[38]).toEqual({
+  expect(calls[39]).toEqual({
     channel: IPC_CHANNELS.renameConversation,
     args: [{ conversationId: 'c1', title: '数学复盘' }]
   });
-  expect(calls[39]).toEqual({
+  expect(calls[40]).toEqual({
     channel: IPC_CHANNELS.setConversationPinned,
     args: [{ conversationId: 'c1', pinned: true }]
   });
-  expect(calls[40]).toEqual({
+  expect(calls[41]).toEqual({
     channel: IPC_CHANNELS.truncateConversationMessages,
     args: [{ conversationId: 'c1', keepCount: 2 }]
   });
-  expect(calls[41]).toEqual({
+  expect(calls[42]).toEqual({
     channel: IPC_CHANNELS.searchConversations,
     args: ['极限']
   });
-  expect(calls[42]?.args).toEqual([{ message: 'hi' }]);
+  expect(calls[43]?.args).toEqual([{ message: 'hi' }]);
 });
 
 test('bridge does not swallow rejected invokes', async () => {

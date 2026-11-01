@@ -120,6 +120,24 @@ test('validates and persists the weekly review settings', async () => {
   expect(updated.notifications).toMatchObject({ weekly: '19:30', weeklyEnabled: false });
 });
 
+test('validates and clears the snoozed date', async () => {
+  const { service } = memorySettings();
+
+  await expect(
+    service.update({ notifications: { snoozedUntil: '2026-11-1' } as never })
+  ).rejects.toThrow(/YYYY-MM-DD/);
+
+  const set = await service.update({
+    notifications: { snoozedUntil: '2026-11-02' } as never
+  });
+  expect(set.notifications.snoozedUntil).toBe('2026-11-02');
+
+  const cleared = await service.update({
+    notifications: { snoozedUntil: '' } as never
+  });
+  expect(cleared.notifications.snoozedUntil).toBe('');
+});
+
 test('fills weekly defaults for settings written before the feature existed', async () => {
   const defaults = createDefaultSettings('/tmp/old-vault');
   const { weekly: _weekly, weeklyEnabled: _weeklyEnabled, ...oldNotifications } =

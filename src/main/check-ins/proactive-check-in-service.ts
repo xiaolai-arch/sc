@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { AppSettings } from '../../shared/types';
 import type { WorkspaceService } from '../../shared/workspace';
 import type { ModelClient } from '../agent/model-client';
-import { gatherContext } from '../butler/context';
+import { gatherContext, type ButlerContext } from '../butler/context';
 import type { Conversation } from '../../shared/conversations';
 import type { ConversationStore } from '../conversations/conversation-store';
 import type { SchedulerNotification } from '../scheduler/scheduler';
@@ -29,6 +29,33 @@ function checkInTitle(trigger: CheckInTrigger, date: string): string {
   return `${prefix} · ${date.slice(5)}`;
 }
 
+/** Drops projects the user excluded from check-ins, including their tasks/memory. */
+function excludeCheckInOff(context: ButlerContext): ButlerContext {
+  const off = new Set(
+    context.workspaces
+      .filter((workspace) => workspace.checkIn === 'off')
+      .map((workspace) => workspace.id)
+  );
+  if (off.size === 0) return context;
+
+  const workspace =
+    context.workspace && !off.has(context.workspace.id) ? context.workspace : undefined;
+  const focusTask =
+    context.focusTask && !off.has(context.focusTask.workspaceId)
+      ? context.focusTask
+      : undefined;
+
+  return {
+    now: context.now,
+    workspaces: context.workspaces.filter((entry) => !off.has(entry.id)),
+    ...(workspace ? { workspace, workspaceId: workspace.id } : {}),
+    ...(focusTask ? { focusTask } : {}),
+    tasks: context.tasks.filter((task) => !off.has(task.workspaceId)),
+    memory: context.memory.filter((item) => !off.has(item.workspaceId)),
+    contextError: context.contextError
+  };
+}
+
 export class ProactiveCheckInService {
   private readonly conversationStore: ConversationStore;
   private readonly workspaceService: WorkspaceService | null;
@@ -50,13 +77,16 @@ export class ProactiveCheckInService {
   ): Promise<SchedulerNotification | null> {
     const settings = await this.getSettings();
     if (!settings.notifications.enabled) return null;
+    if (settings.notifications.snoozedUntil === date) return null;
 
     const conversation = await this.findOrCreateConversation(date, trigger);
     const checkIns = conversation.messages.filter((message) => message.trigger);
     if (checkIns.some((message) => message.trigger === trigger)) return null;
     if (checkIns.length >= settings.budget.proactiveSessionsPerDay) return null;
 
-    const context = await gatherContext(this.workspaceService, { message: '' }, this.now());
+    const rawContext = await gatherContext(this.workspaceService, { message: '' }, this.now());
+    const context = excludeCheckInOff(rawContext);
+    if (rawContext.workspaces.length > 0 && context.workspaces.length === 0) return null;
     const text = await this.generate(trigger, date, context);
     const createdAt = this.now().toISOString();
     await this.conversationStore.appendMessage(conversation.id, {

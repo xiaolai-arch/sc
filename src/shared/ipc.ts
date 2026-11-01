@@ -22,7 +22,12 @@ import type {
 } from './practice';
 import type { PlanWorkspaceInput, WorkspacePlan } from './planning';
 import type { SearchResult } from './search';
-import type { AppSettings, ReviewAnswers } from './types';
+import type {
+  AppSettings,
+  NotificationSettings,
+  ProviderConfig,
+  ReviewAnswers
+} from './types';
 import type {
   ButlerService,
   WorkspaceOnboardingInput,
@@ -112,6 +117,15 @@ export interface ConversationApi {
   onConversationOpened(listener: (conversationId: string) => void): () => void;
 }
 
+/** Partial settings update; nested notifications/budget accept partials. */
+export interface SettingsPatch {
+  vaultPath?: string;
+  provider?: ProviderConfig;
+  notifications?: Partial<NotificationSettings>;
+  budget?: Partial<AppSettings['budget']>;
+  launchAtLogin?: boolean;
+}
+
 export interface StudyCoachApi
   extends WorkspaceService,
     ButlerService,
@@ -123,7 +137,7 @@ export interface StudyCoachApi
   getBootstrap(): Promise<Bootstrap>;
   completeWorkspaceOnboarding(input: WorkspaceOnboardingInput): Promise<void>;
   getSettings(): Promise<AppSettings>;
-  updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
+  updateSettings(patch: SettingsPatch): Promise<AppSettings>;
   setApiKey(key: string): Promise<void>;
   /** Reads persisted review entries (newest first). */
   listReviews(input?: ListReviewsInput): Promise<ReviewRecord[]>;
