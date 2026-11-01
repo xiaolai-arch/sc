@@ -61,9 +61,14 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     workspaces,
     tasks,
     notes,
-    memory,
+    memoryRecords,
+    memoryProfile,
+    reviews,
     reminders,
     practiceSets,
+    practiceMistakes,
+    practiceDue,
+    practiceAttempts,
     streak,
     loading,
     error,
@@ -71,6 +76,8 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     createTask,
     updateTask,
     createNote,
+    submitPracticeAnswer,
+    generatePlan,
     send,
     submitReview
   } = useWorkspaceData();
@@ -91,7 +98,22 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   const filteredTasks = tasks.filter((task) => !workspaceId || task.workspaceId === workspaceId);
   const filteredNotes = notes.filter((note) => !workspaceId || note.workspaceId === workspaceId);
   const filteredSets = practiceSets.filter((set) => !workspaceId || set.workspaceId === workspaceId);
-  const filteredMemory = memory.filter((item) => !workspaceId || item.workspaceId === workspaceId);
+  const filteredMistakes = practiceMistakes.filter(
+    (mistake) => !workspaceId || mistake.workspaceId === workspaceId
+  );
+  const filteredDue = practiceDue.filter(
+    (mistake) => !workspaceId || mistake.workspaceId === workspaceId
+  );
+  const filteredAttempts = practiceAttempts.filter(
+    (attempt) => !workspaceId || attempt.workspaceId === workspaceId
+  );
+  // Vault-wide reviews (no workspaceId) stay visible in every workspace view.
+  const filteredReviews = reviews.filter(
+    (review) => !workspaceId || review.workspaceId === undefined || review.workspaceId === workspaceId
+  );
+  const filteredMemory = memoryRecords.filter(
+    (item) => !workspaceId || item.workspaceId === workspaceId
+  );
 
   const selectedTask =
     filteredTasks.find((task) => task.id === selectedTaskId) ?? filteredTasks[0] ?? null;
@@ -158,6 +180,18 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     }
   }
 
+  async function handleGeneratePlan() {
+    const workspace = currentWorkspace ?? workspaces[0];
+    if (!workspace) throw new Error('还没有工作区，暂时不能生成计划。');
+    setActionError(null);
+    try {
+      await generatePlan(workspace.id);
+    } catch (cause) {
+      setActionError(messageOf(cause));
+      throw cause;
+    }
+  }
+
   async function sendMessage(text: string) {
     const userMessage: ChatMessage = { id: `u-${Date.now()}`, role: 'user', text };
     setMessages((current) => [...current, userMessage]);
@@ -204,7 +238,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   }
 
   async function saveReview(answers: ReviewAnswers) {
-    await submitReview(reviewDate, answers);
+    await submitReview(reviewDate, answers, workspaceId ?? undefined);
     setSavedReviewDates((current) =>
       current.includes(reviewDate) ? current : [...current, reviewDate]
     );
@@ -327,6 +361,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
                 onSelectTask={setSelectedTaskId}
                 onUpdate={handleUpdateTask}
                 onCreateTask={handleCreateTask}
+                onGeneratePlan={handleGeneratePlan}
                 showWorkspace={showWorkspace}
                 dateLabel={dateLabel}
                 onOpenChat={() => setView('chat')}
@@ -337,6 +372,10 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
                 notes={notes}
                 workspaces={workspaces}
                 workspaceId={workspaceId}
+                tasks={filteredTasks}
+                practiceSets={filteredSets}
+                practiceAttempts={filteredAttempts}
+                reviews={filteredReviews}
                 onSelectNote={setSelectedNoteId}
                 onOpenChat={() => setView('chat')}
                 onCreateNote={handleCreateNote}
@@ -346,6 +385,8 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
                 set={selectedSet}
                 workspace={currentWorkspace}
                 notes={filteredNotes}
+                mistakes={filteredMistakes}
+                onSubmitAnswer={submitPracticeAnswer}
                 onOpenChat={() => setView('chat')}
                 onOpenNote={(id) => {
                   setSelectedNoteId(id);
@@ -359,9 +400,12 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
                 date={reviewDate}
                 dateLabel={formatChineseDate(reviewDate)}
                 memory={filteredMemory}
+                profile={memoryProfile}
+                records={filteredReviews.filter((review) => review.date === reviewDate)}
+                dueMistakes={filteredDue}
                 reminders={reminders}
                 streak={streak}
-                saved={savedReviewDates.includes(reviewDate)}
+                saved={savedReviewDates.includes(reviewDate) || filteredReviews.some((review) => review.date === reviewDate)}
                 onSave={saveReview}
                 onOpenChat={() => setView('chat')}
               />

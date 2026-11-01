@@ -53,6 +53,7 @@ type PlanPaneProps = {
   onSelectTask: (id: string) => void;
   onUpdate: (input: UpdateTaskInput) => Promise<void>;
   onCreateTask: (input: NewTaskDraft) => Promise<void>;
+  onGeneratePlan: () => Promise<void>;
   showWorkspace: boolean;
   dateLabel: string;
   onOpenChat: () => void;
@@ -68,6 +69,7 @@ export function PlanPane({
   onSelectTask,
   onUpdate,
   onCreateTask,
+  onGeneratePlan,
   showWorkspace,
   dateLabel,
   onOpenChat
@@ -79,8 +81,24 @@ export function PlanPane({
   const [duration, setDuration] = useState('30');
   const [acceptance, setAcceptance] = useState('');
   const [busy, setBusy] = useState(false);
+  const [planning, setPlanning] = useState(false);
+  const [planStatus, setPlanStatus] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [formStatus, setFormStatus] = useState<string | null>(null);
+
+  async function generatePlan() {
+    setPlanning(true);
+    setPlanStatus(null);
+    setFormError(null);
+    try {
+      await onGeneratePlan();
+      setPlanStatus('已按目标生成今日任务');
+    } catch (cause) {
+      setFormError(cause instanceof Error ? cause.message : '生成计划失败，请重试。');
+    } finally {
+      setPlanning(false);
+    }
+  }
 
   async function submitTask() {
     if (!title.trim()) {
@@ -146,14 +164,24 @@ export function PlanPane({
                   {workspace?.description ?? `今天 ${tasks.length} 个任务，已完成 ${completed} 个。`}
                 </p>
               </div>
-              <Button size="sm" variant="secondary" onClick={onOpenChat}>
-                去管家
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="secondary" disabled={planning} onClick={() => void generatePlan()}>
+                  {planning ? '正在规划…' : '生成今日任务'}
+                </Button>
+                <Button size="sm" variant="secondary" onClick={onOpenChat}>
+                  去管家
+                </Button>
+              </div>
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
               <span>{completed} / {tasks.length} 完成</span>
               <span>·</span>
               <span>{totalMinutes} 分钟</span>
+              {planStatus ? (
+                <span role="status" className="text-[#1d7f3c]">
+                  {planStatus}
+                </span>
+              ) : null}
             </div>
           </Card>
 

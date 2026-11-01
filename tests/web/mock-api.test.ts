@@ -116,3 +116,102 @@ test('returns a canned butler reply and records notes from chat', async () => {
   const snapshot = await api.getWorkspaceSnapshot('kaoyan');
   expect(snapshot.notes.some((note) => note.title === '今天数学卡在极限')).toBe(true);
 });
+
+test('serves seeded practice sets and records answers, mistakes and attempts', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage);
+  const sets = await api.listPracticeSets('kaoyan');
+  expect(sets.map((set) => set.title)).toEqual(['极限基础 3 题', '马原易错 3 题']);
+  const set = await api.getPracticeSet(sets[0]!.id);
+  const question = set!.questions[0]!;
+
+  const wrong = await api.submitPracticeAnswer({ questionId: question.id, choice: 0 });
+  expect(wrong.correct).toBe(false);
+  expect(wrong.mistake?.status).toBe('active');
+  expect(wrong.due).toBeTruthy();
+
+  const mistakes = await api.getPracticeMistakes('kaoyan');
+  expect(mistakes).toHaveLength(1);
+  expect(mistakes[0]?.questionId).toBe(question.id);
+  const due = await api.getPracticeDue({
+    workspaceId: 'kaoyan',
+    date: new Date().toISOString().slice(0, 10)
+  });
+  expect(due).toHaveLength(0);
+
+  const right = await api.submitPracticeAnswer({ questionId: question.id, choice: question.answer });
+  expect(right.correct).toBe(true);
+  expect(right.mistake?.correctStreak).toBe(1);
+  expect(await api.listPracticeAttempts('kaoyan')).toHaveLength(2);
+
+  const created = await api.createPracticeSet({
+    workspaceId: 'english',
+    title: '自建练习',
+    questions: [{ prompt: 'p', options: ['a', 'b'], answer: 1 }]
+  });
+  expect((await api.listPracticeSets('english')).some((entry) => entry.id === created.id)).toBe(true);
+});
+
+test('synthesizes memory from reviews and builds a learner profile', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage);
+  const result = await api.synthesizeMemory({
+    workspaceId: 'kaoyan',
+    date: '2026-10-31',
+    answers: { completed: '数学两小时', stuck: '极限定义', tomorrow: '先复习极限' }
+  });
+  expect(result.generatedBy).toBe('rules');
+  expect(result.items.map((item) => item.kind).sort()).toEqual(['plan', 'strength', 'weakness']);
+
+  await api.submitReview({
+    date: '2026-10-31',
+    workspaceId: 'kaoyan',
+    answers: { completed: '数学两小时', stuck: '极限定义', tomorrow: '先复习极限' }
+  });
+  const records = await api.listMemory('kaoyan');
+  expect(records.some((record) => record.source === 'review:2026-10-31')).toBe(true);
+  expect(records.some((record) => record.text.includes('极限定义'))).toBe(true);
+
+  const profile = await api.getMemoryProfile('kaoyan');
+  expect(profile.memoryCount).toBeGreaterThan(0);
+  expect(profile.weaknesses.some((entry) => entry.includes('极限定义'))).toBe(true);
+  expect(profile.plans.some((entry) => entry.includes('先复习极限'))).toBe(true);
+
+  const skipped = await api.synthesizeMemory({
+    workspaceId: 'kaoyan',
+    date: '2026-11-01',
+    answers: { skipped: true, completed: '', stuck: '', tomorrow: '' }
+  });
+  expect(skipped.items).toHaveLength(0);
+});
+
+test('lists review records and plans and searches the mock workspace', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage);
+  await api.submitReview({
+    date: '2026-10-30',
+    workspaceId: 'kaoyan',
+    answers: { completed: '数学', stuck: '极限', tomorrow: '复习' }
+  });
+  await api.submitReview({
+    date: '2026-10-31',
+    answers: { completed: '英语', stuck: '', tomorrow: '写作' }
+  });
+
+  const reviews = await api.listReviews({ workspaceId: 'kaoyan' });
+  expect(reviews.map((review) => review.date).sort()).toEqual(['2026-10-30', '2026-10-31']);
+  expect((await api.listReviews({ limit: 1 })).length).toBe(1);
+
+  const plan = await api.planWorkspace({ workspaceId: 'project', availableMinutes: 90 });
+  expect(plan.generatedBy).toBe('template');
+  expect(plan.workspaceId).toBe('project');
+  expect(plan.tasks.length).toBeGreaterThan(0);
+  expect(plan.tasks.every((task) => task.durationMin >= 15)).toBe(true);
+
+  const found = await api.searchWorkspace({ workspaceId: 'kaoyan', query: '洛必达' });
+  expect(found.length).toBeGreaterThan(0);
+  expect(found.some((hit) => hit.kind === 'practice-question')).toBe(true);
+  expect(found[0]?.snippet).toContain('洛必达');
+  expect(await api.searchWorkspace({ workspaceId: 'kaoyan', query: '  ' })).toEqual([]);
+  await expect(api.rebuildSearchIndex()).resolves.toBeUndefined();
+});

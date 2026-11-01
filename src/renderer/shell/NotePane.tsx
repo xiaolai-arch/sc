@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import type { CreateNoteInput, Workspace, WorkspaceNote } from '../../shared/workspace';
+import type { CreateNoteInput, Workspace, WorkspaceNote, WorkspaceTask } from '../../shared/workspace';
+import type { ReviewRecord } from '../../shared/ipc';
+import type { PracticeAttempt, PracticeSet } from '../../shared/practice';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Label } from '../ui/Label';
@@ -99,6 +101,10 @@ type NotePaneProps = {
   notes: WorkspaceNote[];
   workspaces: Workspace[];
   workspaceId: string | null;
+  tasks: WorkspaceTask[];
+  practiceSets: PracticeSet[];
+  practiceAttempts: PracticeAttempt[];
+  reviews: ReviewRecord[];
   onSelectNote: (id: string) => void;
   onOpenChat: () => void;
   onCreateNote: (input: CreateNoteInput) => Promise<WorkspaceNote>;
@@ -109,6 +115,10 @@ export function NotePane({
   notes,
   workspaces,
   workspaceId,
+  tasks,
+  practiceSets,
+  practiceAttempts,
+  reviews,
   onSelectNote,
   onOpenChat,
   onCreateNote
@@ -192,6 +202,68 @@ export function NotePane({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-6">
+        <div className="mx-auto mb-5 w-full max-w-[720px]">
+          <div className="rounded-xl border border-black/[0.06] bg-[#fafafa] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[13px] font-medium text-black">最近活动</p>
+              <span className="text-[11px] text-gray-500">
+                {tasks.length} 个任务 · {practiceAttempts.length} 次练习 · {reviews.length} 条复盘
+              </span>
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <div>
+                <p className="text-[11px] font-medium text-gray-500">任务</p>
+                <ul className="mt-1.5 space-y-1 text-[12px] leading-5 text-gray-600">
+                  {tasks.length === 0 ? (
+                    <li className="text-gray-400">还没有任务</li>
+                  ) : (
+                    tasks.slice(0, 3).map((task) => (
+                      <li key={task.id} className="truncate">
+                        {task.status === 'done' ? '✓ ' : ''}
+                        {task.title}
+                      </li>
+                    ))
+                  )}
+                </ul>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium text-gray-500">练习</p>
+                <ul className="mt-1.5 space-y-1 text-[12px] leading-5 text-gray-600">
+                  {practiceAttempts.length === 0 ? (
+                    <li className="text-gray-400">还没有练习</li>
+                  ) : (
+                    [...practiceAttempts]
+                      .slice(-3)
+                      .reverse()
+                      .map((attempt) => {
+                        const set = practiceSets.find((item) => item.id === attempt.setId);
+                        return (
+                          <li key={attempt.id} className="truncate">
+                            {set?.title ?? '练习'} · {attempt.correct ? '答对' : '答错'}
+                          </li>
+                        );
+                      })
+                  )}
+                </ul>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium text-gray-500">复盘</p>
+                <ul className="mt-1.5 space-y-1 text-[12px] leading-5 text-gray-600">
+                  {reviews.length === 0 ? (
+                    <li className="text-gray-400">还没有复盘</li>
+                  ) : (
+                    reviews.slice(0, 3).map((review) => (
+                      <li key={`${review.date}-${review.submittedAt}`} className="truncate">
+                        {review.date}
+                        {review.skipped ? ' · 已跳过' : ''}
+                      </li>
+                    ))
+                  )}
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
         {creating ? (
           <form
             className="mx-auto w-full max-w-[720px] space-y-4"

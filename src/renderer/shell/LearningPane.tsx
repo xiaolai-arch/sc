@@ -4,7 +4,12 @@ import { BookOpenIcon, CheckIcon, TargetIcon } from '../ui/icons';
 import { Progress } from '../ui/Progress';
 import { cn } from '../ui/cn';
 import type { Workspace, WorkspaceNote } from '../../shared/workspace';
-import type { PracticeSet } from './demoData';
+import type {
+  PracticeMistake,
+  PracticeSet,
+  SubmitAnswerInput,
+  SubmitAnswerResult
+} from '../../shared/practice';
 import { shellPaneClass } from './TaskListPane';
 
 type PracticeListProps = {
@@ -77,25 +82,37 @@ type LearningPaneProps = {
   set: PracticeSet | null;
   workspace: Workspace | null;
   notes: WorkspaceNote[];
+  mistakes: PracticeMistake[];
+  onSubmitAnswer: (input: SubmitAnswerInput) => Promise<SubmitAnswerResult>;
   onOpenChat: () => void;
   onOpenNote: (id: string) => void;
 };
 
-export function LearningPane({ set, workspace, notes, onOpenChat, onOpenNote }: LearningPaneProps) {
+export function LearningPane({
+  set,
+  workspace,
+  notes,
+  mistakes,
+  onSubmitAnswer,
+  onOpenChat,
+  onOpenNote
+}: LearningPaneProps) {
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
-  const [checked, setChecked] = useState(false);
+  const [result, setResult] = useState<SubmitAnswerResult | null>(null);
+  const [checking, setChecking] = useState(false);
   const [score, setScore] = useState(0);
   const [finished, setFinished] = useState(false);
-  const [wrongAdded, setWrongAdded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setIndex(0);
     setSelected(null);
-    setChecked(false);
+    setResult(null);
+    setChecking(false);
     setScore(0);
     setFinished(false);
-    setWrongAdded(false);
+    setError(null);
   }, [set?.id]);
 
   if (!set) {
@@ -115,6 +132,19 @@ export function LearningPane({ set, workspace, notes, onOpenChat, onOpenNote }: 
                 去问管家
               </Button>
             </div>
+            {mistakes.length > 0 ? (
+              <div className="mt-6 rounded-xl border border-black/[0.06] p-4">
+                <p className="text-[11px] font-medium text-gray-500">错题本 · {mistakes.length} 道待复习</p>
+                <ul className="mt-2 space-y-1.5">
+                  {mistakes.slice(0, 4).map((mistake) => (
+                    <li key={mistake.id} className="text-[12px] leading-5 text-gray-600">
+                      {mistake.prompt}
+                      <span className="ml-1 text-[10px] text-gray-400">（{mistake.due} 复习）</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             {notes.length > 0 ? (
               <div className="mt-6">
                 <p className="text-[11px] font-medium text-gray-500">相关记录</p>
@@ -140,13 +170,23 @@ export function LearningPane({ set, workspace, notes, onOpenChat, onOpenNote }: 
   }
 
   const question = set.questions[index];
-  const correct = selected === question.answer;
+  const answered = result !== null;
+  const correct = result?.correct === true;
   const last = index === set.questions.length - 1;
 
-  function check() {
-    if (selected === null || checked) return;
-    setChecked(true);
-    if (selected === question.answer) setScore((current) => current + 1);
+  async function check() {
+    if (selected === null || answered || checking) return;
+    setChecking(true);
+    setError(null);
+    try {
+      const submitted = await onSubmitAnswer({ questionId: question.id, choice: selected });
+      setResult(submitted);
+      if (submitted.correct) setScore((current) => current + 1);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '提交答案失败，请重试。');
+    } finally {
+      setChecking(false);
+    }
   }
 
   function next() {
@@ -156,17 +196,18 @@ export function LearningPane({ set, workspace, notes, onOpenChat, onOpenNote }: 
     }
     setIndex((current) => current + 1);
     setSelected(null);
-    setChecked(false);
-    setWrongAdded(false);
+    setResult(null);
+    setError(null);
   }
 
   function restart() {
     setIndex(0);
     setSelected(null);
-    setChecked(false);
+    setResult(null);
+    setChecking(false);
     setScore(0);
     setFinished(false);
-    setWrongAdded(false);
+    setError(null);
   }
 
   return (
@@ -193,6 +234,11 @@ export function LearningPane({ set, workspace, notes, onOpenChat, onOpenNote }: 
               <p className="mt-1 text-[12px] text-gray-500">
                 {score === set.questions.length ? '全对，继续保持。' : '错题已经记下来，晚点复盘再看一遍。'}
               </p>
+              {mistakes.length > 0 ? (
+                <p className="mt-1 text-[11px] text-gray-500">
+                  错题本还有 {mistakes.length} 道待复习。
+                </p>
+              ) : null}
               <div className="mt-4 flex justify-center gap-2">
                 <Button size="sm" onClick={restart}>
                   再练一次
@@ -223,13 +269,13 @@ export function LearningPane({ set, workspace, notes, onOpenChat, onOpenNote }: 
 
               <div className="mt-4 space-y-2">
                 {question.options.map((option, optionIndex) => {
-                  const isCorrect = checked && optionIndex === question.answer;
-                  const isWrong = checked && optionIndex === selected && optionIndex !== question.answer;
+                  const isCorrect = answered && optionIndex === result.answer;
+                  const isWrong = answered && optionIndex === selected && !result?.correct;
                   return (
                     <button
                       key={option}
                       type="button"
-                      disabled={checked}
+                      disabled={answered || checking}
                       onClick={() => setSelected(optionIndex)}
                       aria-pressed={selected === optionIndex}
                       aria-label={`${String.fromCharCode(65 + optionIndex)}. ${option}`}
@@ -257,34 +303,31 @@ export function LearningPane({ set, workspace, notes, onOpenChat, onOpenNote }: 
                 })}
               </div>
 
-              {checked ? (
+              {error ? (
+                <p role="alert" className="mt-3 text-[12px] text-[#d70015]">
+                  {error}
+                </p>
+              ) : null}
+
+              {answered ? (
                 <div className="mt-4 rounded-xl border border-black/[0.06] bg-[#fafafa] px-3 py-3">
                   <p className={cn('text-[12px] font-medium', correct ? 'text-[#1d7f3c]' : 'text-[#d70015]')}>
                     {correct ? '回答正确' : '回答错误'}
                   </p>
-                  <p className="mt-1 text-[12px] leading-5 text-gray-600">{question.explanation}</p>
-                  {!correct && !wrongAdded ? (
-                    <button
-                      type="button"
-                      onClick={() => setWrongAdded(true)}
-                      className="mt-2 text-[11px] font-medium text-[#0071e3] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
-                    >
-                      加入错题本
-                    </button>
-                  ) : null}
-                  {wrongAdded ? (
+                  <p className="mt-1 text-[12px] leading-5 text-gray-600">{result.explanation}</p>
+                  {result.mistake?.status === 'active' ? (
                     <p className="mt-2 text-[11px] text-gray-500" role="status">
-                      已加入错题本（原型）。
+                      已加入错题本，{result.mistake.due} 复习。
                     </p>
                   ) : null}
                 </div>
               ) : null}
 
               <div className="mt-5 flex gap-2">
-                <Button size="sm" disabled={selected === null} onClick={check}>
-                  检查答案
+                <Button size="sm" disabled={selected === null || answered || checking} onClick={() => void check()}>
+                  {checking ? '正在提交…' : '检查答案'}
                 </Button>
-                {checked ? (
+                {answered ? (
                   <Button size="sm" variant="secondary" onClick={next}>
                     {last ? '完成练习' : '下一题'}
                   </Button>
