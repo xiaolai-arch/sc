@@ -24,6 +24,7 @@ import {
 } from './focus-timer';
 import { LearningPane } from './LearningPane';
 import { ProjectPanel, type ProjectPanelTab } from './ProjectPanel';
+import { QuickCaptureDialog } from './QuickCaptureDialog';
 import type { ChatMessage, ChatStep } from './types';
 import { useConversations } from './useConversations';
 import { useWorkspaceData } from './useWorkspaceData';
@@ -141,6 +142,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   const [focus, setFocus] = useState<FocusSession | null>(null);
   const [focusNotice, setFocusNotice] = useState<string | null>(null);
   const [snoozedUntil, setSnoozedUntil] = useState<string | null>(null);
+  const [quickCaptureOpen, setQuickCaptureOpen] = useState(false);
   const focusSessionCounterRef = useRef(0);
   const recordedFocusSessionsRef = useRef<Set<number>>(new Set());
   const tasksRef = useRef(tasks);
@@ -194,6 +196,29 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     }, FOCUS_TICK_MS);
     return () => window.clearInterval(id);
   }, [focus?.running]);
+
+  useEffect(() => {
+    const api = window.studyCoach;
+    if (!api?.onQuickCapture) return undefined;
+    return api.onQuickCapture(() => setQuickCaptureOpen(true));
+  }, []);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
+      if (event.key.toLowerCase() !== 'n') return;
+      if (quickCaptureOpen) return;
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || target?.isContentEditable) {
+        return;
+      }
+      event.preventDefault();
+      startDraft();
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [quickCaptureOpen]);
 
   useEffect(() => {
     if (!focus || focus.remainingMs > 0 || focus.recorded) return;
@@ -878,6 +903,16 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
           </div>
         </div>
       ) : null}
+
+      <QuickCaptureDialog
+        open={quickCaptureOpen}
+        disabled={typing}
+        onClose={() => setQuickCaptureOpen(false)}
+        onSubmit={(text) => {
+          setQuickCaptureOpen(false);
+          void sendMessage(text);
+        }}
+      />
 
       <Dialog
         open={previewNote !== null}
