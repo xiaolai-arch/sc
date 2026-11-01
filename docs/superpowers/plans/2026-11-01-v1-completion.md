@@ -71,6 +71,7 @@
 - 每个 Wave 1 模块一个 Orca Task；worktree `new-top-level`，base `feat/v1-completion`。
 - 四个模块可并行；不允许跨目录。Wave 2 在 Wave 1 合并后启动。
 - 每个 worker 在 worktree 内提交，报告 commit、测试、风险。
+- Wave 2 顺序：5 (search-watcher) ∥ 7 (packaging-e2e) → 6 (ui-wiring) → 8 (legacy-cleanup)；6/8 都改 UI，7 的 e2e 需要稳定 UI，串行合并避免冲突。
 
 ## Dispatch log (2026-11-01)
 
@@ -79,3 +80,11 @@
 - Module 2 `task_bc6c2f97384e` / codex / `ctx_43830f71ec5f` / `v1-workspace-planner` — **done** (commits `f0a3636`, `cc83e6f`, `ad91bc1`; merged `5e5187f`; 264 tests/typecheck/build pass; worker ended without worker_done, released per nextAction)
 - Module 3 `task_546103c80b9b` / opencode / `ctx_ab4d64bb4edd` / `v1-practice-service` — **done** (commits `99e9dcf`, `3513aa1`, `f374bd0`; merged `a3a2e43`; 222 tests/typecheck/build pass)
 - Module 4 `task_3ac645878ae1` / zcode / `ctx_ec3ad6bf1a9b` / `v1-memory-profile` — **done** (commits `9330eb2`, `431e08f`; merged `b493458`; 244 tests/typecheck/build pass)
+
+### Wave 2 (2026-11-01)
+
+- Run: `run_ff9c07a5e79e` resumed; base `8836fae`（264 tests/typecheck green）
+- Module 5 `task_1bde9d51b07f` / zcode / `ctx_2311d116033c` / `v1-search-watcher` — dispatched (wave 2a)
+- Module 7 `task_800fc28572f5` / codex / `ctx_f7f1f4670e03` / `v1-packaging-e2e` — dispatched (wave 2a)
+- Module 6 `ui-wiring`（opencode）queued — after module 5 merges
+- Module 8 `legacy-cleanup`（claude）queued — after module 6 merges
