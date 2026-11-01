@@ -38,6 +38,11 @@ test('locks the public channel names', () => {
     getMemoryProfile: 'study-coach:memory:profile',
     searchWorkspace: 'study-coach:search:query',
     rebuildSearchIndex: 'study-coach:search:rebuild',
+    listConversations: 'study-coach:conversations:list',
+    getConversation: 'study-coach:conversations:get',
+    createConversation: 'study-coach:conversations:create',
+    appendConversationMessage: 'study-coach:conversations:append-message',
+    deleteConversation: 'study-coach:conversations:delete',
     send: 'study-coach:butler:send'
   });
 });
@@ -93,6 +98,16 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
   await bridge.getMemoryProfile('ws-1');
   await bridge.searchWorkspace({ workspaceId: 'ws-1', query: '极限', limit: 5 });
   await bridge.rebuildSearchIndex();
+  await bridge.listConversations();
+  await bridge.getConversation('c1');
+  await bridge.createConversation({ workspaceId: 'ws-1' });
+  await bridge.appendConversationMessage('c1', {
+    id: 'm1',
+    role: 'user',
+    text: 'hi',
+    createdAt: '2026-11-01T09:00:00.000Z'
+  });
+  await bridge.deleteConversation('c1');
   await bridge.send({ message: 'hi' });
 
   expect(calls.map((entry) => entry.channel)).toEqual(Object.values(IPC_CHANNELS));
@@ -109,7 +124,21 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
     channel: IPC_CHANNELS.searchWorkspace,
     args: [{ workspaceId: 'ws-1', query: '极限', limit: 5 }]
   });
-  expect(calls[29]?.args).toEqual([{ message: 'hi' }]);
+  expect(calls[32]).toEqual({
+    channel: IPC_CHANNELS.appendConversationMessage,
+    args: [
+      {
+        conversationId: 'c1',
+        message: {
+          id: 'm1',
+          role: 'user',
+          text: 'hi',
+          createdAt: '2026-11-01T09:00:00.000Z'
+        }
+      }
+    ]
+  });
+  expect(calls[34]?.args).toEqual([{ message: 'hi' }]);
 });
 
 test('bridge does not swallow rejected invokes', async () => {

@@ -1,3 +1,9 @@
+import type {
+  Conversation,
+  ConversationMessage,
+  ConversationSummary,
+  CreateConversationInput
+} from './conversations';
 import type { LearnerProfile, MemoryRecord, MemorySynthesisResult, SynthesizeMemoryInput } from './memory';
 import type {
   CreatePracticeSetInput,
@@ -76,13 +82,26 @@ export interface PlannerApi {
   planWorkspace(input: PlanWorkspaceInput): Promise<WorkspacePlan>;
 }
 
+/** Conversation persistence exposed to the renderer. */
+export interface ConversationApi {
+  listConversations(): Promise<ConversationSummary[]>;
+  getConversation(id: string): Promise<Conversation | null>;
+  createConversation(input?: CreateConversationInput): Promise<Conversation>;
+  appendConversationMessage(
+    id: string,
+    message: ConversationMessage
+  ): Promise<Conversation>;
+  deleteConversation(id: string): Promise<void>;
+}
+
 export interface StudyCoachApi
   extends WorkspaceService,
     ButlerService,
     PracticeApi,
     MemoryApi,
     SearchApi,
-    PlannerApi {
+    PlannerApi,
+    ConversationApi {
   getBootstrap(): Promise<Bootstrap>;
   completeWorkspaceOnboarding(input: WorkspaceOnboardingInput): Promise<void>;
   getSettings(): Promise<AppSettings>;

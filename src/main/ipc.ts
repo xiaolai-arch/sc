@@ -2,6 +2,10 @@ import type { AppSettings } from '../shared/types';
 import type { StudyCoachApi } from '../shared/ipc';
 import type { ButlerStreamEvent } from '../shared/butler-stream';
 import type {
+  ConversationMessage,
+  CreateConversationInput
+} from '../shared/conversations';
+import type {
   CreateNoteInput,
   CreateTaskInput,
   CreateWorkspaceInput,
@@ -47,6 +51,11 @@ export const IPC_CHANNELS = {
   getMemoryProfile: 'study-coach:memory:profile',
   searchWorkspace: 'study-coach:search:query',
   rebuildSearchIndex: 'study-coach:search:rebuild',
+  listConversations: 'study-coach:conversations:list',
+  getConversation: 'study-coach:conversations:get',
+  createConversation: 'study-coach:conversations:create',
+  appendConversationMessage: 'study-coach:conversations:append-message',
+  deleteConversation: 'study-coach:conversations:delete',
   send: 'study-coach:butler:send'
 } as const;
 
@@ -167,6 +176,56 @@ function requireSend(value: unknown): SendMessageInput {
   optionalString(input.workspaceId, '工作区 ID');
   optionalString(input.taskId, '任务 ID');
   return input as unknown as SendMessageInput;
+}
+
+function requireCreateConversation(value: unknown): CreateConversationInput {
+  if (value === undefined || value === null) return {};
+  const input = requireObject(value, '创建对话');
+  const title = optionalString(input.title, '对话标题');
+  const kind = input.kind;
+  if (kind !== undefined && kind !== 'chat' && kind !== 'check-in') {
+    throw new Error('对话类型无效。');
+  }
+  const workspaceId = optionalString(input.workspaceId, '工作区 ID');
+  return {
+    ...(title !== undefined ? { title } : {}),
+    ...(kind !== undefined ? { kind } : {}),
+    ...(workspaceId !== undefined ? { workspaceId } : {})
+  };
+}
+
+function requireConversationMessage(value: unknown): ConversationMessage {
+  const input = requireObject(value, '对话消息');
+  const id = requireString(input.id, '消息 ID');
+  if (input.role !== 'user' && input.role !== 'assistant') {
+    throw new Error('消息角色无效。');
+  }
+  if (typeof input.text !== 'string') {
+    throw new Error('消息内容无效。');
+  }
+  const createdAt = requireString(input.createdAt, '消息时间');
+  const steps = Array.isArray(input.steps)
+    ? (input.steps as ConversationMessage['steps'])
+    : undefined;
+  const source =
+    input.source === 'user' || input.source === 'butler' || input.source === 'check-in'
+      ? input.source
+      : undefined;
+  const trigger =
+    input.trigger === 'morning' ||
+    input.trigger === 'evening' ||
+    input.trigger === 'custom'
+      ? input.trigger
+      : undefined;
+  return {
+    id,
+    role: input.role,
+    text: input.text,
+    createdAt,
+    ...(steps ? { steps } : {}),
+    ...(source ? { source } : {}),
+    ...(trigger ? { trigger } : {})
+  };
 }
 
 interface ButlerStreamPayload {
@@ -307,6 +366,17 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
     getMemoryProfile: async (input) => api.getMemoryProfile(optionalString(input, '工作区 ID')),
     searchWorkspace: async (input) => api.searchWorkspace(requireSearchWorkspace(input)),
     rebuildSearchIndex: async () => api.rebuildSearchIndex(),
+    listConversations: async () => api.listConversations(),
+    getConversation: async (input) => api.getConversation(requireString(input, '对话 ID')),
+    createConversation: async (input) => api.createConversation(requireCreateConversation(input)),
+    appendConversationMessage: async (input) => {
+      const raw = requireObject(input, '追加对话消息');
+      return api.appendConversationMessage(
+        requireString(raw.conversationId, '对话 ID'),
+        requireConversationMessage(raw.message)
+      );
+    },
+    deleteConversation: async (input) => api.deleteConversation(requireString(input, '对话 ID')),
     send: async (input) => api.send(requireSend(input))
   };
 
@@ -437,6 +507,12 @@ export function createStudyCoachBridge(
     getMemoryProfile: (workspaceId) => call(IPC_CHANNELS.getMemoryProfile, workspaceId),
     searchWorkspace: (input) => call(IPC_CHANNELS.searchWorkspace, input),
     rebuildSearchIndex: () => call(IPC_CHANNELS.rebuildSearchIndex),
+    listConversations: () => call(IPC_CHANNELS.listConversations),
+    getConversation: (id) => call(IPC_CHANNELS.getConversation, id),
+    createConversation: (input) => call(IPC_CHANNELS.createConversation, input),
+    appendConversationMessage: (id, message) =>
+      call(IPC_CHANNELS.appendConversationMessage, { conversationId: id, message }),
+    deleteConversation: (id) => call(IPC_CHANNELS.deleteConversation, id),
     send: (input) => call(IPC_CHANNELS.send, input),
     async stream(input, onEvent) {
       const requestId = createRequestId();

@@ -24,6 +24,12 @@ import type {
 import type { StreamingButlerApi } from '../src/shared/butler-stream';
 import { BUTLER_TOOL_LABELS } from '../src/shared/butler-stream';
 import type {
+  Conversation,
+  ConversationMessage,
+  ConversationSummary,
+  CreateConversationInput
+} from '../src/shared/conversations';
+import type {
   CreatePracticeSetInput,
   PracticeAttempt,
   PracticeMistake,
@@ -67,6 +73,7 @@ interface MockState {
   practiceSets: PracticeSet[];
   practiceAttempts: PracticeAttempt[];
   practiceMistakes: PracticeMistake[];
+  conversations: Conversation[];
 }
 
 function inferMemoryKind(text: string): MemoryKind {
@@ -167,6 +174,7 @@ function defaultState(): MockState {
     onboarded: false,
     settings: structuredClone(defaultSettings),
     reviews: [],
+    conversations: [],
     ...seedWorkspaceData()
   };
 }
@@ -208,7 +216,10 @@ function readState(storage: Storage | null): MockState {
         : seeded.practiceAttempts,
       practiceMistakes: Array.isArray(parsed.practiceMistakes)
         ? parsed.practiceMistakes
-        : seeded.practiceMistakes
+        : seeded.practiceMistakes,
+      conversations: Array.isArray(parsed.conversations)
+        ? (parsed.conversations as Conversation[])
+        : []
     };
   } catch {
     return defaultState();
@@ -240,6 +251,10 @@ function chunkText(text: string, size: number): string[] {
     chunks.push(chars.slice(index, index + size).join(''));
   }
   return chunks;
+}
+
+function truncateConversationText(value: string, limit: number): string {
+  return Array.from(value.trim()).slice(0, limit).join('');
 }
 
 export type MockApiOptions = {
@@ -857,6 +872,66 @@ export function createMockApi(
 
     async getReminders(): Promise<Reminder[]> {
       return structuredClone(state.reminders);
+    },
+
+    async listConversations(): Promise<ConversationSummary[]> {
+      return state.conversations
+        .filter((conversation) => conversation.messages.length > 0)
+        .slice()
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        .map((conversation) => {
+          const last = conversation.messages[conversation.messages.length - 1];
+          return {
+            id: conversation.id,
+            title: conversation.title,
+            kind: conversation.kind,
+            ...(conversation.workspaceId ? { workspaceId: conversation.workspaceId } : {}),
+            updatedAt: conversation.updatedAt,
+            preview: last ? truncateConversationText(last.text, 80) : ''
+          };
+        });
+    },
+
+    async getConversation(id: string): Promise<Conversation | null> {
+      const conversation = state.conversations.find((entry) => entry.id === id);
+      return conversation ? structuredClone(conversation) : null;
+    },
+
+    async createConversation(input: CreateConversationInput = {}): Promise<Conversation> {
+      const timestamp = new Date().toISOString();
+      const conversation: Conversation = {
+        id: nextId('conv'),
+        title: input.title?.trim() ? truncateConversationText(input.title, 24) : '新对话',
+        kind: input.kind ?? 'chat',
+        ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        messages: []
+      };
+      state.conversations.push(conversation);
+      persist();
+      return structuredClone(conversation);
+    },
+
+    async appendConversationMessage(
+      id: string,
+      message: ConversationMessage
+    ): Promise<Conversation> {
+      const conversation = state.conversations.find((entry) => entry.id === id);
+      if (!conversation) throw new Error('对话不存在');
+      conversation.messages.push(structuredClone(message));
+      conversation.updatedAt = new Date().toISOString();
+      if (conversation.title === '新对话' && message.role === 'user') {
+        const title = truncateConversationText(message.text, 24);
+        if (title) conversation.title = title;
+      }
+      persist();
+      return structuredClone(conversation);
+    },
+
+    async deleteConversation(id: string): Promise<void> {
+      state.conversations = state.conversations.filter((entry) => entry.id !== id);
+      persist();
     },
 
     async send(input: SendMessageInput): Promise<SendMessageResult> {

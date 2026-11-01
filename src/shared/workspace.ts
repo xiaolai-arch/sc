@@ -125,6 +125,8 @@ export interface SendMessageInput {
   workspaceId?: string;
   taskId?: string;
   message: string;
+  /** Conversation to append to. When omitted, the butler creates one. */
+  conversationId?: string;
 }
 
 export interface SendMessageResult {
@@ -133,6 +135,7 @@ export interface SendMessageResult {
     inputTokens: number;
     outputTokens: number;
   };
+  conversationId?: string;
 }
 
 /** Main-process contract: vault-backed or test implementation. */

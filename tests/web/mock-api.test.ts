@@ -273,3 +273,31 @@ test('streams a plain answer without a tool step', async () => {
   expect(events.filter((event) => event.type === 'text').length).toBeGreaterThan(1);
   expect(result.text.length).toBeGreaterThan(0);
 });
+
+test('creates, lists, appends and deletes conversations', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage);
+  const created = await api.createConversation({ workspaceId: 'kaoyan' });
+  expect(created.title).toBe('新对话');
+  expect(await api.listConversations()).toEqual([]);
+
+  const updated = await api.appendConversationMessage(created.id, {
+    id: 'm1',
+    role: 'user',
+    text: '我想考研',
+    createdAt: '2026-11-01T09:00:00.000Z'
+  });
+  expect(updated.title).toBe('我想考研');
+  const summaries = await api.listConversations();
+  expect(summaries).toHaveLength(1);
+  expect(summaries[0]).toMatchObject({
+    id: created.id,
+    workspaceId: 'kaoyan',
+    preview: '我想考研'
+  });
+
+  const second = createMockApi(localStorage);
+  expect((await second.getConversation(created.id))?.messages).toHaveLength(1);
+  await second.deleteConversation(created.id);
+  expect(await second.getConversation(created.id)).toBeNull();
+});

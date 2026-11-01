@@ -9,6 +9,7 @@ import type { AppSettings, ProviderConfig } from '../shared/types';
 import type { ButlerService, SendMessageInput, WorkspaceService } from '../shared/workspace';
 import { createModelClient, NoApiKeyError, type ModelClient } from './agent/model-client';
 import { createButlerService } from './butler/create-butler-service';
+import { ConversationStore } from './conversations/conversation-store';
 import { createMemoryService } from './memory/create-memory-service';
 import { createPracticeService } from './practice';
 import { createWorkspacePlanner } from './planning';
@@ -70,6 +71,7 @@ export interface AppContext {
   state: JsonStateStore;
   settings: SettingsService;
   secrets: SecretStore;
+  conversationStore: ConversationStore;
   readonly workspace: WorkspaceService;
   readonly butler: ButlerService;
   readonly practice: PracticeService;
@@ -142,6 +144,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
   });
   const stored = await state.read();
   const settings = new SettingsService(state);
+  const conversationStore = new ConversationStore(join(options.userDataPath, 'conversations'));
   const secrets =
     options.secretStore ??
     new SafeStorageSecretStore(join(options.userDataPath, 'secrets', 'api-key.bin'));
@@ -470,6 +473,21 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     async rebuildSearchIndex() {
       await (await getServices()).search.rebuild();
     },
+    async listConversations() {
+      return conversationStore.list();
+    },
+    async getConversation(id) {
+      return conversationStore.get(id);
+    },
+    async createConversation(input) {
+      return conversationStore.create(input);
+    },
+    async appendConversationMessage(id, message) {
+      return conversationStore.appendMessage(id, message);
+    },
+    async deleteConversation(id) {
+      await conversationStore.delete(id);
+    },
     async send(input: SendMessageInput) {
       return (await getServices()).butler.send(input);
     },
@@ -483,6 +501,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     state,
     settings,
     secrets,
+    conversationStore,
     get workspace() {
       if (!active) throw new Error('工作区服务尚未初始化。');
       return active.workspace;
