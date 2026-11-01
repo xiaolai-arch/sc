@@ -18,6 +18,8 @@ export interface CreateButlerServiceOptions {
   workspaceService?: WorkspaceService | null;
   /** Pre-built model client. Takes precedence over provider/apiKey. */
   modelClient?: ModelClient | null;
+  /** Builds a client for a conversation-level model override. */
+  modelClientFor?: (model: string) => ModelClient | null;
   /** Optional conversation store used to load history and persist replies. */
   conversationStore?: ConversationStore | null;
   memoryService?: MemoryService | null;
@@ -49,6 +51,7 @@ export function createButlerService(
   const serviceOptions: ButlerServiceOptions = {
     workspaceService: options.workspaceService ?? null,
     modelClient,
+    ...(options.modelClientFor ? { modelClientFor: options.modelClientFor } : {}),
     ...(options.conversationStore !== undefined
       ? { conversationStore: options.conversationStore }
       : {}),

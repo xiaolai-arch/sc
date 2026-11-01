@@ -112,6 +112,8 @@ export interface ConversationApi {
   /** Keeps the first `keepCount` messages; used by regenerate and edit. */
   truncateConversationMessages(id: string, keepCount: number): Promise<Conversation>;
   searchConversations(query: string): Promise<ConversationSummary[]>;
+  /** Per-conversation model override; null clears it (follow the global provider). */
+  setConversationModel(id: string, model: string | null): Promise<Conversation>;
   /** Abort the in-flight turn identified by the renderer's assistant message id. */
   cancelStream(messageId: string): Promise<void>;
   /** Proactive check-ins ask the renderer to open a conversation. */

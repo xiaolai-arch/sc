@@ -46,3 +46,34 @@ test('records butler usage, prices it and clears it', async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('records override-model usage with the conversation model label', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'study-coach-usage-override-'));
+  try {
+    const model = new FakeModelClient([
+      { text: '回复', usage: { inputTokens: 5, outputTokens: 2 } }
+    ]);
+    const context = await createAppContext({
+      userDataPath: dir,
+      defaultVaultPath: join(dir, 'vault'),
+      secretStore: new InMemorySecretStore(),
+      modelClient: model,
+      now: () => new Date(2026, 10, 1, 9, 0, 0)
+    });
+    const conversation = await context.api.createConversation({});
+    await context.api.setConversationModel(conversation.id, 'override-model');
+
+    await context.api.send({ conversationId: conversation.id, message: '你好' });
+
+    expect(await context.usage.list()).toEqual([
+      expect.objectContaining({
+        model: 'override-model',
+        calls: 1,
+        inputTokens: 5,
+        outputTokens: 2
+      })
+    ]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

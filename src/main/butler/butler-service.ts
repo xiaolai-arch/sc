@@ -40,6 +40,8 @@ export interface ButlerServiceOptions {
   workspaceService?: WorkspaceService | null;
   /** Injected model client. Null means template replies only (e.g. no API key). */
   modelClient?: ModelClient | null;
+  /** Builds a client for a conversation-level model override; null falls back. */
+  modelClientFor?: (model: string) => ModelClient | null;
   /** Optional conversation persistence. Null keeps send/stream stateless. */
   conversationStore?: ConversationStore | null;
   memoryService?: MemoryService | null;
@@ -56,6 +58,7 @@ const DEFAULT_MAX_TOOL_STEPS = 4;
 export class ButlerServiceImpl implements ButlerService {
   private readonly workspaceService: WorkspaceService | null;
   private readonly modelClient: ModelClient | null;
+  private readonly modelClientFor: ((model: string) => ModelClient | null) | null;
   private readonly conversationStore: ConversationStore | null;
   private readonly memoryService: MemoryService | null;
   private readonly planner: WorkspacePlanner | null;
@@ -68,6 +71,7 @@ export class ButlerServiceImpl implements ButlerService {
   constructor(options: ButlerServiceOptions = {}) {
     this.workspaceService = options.workspaceService ?? null;
     this.modelClient = options.modelClient ?? null;
+    this.modelClientFor = options.modelClientFor ?? null;
     this.conversationStore = options.conversationStore ?? null;
     this.memoryService = options.memoryService ?? null;
     this.planner = options.planner ?? null;
@@ -84,6 +88,7 @@ export class ButlerServiceImpl implements ButlerService {
   async send(input: SendMessageInput): Promise<SendMessageResult> {
     const message = typeof input.message === 'string' ? input.message.trim() : '';
     const conversation = await this.resolveConversation(input);
+    const client = this.clientFor(conversation);
     const effectiveInput = this.effectiveInput(input, conversation);
     const context = await gatherContext(this.workspaceService, effectiveInput, this.now());
 
@@ -93,7 +98,7 @@ export class ButlerServiceImpl implements ButlerService {
       return { text, ...(conversation ? { conversationId: conversation.id } : {}) };
     }
 
-    if (!this.modelClient) {
+    if (!client) {
       const text = buildTemplateReply(context, input, { reason: 'no-key' });
       await this.persistAssistant(conversation, input, text, []);
       return { text, ...(conversation ? { conversationId: conversation.id } : {}) };
@@ -107,7 +112,7 @@ export class ButlerServiceImpl implements ButlerService {
 
     try {
       for (let stepIndex = 0; stepIndex <= this.maxToolSteps; stepIndex += 1) {
-        const response = await this.complete(messages);
+        const response = await this.complete(messages, undefined, client);
         usage = sumUsage(usage, response.usage);
         if (response.text.trim()) lastText = response.text.trim();
 
@@ -175,6 +180,7 @@ export class ButlerServiceImpl implements ButlerService {
     const signal = options.signal;
     const message = typeof input.message === 'string' ? input.message.trim() : '';
     const conversation = await this.resolveConversation(input);
+    const client = this.clientFor(conversation);
     const effectiveInput = this.effectiveInput(input, conversation);
     const context = await gatherContext(this.workspaceService, effectiveInput, this.now());
 
@@ -186,7 +192,7 @@ export class ButlerServiceImpl implements ButlerService {
       return { text, ...(conversation ? { conversationId: conversation.id } : {}) };
     }
 
-    if (!this.modelClient) {
+    if (!client) {
       const text = buildTemplateReply(context, input, { reason: 'no-key' });
       await this.persistAssistant(conversation, input, text, []);
       onEvent({ type: 'text', text });
@@ -217,8 +223,8 @@ export class ButlerServiceImpl implements ButlerService {
         let streamedText = false;
         let streamedTextContent = '';
 
-        if (supportsStreaming(this.modelClient)) {
-          response = await this.modelClient.stream(
+        if (supportsStreaming(client)) {
+          response = await client.stream(
             this.buildRequest(messages, signal),
             (event) => {
               if (event.type === 'reasoning') {
@@ -232,7 +238,7 @@ export class ButlerServiceImpl implements ButlerService {
             }
           );
         } else {
-          response = await this.complete(messages, signal);
+          response = await this.complete(messages, signal, client);
         }
         throwIfAborted(signal);
 
@@ -325,6 +331,17 @@ export class ButlerServiceImpl implements ButlerService {
         ...(lastToolFailure ? { toolName: lastToolFailure } : {})
       })
     );
+  }
+
+  /** Conversation override first; any failure falls back to the default client. */
+  private clientFor(conversation: Conversation | null): ModelClient | null {
+    const override = conversation?.model?.trim();
+    if (!override || !this.modelClientFor) return this.modelClient;
+    try {
+      return this.modelClientFor(override) ?? this.modelClient;
+    } catch {
+      return this.modelClient;
+    }
   }
 
   private async resolveConversation(input: SendMessageInput): Promise<Conversation | null> {
@@ -443,12 +460,10 @@ export class ButlerServiceImpl implements ButlerService {
 
   private async complete(
     messages: ModelMessage[],
-    signal?: AbortSignal
+    signal: AbortSignal | undefined,
+    client: ModelClient
   ): Promise<ModelResponse> {
-    if (!this.modelClient) {
-      throw new Error('Model client is not configured.');
-    }
-    return this.modelClient.complete(this.buildRequest(messages, signal));
+    return client.complete(this.buildRequest(messages, signal));
   }
 
   private async runTool(

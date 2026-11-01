@@ -102,6 +102,7 @@ test('locks the public channel names', () => {
     setConversationPinned: 'study-coach:conversations:set-pinned',
     truncateConversationMessages: 'study-coach:conversations:truncate-messages',
     searchConversations: 'study-coach:conversations:search',
+    setConversationModel: 'study-coach:conversations:set-model',
     getUsageSummary: 'study-coach:usage:summary',
     clearUsage: 'study-coach:usage:clear',
     send: 'study-coach:butler:send'
@@ -183,6 +184,7 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
   await bridge.setConversationPinned('c1', true);
   await bridge.truncateConversationMessages('c1', 2);
   await bridge.searchConversations('极限');
+  await bridge.setConversationModel('c1', 'gpt-x');
   await bridge.getUsageSummary(7);
   await bridge.clearUsage();
   await bridge.send({ message: 'hi' });
@@ -251,9 +253,13 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
     channel: IPC_CHANNELS.searchConversations,
     args: ['极限']
   });
-  expect(calls[43]).toEqual({ channel: IPC_CHANNELS.getUsageSummary, args: [7] });
-  expect(calls[44]).toEqual({ channel: IPC_CHANNELS.clearUsage, args: [] });
-  expect(calls[45]?.args).toEqual([{ message: 'hi' }]);
+  expect(calls[43]).toEqual({
+    channel: IPC_CHANNELS.setConversationModel,
+    args: [{ conversationId: 'c1', model: 'gpt-x' }]
+  });
+  expect(calls[44]).toEqual({ channel: IPC_CHANNELS.getUsageSummary, args: [7] });
+  expect(calls[45]).toEqual({ channel: IPC_CHANNELS.clearUsage, args: [] });
+  expect(calls[46]?.args).toEqual([{ message: 'hi' }]);
 });
 
 test('bridge does not swallow rejected invokes', async () => {

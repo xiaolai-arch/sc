@@ -36,6 +36,7 @@ export interface ButlerFactoryDependencies {
   memoryService?: MemoryService;
   planner?: WorkspacePlanner;
   modelClient?: ModelClient | null;
+  modelClientFor?: (model: string) => ModelClient | null;
 }
 
 /** Dependencies handed to an injected memory factory. */
@@ -184,7 +185,8 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       ...(dependencies.memoryService ? { memoryService: dependencies.memoryService } : {}),
       ...(dependencies.planner ? { planner: dependencies.planner } : {}),
       now,
-      ...(dependencies.modelClient !== undefined ? { modelClient: dependencies.modelClient } : {})
+      ...(dependencies.modelClient !== undefined ? { modelClient: dependencies.modelClient } : {}),
+      ...(dependencies.modelClientFor ? { modelClientFor: dependencies.modelClientFor } : {})
     });
   }
 
@@ -224,23 +226,40 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
   async function buildServices(nextSettings: AppSettings): Promise<ActiveServices> {
     const apiKey = await secrets.getApiKey();
     const workspace = createWorkspace(nextSettings.vaultPath);
-    const resolvedClient =
-      options.modelClient !== undefined
-        ? options.modelClient
-        : resolveModelClient(nextSettings.provider, apiKey);
-    const modelClient = resolvedClient
-      ? createRecordingModelClient(
-          resolvedClient,
-          (entry) => usageStore.record(entry),
-          {
-            provider:
-              nextSettings.provider.kind === 'local-cli'
-                ? nextSettings.provider.agent
-                : nextSettings.provider.kind,
-            model: nextSettings.provider.model ?? ''
-          }
-        )
-      : null;
+    const providerLabel =
+      nextSettings.provider.kind === 'local-cli'
+        ? nextSettings.provider.agent
+        : nextSettings.provider.kind;
+
+    function buildClient(provider: ProviderConfig, model: string): ModelClient | null {
+      const resolved =
+        options.modelClient !== undefined
+          ? options.modelClient
+          : resolveModelClient(provider, apiKey);
+      return resolved
+        ? createRecordingModelClient(
+            resolved,
+            (entry) => usageStore.record(entry),
+            { provider: providerLabel, model }
+          )
+        : null;
+    }
+
+    const modelClient = buildClient(
+      nextSettings.provider,
+      nextSettings.provider.model ?? ''
+    );
+    const modelClientCache = new Map<string, ModelClient | null>();
+    function modelClientFor(model: string): ModelClient | null {
+      const trimmed = model.trim();
+      if (!trimmed) return modelClient;
+      if (modelClientCache.has(trimmed)) return modelClientCache.get(trimmed) ?? null;
+      const overridden = { ...nextSettings.provider, model: trimmed } as ProviderConfig;
+      const client = buildClient(overridden, trimmed);
+      modelClientCache.set(trimmed, client);
+      return client;
+    }
+
     const memory = createMemory(nextSettings.vaultPath, modelClient);
     const planner = createPlanner(nextSettings.vaultPath, workspace, modelClient);
     const dependencies: ButlerFactoryDependencies = {
@@ -250,7 +269,8 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       conversationStore,
       memoryService: memory,
       planner,
-      modelClient
+      modelClient,
+      modelClientFor
     };
     const butler = createButler(nextSettings.vaultPath, dependencies);
 
@@ -564,6 +584,9 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     },
     async searchConversations(query) {
       return conversationStore.search(query);
+    },
+    async setConversationModel(id, model) {
+      return conversationStore.setModel(id, model);
     },
     async getUsageSummary(days) {
       const requested =

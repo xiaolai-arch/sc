@@ -73,6 +73,7 @@ export const IPC_CHANNELS = {
   setConversationPinned: 'study-coach:conversations:set-pinned',
   truncateConversationMessages: 'study-coach:conversations:truncate-messages',
   searchConversations: 'study-coach:conversations:search',
+  setConversationModel: 'study-coach:conversations:set-model',
   getUsageSummary: 'study-coach:usage:summary',
   clearUsage: 'study-coach:usage:clear',
   send: 'study-coach:butler:send'
@@ -314,6 +315,24 @@ function requireTruncateConversation(value: unknown): {
   return {
     conversationId: requireString(input.conversationId, '对话 ID'),
     keepCount: input.keepCount
+  };
+}
+
+function requireSetConversationModel(value: unknown): {
+  conversationId: string;
+  model: string | null;
+} {
+  const input = requireObject(value, '设置对话模型');
+  const model = input.model;
+  if (model !== null && typeof model !== 'string') {
+    throw new Error('对话模型无效。');
+  }
+  if (typeof model === 'string' && Array.from(model).length > 120) {
+    throw new Error('对话模型过长。');
+  }
+  return {
+    conversationId: requireString(input.conversationId, '对话 ID'),
+    model
   };
 }
 
@@ -571,6 +590,10 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
     },
     searchConversations: async (input) =>
       api.searchConversations(requireConversationSearch(input)),
+    setConversationModel: async (input) => {
+      const { conversationId, model } = requireSetConversationModel(input);
+      return api.setConversationModel(conversationId, model);
+    },
     getUsageSummary: async (input) => api.getUsageSummary(requireUsageDays(input)),
     clearUsage: async () => api.clearUsage(),
     send: async (input) => api.send(requireSend(input))
@@ -745,6 +768,8 @@ export function createStudyCoachBridge(
     truncateConversationMessages: (id, keepCount) =>
       call(IPC_CHANNELS.truncateConversationMessages, { conversationId: id, keepCount }),
     searchConversations: (query) => call(IPC_CHANNELS.searchConversations, query),
+    setConversationModel: (id, model) =>
+      call(IPC_CHANNELS.setConversationModel, { conversationId: id, model }),
     getUsageSummary: (days) => call(IPC_CHANNELS.getUsageSummary, days),
     clearUsage: () => call(IPC_CHANNELS.clearUsage),
     cancelStream: (messageId) => call(BUTLER_STREAM_CHANNELS.cancel, messageId),

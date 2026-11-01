@@ -1068,6 +1068,19 @@ export function createMockApi(
       persist();
     },
 
+    async setConversationModel(id: string, model: string | null): Promise<Conversation> {
+      const conversation = state.conversations.find((entry) => entry.id === id);
+      if (!conversation) throw new Error('对话不存在');
+      const trimmed = model?.trim() ?? '';
+      if (trimmed) {
+        conversation.model = Array.from(trimmed).slice(0, 120).join('');
+      } else {
+        delete conversation.model;
+      }
+      persist();
+      return structuredClone(conversation);
+    },
+
     async renameConversation(id: string, title: string): Promise<Conversation> {
       const conversation = state.conversations.find((entry) => entry.id === id);
       if (!conversation) throw new Error('对话不存在');

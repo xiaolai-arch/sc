@@ -74,6 +74,17 @@ function fakeApi(): { api: StudyCoachApi; calls: unknown[][] } {
     async searchConversations(query: string) {
       calls.push(['search', query]);
       return [];
+    },
+    async setConversationModel(id: string, model: string | null) {
+      calls.push(['model', id, model]);
+      return {
+        id,
+        title: '新对话',
+        kind: 'chat',
+        createdAt: '2026-11-01T09:00:00.000Z',
+        updatedAt: '2026-11-01T09:00:00.000Z',
+        messages: []
+      };
     }
   } as unknown as StudyCoachApi;
   return { api, calls };
@@ -100,6 +111,8 @@ test('routes conversation channels and validates payloads', async () => {
   await handlers.setConversationPinned({ conversationId: 'c1', pinned: true });
   await handlers.truncateConversationMessages({ conversationId: 'c1', keepCount: 2 });
   await handlers.searchConversations('极限');
+  await handlers.setConversationModel({ conversationId: 'c1', model: 'gpt-x' });
+  await handlers.setConversationModel({ conversationId: 'c1', model: null });
 
   expect(calls).toEqual([
     ['list'],
@@ -119,7 +132,9 @@ test('routes conversation channels and validates payloads', async () => {
     ['rename', 'c1', '数学复盘'],
     ['pin', 'c1', true],
     ['truncate', 'c1', 2],
-    ['search', '极限']
+    ['search', '极限'],
+    ['model', 'c1', 'gpt-x'],
+    ['model', 'c1', null]
   ]);
 });
 
@@ -147,4 +162,13 @@ test('rejects malformed conversation payloads', async () => {
     handlers.truncateConversationMessages({ conversationId: 'c1', keepCount: -1 })
   ).rejects.toThrow(/保留消息数/);
   await expect(handlers.searchConversations(42)).rejects.toThrow(/搜索关键词/);
+  await expect(handlers.setConversationModel({ model: 'gpt-x' })).rejects.toThrow(
+    /对话 ID/
+  );
+  await expect(
+    handlers.setConversationModel({ conversationId: 'c1', model: 'x'.repeat(121) })
+  ).rejects.toThrow(/对话模型/);
+  await expect(
+    handlers.setConversationModel({ conversationId: 'c1', model: 42 })
+  ).rejects.toThrow(/对话模型/);
 });
