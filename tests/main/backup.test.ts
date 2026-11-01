@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createBackup, handleExportBackup } from '../../src/main/backup';
@@ -151,6 +151,30 @@ test('rejects destinations inside the vault or user data directory', async () =>
         vaultPath: vault,
         userDataPath: userData,
         destinationRoot: join(userData, 'backups'),
+        now: NOW
+      })
+    ).rejects.toThrow(/不能位于/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects a destination symlink pointing inside the vault', async () => {
+  const { root, vault, userData } = await fixture();
+  try {
+    const link = join(root, 'vault-workspaces-link');
+    try {
+      await symlink(join(vault, 'workspaces'), link, 'dir');
+    } catch {
+      // Platforms without symlink support (e.g. Windows without privileges).
+      return;
+    }
+
+    await expect(
+      createBackup({
+        vaultPath: vault,
+        userDataPath: userData,
+        destinationRoot: link,
         now: NOW
       })
     ).rejects.toThrow(/不能位于/);

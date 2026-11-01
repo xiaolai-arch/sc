@@ -1,5 +1,5 @@
-import { copyFile, cp, mkdir, stat, writeFile } from 'node:fs/promises';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { copyFile, cp, mkdir, realpath, stat, writeFile } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { BackupResult } from '../shared/ipc';
 
 export type { BackupCopied, BackupResult } from '../shared/ipc';
@@ -40,6 +40,21 @@ function isInside(child: string, parent: string): boolean {
   return path === '' || (!path.startsWith('..') && !isAbsolute(path));
 }
 
+/**
+ * Resolves symlinks for the existing part of a path. Missing tail components
+ * (e.g. the chosen folder does not exist yet) are appended to the resolved
+ * parent so `/var` vs `/private/var` style aliases cannot defeat the check.
+ */
+async function realPathOrResolve(path: string): Promise<string> {
+  try {
+    return await realpath(path);
+  } catch {
+    const parent = dirname(path);
+    if (parent === path) return resolve(path);
+    return join(await realPathOrResolve(parent), basename(path));
+  }
+}
+
 async function isDirectory(path: string): Promise<boolean> {
   try {
     return (await stat(path)).isDirectory();
@@ -66,7 +81,14 @@ export async function createBackup(options: CreateBackupOptions): Promise<Backup
   const userDataPath = resolve(options.userDataPath);
   const destinationRoot = resolve(options.destinationRoot);
 
-  if (isInside(destinationRoot, vaultPath) || isInside(destinationRoot, userDataPath)) {
+  // Compare physical paths so a symlinked destination cannot point back into
+  // the sources and turn the copy into a recursive self-copy.
+  const [realVault, realUserData, realDestination] = await Promise.all([
+    realPathOrResolve(vaultPath),
+    realPathOrResolve(userDataPath),
+    realPathOrResolve(destinationRoot)
+  ]);
+  if (isInside(realDestination, realVault) || isInside(realDestination, realUserData)) {
     throw new Error('备份目录不能位于 vault 或应用数据目录内。');
   }
 
