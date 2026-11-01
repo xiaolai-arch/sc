@@ -35,15 +35,15 @@ export function Composer({
 
   return (
     <div className="shrink-0 px-4 pb-4 pt-2 md:px-6">
-      <div className="mx-auto w-full max-w-[760px] rounded-2xl border border-black/[0.08] bg-white p-3 shadow-sm">
+      <div className="mx-auto w-full max-w-[760px] rounded-2xl border border-black/[0.08] dark:border-white/10 bg-white dark:bg-[#1c1c1e] p-3 shadow-sm">
         {editing ? (
-          <div className="mb-2 flex items-center justify-between rounded-md bg-[#f2f7fd] px-2 py-1 text-[11px] text-gray-600">
+          <div className="mb-2 flex items-center justify-between rounded-md bg-[#f2f7fd] dark:bg-[#16202b] px-2 py-1 text-[11px] text-gray-600 dark:text-[#a1a1a6]">
             <span>正在编辑已发送的消息</span>
             {onCancelEdit ? (
               <button
                 type="button"
                 onClick={onCancelEdit}
-                className="font-medium text-[#0071e3] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+                className="font-medium text-[#0071e3] dark:text-[#4da3ff] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
               >
                 取消编辑
               </button>
@@ -62,20 +62,20 @@ export function Composer({
           rows={2}
           placeholder="向管家提问，或说「记一下…」"
           aria-label="向管家提问"
-          className="max-h-32 min-h-[44px] w-full resize-none bg-transparent px-1 py-1 text-[13px] leading-5 text-[#1d1d1f] outline-none placeholder:text-gray-500"
+          className="max-h-32 min-h-[44px] w-full resize-none bg-transparent px-1 py-1 text-[13px] leading-5 text-[#1d1d1f] dark:text-[#f5f5f7] outline-none placeholder:text-gray-500"
         />
         <div className="mt-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-1">
             <button
               type="button"
               aria-label="添加附件"
-              className="flex h-7 w-7 items-center justify-center rounded-md text-gray-500 transition-colors duration-150 hover:bg-black/[0.04] hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-gray-500 dark:text-[#8e8e93] transition-colors duration-150 hover:bg-black/[0.04] dark:hover:bg-white/[0.06] hover:text-black dark:hover:text-[#f5f5f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
             >
               <PlusIcon className="h-4 w-4" />
             </button>
             <button
               type="button"
-              className="flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-gray-500 transition-colors duration-150 hover:bg-black/[0.04] hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+              className="flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-gray-500 dark:text-[#8e8e93] transition-colors duration-150 hover:bg-black/[0.04] dark:hover:bg-white/[0.06] hover:text-black dark:hover:text-[#f5f5f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
             >
               <LockIcon className="h-3.5 w-3.5" />
               计划模式
@@ -83,7 +83,7 @@ export function Composer({
             </button>
           </div>
           <div className="flex min-w-0 items-center gap-3">
-            <span className="hidden min-w-0 items-center gap-1.5 text-[11px] text-gray-500 sm:flex">
+            <span className="hidden min-w-0 items-center gap-1.5 text-[11px] text-gray-500 dark:text-[#8e8e93] sm:flex">
               <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#34c759]" />
               <span className="truncate">{modelLabel}</span>
             </span>

@@ -116,26 +116,26 @@ export function memoryWhyRemembered(record: MemoryRecord): string {
 function memoryKindClass(kind: MemoryKind): string {
   switch (kind) {
     case 'weakness':
-      return 'bg-[#fdf3f2] text-[#d70015]';
+      return 'bg-[#fdf3f2] dark:bg-[#3a1c1e] text-[#d70015] dark:text-[#ff7b72]';
     case 'strength':
-      return 'bg-[#eefaf0] text-[#1d7f3a]';
+      return 'bg-[#eefaf0] dark:bg-[#12301c] text-[#1d7f3a] dark:text-[#7ee2a0]';
     case 'preference':
-      return 'bg-[#f2f7fd] text-[#0071e3]';
+      return 'bg-[#f2f7fd] dark:bg-[#16202b] text-[#0071e3] dark:text-[#4da3ff]';
     case 'plan':
-      return 'bg-[#f4f1fb] text-[#6b4fbb]';
+      return 'bg-[#f4f1fb] dark:bg-[#2a2340] text-[#6b4fbb] dark:text-[#c9b8ff]';
     default:
-      return 'bg-[#f1eee8] text-[#6b6b70]';
+      return 'bg-[#f1eee8] dark:bg-white/[0.08] text-[#6b6b70] dark:text-[#a1a1a6]';
   }
 }
 
 const actionClass =
-  'rounded px-1.5 py-0.5 text-[10px] text-[#6b6b70] transition-colors hover:bg-black/[0.05] hover:text-black disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30';
+  'rounded px-1.5 py-0.5 text-[10px] text-[#6b6b70] dark:text-[#a1a1a6] transition-colors hover:bg-black/[0.05] dark:hover:bg-white/[0.06] hover:text-black dark:hover:text-[#f5f5f7] disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30';
 
 const primaryButtonClass =
   'rounded-md bg-[#0071e3] px-2 py-1 text-[10px] font-medium text-white disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30';
 
 const inputClass =
-  'h-7 min-w-0 rounded-md border border-[#e5e1da] bg-white px-2 text-[10px] text-[#1d1d1f] outline-none placeholder:text-[#9a9a9e] focus:border-[#0071e3]/40 focus:ring-2 focus:ring-[#0071e3]/20';
+  'h-7 min-w-0 rounded-md border border-[#e5e1da] dark:border-white/10 bg-white dark:bg-[#242426] px-2 text-[10px] text-[#1d1d1f] dark:text-[#f5f5f7] outline-none placeholder:text-[#9a9a9e] focus:border-[#0071e3]/40 focus:ring-2 focus:ring-[#0071e3]/20';
 
 function messageOf(cause: unknown) {
   return cause instanceof Error ? cause.message : '操作失败，请重试。';
@@ -157,12 +157,12 @@ function statusDot(status: WorkspaceTask['status']) {
 
 function Empty({ text, action, onAction }: { text: string; action: string; onAction: () => void }) {
   return (
-    <div className="rounded-lg border border-dashed border-[#ddd8d0] px-3 py-5 text-center">
-      <p className="text-[11px] leading-5 text-[#8a8a8e]">{text}</p>
+    <div className="rounded-lg border border-dashed border-[#ddd8d0] dark:border-white/10 px-3 py-5 text-center">
+      <p className="text-[11px] leading-5 text-[#8a8a8e] dark:text-[#8e8e93]">{text}</p>
       <button
         type="button"
         onClick={onAction}
-        className="mt-2 text-[11px] font-medium text-[#0071e3] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+        className="mt-2 text-[11px] font-medium text-[#0071e3] dark:text-[#4da3ff] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
       >
         {action}
       </button>
@@ -394,27 +394,27 @@ export function ProjectPanel({
   }
 
   return (
-    <aside className="fixed inset-y-0 right-0 z-40 flex w-[300px] max-w-[85vw] shrink-0 flex-col border-l border-[#e8e5e0] bg-[#fdfdfc] transition-transform duration-200 motion-reduce:transition-none md:static md:z-auto md:h-full md:w-[300px] md:max-w-none md:translate-x-0">
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-[#ece9e4] px-3">
+    <aside className="fixed inset-y-0 right-0 z-40 flex w-[300px] max-w-[85vw] shrink-0 flex-col border-l border-[#e8e5e0] dark:border-white/10 bg-[#fdfdfc] dark:bg-[#1c1c1e] transition-transform duration-200 motion-reduce:transition-none md:static md:z-auto md:h-full md:w-[300px] md:max-w-none md:translate-x-0">
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-[#ece9e4] dark:border-white/10 px-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <span className="truncate text-[13px] font-semibold text-[#1d1d1f]">
+            <span className="truncate text-[13px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">
               {workspace?.name ?? '项目'}
             </span>
             {profile ? (
-              <span className="shrink-0 rounded-full bg-[#f1eee8] px-1.5 py-0.5 text-[9px] text-[#6b6b70]">
+              <span className="shrink-0 rounded-full bg-[#f1eee8] dark:bg-white/[0.08] px-1.5 py-0.5 text-[9px] text-[#6b6b70] dark:text-[#a1a1a6]">
                 {profile.weaknesses.length} 个薄弱点
               </span>
             ) : null}
           </div>
-          <div className="mt-0.5 truncate text-[10px] text-[#8a8a8e]">
+          <div className="mt-0.5 truncate text-[10px] text-[#8a8a8e] dark:text-[#8e8e93]">
             {workspace?.goal || '告诉管家你想做什么，他会创建项目。'}
           </div>
         </div>
         <button
           type="button"
           onClick={onOpenPractice}
-          className="shrink-0 rounded-md px-2 py-1 text-[10px] font-medium text-[#0071e3] hover:bg-[#e8f2ff] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+          className="shrink-0 rounded-md px-2 py-1 text-[10px] font-medium text-[#0071e3] dark:text-[#4da3ff] hover:bg-[#e8f2ff] dark:hover:bg-[#0a84ff]/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
         >
           练习
         </button>
@@ -422,18 +422,18 @@ export function ProjectPanel({
           type="button"
           aria-label="关闭项目面板"
           onClick={onClose}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[#8a8a8e] hover:bg-black/[0.04] hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[#8a8a8e] dark:text-[#8e8e93] hover:bg-black/[0.04] dark:hover:bg-white/[0.06] hover:text-black dark:hover:text-[#f5f5f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
         >
           <ChevronRightIcon className="h-4 w-4" />
         </button>
       </header>
 
-      <div className="shrink-0 border-b border-[#ece9e4] px-3 py-2">
+      <div className="shrink-0 border-b border-[#ece9e4] dark:border-white/10 px-3 py-2">
         <select
           aria-label="切换项目"
           value={workspace?.id ?? ''}
           onChange={(event) => onSelectWorkspace(event.target.value)}
-          className="h-8 w-full rounded-md border border-[#e5e1da] bg-white px-2 text-[11px] text-[#3c3c3f] outline-none focus:border-[#0071e3]"
+          className="h-8 w-full rounded-md border border-[#e5e1da] dark:border-white/10 bg-white dark:bg-[#242426] px-2 text-[11px] text-[#3c3c3f] dark:text-[#a1a1a6] outline-none focus:border-[#0071e3]"
         >
           <option value="">全部项目</option>
           {workspaces.map((project) => (
@@ -444,7 +444,7 @@ export function ProjectPanel({
         </select>
         {workspace ? (
           <div className="mt-1.5 flex items-center justify-between gap-2">
-            <label htmlFor="workspace-check-in" className="text-[10px] text-[#6b6b70]">
+            <label htmlFor="workspace-check-in" className="text-[10px] text-[#6b6b70] dark:text-[#a1a1a6]">
               参与检查
             </label>
             <select
@@ -454,7 +454,7 @@ export function ProjectPanel({
               onChange={(event) =>
                 void updateCheckIn(event.target.value as 'daily' | 'off')
               }
-              className="h-7 rounded-md border border-[#e5e1da] bg-white px-1.5 text-[10px] text-[#3c3c3f] outline-none focus:border-[#0071e3]"
+              className="h-7 rounded-md border border-[#e5e1da] dark:border-white/10 bg-white dark:bg-[#242426] px-1.5 text-[10px] text-[#3c3c3f] dark:text-[#a1a1a6] outline-none focus:border-[#0071e3]"
             >
               <option value="daily">每天</option>
               <option value="off">关闭</option>
@@ -462,13 +462,13 @@ export function ProjectPanel({
           </div>
         ) : null}
         {workspaceError ? (
-          <p role="alert" className="mt-1 text-[10px] text-[#d70015]">
+          <p role="alert" className="mt-1 text-[10px] text-[#d70015] dark:text-[#ff7b72]">
             {workspaceError}
           </p>
         ) : null}
       </div>
 
-      <div className="flex shrink-0 gap-1 border-b border-[#ece9e4] px-3 py-2">
+      <div className="flex shrink-0 gap-1 border-b border-[#ece9e4] dark:border-white/10 px-3 py-2">
         {TABS.map((item) => (
           <button
             key={item.id}
@@ -479,7 +479,7 @@ export function ProjectPanel({
               'rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30',
               tab === item.id
                 ? 'bg-[#0071e3] text-white'
-                : 'bg-[#f1eee8] text-[#6b6b70] hover:bg-[#e9e6e0]'
+                : 'bg-[#f1eee8] dark:bg-white/[0.08] text-[#6b6b70] dark:text-[#a1a1a6] hover:bg-[#e9e6e0] dark:hover:bg-white/[0.1]'
             )}
           >
             {item.label}
@@ -501,12 +501,12 @@ export function ProjectPanel({
             />
 
             <div className="mb-2 flex items-baseline justify-between">
-              <span className="text-[11px] font-semibold text-[#1d1d1f]">今天</span>
-              <span className="text-[10px] text-[#8a8a8e]">
+              <span className="text-[11px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">今天</span>
+              <span className="text-[10px] text-[#8a8a8e] dark:text-[#8e8e93]">
                 {done} / {filteredTasks.length} 完成
               </span>
             </div>
-            <div className="mb-3 h-1 overflow-hidden rounded-full bg-[#ece9e4]">
+            <div className="mb-3 h-1 overflow-hidden rounded-full bg-[#ece9e4] dark:bg-white/10">
               <div
                 className="h-full rounded-full bg-[#0071e3]"
                 style={{
@@ -521,7 +521,7 @@ export function ProjectPanel({
                 onAction={() => onPrompt('帮我排一下这个项目的计划')}
               />
             ) : (
-              <div className="divide-y divide-[#f0ece6]">
+              <div className="divide-y divide-[#f0ece6] dark:divide-white/[0.08]">
                 {filteredTasks.map((task) => (
                   <div key={task.id} className="py-2">
                     <div className="flex items-start gap-2">
@@ -537,13 +537,13 @@ export function ProjectPanel({
                           className={cn(
                             'text-[11px] leading-5',
                             task.status === 'done'
-                              ? 'text-[#9a9a9e] line-through'
-                              : 'text-[#1d1d1f]'
+                              ? 'text-[#9a9a9e] dark:text-[#8e8e93] line-through'
+                              : 'text-[#1d1d1f] dark:text-[#f5f5f7]'
                           )}
                         >
                           {task.title}
                         </p>
-                        <p className="mt-0.5 truncate text-[9px] text-[#8a8a8e]">
+                        <p className="mt-0.5 truncate text-[9px] text-[#8a8a8e] dark:text-[#8e8e93]">
                           {task.subject} · {task.durationMin} 分钟
                           {typeof task.actualMin === 'number' ? ` · 已练 ${task.actualMin} 分钟` : ''}
                         </p>
@@ -571,7 +571,7 @@ export function ProjectPanel({
                       </button>
                     </div>
                     {taskError?.id === task.id ? (
-                      <p role="alert" className="mt-1 pl-3.5 text-[10px] text-[#d70015]">
+                      <p role="alert" className="mt-1 pl-3.5 text-[10px] text-[#d70015] dark:text-[#ff7b72]">
                         {taskError.message}
                       </p>
                     ) : null}
@@ -582,7 +582,7 @@ export function ProjectPanel({
             <button
               type="button"
               onClick={() => onPrompt('帮我调整一下今天的任务安排')}
-              className="mt-3 text-[11px] font-medium text-[#0071e3] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+              className="mt-3 text-[11px] font-medium text-[#0071e3] dark:text-[#4da3ff] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
             >
               让管家调整
             </button>
@@ -605,10 +605,10 @@ export function ProjectPanel({
                 写一条记录
               </button>
               {!workspace ? (
-                <p className="mt-1 text-[10px] text-[#8a8a8e]">先选择项目</p>
+                <p className="mt-1 text-[10px] text-[#8a8a8e] dark:text-[#8e8e93]">先选择项目</p>
               ) : null}
               {noteFormOpen && workspace ? (
-                <div className="mt-2 rounded-lg border border-[#e5e1da] bg-white p-2">
+                <div className="mt-2 rounded-lg border border-[#e5e1da] dark:border-white/10 bg-white dark:bg-[#242426] p-2">
                   <input
                     aria-label="记录标题"
                     placeholder="标题（可选）"
@@ -622,10 +622,10 @@ export function ProjectPanel({
                     placeholder="记下今天发生了什么…"
                     value={noteBody}
                     onChange={(event) => setNoteBody(event.target.value)}
-                    className="mt-1 w-full resize-none rounded-md border border-[#e5e1da] bg-white px-2 py-1.5 text-[10px] leading-5 text-[#1d1d1f] outline-none placeholder:text-[#9a9a9e] focus:border-[#0071e3]/40 focus:ring-2 focus:ring-[#0071e3]/20"
+                    className="mt-1 w-full resize-none rounded-md border border-[#e5e1da] dark:border-white/10 bg-white dark:bg-[#242426] px-2 py-1.5 text-[10px] leading-5 text-[#1d1d1f] dark:text-[#f5f5f7] outline-none placeholder:text-[#9a9a9e] focus:border-[#0071e3]/40 focus:ring-2 focus:ring-[#0071e3]/20"
                   />
                   {noteError ? (
-                    <p role="alert" className="mt-1 text-[10px] text-[#d70015]">
+                    <p role="alert" className="mt-1 text-[10px] text-[#d70015] dark:text-[#ff7b72]">
                       {noteError}
                     </p>
                   ) : null}
@@ -660,7 +660,7 @@ export function ProjectPanel({
                 onAction={() => onPrompt('记一下：')}
               />
             ) : (
-              <div className="divide-y divide-[#f0ece6]">
+              <div className="divide-y divide-[#f0ece6] dark:divide-white/[0.08]">
                 {filteredNotes.slice(0, 10).map((note) => (
                   <button
                     key={note.id}
@@ -668,10 +668,10 @@ export function ProjectPanel({
                     onClick={() => onPreviewNote(note)}
                     className="flex w-full flex-col gap-0.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
                   >
-                    <span className="truncate text-[11px] font-medium text-[#1d1d1f]">
+                    <span className="truncate text-[11px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
                       {note.title}
                     </span>
-                    <span className="truncate text-[9px] text-[#8a8a8e]">
+                    <span className="truncate text-[9px] text-[#8a8a8e] dark:text-[#8e8e93]">
                       {note.subject} · {note.updated}
                     </span>
                   </button>
@@ -681,7 +681,7 @@ export function ProjectPanel({
             <button
               type="button"
               onClick={() => onPrompt('记一下：')}
-              className="mt-3 text-[11px] font-medium text-[#0071e3] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+              className="mt-3 text-[11px] font-medium text-[#0071e3] dark:text-[#4da3ff] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
             >
               让管家记一条
             </button>
@@ -691,8 +691,8 @@ export function ProjectPanel({
         {tab === 'memory' ? (
           <div>
             {filteredMemories.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-[#ddd8d0] px-3 py-5 text-center">
-                <p className="text-[11px] leading-5 text-[#8a8a8e]">
+              <div className="rounded-lg border border-dashed border-[#ddd8d0] dark:border-white/10 px-3 py-5 text-center">
+                <p className="text-[11px] leading-5 text-[#8a8a8e] dark:text-[#8e8e93]">
                   还没有记忆。完成一次复盘后，管家会记住你的卡点和偏好。
                 </p>
               </div>
@@ -704,7 +704,7 @@ export function ProjectPanel({
                   return (
                     <div
                       key={memory.id}
-                      className="rounded-lg border border-[#e5e1da] bg-white p-2"
+                      className="rounded-lg border border-[#e5e1da] dark:border-white/10 bg-white dark:bg-[#242426] p-2"
                     >
                       <div className="flex items-center justify-between gap-1">
                         <span
@@ -735,7 +735,7 @@ export function ProjectPanel({
                               }
                               disabled={pendingMemoryId === memory.id}
                               onClick={() => void removeMemory(memory)}
-                              className={cn(actionClass, confirming ? 'text-[#d70015]' : '')}
+                              className={cn(actionClass, confirming ? 'text-[#d70015] dark:text-[#ff7b72]' : '')}
                             >
                               {confirming ? '确认删除' : '删除'}
                             </button>
@@ -750,7 +750,7 @@ export function ProjectPanel({
                             rows={3}
                             value={memoryText}
                             onChange={(event) => setMemoryText(event.target.value)}
-                            className="w-full resize-none rounded-md border border-[#e5e1da] bg-white px-2 py-1.5 text-[10px] leading-5 text-[#1d1d1f] outline-none focus:border-[#0071e3]/40 focus:ring-2 focus:ring-[#0071e3]/20"
+                            className="w-full resize-none rounded-md border border-[#e5e1da] dark:border-white/10 bg-white dark:bg-[#242426] px-2 py-1.5 text-[10px] leading-5 text-[#1d1d1f] dark:text-[#f5f5f7] outline-none focus:border-[#0071e3]/40 focus:ring-2 focus:ring-[#0071e3]/20"
                           />
                           <select
                             aria-label="记忆类型"
@@ -767,7 +767,7 @@ export function ProjectPanel({
                             ))}
                           </select>
                           {memoryError?.id === memory.id ? (
-                            <p role="alert" className="mt-1 text-[10px] text-[#d70015]">
+                            <p role="alert" className="mt-1 text-[10px] text-[#d70015] dark:text-[#ff7b72]">
                               {memoryError.message}
                             </p>
                           ) : null}
@@ -791,17 +791,17 @@ export function ProjectPanel({
                         </div>
                       ) : (
                         <>
-                          <p className="mt-1 text-[11px] leading-5 text-[#1d1d1f]">
+                          <p className="mt-1 text-[11px] leading-5 text-[#1d1d1f] dark:text-[#f5f5f7]">
                             {memory.text}
                           </p>
-                          <p className="mt-1 text-[9px] text-[#8a8a8e]">
+                          <p className="mt-1 text-[9px] text-[#8a8a8e] dark:text-[#8e8e93]">
                             {memorySourceLabel(memory.source)}
                           </p>
-                          <p className="text-[9px] text-[#9a9a9e]">
+                          <p className="text-[9px] text-[#9a9a9e] dark:text-[#8e8e93]">
                             {memoryWhyRemembered(memory)}
                           </p>
                           {memoryError?.id === memory.id ? (
-                            <p role="alert" className="mt-1 text-[10px] text-[#d70015]">
+                            <p role="alert" className="mt-1 text-[10px] text-[#d70015] dark:text-[#ff7b72]">
                               {memoryError.message}
                             </p>
                           ) : null}
@@ -818,18 +818,18 @@ export function ProjectPanel({
         {tab === 'review' ? (
           <div>
             {latestReview ? (
-              <div className="rounded-lg bg-white p-3 shadow-sm">
+              <div className="rounded-lg bg-white dark:bg-[#242426] p-3 shadow-sm">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-semibold text-[#1d1d1f]">
+                  <span className="text-[11px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">
                     {latestReview.date}
                   </span>
-                  <span className="text-[9px] text-[#8a8a8e]">最近一次</span>
+                  <span className="text-[9px] text-[#8a8a8e] dark:text-[#8e8e93]">最近一次</span>
                 </div>
-                <p className="mt-2 line-clamp-3 text-[10px] leading-5 text-[#5f5f63]">
+                <p className="mt-2 line-clamp-3 text-[10px] leading-5 text-[#5f5f63] dark:text-[#a1a1a6]">
                   {latestReview.completed || '没有填写完成内容'}
                 </p>
                 {latestReview.stuck ? (
-                  <p className="mt-1 line-clamp-2 text-[10px] leading-5 text-[#d70015]">
+                  <p className="mt-1 line-clamp-2 text-[10px] leading-5 text-[#d70015] dark:text-[#ff7b72]">
                     卡点：{latestReview.stuck}
                   </p>
                 ) : null}
@@ -844,7 +844,7 @@ export function ProjectPanel({
             <button
               type="button"
               onClick={() => onPrompt('我们开始今天复盘')}
-              className="mt-3 text-[11px] font-medium text-[#0071e3] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+              className="mt-3 text-[11px] font-medium text-[#0071e3] dark:text-[#4da3ff] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
             >
               开始复盘
             </button>
@@ -858,7 +858,7 @@ export function ProjectPanel({
                 event.preventDefault();
                 void addReminder();
               }}
-              className="mb-3 rounded-lg border border-[#e5e1da] bg-white p-2"
+              className="mb-3 rounded-lg border border-[#e5e1da] dark:border-white/10 bg-white dark:bg-[#242426] p-2"
             >
               <div className="flex items-center gap-1">
                 <input
@@ -877,7 +877,7 @@ export function ProjectPanel({
                 />
               </div>
               {reminderError ? (
-                <p role="alert" className="mt-1 text-[10px] text-[#d70015]">
+                <p role="alert" className="mt-1 text-[10px] text-[#d70015] dark:text-[#ff7b72]">
                   {reminderError}
                 </p>
               ) : null}
@@ -892,7 +892,7 @@ export function ProjectPanel({
               </div>
             </form>
 
-            <p className="mb-2 text-[9px] text-[#8a8a8e]">全部提醒</p>
+            <p className="mb-2 text-[9px] text-[#8a8a8e] dark:text-[#8e8e93]">全部提醒</p>
             {reminders.length === 0 ? (
               <Empty
                 text="还没有提醒。"
@@ -900,7 +900,7 @@ export function ProjectPanel({
                 onAction={() => onPrompt('帮我设一个提醒：')}
               />
             ) : (
-              <div className="divide-y divide-[#f0ece6]">
+              <div className="divide-y divide-[#f0ece6] dark:divide-white/[0.08]">
                 {reminders.map((reminder) => (
                   <div key={reminder.id} className="flex items-center gap-2 py-2">
                     <span
@@ -910,10 +910,10 @@ export function ProjectPanel({
                         reminder.enabled ? 'bg-[#34c759]' : 'bg-[#c9c4bc]'
                       )}
                     />
-                    <span className="w-10 shrink-0 text-[10px] tabular-nums text-[#6b6b70]">
+                    <span className="w-10 shrink-0 text-[10px] tabular-nums text-[#6b6b70] dark:text-[#a1a1a6]">
                       {reminder.time}
                     </span>
-                    <span className="min-w-0 flex-1 truncate text-[10px] text-[#1d1d1f]">
+                    <span className="min-w-0 flex-1 truncate text-[10px] text-[#1d1d1f] dark:text-[#f5f5f7]">
                       {reminder.label}
                     </span>
                     <button
@@ -943,18 +943,18 @@ export function ProjectPanel({
             <button
               type="button"
               onClick={() => onPrompt('帮我设一个提醒：')}
-              className="mt-3 text-[11px] font-medium text-[#0071e3] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+              className="mt-3 text-[11px] font-medium text-[#0071e3] dark:text-[#4da3ff] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
             >
               让管家设提醒
             </button>
 
-            <div className="mt-4 rounded-lg border border-[#e5e1da] bg-white p-2">
-              <p className="text-[10px] font-semibold text-[#1d1d1f]">主动检查</p>
-              <p className="mt-0.5 text-[9px] leading-4 text-[#8a8a8e]">
+            <div className="mt-4 rounded-lg border border-[#e5e1da] dark:border-white/10 bg-white dark:bg-[#242426] p-2">
+              <p className="text-[10px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">主动检查</p>
+              <p className="mt-0.5 text-[9px] leading-4 text-[#8a8a8e] dark:text-[#8e8e93]">
                 仅暂停主动检查，不影响你设的提醒。
               </p>
               {snoozedToday ? (
-                <p className="mt-2 text-[10px] text-[#6b6b70]">今天已静音，明天恢复</p>
+                <p className="mt-2 text-[10px] text-[#6b6b70] dark:text-[#a1a1a6]">今天已静音，明天恢复</p>
               ) : (
                 <button
                   type="button"

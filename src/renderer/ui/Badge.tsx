@@ -7,10 +7,10 @@ type BadgeProps = {
 };
 
 const toneClasses = {
-  gray: 'bg-[#f5f5f7] text-gray-600',
-  blue: 'bg-[#0071e3]/10 text-[#1d1d1f]',
-  green: 'bg-[#34c759]/10 text-[#1d1d1f]',
-  red: 'bg-[#ff3b30]/10 text-[#1d1d1f]'
+  gray: 'bg-[#f5f5f7] text-gray-600 dark:bg-white/[0.08] dark:text-[#a1a1a6]',
+  blue: 'bg-[#0071e3]/10 text-[#1d1d1f] dark:bg-[#0a84ff]/20 dark:text-[#f5f5f7]',
+  green: 'bg-[#34c759]/10 text-[#1d1d1f] dark:bg-[#34c759]/20 dark:text-[#f5f5f7]',
+  red: 'bg-[#ff3b30]/10 text-[#1d1d1f] dark:bg-[#ff3b30]/20 dark:text-[#f5f5f7]'
 } as const;
 
 export function Badge({ tone = 'gray', children }: BadgeProps) {

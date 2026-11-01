@@ -29,7 +29,7 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
       nodes.push(<strong key={key}>{token.slice(2, -2)}</strong>);
     } else if (token.startsWith('`')) {
       nodes.push(
-        <code key={key} className="rounded bg-black/[0.06] px-1 py-0.5 text-[12px]">
+        <code key={key} className="rounded bg-black/[0.06] dark:bg-white/10 px-1 py-0.5 text-[12px]">
           {token.slice(1, -1)}
         </code>
       );
@@ -42,7 +42,7 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
             href={link[2]}
             target="_blank"
             rel="noreferrer"
-            className="text-[#0071e3] underline underline-offset-2"
+            className="text-[#0071e3] dark:text-[#4da3ff] underline underline-offset-2"
           >
             {link[1]}
           </a>
@@ -153,7 +153,7 @@ function CopyButton({ text }: { text: string }) {
           // Clipboard access can be unavailable in tests or restricted webviews.
         }
       }}
-      className="rounded px-1.5 py-0.5 text-[10px] text-gray-400 transition-colors hover:bg-white/10 hover:text-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+      className="rounded px-1.5 py-0.5 text-[10px] text-gray-400 dark:text-[#8e8e93] transition-colors hover:bg-white/10 hover:text-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
     >
       {copied ? '已复制' : '复制'}
     </button>
@@ -162,9 +162,9 @@ function CopyButton({ text }: { text: string }) {
 
 function CodeBlock({ language, code, blockKey }: { language: string; code: string; blockKey: string }) {
   return (
-    <div key={blockKey} className="my-3 overflow-hidden rounded-lg bg-[#1d1d1f]">
+    <div key={blockKey} className="my-3 overflow-hidden rounded-lg bg-[#1d1d1f] dark:bg-[#0d0d0f] dark:border dark:border-white/10">
       <div className="flex items-center justify-between border-b border-white/10 px-3 py-1.5">
-        <span className="text-[10px] text-gray-400">{language || 'code'}</span>
+        <span className="text-[10px] text-gray-400 dark:text-[#8e8e93]">{language || 'code'}</span>
         <CopyButton text={code} />
       </div>
       <pre className="overflow-x-auto px-3 py-2.5 text-[12px] leading-5 text-[#f2f2f7]">
@@ -177,7 +177,7 @@ function CodeBlock({ language, code, blockKey }: { language: string; code: strin
 export function MarkdownText({ text }: MarkdownTextProps) {
   const blocks = parseBlocks(text);
   return (
-    <div className="text-[13px] leading-6 text-[#1d1d1f]">
+    <div className="text-[13px] leading-6 text-[#1d1d1f] dark:text-[#f5f5f7]">
       {blocks.map((block, index) => {
         const key = `block-${index}`;
         if (block.type === 'code') {

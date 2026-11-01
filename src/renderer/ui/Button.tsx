@@ -7,9 +7,9 @@ type ButtonProps = ComponentPropsWithoutRef<'button'> & {
 };
 
 const variantClasses = {
-  primary: 'bg-[#0071e3] text-white',
-  secondary: 'bg-white text-[#1d1d1f] ring-1 ring-black/10',
-  ghost: 'bg-transparent text-[#0071e3]',
+  primary: 'bg-[#0071e3] text-white dark:bg-[#0a84ff]',
+  secondary: 'bg-white text-[#1d1d1f] ring-1 ring-black/10 dark:bg-[#242426] dark:text-[#f5f5f7] dark:ring-white/10',
+  ghost: 'bg-transparent text-[#0071e3] dark:text-[#4da3ff]',
   danger: 'bg-[#d70015] text-white'
 } as const;
 

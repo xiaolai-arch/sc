@@ -8,7 +8,7 @@ type CardProps = ComponentPropsWithoutRef<'div'> & {
 export function Card({ className, padding = 'default', ...props }: CardProps) {
   return (
     <div
-      className={cn('bg-white rounded-2xl shadow-sm', padding === 'compact' ? 'p-5' : 'p-8', className)}
+      className={cn('bg-white rounded-2xl shadow-sm dark:bg-[#1c1c1e] dark:shadow-none', padding === 'compact' ? 'p-5' : 'p-8', className)}
       {...props}
     />
   );

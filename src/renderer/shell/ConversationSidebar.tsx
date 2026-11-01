@@ -39,7 +39,7 @@ function timeLabel(value: string): string {
 }
 
 const menuItemClass =
-  'flex w-full items-center rounded-md px-2 py-1.5 text-left text-[11px] text-[#3c3c3f] hover:bg-[#f1eee8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30';
+  'flex w-full items-center rounded-md px-2 py-1.5 text-left text-[11px] text-[#3c3c3f] dark:text-[#a1a1a6] hover:bg-[#f1eee8] dark:hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30';
 
 export function ConversationSidebar({
   conversations,
@@ -163,7 +163,7 @@ export function ConversationSidebar({
   return (
     <aside
       className={cn(
-        'fixed inset-y-0 left-0 z-40 flex w-[260px] max-w-[85vw] shrink-0 flex-col border-r border-[#e8e5e0] bg-[#fbfbfa] transition-transform duration-200 motion-reduce:transition-none',
+        'fixed inset-y-0 left-0 z-40 flex w-[260px] max-w-[85vw] shrink-0 flex-col border-r border-[#e8e5e0] dark:border-white/10 bg-[#fbfbfa] dark:bg-[#141415] transition-transform duration-200 motion-reduce:transition-none',
         mobileOpen ? 'translate-x-0' : '-translate-x-full',
         'md:static md:z-auto md:h-full md:w-[220px] md:max-w-none md:translate-x-0'
       )}
@@ -175,12 +175,12 @@ export function ConversationSidebar({
       </div>
 
       <div className="flex items-center justify-between px-4 pt-3 md:hidden">
-        <span className="text-[12px] font-semibold tracking-tight text-black">对话</span>
+        <span className="text-[12px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">对话</span>
         <button
           type="button"
           aria-label="关闭对话列表"
           onClick={onCloseMobile}
-          className="flex h-7 items-center justify-center rounded-md px-2 text-[10px] text-[#8a8a8e] hover:bg-black/[0.04] hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+          className="flex h-7 items-center justify-center rounded-md px-2 text-[10px] text-[#8a8a8e] dark:text-[#8e8e93] hover:bg-black/[0.04] dark:hover:bg-white/[0.06] hover:text-black dark:hover:text-[#f5f5f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
         >
           关闭
         </button>
@@ -190,7 +190,7 @@ export function ConversationSidebar({
         <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#1d1d1f] text-[11px] font-semibold text-white">
           S
         </span>
-        <span className="text-[13px] font-semibold tracking-tight text-black">Study Coach</span>
+        <span className="text-[13px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">Study Coach</span>
       </div>
 
       <div className="px-3 pb-2">
@@ -206,7 +206,7 @@ export function ConversationSidebar({
 
       <div className="px-3 pb-2">
         <div className="relative">
-          <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#9a9a9e]" />
+          <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#9a9a9e] dark:text-[#8e8e93]" />
           <input
             ref={searchRef}
             type="search"
@@ -214,19 +214,19 @@ export function ConversationSidebar({
             onChange={(event) => setQuery(event.target.value)}
             placeholder="搜索对话 ⌘K"
             aria-label="搜索对话"
-            className="h-8 w-full rounded-lg border border-black/[0.08] bg-white pl-7 pr-2 text-[11px] text-[#1d1d1f] outline-none placeholder:text-[#9a9a9e] focus:border-[#0071e3]/40 focus:ring-2 focus:ring-[#0071e3]/20"
+            className="h-8 w-full rounded-lg border border-black/[0.08] dark:border-white/10 bg-white dark:bg-[#242426] pl-7 pr-2 text-[11px] text-[#1d1d1f] dark:text-[#f5f5f7] outline-none placeholder:text-[#9a9a9e] focus:border-[#0071e3]/40 focus:ring-2 focus:ring-[#0071e3]/20"
           />
         </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-        <p className="px-2.5 pb-1 pt-2 text-[10px] font-medium tracking-wide text-[#9a9a9e]">
+        <p className="px-2.5 pb-1 pt-2 text-[10px] font-medium tracking-wide text-[#9a9a9e] dark:text-[#8e8e93]">
           最近对话
         </p>
         {searching && visibleConversations.length === 0 ? (
-          <p className="px-2.5 py-2 text-[11px] leading-5 text-[#9a9a9e]">没有找到对话。</p>
+          <p className="px-2.5 py-2 text-[11px] leading-5 text-[#9a9a9e] dark:text-[#8e8e93]">没有找到对话。</p>
         ) : visibleConversations.length === 0 ? (
-          <p className="px-2.5 py-2 text-[11px] leading-5 text-[#9a9a9e]">
+          <p className="px-2.5 py-2 text-[11px] leading-5 text-[#9a9a9e] dark:text-[#8e8e93]">
             还没有对话。告诉管家你想做什么。
           </p>
         ) : (
@@ -252,7 +252,7 @@ export function ConversationSidebar({
                           setRenameText('');
                         }
                       }}
-                      className="h-8 w-full rounded-lg border border-[#0071e3]/40 bg-white px-2 text-[12px] text-[#1d1d1f] outline-none focus:ring-2 focus:ring-[#0071e3]/20"
+                      className="h-8 w-full rounded-lg border border-[#0071e3]/40 bg-white dark:bg-[#242426] px-2 text-[12px] text-[#1d1d1f] dark:text-[#f5f5f7] outline-none focus:ring-2 focus:ring-[#0071e3]/20"
                     />
                   </div>
                 );
@@ -268,27 +268,27 @@ export function ConversationSidebar({
                     }}
                     className={cn(
                       'flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30',
-                      active ? 'bg-[#e9e6e0]' : 'hover:bg-[#f1eee8]'
+                      active ? 'bg-[#e9e6e0] dark:bg-white/[0.1]' : 'hover:bg-[#f1eee8] dark:hover:bg-white/[0.06]'
                     )}
                   >
-                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-white/80 text-[10px] text-[#6b6b70]">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-white/80 dark:bg-white/[0.08] text-[10px] text-[#6b6b70] dark:text-[#a1a1a6]">
                       {conversation.kind === 'check-in' ? '☾' : '✦'}
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline gap-1.5">
-                        <span className="truncate text-[12px] font-medium text-[#1d1d1f]">
+                        <span className="truncate text-[12px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
                           {conversation.pinned ? '📌 ' : ''}
                           {conversation.title}
                         </span>
-                        <span className="ml-auto shrink-0 text-[9px] text-[#9a9a9e]">
+                        <span className="ml-auto shrink-0 text-[9px] text-[#9a9a9e] dark:text-[#8e8e93]">
                           {timeLabel(conversation.updatedAt)}
                         </span>
                       </span>
-                      <span className="mt-0.5 block truncate text-[10px] text-[#8a8a8e]">
+                      <span className="mt-0.5 block truncate text-[10px] text-[#8a8a8e] dark:text-[#8e8e93]">
                         {conversation.preview || '还没有消息'}
                       </span>
                       {project ? (
-                        <span className="mt-1 inline-block rounded-full bg-[#f1eee8] px-1.5 py-0.5 text-[9px] text-[#6b6b70]">
+                        <span className="mt-1 inline-block rounded-full bg-[#f1eee8] dark:bg-white/[0.08] px-1.5 py-0.5 text-[9px] text-[#6b6b70] dark:text-[#a1a1a6]">
                           {project}
                         </span>
                       ) : null}
@@ -307,7 +307,7 @@ export function ConversationSidebar({
                         return current === conversation.id ? null : conversation.id;
                       })
                     }
-                    className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-md text-[#8a8a8e] opacity-0 transition-opacity hover:bg-black/[0.05] hover:text-black focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 group-hover:opacity-100"
+                    className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-md text-[#8a8a8e] dark:text-[#8e8e93] opacity-0 transition-opacity hover:bg-black/[0.05] dark:hover:bg-white/[0.06] hover:text-black dark:hover:text-[#f5f5f7] focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 group-hover:opacity-100"
                   >
                     <MoreHorizontalIcon className="h-3.5 w-3.5" />
                   </button>
@@ -316,7 +316,7 @@ export function ConversationSidebar({
                     <div
                       ref={menuRef}
                       role="menu"
-                      className="absolute right-1 top-7 z-10 w-28 rounded-lg border border-black/[0.08] bg-white p-1 shadow-lg"
+                      className="absolute right-1 top-7 z-10 w-28 rounded-lg border border-black/[0.08] dark:border-white/10 bg-white dark:bg-[#1c1c1e] p-1 shadow-lg"
                     >
                       <button
                         type="button"
@@ -339,7 +339,7 @@ export function ConversationSidebar({
                         role="menuitem"
                         className={cn(
                           menuItemClass,
-                          confirmDeleteId === conversation.id ? 'text-[#d70015]' : ''
+                          confirmDeleteId === conversation.id ? 'text-[#d70015] dark:text-[#ff7b72]' : ''
                         )}
                         onClick={() => requestDelete(conversation)}
                       >
@@ -353,11 +353,11 @@ export function ConversationSidebar({
           </div>
         )}
 
-        <p className="px-2.5 pb-1 pt-4 text-[10px] font-medium tracking-wide text-[#9a9a9e]">
+        <p className="px-2.5 pb-1 pt-4 text-[10px] font-medium tracking-wide text-[#9a9a9e] dark:text-[#8e8e93]">
           项目
         </p>
         {projects.length === 0 ? (
-          <p className="px-2.5 py-2 text-[11px] leading-5 text-[#9a9a9e]">
+          <p className="px-2.5 py-2 text-[11px] leading-5 text-[#9a9a9e] dark:text-[#8e8e93]">
             项目会由管家在对话里创建。
           </p>
         ) : (
@@ -372,7 +372,7 @@ export function ConversationSidebar({
                   onClick={() => onSelectProject(project.id)}
                   className={cn(
                     'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30',
-                    active ? 'bg-[#e9e6e0]' : 'hover:bg-[#f1eee8]'
+                    active ? 'bg-[#e9e6e0] dark:bg-white/[0.1]' : 'hover:bg-[#f1eee8] dark:hover:bg-white/[0.06]'
                   )}
                 >
                   <span
@@ -380,10 +380,10 @@ export function ConversationSidebar({
                     className="h-2 w-2 shrink-0 rounded-full"
                     style={{ backgroundColor: project.color }}
                   />
-                  <span className="min-w-0 flex-1 truncate text-[12px] text-[#3c3c3f]">
+                  <span className="min-w-0 flex-1 truncate text-[12px] text-[#3c3c3f] dark:text-[#a1a1a6]">
                     {project.name}
                   </span>
-                  <FolderIcon className="h-3.5 w-3.5 shrink-0 text-[#9a9a9e]" />
+                  <FolderIcon className="h-3.5 w-3.5 shrink-0 text-[#9a9a9e] dark:text-[#8e8e93]" />
                 </button>
               );
             })}
@@ -391,16 +391,16 @@ export function ConversationSidebar({
         )}
       </div>
 
-      <div className="flex items-center gap-2 border-t border-[#eeeae4] px-3 py-3">
+      <div className="flex items-center gap-2 border-t border-[#eeeae4] dark:border-white/10 px-3 py-3">
         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#1d1d1f] text-[10px] text-white">
           x
         </span>
-        <span className="min-w-0 flex-1 truncate text-[11px] text-[#5f5f63]">xiaolai</span>
+        <span className="min-w-0 flex-1 truncate text-[11px] text-[#5f5f63] dark:text-[#a1a1a6]">xiaolai</span>
         <button
           type="button"
           aria-label="打开设置"
           onClick={onOpenSettings}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-[#8a8a8e] transition-colors hover:bg-black/[0.04] hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-[#8a8a8e] dark:text-[#8e8e93] transition-colors hover:bg-black/[0.04] dark:hover:bg-white/[0.06] hover:text-black dark:hover:text-[#f5f5f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
         >
           <SettingsIcon className="h-4 w-4" />
         </button>

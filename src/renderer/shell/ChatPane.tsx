@@ -81,8 +81,8 @@ export function ChatPane({
   }, [messages, typing, lastRole]);
 
   return (
-    <div className="flex h-full min-w-0 flex-1 flex-col bg-white">
-      <header className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-black/[0.06] px-4 md:px-5">
+    <div className="flex h-full min-w-0 flex-1 flex-col bg-white dark:bg-[#131315]">
+      <header className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-black/[0.06] dark:border-white/10 px-4 md:px-5">
         <div className="flex min-w-0 items-center gap-2">
           {onOpenSidebar ? (
             <button
@@ -90,14 +90,14 @@ export function ChatPane({
               aria-label="打开对话列表"
               aria-expanded={sidebarOpen}
               onClick={onOpenSidebar}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-500 transition-colors duration-150 hover:bg-black/[0.04] hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 md:hidden"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-500 dark:text-[#8e8e93] transition-colors duration-150 hover:bg-black/[0.04] dark:hover:bg-white/[0.06] hover:text-black dark:hover:text-[#f5f5f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 md:hidden"
             >
               <MenuIcon className="h-4 w-4" />
             </button>
           ) : null}
-          <span className="text-[13px] font-medium text-black">管家</span>
-          <span className="text-[11px] text-gray-400">/</span>
-          <span className="truncate text-[11px] text-gray-500">
+          <span className="text-[13px] font-medium text-black dark:text-[#f5f5f7]">管家</span>
+          <span className="text-[11px] text-gray-400 dark:text-[#8e8e93]">/</span>
+          <span className="truncate text-[11px] text-gray-500 dark:text-[#8e8e93]">
             {workspace?.name ?? '全部工作区'} · {dateLabel}
           </span>
         </div>
@@ -107,7 +107,7 @@ export function ChatPane({
               type="button"
               aria-label={panelOpen ? '收起项目面板' : '打开项目面板'}
               onClick={onTogglePanel}
-              className="flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-gray-500 transition-colors duration-150 hover:bg-black/[0.04] hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+              className="flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-gray-500 dark:text-[#8e8e93] transition-colors duration-150 hover:bg-black/[0.04] dark:hover:bg-white/[0.06] hover:text-black dark:hover:text-[#f5f5f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
             >
               项目
               <ChevronRightIcon
@@ -118,7 +118,7 @@ export function ChatPane({
           <button
             type="button"
             aria-label="更多"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-gray-500 transition-colors duration-150 hover:bg-black/[0.04] hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-gray-500 dark:text-[#8e8e93] transition-colors duration-150 hover:bg-black/[0.04] dark:hover:bg-white/[0.06] hover:text-black dark:hover:text-[#f5f5f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
           >
             <MoreHorizontalIcon className="h-4 w-4" />
           </button>
@@ -137,12 +137,12 @@ export function ChatPane({
       >
         <div className="mx-auto w-full max-w-[720px] space-y-6">
           {!hasApiKey ? (
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-[#0071e3]/15 bg-[#f2f7fd] px-3 py-2">
-              <p className="text-[12px] text-gray-600">未配置模型，当前使用模板计划。</p>
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-[#0071e3]/15 bg-[#f2f7fd] dark:bg-[#16202b] px-3 py-2">
+              <p className="text-[12px] text-gray-600 dark:text-[#a1a1a6]">未配置模型，当前使用模板计划。</p>
               <button
                 type="button"
                 onClick={onOpenSettings}
-                className="shrink-0 text-[12px] font-medium text-[#0071e3] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+                className="shrink-0 text-[12px] font-medium text-[#0071e3] dark:text-[#4da3ff] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
               >
                 去设置
               </button>
@@ -154,10 +154,10 @@ export function ChatPane({
               <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#0071e3] text-white">
                 <SparklesIcon className="h-4 w-4" />
               </span>
-              <h2 className="mt-5 text-[24px] font-semibold tracking-tight text-black">
+              <h2 className="mt-5 text-[24px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
                 早上好，xiaolai。
               </h2>
-              <p className="mt-2 text-[14px] leading-6 text-gray-600">
+              <p className="mt-2 text-[14px] leading-6 text-gray-600 dark:text-[#a1a1a6]">
                 我是你的个人管家。今天想做点什么？
               </p>
               <div className="mt-6 flex flex-wrap gap-2">
@@ -166,7 +166,7 @@ export function ChatPane({
                     key={prompt}
                     type="button"
                     onClick={() => onSend(prompt)}
-                    className="rounded-full border border-black/[0.08] bg-white px-3.5 py-2 text-[12px] text-gray-600 transition-colors duration-150 hover:bg-[#f7f7f8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+                    className="rounded-full border border-black/[0.08] dark:border-white/10 bg-white dark:bg-[#1c1c1e] px-3.5 py-2 text-[12px] text-gray-600 dark:text-[#a1a1a6] transition-colors duration-150 hover:bg-[#f7f7f8] dark:hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
                   >
                     {prompt}
                   </button>
@@ -196,7 +196,7 @@ export function ChatPane({
                   <SparklesIcon className="h-3.5 w-3.5" />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[11px] font-medium text-gray-500">Study Coach</p>
+                  <p className="text-[11px] font-medium text-gray-500 dark:text-[#8e8e93]">Study Coach</p>
                   <ReasoningBlock
                     reasoning={message.reasoning}
                     steps={message.steps}
@@ -222,7 +222,7 @@ export function ChatPane({
           )}
 
           {typing && !messages.some((message) => message.streaming) ? (
-            <p className="ml-9 text-[12px] text-gray-500" role="status">
+            <p className="ml-9 text-[12px] text-gray-500 dark:text-[#8e8e93]" role="status">
               正在输入…
             </p>
           ) : null}
