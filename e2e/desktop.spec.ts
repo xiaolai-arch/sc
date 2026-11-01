@@ -3,7 +3,7 @@ import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { launchStudyCoach, type LaunchedStudyCoach } from './support/launch';
 
-test.describe('阿咲 desktop', () => {
+test.describe('ASAKI desktop', () => {
   test('conversation-first project creation and persistence', async () => {
     const launched: LaunchedStudyCoach = await launchStudyCoach();
     const { page, environment } = launched;

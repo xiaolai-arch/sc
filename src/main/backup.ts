@@ -132,7 +132,7 @@ export async function createBackup(options: CreateBackupOptions): Promise<Backup
   }
 
   const readme = [
-    '阿咲备份',
+    'ASAKI备份',
     `导出时间：${backupTimestamp(now)}（本地时间）`,
     '',
     '包含项：',

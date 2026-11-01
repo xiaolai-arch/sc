@@ -86,8 +86,8 @@ export function summarizeWorkspaceTasks(tasks: readonly WorkspaceTask[]): TrayPr
 }
 
 export function buildTrayTooltip(progress: TrayProgress): string {
-  if (progress.total === 0) return '阿咲 · 今天还没有计划';
-  const base = `阿咲 · 今日 ${progress.completed}/${progress.total}`;
+  if (progress.total === 0) return 'ASAKI · 今天还没有计划';
+  const base = `ASAKI · 今日 ${progress.completed}/${progress.total}`;
   return progress.nextTask ? `${base} · 下一项：${progress.nextTask.title}` : `${base} · 今日任务已完成`;
 }
 
@@ -109,7 +109,7 @@ export function buildTrayMenuTemplate(options: TrayMenuOptions): TrayMenuItem[] 
       : '下一项：今日任务已完成';
 
   const template: TrayMenuItem[] = [
-    { label: '打开阿咲', click: options.onOpen },
+    { label: '打开ASAKI', click: options.onOpen },
     { label: '快速记一条', click: options.onQuickCapture },
     { type: 'separator' },
     { label: progressLabel, enabled: false },
@@ -190,7 +190,7 @@ export async function createElectronTray(
   const electron = await import('electron');
   const image = electron.nativeImage.createFromDataURL(options.iconDataUrl ?? DEFAULT_ICON_DATA_URL);
   const tray = new electron.Tray(image);
-  tray.setToolTip('阿咲');
+  tray.setToolTip('ASAKI');
 
   const controller = createTrayController({
     ...options,

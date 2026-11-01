@@ -49,7 +49,7 @@ function createWindow(): BrowserWindow {
     ? window.loadURL(rendererUrl)
     : window.loadFile(join(__dirname, '../renderer/index.html'));
   void loading.catch((error: unknown) => {
-    console.error('阿咲 renderer failed to load:', serializeError(error).message);
+    console.error('ASAKI renderer failed to load:', serializeError(error).message);
   });
 
   mainWindow = window;
@@ -139,7 +139,7 @@ app.whenReady().then(async () => {
     { accelerator: 'CommandOrControl+Shift+Space', run: openQuickCapture }
   ]);
   for (const accelerator of shortcuts.failed) {
-    console.warn(`阿咲 shortcut unavailable: ${accelerator}`);
+    console.warn(`ASAKI shortcut unavailable: ${accelerator}`);
   }
   app.on('will-quit', () => shortcuts.dispose());
 
@@ -158,7 +158,7 @@ app.whenReady().then(async () => {
       context,
       notify,
       onError: (error) => {
-        console.error('阿咲 scheduler error:', serializeError(error).message);
+        console.error('ASAKI scheduler error:', serializeError(error).message);
       }
     });
     scheduler.start();
@@ -177,7 +177,7 @@ app.whenReady().then(async () => {
         onQuickCapture: openQuickCapture,
         onGeneratePlan: () => {
           void planFirstEmptyWorkspace(context).catch((error: unknown) => {
-            console.error('阿咲 tray plan failed:', serializeError(error).message);
+            console.error('ASAKI tray plan failed:', serializeError(error).message);
           });
         },
         onEveningReview: showWindow,
@@ -189,7 +189,7 @@ app.whenReady().then(async () => {
     controller.start();
   } catch (error) {
     // Background services are optional; the window and IPC stay usable.
-    console.error('阿咲 background services failed:', serializeError(error).message);
+    console.error('ASAKI background services failed:', serializeError(error).message);
   }
 
   app.on('before-quit', () => {
@@ -211,7 +211,7 @@ app.whenReady().then(async () => {
   });
 }).catch((error: unknown) => {
   // Only the sanitized message is logged; API keys never reach this path.
-  console.error('阿咲 failed to start:', serializeError(error).message);
+  console.error('ASAKI failed to start:', serializeError(error).message);
   app.quit();
 });
 

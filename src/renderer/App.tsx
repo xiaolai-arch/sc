@@ -29,7 +29,7 @@ export function App() {
 
   return (
     <>
-      <h1 className="sr-only">阿咲</h1>
+      <h1 className="sr-only">ASAKI</h1>
       {bootstrap === null ? (
         <PageShell>
           <div className="mx-auto max-w-[980px] px-6 py-20 text-gray-500 dark:text-[#a1a1a6]">正在准备…</div>
