@@ -6,6 +6,13 @@ import { createContextScheduler } from './scheduler';
 import { DEFAULT_VAULT_DIRECTORY } from './settings/defaults';
 import { createElectronNotificationSink, createElectronTray } from './tray';
 
+// Local development/e2e isolation hook. Normal launches leave this unset and
+// keep Electron's platform default userData directory.
+const userDataOverride = process.env['STUDY_COACH_USER_DATA_DIR']?.trim();
+if (userDataOverride) {
+  app.setPath('userData', userDataOverride);
+}
+
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow(): BrowserWindow {

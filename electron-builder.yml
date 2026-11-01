@@ -1,0 +1,34 @@
+appId: com.studycoach.desktop
+productName: Study Coach
+copyright: Copyright © 2026 Study Coach contributors
+
+directories:
+  output: dist
+  buildResources: build
+
+# electron-vite emits main, preload and renderer bundles into out/.
+# Production dependencies are added automatically from package.json.
+files:
+  - out/**/*
+  - package.json
+  - LICENSE
+
+asar: true
+
+mac:
+  category: public.app-category.education
+  # arm64-only for v1. `dir` is the fast local verification target; zip and dmg
+  # are the distributable artifacts.
+  target:
+    - target: dir
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
+    - target: dmg
+      arch: [arm64]
+  # Signing is optional. Set CSC_LINK/CSC_KEY_PASSWORD (or CSC_NAME) in the
+  # environment to sign; otherwise electron-builder produces an unsigned build.
+  hardenedRuntime: true
+  gatekeeperAssess: false
+
+artifactName: ${productName}-${version}-${arch}.${ext}
