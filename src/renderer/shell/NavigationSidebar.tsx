@@ -347,7 +347,9 @@ export function NavigationSidebar({
   function projectList() {
     return (
       <>
-        <p className={contextHeadingClass}>项目</p>
+        <p className={contextHeadingClass}>
+          {section === 'projects' ? '项目列表' : '按项目筛选'}
+        </p>
         {projects.length === 0 ? (
           <p className="px-2.5 py-2 text-[11px] leading-5 text-[#9a9a9e] dark:text-[#8e8e93]">
             项目会由管家在对话里创建。
@@ -458,7 +460,7 @@ export function NavigationSidebar({
               className={cn(
                 'flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[12px] transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30',
                 active
-                  ? 'bg-[#e9e6e0] dark:bg-white/[0.1] font-medium text-[#1d1d1f] dark:text-[#f5f5f7]'
+                  ? 'bg-[#e8f2ff] dark:bg-[#0a84ff]/15 font-medium text-[#0071e3] dark:text-[#4da3ff]'
                   : 'text-[#3c3c3f] dark:text-[#a1a1a6] hover:bg-[#f1eee8] dark:hover:bg-white/[0.06]'
               )}
             >
