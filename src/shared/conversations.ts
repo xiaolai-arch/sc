@@ -1,5 +1,5 @@
 export type ConversationKind = 'chat' | 'check-in';
-export type CheckInTrigger = 'morning' | 'evening' | 'custom';
+export type CheckInTrigger = 'morning' | 'evening' | 'weekly' | 'custom';
 
 export type ConversationStep = {
   id: string;

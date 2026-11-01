@@ -153,6 +153,34 @@ test('sorts summaries by updatedAt, newest first', async () => {
   expect(summaries.map((summary) => summary.id)).toEqual([second.id, first.id]);
 });
 
+test('normalizes weekly check-in triggers from existing files', async () => {
+  const dir = await tempDir();
+  await writeFile(
+    join(dir, 'weekly.json'),
+    JSON.stringify({
+      id: 'weekly',
+      title: '每周复盘 · 11-01',
+      kind: 'check-in',
+      createdAt: '2026-11-01T12:00:00.000Z',
+      updatedAt: '2026-11-01T12:00:00.000Z',
+      messages: [
+        {
+          id: 'm1',
+          role: 'assistant',
+          text: '周日复盘',
+          createdAt: '2026-11-01T12:00:00.000Z',
+          source: 'check-in',
+          trigger: 'weekly'
+        }
+      ]
+    }),
+    'utf8'
+  );
+
+  const store = new ConversationStore(dir);
+  expect((await store.get('weekly'))?.messages[0]?.trigger).toBe('weekly');
+});
+
 test('ignores corrupt conversation files and rejects unsafe ids', async () => {
   const dir = await tempDir();
   const store = new ConversationStore(dir);

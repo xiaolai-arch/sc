@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { FakeModelClient } from '../../src/main/agent/model-client';
 import { ProactiveCheckInService } from '../../src/main/check-ins/proactive-check-in-service';
 import { ConversationStore } from '../../src/main/conversations/conversation-store';
+import { Scheduler, type SchedulerNotification } from '../../src/main/scheduler/scheduler';
 import { createDefaultSettings } from '../../src/main/settings/defaults';
 import type { AppSettings } from '../../src/shared/types';
 import type {
@@ -133,6 +134,129 @@ test('deduplicates the same trigger and respects the proactive budget', async ()
     expect(conversation?.messages).toHaveLength(1);
     expect(conversation?.messages[0]?.trigger).toBe('morning');
     expect(conversation?.messages[0]?.text).toContain('早上好');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('creates a weekly review conversation with its own title and notification', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    const notification = await service.check('weekly', '2026-11-01');
+
+    expect(notification).toMatchObject({
+      kind: 'weekly-review',
+      scheduledTime: '20:00',
+      conversationId: expect.any(String)
+    });
+    expect(notification?.body).not.toContain('极限基础');
+
+    const summaries = await value.list();
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toMatchObject({ kind: 'check-in', title: '每周复盘 · 11-01' });
+    const conversation = await value.get(summaries[0]!.id);
+    expect(conversation?.messages).toHaveLength(1);
+    expect(conversation?.messages[0]).toMatchObject({
+      role: 'assistant',
+      source: 'check-in',
+      trigger: 'weekly'
+    });
+    expect(conversation?.messages[0]?.text).toContain('下周');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('deduplicates weekly reviews and keeps them separate from daily check-ins', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () =>
+        settings({ budget: { proactiveSessionsPerDay: 1, dailyTokens: 1000 } }),
+      now: () => NOW
+    });
+
+    expect(await service.check('morning', '2026-11-01')).not.toBeNull();
+    expect(await service.check('weekly', '2026-11-01')).not.toBeNull();
+    expect(await service.check('weekly', '2026-11-01')).toBeNull();
+
+    const summaries = await value.list();
+    expect(summaries.map((summary) => summary.title).sort()).toEqual([
+      '今天的检查 · 11-01',
+      '每周复盘 · 11-01'
+    ]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('skips weekly reviews when notifications are disabled', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () =>
+        settings({ notifications: { ...settings().notifications, enabled: false } }),
+      now: () => NOW
+    });
+
+    expect(await service.check('weekly', '2026-11-01')).toBeNull();
+    expect(await value.list()).toEqual([]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a Sunday 20:00 tick creates the weekly review conversation', async () => {
+  const { dir, value } = await store();
+  try {
+    const weeklySettings = settings({
+      notifications: {
+        ...settings().notifications,
+        morning: '23:50',
+        evening: '23:55',
+        weekly: '20:00'
+      }
+    });
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () => weeklySettings,
+      now: () => new Date(2026, 10, 1, 20, 0, 0)
+    });
+    const delivered: SchedulerNotification[] = [];
+    const scheduler = new Scheduler({
+      now: () => new Date(2026, 10, 1, 20, 0, 0),
+      getSettings: async () => weeklySettings,
+      notify: (notification) => {
+        delivered.push(notification);
+      },
+      onCheckIn: (kind, date) => service.check(kind, date)
+    });
+
+    const result = await scheduler.tick();
+
+    expect(result.delivered.map((notification) => notification.kind)).toEqual([
+      'weekly-review'
+    ]);
+    expect(delivered[0]).toMatchObject({ kind: 'weekly-review', scheduledTime: '20:00' });
+    const summaries = await value.list();
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]?.title).toBe('每周复盘 · 11-01');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

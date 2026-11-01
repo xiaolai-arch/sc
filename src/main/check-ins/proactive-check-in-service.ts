@@ -22,9 +22,11 @@ export interface ProactiveCheckInOptions {
 }
 
 const CHECK_IN_TITLE_PREFIX = '今天的检查';
+const WEEKLY_TITLE_PREFIX = '每周复盘';
 
-function checkInTitle(date: string): string {
-  return `${CHECK_IN_TITLE_PREFIX} · ${date.slice(5)}`;
+function checkInTitle(trigger: CheckInTrigger, date: string): string {
+  const prefix = trigger === 'weekly' ? WEEKLY_TITLE_PREFIX : CHECK_IN_TITLE_PREFIX;
+  return `${prefix} · ${date.slice(5)}`;
 }
 
 export class ProactiveCheckInService {
@@ -49,7 +51,7 @@ export class ProactiveCheckInService {
     const settings = await this.getSettings();
     if (!settings.notifications.enabled) return null;
 
-    const conversation = await this.findOrCreateConversation(date);
+    const conversation = await this.findOrCreateConversation(date, trigger);
     const checkIns = conversation.messages.filter((message) => message.trigger);
     if (checkIns.some((message) => message.trigger === trigger)) return null;
     if (checkIns.length >= settings.budget.proactiveSessionsPerDay) return null;
@@ -68,20 +70,31 @@ export class ProactiveCheckInService {
 
     return {
       key: `${date}:check-in:${trigger}`,
-      kind: trigger === 'morning' ? 'morning-plan' : 'evening-review',
+      kind:
+        trigger === 'morning'
+          ? 'morning-plan'
+          : trigger === 'evening'
+            ? 'evening-review'
+            : 'weekly-review',
       date,
       scheduledTime:
         trigger === 'morning'
           ? settings.notifications.morning
-          : settings.notifications.evening,
-      title: '管家想和你聊聊今天的进度',
-      body: buildCheckInNotificationBody(context),
+          : trigger === 'evening'
+            ? settings.notifications.evening
+            : settings.notifications.weekly,
+      title:
+        trigger === 'weekly' ? '管家想和你回顾这一周' : '管家想和你聊聊今天的进度',
+      body: buildCheckInNotificationBody(context, trigger),
       conversationId: conversation.id
     };
   }
 
-  private async findOrCreateConversation(date: string): Promise<Conversation> {
-    const title = checkInTitle(date);
+  private async findOrCreateConversation(
+    date: string,
+    trigger: CheckInTrigger
+  ): Promise<Conversation> {
+    const title = checkInTitle(trigger, date);
     const summaries = await this.conversationStore.list();
     const existing = summaries.find(
       (summary) => summary.kind === 'check-in' && summary.title === title
