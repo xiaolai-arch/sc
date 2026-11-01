@@ -1,4 +1,4 @@
-import { jsonSchema } from 'ai';
+import { jsonSchema, streamText } from 'ai';
 import type {
   JSONSchema7,
   LanguageModel,
@@ -11,8 +11,10 @@ import type {
   ModelMessage,
   ModelRequest,
   ModelResponse,
+  ModelStreamEvent,
   ModelToolCall,
-  ModelToolDefinition
+  ModelToolDefinition,
+  StreamingModelClient
 } from './model-client';
 
 type AiSdkGenerateOptions = Parameters<typeof import('ai').generateText>[0];
@@ -36,8 +38,33 @@ export interface AiSdkGenerateResult {
 
 export type AiSdkGenerate = (options: AiSdkGenerateOptions) => Promise<AiSdkGenerateResult>;
 
+export interface AiSdkStreamPart {
+  type: string;
+  text?: string;
+  toolCallId?: string;
+  toolName?: string;
+  input?: unknown;
+  totalUsage?: AiSdkUsageLike;
+  error?: unknown;
+}
+
+export interface AiSdkUsageLike {
+  inputTokens?: number | undefined;
+  outputTokens?: number | undefined;
+  promptTokens?: number | undefined;
+  completionTokens?: number | undefined;
+}
+
+export interface AiSdkStreamResult {
+  fullStream: AsyncIterable<AiSdkStreamPart>;
+  totalUsage?: PromiseLike<AiSdkUsageLike> | AiSdkUsageLike;
+}
+
+export type AiSdkStreamGenerate = (options: AiSdkGenerateOptions) => AiSdkStreamResult;
+
 export interface AiSdkModelClientOptions {
   generate: AiSdkGenerate;
+  streamGenerate?: AiSdkStreamGenerate;
   model: LanguageModel;
 }
 
@@ -45,31 +72,19 @@ export interface AiSdkModelClientOptions {
  * Adapter between the provider-agnostic ModelClient and the AI SDK.
  * Tool execution stays outside the SDK so the butler owns the tool loop.
  */
-export class AiSdkModelClient implements ModelClient {
+export class AiSdkModelClient implements StreamingModelClient {
   private readonly generate: AiSdkGenerate;
+  private readonly streamGenerate: AiSdkStreamGenerate;
   private readonly model: LanguageModel;
 
   constructor(options: AiSdkModelClientOptions) {
     this.generate = options.generate;
+    this.streamGenerate = options.streamGenerate ?? streamText;
     this.model = options.model;
   }
 
   async complete(request: ModelRequest): Promise<ModelResponse> {
-    const options: Record<string, unknown> = {
-      model: this.model,
-      messages: toAiSdkMessages(request.messages)
-    };
-    if (request.temperature !== undefined) {
-      options['temperature'] = request.temperature;
-    }
-    if (request.maxTokens !== undefined) {
-      options['maxOutputTokens'] = request.maxTokens;
-    }
-    const tools = toAiSdkTools(request.tools);
-    if (tools) {
-      options['tools'] = tools;
-    }
-
+    const options = this.buildOptions(request);
     const result = await this.generate(options as AiSdkGenerateOptions);
     const usage = result.usage;
     const toolCalls: ModelToolCall[] = (result.toolCalls ?? []).map((call) => ({
@@ -86,6 +101,64 @@ export class AiSdkModelClient implements ModelClient {
       },
       ...(toolCalls.length > 0 ? { toolCalls } : {})
     };
+  }
+
+  async stream(
+    request: ModelRequest,
+    onEvent: (event: ModelStreamEvent) => void
+  ): Promise<ModelResponse> {
+    const result = this.streamGenerate(this.buildOptions(request) as AiSdkGenerateOptions);
+    let text = '';
+    const toolCalls: ModelToolCall[] = [];
+
+    for await (const part of result.fullStream) {
+      if (part.type === 'text-delta' && typeof part.text === 'string') {
+        text += part.text;
+        onEvent({ type: 'text', text: part.text });
+      } else if (part.type === 'reasoning-delta' && typeof part.text === 'string') {
+        onEvent({ type: 'reasoning', text: part.text });
+      } else if (part.type === 'tool-call' && part.toolCallId && part.toolName) {
+        toolCalls.push({
+          id: part.toolCallId,
+          name: part.toolName,
+          arguments: part.input ?? {}
+        });
+      } else if (part.type === 'error') {
+        throw part.error instanceof Error
+          ? part.error
+          : new Error(String(part.error ?? '模型流式输出失败。'));
+      }
+    }
+
+    const usage = (await Promise.resolve(
+      result.totalUsage ?? { inputTokens: 0, outputTokens: 0 }
+    )) as AiSdkUsageLike;
+    return {
+      text,
+      usage: {
+        inputTokens: usage.inputTokens ?? usage.promptTokens ?? 0,
+        outputTokens: usage.outputTokens ?? usage.completionTokens ?? 0
+      },
+      ...(toolCalls.length > 0 ? { toolCalls } : {})
+    };
+  }
+
+  private buildOptions(request: ModelRequest): Record<string, unknown> {
+    const options: Record<string, unknown> = {
+      model: this.model,
+      messages: toAiSdkMessages(request.messages)
+    };
+    if (request.temperature !== undefined) {
+      options['temperature'] = request.temperature;
+    }
+    if (request.maxTokens !== undefined) {
+      options['maxOutputTokens'] = request.maxTokens;
+    }
+    const tools = toAiSdkTools(request.tools);
+    if (tools) {
+      options['tools'] = tools;
+    }
+    return options;
   }
 }
 

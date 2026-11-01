@@ -1,7 +1,7 @@
 import type { ProviderConfig } from '../../shared/types';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { generateText } from 'ai';
+import { generateText, streamText } from 'ai';
 import { AiSdkModelClient } from './ai-sdk-client';
 import { CliAgentClient } from './cli-agent-client';
 
@@ -110,7 +110,7 @@ export function createModelClient(provider: ProviderConfig, apiKey: string | nul
         throw new NoApiKeyError('anthropic');
       }
       const anthropic = createAnthropic({ apiKey });
-      return new AiSdkModelClient({ generate: generateText, model: anthropic(provider.model) });
+      return new AiSdkModelClient({ generate: generateText, streamGenerate: streamText, model: anthropic(provider.model) });
     }
     case 'openai-compatible': {
       const compatible = createOpenAICompatible({
@@ -118,7 +118,7 @@ export function createModelClient(provider: ProviderConfig, apiKey: string | nul
         baseURL: provider.baseURL,
         ...(apiKey ? { apiKey } : {})
       });
-      return new AiSdkModelClient({ generate: generateText, model: compatible(provider.model) });
+      return new AiSdkModelClient({ generate: generateText, streamGenerate: streamText, model: compatible(provider.model) });
     }
     case 'ollama': {
       const baseURL = provider.baseURL || 'http://127.0.0.1:11434/v1';
@@ -127,7 +127,7 @@ export function createModelClient(provider: ProviderConfig, apiKey: string | nul
         baseURL,
         apiKey: apiKey || 'ollama'
       });
-      return new AiSdkModelClient({ generate: generateText, model: ollama(provider.model) });
+      return new AiSdkModelClient({ generate: generateText, streamGenerate: streamText, model: ollama(provider.model) });
     }
     case 'local-cli':
       return new CliAgentClient(provider);
