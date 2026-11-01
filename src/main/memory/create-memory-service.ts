@@ -33,6 +33,13 @@ export interface MemoryServiceOptions {
   maxTokens?: number;
 }
 
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  const error = new Error('Aborted');
+  error.name = 'AbortError';
+  throw error;
+}
+
 function byNewestFirst(a: MemoryRecord, b: MemoryRecord): number {
   return (b.createdAt ?? '').localeCompare(a.createdAt ?? '') || b.id.localeCompare(a.id);
 }
@@ -156,11 +163,19 @@ export function createMemoryService(options: MemoryServiceOptions): MemoryServic
         date,
         answers
       };
+      throwIfAborted(input.signal);
       const candidates =
-        modelClient !== null ? await synthesizeByModel(modelClient, source, options) : null;
+        modelClient !== null
+          ? await synthesizeByModel(modelClient, source, {
+              ...options,
+              ...(input.signal ? { signal: input.signal } : {})
+            })
+          : null;
       const generatedBy = candidates !== null ? 'model' : 'rules';
       const chosen = candidates ?? synthesizeByRules(answers);
 
+      // A Stop during synthesis must not append memory after the turn ended.
+      throwIfAborted(input.signal);
       const createdAt = now().toISOString();
       const records: MemoryRecord[] = chosen.map((candidate) => ({
         id: newId('m'),

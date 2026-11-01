@@ -122,18 +122,31 @@ function buildMessages(source: ReviewSynthesisSource): ModelMessage[] {
 export async function synthesizeByModel(
   modelClient: ModelClient,
   source: ReviewSynthesisSource,
-  options: { temperature?: number; maxTokens?: number } = {}
+  options: {
+    temperature?: number;
+    maxTokens?: number;
+    signal?: AbortSignal;
+  } = {}
 ): Promise<Candidate[] | null> {
   let text: string;
   try {
     const response = await modelClient.complete({
       messages: buildMessages(source),
       ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-      ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {})
+      ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
+      ...(options.signal ? { signal: options.signal } : {})
     });
     text = response.text;
-  } catch {
+  } catch (error) {
+    if (options.signal?.aborted) throw abortError();
     return null;
   }
+  if (options.signal?.aborted) throw abortError();
   return parseModelItems(text);
+}
+
+function abortError(): Error {
+  const error = new Error('Aborted');
+  error.name = 'AbortError';
+  return error;
 }

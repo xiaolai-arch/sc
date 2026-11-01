@@ -170,6 +170,64 @@ test('reschedules a task without changing its status', async () => {
   });
 });
 
+test('does not create planned tasks when Stop arrives during planning', async () => {
+  const controller = new AbortController();
+  const createTask = vi.fn();
+  const planner = {
+    plan: async () => {
+      controller.abort();
+      return {
+        workspaceId: 'ws-exam',
+        date: '2026-11-01',
+        generatedBy: 'agent' as const,
+        tasks: [
+          { title: '极限', subject: '数学', durationMin: 30, acceptance: '完成' }
+        ]
+      };
+    }
+  };
+  const result = await executeButlerTool(
+    { id: 'c6', name: 'plan_workspace', arguments: { workspaceId: 'ws-exam' } },
+    tools,
+    {
+      workspace: { ...workspaceService, createTask } as unknown as WorkspaceService,
+      workspaceId: 'ws-exam',
+      planner,
+      signal: controller.signal,
+      now: () => new Date()
+    }
+  );
+
+  expect(result.ok).toBe(false);
+  expect(createTask).not.toHaveBeenCalled();
+});
+
+test('passes the Stop signal into review memory synthesis', async () => {
+  const controller = new AbortController();
+  const synthesizeFromReview = vi
+    .fn()
+    .mockResolvedValue({ items: [], generatedBy: 'rules' });
+  const result = await executeButlerTool(
+    {
+      id: 'c7',
+      name: 'save_review',
+      arguments: { workspaceId: 'ws-exam', completed: '数学', stuck: '极限', tomorrow: '复盘' }
+    },
+    tools,
+    {
+      workspace: workspaceService,
+      memory: { synthesizeFromReview } as never,
+      signal: controller.signal,
+      now: () => new Date()
+    }
+  );
+
+  expect(result.ok).toBe(true);
+  expect(synthesizeFromReview).toHaveBeenCalledWith(
+    expect.objectContaining({ signal: controller.signal })
+  );
+});
+
 test('sets a global reminder', async () => {
   const result = await executeButlerTool(
     {

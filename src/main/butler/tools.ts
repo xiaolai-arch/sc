@@ -20,6 +20,13 @@ export interface ButlerToolContext {
   signal?: AbortSignal;
 }
 
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  const error = new Error('Aborted');
+  error.name = 'AbortError';
+  throw error;
+}
+
 export interface ButlerToolDefinition {
   name: string;
   description: string;
@@ -200,7 +207,8 @@ export function createButlerTools(): ButlerToolDefinition[] {
           const result = await context.memory.synthesizeFromReview({
             workspaceId,
             date,
-            answers
+            answers,
+            ...(context.signal ? { signal: context.signal } : {})
           });
           return {
             date,
@@ -247,10 +255,13 @@ export function createButlerTools(): ButlerToolDefinition[] {
         const plan = await context.planner.plan({
           workspaceId,
           ...(date ? { date } : {}),
-          ...(availableMinutes !== undefined ? { availableMinutes } : {})
+          ...(availableMinutes !== undefined ? { availableMinutes } : {}),
+          ...(context.signal ? { signal: context.signal } : {})
         });
+        throwIfAborted(context.signal);
         const tasks = [];
         for (const task of plan.tasks) {
+          throwIfAborted(context.signal);
           tasks.push(
             await context.workspace.createTask({
               workspaceId,

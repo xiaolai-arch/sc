@@ -206,8 +206,10 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
                 kind,
                 agent: cliAgent,
                 command: cliCommand.trim(),
-                ...(model.trim() ? { model: model.trim() } : {}),
-                ...(cliAgent === 'codex' || cliAgent === 'claude'
+                ...(cliAgent !== 'zcode' && model.trim() ? { model: model.trim() } : {}),
+                ...(cliAgent === 'codex' ||
+                cliAgent === 'claude' ||
+                cliAgent === 'opencode'
                   ? cliEffort
                     ? { effort: cliEffort }
                     : {}
@@ -438,10 +440,12 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
                   ))}
                 </Select>
               </div>
-              <div>
-                <Label htmlFor="settings-model">模型名称</Label>
-                <Input id="settings-model" value={model} onChange={(event) => setModel(event.target.value)} />
-              </div>
+              {kind === 'local-cli' && cliAgent === 'zcode' ? null : (
+                <div>
+                  <Label htmlFor="settings-model">模型名称</Label>
+                  <Input id="settings-model" value={model} onChange={(event) => setModel(event.target.value)} />
+                </div>
+              )}
             </div>
 
             {kind === 'local-cli' ? (
@@ -473,7 +477,7 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
                     placeholder="codex"
                   />
                 </div>
-                {cliAgent === 'codex' || cliAgent === 'claude' ? (
+                {cliAgent === 'codex' || cliAgent === 'claude' || cliAgent === 'opencode' ? (
                   <div>
                     <Label htmlFor="settings-cli-effort">推理强度</Label>
                     <Select
@@ -506,9 +510,15 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
                     </span>
                   </label>
                 ) : null}
+                {cliAgent === 'zcode' ? (
+                  <p className="text-sm text-gray-500 dark:text-[#a1a1a6] md:col-span-2">
+                    zcode 的模型和推理强度在 zcode 内切换（/model），本应用不会覆盖。
+                  </p>
+                ) : null}
                 <p className="text-sm text-gray-500 dark:text-[#a1a1a6] md:col-span-2">
                   使用本机已登录的 CLI agent，不需要 API key；命令会在临时目录中运行。
-                  Codex 使用 -c model_reasoning_effort，Claude 使用 --effort。
+                  Codex 使用 -c model_reasoning_effort，Claude 使用 --effort，opencode 使用
+                  --model provider/model#variant。
                   Claude 会逐字返回思考；Codex 的 --json 只在思考完成后返回整段。
                 </p>
               </div>

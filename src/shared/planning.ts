@@ -29,6 +29,8 @@ export interface PlanWorkspaceInput {
   date?: string;
   /** Total minutes available today. Defaults to 120. */
   availableMinutes?: number;
+  /** Aborting must stop the model call instead of returning a template plan. */
+  signal?: AbortSignal;
 }
 
 export interface WorkspacePlanner {

@@ -41,6 +41,7 @@ export class WorkspacePlannerImpl implements WorkspacePlanner {
   }
 
   async plan(input: PlanWorkspaceInput): Promise<WorkspacePlan> {
+    throwIfAborted(input.signal);
     const date = resolveDate(input.date, this.now());
     const availableMinutes = normalizeAvailableMinutes(input.availableMinutes);
     const snapshot = await this.workspaceService.getWorkspaceSnapshot(input.workspaceId);
@@ -60,12 +61,16 @@ export class WorkspacePlannerImpl implements WorkspacePlanner {
             { role: 'user', content: prompt.user }
           ],
           temperature: PLAN_TEMPERATURE,
-          maxTokens: PLAN_MAX_TOKENS
+          maxTokens: PLAN_MAX_TOKENS,
+          ...(input.signal ? { signal: input.signal } : {})
         });
+        throwIfAborted(input.signal);
         const plan = parseWorkspacePlanReply(response.text, snapshot.workspace.id, date);
         if (plan !== null) return plan;
-      } catch {
-        // Any model failure falls through to the local template plan.
+      } catch (error) {
+        // Abort is not a model failure: never mask it with a template plan.
+        if (input.signal?.aborted) throw abortError();
+        // Any other model failure falls through to the local template plan.
       }
     }
 
@@ -79,6 +84,16 @@ export class WorkspacePlannerImpl implements WorkspacePlanner {
 
 export function createWorkspacePlanner(options: WorkspacePlannerOptions): WorkspacePlanner {
   return new WorkspacePlannerImpl(options);
+}
+
+function abortError(): Error {
+  const error = new Error('Aborted');
+  error.name = 'AbortError';
+  return error;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw abortError();
 }
 
 function resolveDate(value: string | undefined, now: Date): string {

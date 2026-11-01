@@ -14,6 +14,8 @@ export interface SynthesizeMemoryInput {
   /** Review day the answers belong to (YYYY-MM-DD); becomes the item source. */
   date: string;
   answers: ReviewAnswers;
+  /** Aborting must stop the model call and skip writing memory. */
+  signal?: AbortSignal;
 }
 
 export interface UpdateMemoryInput {

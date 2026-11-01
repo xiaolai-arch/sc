@@ -196,6 +196,45 @@ test('saves a local cli provider without an api key', async () => {
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });
 
+test('hides model and effort for zcode and explains where to change them', async () => {
+  const localSettings = {
+    ...settings,
+    provider: { kind: 'local-cli' as const, agent: 'zcode' as const, command: 'zcode' }
+  };
+  window.studyCoach = {
+    getSettings: vi.fn().mockResolvedValue(localSettings),
+    updateSettings: vi.fn(),
+    setApiKey: vi.fn()
+  } as never;
+
+  render(<SettingsPage onClose={() => {}} />);
+  expect(await screen.findByLabelText('CLI agent')).toHaveValue('zcode');
+  expect(screen.queryByLabelText('模型名称')).not.toBeInTheDocument();
+  expect(screen.getByText(/在 zcode 内/)).toBeInTheDocument();
+});
+
+test('shows model and effort for opencode', async () => {
+  const localSettings = {
+    ...settings,
+    provider: {
+      kind: 'local-cli' as const,
+      agent: 'opencode' as const,
+      command: 'opencode',
+      model: 'anthropic/claude-sonnet-5-5'
+    }
+  };
+  window.studyCoach = {
+    getSettings: vi.fn().mockResolvedValue(localSettings),
+    updateSettings: vi.fn(),
+    setApiKey: vi.fn()
+  } as never;
+
+  render(<SettingsPage onClose={() => {}} />);
+  expect(await screen.findByLabelText('CLI agent')).toHaveValue('opencode');
+  expect(screen.getByLabelText('模型名称')).toHaveValue('anthropic/claude-sonnet-5-5');
+  expect(screen.getByLabelText('推理强度')).toBeInTheDocument();
+});
+
 test('clears the saved key before switching to a different endpoint', async () => {
   const update = vi.fn().mockResolvedValue(settings);
   const setKey = vi.fn().mockResolvedValue(undefined);

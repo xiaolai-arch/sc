@@ -150,6 +150,31 @@ describe('synthesizeFromReview with a model', () => {
   });
 });
 
+test('does not write memory when the turn is aborted during synthesis', async () => {
+  const controller = new AbortController();
+  const model = {
+    complete: async () => {
+      controller.abort();
+      return {
+        text: JSON.stringify({ items: [{ text: '应被丢弃', kind: 'fact' }] }),
+        usage: { inputTokens: 1, outputTokens: 1 }
+      };
+    }
+  };
+  const service = createMemoryService({ root, modelClient: model });
+
+  await expect(
+    service.synthesizeFromReview({
+      workspaceId,
+      date: '2026-11-01',
+      answers: answers('完成数学', '极限', '复盘'),
+      signal: controller.signal
+    })
+  ).rejects.toMatchObject({ name: 'AbortError' });
+
+  expect(await service.list(workspaceId)).toHaveLength(0);
+});
+
 describe('synthesizeFromReview without a model', () => {
   test('uses deterministic rule summaries', async () => {
     const service = createMemoryService({ root });

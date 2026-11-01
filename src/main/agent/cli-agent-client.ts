@@ -75,7 +75,9 @@ const DEFAULT_TIMEOUT_MS = 180_000;
  * - codex: model and reasoning effort go before the stdin placeholder `-`;
  *   effort defaults to `medium`, preserving the previous behavior.
  * - claude: `--model`/`--effort` only when configured; `--bare` when isolated.
- * - zcode/opencode: unchanged.
+ * - opencode: `--model provider/model`; the effort becomes the `#variant`
+ *   suffix unless the model already names one.
+ * - zcode: unchanged; its model is chosen inside zcode, not per prompt.
  */
 export function buildAgentArgs(
   provider: LocalCliProvider,
@@ -103,6 +105,15 @@ export function buildAgentArgs(
     if (model) args.push('--model', model);
     if (provider.effort) args.push('--effort', provider.effort);
     if (provider.isolate) args.push('--bare');
+  }
+
+  if (provider.agent === 'opencode') {
+    const model = provider.model?.trim();
+    if (model) {
+      const variant =
+        model.includes('#') || !provider.effort ? model : `${model}#${provider.effort}`;
+      args.push('--model', variant);
+    }
   }
 
   return args;

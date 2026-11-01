@@ -487,6 +487,62 @@ test('omits claude effort when it is not configured', async () => {
   expect(calls[0]).not.toContain('--effort');
 });
 
+test('passes model and effort variant to opencode', async () => {
+  const calls: string[][] = [];
+  const client = new CliAgentClient(
+    {
+      kind: 'local-cli',
+      agent: 'opencode',
+      command: 'opencode',
+      model: 'anthropic/claude-sonnet-5-5',
+      effort: 'high'
+    },
+    {
+      runner: async (_command, args) => {
+        calls.push(args);
+        return { stdout: 'ok', stderr: '', code: 0 };
+      }
+    }
+  );
+
+  await client.complete({ messages: [{ role: 'user', content: 'hi' }] });
+
+  expect(calls[0]).toEqual([
+    '--prompt',
+    '--model',
+    'anthropic/claude-sonnet-5-5#high',
+    'USER:\nhi'
+  ]);
+});
+
+test('keeps an explicit opencode variant instead of appending effort', async () => {
+  const calls: string[][] = [];
+  const client = new CliAgentClient(
+    {
+      kind: 'local-cli',
+      agent: 'opencode',
+      command: 'opencode',
+      model: 'anthropic/claude-sonnet-5-5#max',
+      effort: 'low'
+    },
+    {
+      runner: async (_command, args) => {
+        calls.push(args);
+        return { stdout: 'ok', stderr: '', code: 0 };
+      }
+    }
+  );
+
+  await client.complete({ messages: [{ role: 'user', content: 'hi' }] });
+
+  expect(calls[0]).toEqual([
+    '--prompt',
+    '--model',
+    'anthropic/claude-sonnet-5-5#max',
+    'USER:\nhi'
+  ]);
+});
+
 test('ignores model and effort for zcode', async () => {
   const calls: string[][] = [];
   const client = new CliAgentClient(

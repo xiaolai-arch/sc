@@ -416,3 +416,35 @@ describe('buildTemplatePlan', () => {
     expect(plan.tasks.reduce((total, task) => total + task.durationMin, 0)).toBe(50);
   });
 });
+
+test('passes the abort signal to the planning model call', async () => {
+  const client = new FakeModelClient([
+    '{"tasks":[{"title":"极限","subject":"数学","durationMin":30,"acceptance":"完成"}]}'
+  ]);
+  const planner = createWorkspacePlanner({
+    modelClient: client,
+    workspaceService: makeWorkspaceService(),
+    now: () => NOW
+  });
+  const controller = new AbortController();
+
+  await planner.plan({ workspaceId: 'ws-exam', signal: controller.signal });
+
+  expect(client.calls[0]?.signal).toBe(controller.signal);
+});
+
+test('does not fall back to a template plan after abort', async () => {
+  const client = new FakeModelClient(['{"tasks":[]}']);
+  const planner = createWorkspacePlanner({
+    modelClient: client,
+    workspaceService: makeWorkspaceService(),
+    now: () => NOW
+  });
+  const controller = new AbortController();
+  controller.abort();
+
+  await expect(
+    planner.plan({ workspaceId: 'ws-exam', signal: controller.signal })
+  ).rejects.toMatchObject({ name: 'AbortError' });
+  expect(client.calls).toHaveLength(0);
+});
