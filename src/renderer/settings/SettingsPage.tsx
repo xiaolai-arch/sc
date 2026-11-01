@@ -194,7 +194,11 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
                 agent: cliAgent,
                 command: cliCommand.trim(),
                 ...(model.trim() ? { model: model.trim() } : {}),
-                ...(cliEffort ? { effort: cliEffort } : {}),
+                ...(cliAgent === 'codex' || cliAgent === 'claude'
+                  ? cliEffort
+                    ? { effort: cliEffort }
+                    : {}
+                  : {}),
                 ...(cliAgent === 'claude' && cliIsolate ? { isolate: true } : {})
               }
             : { kind, baseURL, model };
@@ -407,21 +411,23 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
                     placeholder="codex"
                   />
                 </div>
-                <div>
-                  <Label htmlFor="settings-cli-effort">推理强度</Label>
-                  <Select
-                    id="settings-cli-effort"
-                    value={cliEffort}
-                    onChange={(event) =>
-                      setCliEffort(event.target.value as LocalCliEffort | '')
-                    }
-                  >
-                    <option value="">默认</option>
-                    <option value="low">低</option>
-                    <option value="medium">中</option>
-                    <option value="high">高</option>
-                  </Select>
-                </div>
+                {cliAgent === 'codex' || cliAgent === 'claude' ? (
+                  <div>
+                    <Label htmlFor="settings-cli-effort">推理强度</Label>
+                    <Select
+                      id="settings-cli-effort"
+                      value={cliEffort}
+                      onChange={(event) =>
+                        setCliEffort(event.target.value as LocalCliEffort | '')
+                      }
+                    >
+                      <option value="">默认</option>
+                      <option value="low">低</option>
+                      <option value="medium">中</option>
+                      <option value="high">高</option>
+                    </Select>
+                  </div>
+                ) : null}
                 {cliAgent === 'claude' ? (
                   <label className="flex items-start gap-3 text-sm text-gray-600 dark:text-[#a1a1a6] md:col-span-2">
                     <input

@@ -40,7 +40,7 @@ export type ProviderConfig =
       agent: LocalCliAgent;
       command?: string;
       model?: string;
-      /** Reasoning effort for codex/claude; unset keeps each CLI's default. */
+      /** codex defaults to medium when unset; claude then uses the CLI default. */
       effort?: LocalCliEffort;
       /** Claude Code only: run with --bare to skip global hooks/CLAUDE.md. */
       isolate?: boolean;

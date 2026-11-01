@@ -69,6 +69,51 @@ test('saves the chosen effort and omits it for the default', async () => {
   ).toBe('high');
 });
 
+test('hides the effort selector for unsupported agents', async () => {
+  window.studyCoach = apiStub({
+    getSettings: vi.fn().mockResolvedValue({
+      ...baseSettings,
+      provider: { kind: 'local-cli', agent: 'zcode', command: 'zcode' }
+    })
+  }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  expect(await screen.findByLabelText('CLI agent')).toHaveValue('zcode');
+  expect(screen.queryByLabelText('推理强度')).not.toBeInTheDocument();
+});
+
+test('does not save effort for zcode and restores it when switching back', async () => {
+  const update = vi.fn().mockResolvedValue(baseSettings);
+  window.studyCoach = apiStub({
+    updateSettings: update,
+    getSettings: vi.fn().mockResolvedValue({
+      ...baseSettings,
+      provider: {
+        kind: 'local-cli',
+        agent: 'claude',
+        command: 'claude',
+        effort: 'high'
+      }
+    })
+  }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  expect(await screen.findByLabelText('推理强度')).toHaveValue('high');
+
+  await userEvent.selectOptions(screen.getByLabelText('CLI agent'), 'zcode');
+  expect(screen.queryByLabelText('推理强度')).not.toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+  const saved = update.mock.calls.at(-1)?.[0] as {
+    provider: { kind: string; agent: string; effort?: string };
+  };
+  expect(saved.provider).toMatchObject({ kind: 'local-cli', agent: 'zcode' });
+  expect(saved.provider.effort).toBeUndefined();
+
+  await userEvent.selectOptions(screen.getByLabelText('CLI agent'), 'claude');
+  expect(screen.getByLabelText('推理强度')).toHaveValue('high');
+});
+
 test('loads an existing effort and keeps it when switching agents', async () => {
   window.studyCoach = apiStub({
     getSettings: vi.fn().mockResolvedValue({
