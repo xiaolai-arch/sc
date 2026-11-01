@@ -119,7 +119,10 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     updateTask,
     createNote,
     createReminder,
-    updateReminder
+    updateReminder,
+    memoryRecords,
+    updateMemory,
+    deleteMemory
   } = useWorkspaceData();
   const conversations = useConversations();
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -731,6 +734,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
             notes={notes}
             reviews={reviews}
             reminders={reminders}
+            memoryRecords={memoryRecords}
             profile={memoryProfile}
             tab={panelTab}
             onTabChange={setPanelTab}
@@ -761,6 +765,8 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
             onPauseFocus={pauseFocus}
             onResumeFocus={resumeFocus}
             onResetFocus={resetFocus}
+            onUpdateMemory={updateMemory}
+            onDeleteMemory={deleteMemory}
           />
         </div>
       </div>

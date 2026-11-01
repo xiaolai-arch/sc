@@ -2,7 +2,13 @@ import { useState } from 'react';
 import { cn } from '../ui/cn';
 import { CheckIcon, ChevronRightIcon } from '../ui/icons';
 import type { ReviewRecord } from '../../shared/ipc';
-import type { LearnerProfile } from '../../shared/memory';
+import type {
+  DeleteMemoryInput,
+  LearnerProfile,
+  MemoryKind,
+  MemoryRecord,
+  UpdateMemoryInput
+} from '../../shared/memory';
 import type {
   CreateNoteInput,
   CreateReminderInput,
@@ -17,7 +23,7 @@ import type {
 import { FocusTimer } from './FocusTimer';
 import type { FocusSession } from './focus-timer';
 
-export type ProjectPanelTab = 'plan' | 'records' | 'review' | 'reminders';
+export type ProjectPanelTab = 'plan' | 'records' | 'memory' | 'review' | 'reminders';
 
 type ProjectPanelProps = {
   open: boolean;
@@ -27,6 +33,7 @@ type ProjectPanelProps = {
   notes: WorkspaceNote[];
   reviews: ReviewRecord[];
   reminders: Reminder[];
+  memoryRecords: MemoryRecord[];
   profile: LearnerProfile | null;
   tab: ProjectPanelTab;
   onTabChange: (tab: ProjectPanelTab) => void;
@@ -48,14 +55,74 @@ type ProjectPanelProps = {
   onPauseFocus: () => void;
   onResumeFocus: () => void;
   onResetFocus: () => void;
+  onUpdateMemory: (input: UpdateMemoryInput) => Promise<MemoryRecord>;
+  onDeleteMemory: (input: DeleteMemoryInput) => Promise<void>;
 };
 
 const TABS: Array<{ id: ProjectPanelTab; label: string }> = [
   { id: 'plan', label: '计划' },
   { id: 'records', label: '记录' },
+  { id: 'memory', label: '记忆' },
   { id: 'review', label: '复盘' },
   { id: 'reminders', label: '提醒' }
 ];
+
+export const MEMORY_KIND_LABELS: Record<MemoryKind, string> = {
+  weakness: '薄弱点',
+  strength: '优势',
+  preference: '偏好',
+  plan: '计划',
+  fact: '事实'
+};
+
+const MEMORY_KIND_ORDER: MemoryKind[] = [
+  'weakness',
+  'strength',
+  'preference',
+  'plan',
+  'fact'
+];
+
+export function memorySourceLabel(source: string): string {
+  const match = /^review:(\d{4}-\d{2}-\d{2})$/.exec(source);
+  return match ? `来自 ${match[1]} 复盘` : `来自 ${source || '管家记录'}`;
+}
+
+export function memoryWhyRemembered(record: MemoryRecord): string {
+  const label = MEMORY_KIND_LABELS[record.kind];
+  const match = /^review:(\d{4})-(\d{2})-(\d{2})$/.exec(record.source);
+  if (!match) {
+    return record.source ? `${label} · 来自 ${record.source}` : `${label} · 由管家记录`;
+  }
+  const day = `${match[2]}-${match[3]}`;
+  switch (record.kind) {
+    case 'weakness':
+      return `${label} · 来自 ${day} 复盘里提到的卡点`;
+    case 'strength':
+      return `${label} · 来自 ${day} 复盘里提到的完成项`;
+    case 'preference':
+      return `${label} · 来自 ${day} 复盘里提到的调整`;
+    case 'plan':
+      return `${label} · 来自 ${day} 复盘里提到的明日安排`;
+    default:
+      return `${label} · 来自 ${day} 复盘`;
+  }
+}
+
+function memoryKindClass(kind: MemoryKind): string {
+  switch (kind) {
+    case 'weakness':
+      return 'bg-[#fdf3f2] text-[#d70015]';
+    case 'strength':
+      return 'bg-[#eefaf0] text-[#1d7f3a]';
+    case 'preference':
+      return 'bg-[#f2f7fd] text-[#0071e3]';
+    case 'plan':
+      return 'bg-[#f4f1fb] text-[#6b4fbb]';
+    default:
+      return 'bg-[#f1eee8] text-[#6b6b70]';
+  }
+}
 
 const actionClass =
   'rounded px-1.5 py-0.5 text-[10px] text-[#6b6b70] transition-colors hover:bg-black/[0.05] hover:text-black disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30';
@@ -107,6 +174,7 @@ export function ProjectPanel({
   notes,
   reviews,
   reminders,
+  memoryRecords,
   profile,
   tab,
   onTabChange,
@@ -127,7 +195,9 @@ export function ProjectPanel({
   onStartDefaultFocus,
   onPauseFocus,
   onResumeFocus,
-  onResetFocus
+  onResetFocus,
+  onUpdateMemory,
+  onDeleteMemory
 }: ProjectPanelProps) {
   const [pendingTaskId, setPendingTaskId] = useState<string | null>(null);
   const [taskError, setTaskError] = useState<{ id: string; message: string } | null>(null);
@@ -141,11 +211,25 @@ export function ProjectPanel({
   const [reminderError, setReminderError] = useState<string | null>(null);
   const [creatingReminder, setCreatingReminder] = useState(false);
   const [pendingReminderId, setPendingReminderId] = useState<string | null>(null);
+  const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null);
+  const [memoryText, setMemoryText] = useState('');
+  const [memoryKind, setMemoryKind] = useState<MemoryKind>('fact');
+  const [memoryError, setMemoryError] = useState<{ id: string; message: string } | null>(null);
+  const [savingMemory, setSavingMemory] = useState(false);
+  const [confirmMemoryId, setConfirmMemoryId] = useState<string | null>(null);
+  const [pendingMemoryId, setPendingMemoryId] = useState<string | null>(null);
 
   if (!open) return null;
 
   const filteredTasks = tasks.filter((task) => !workspace || task.workspaceId === workspace.id);
   const filteredNotes = notes.filter((note) => !workspace || note.workspaceId === workspace.id);
+  const filteredMemories = memoryRecords
+    .filter((record) => !workspace || record.workspaceId === workspace.id)
+    .slice()
+    .sort(
+      (a, b) =>
+        (b.createdAt ?? '').localeCompare(a.createdAt ?? '') || b.id.localeCompare(a.id)
+    );
   const filteredReviews = reviews.filter(
     (review) => !workspace || review.workspaceId === workspace.id
   );
@@ -232,6 +316,62 @@ export function ProjectPanel({
       setReminderError(messageOf(cause));
     } finally {
       setPendingReminderId(null);
+    }
+  }
+
+  function startMemoryEdit(record: MemoryRecord) {
+    setEditingMemoryId(record.id);
+    setMemoryText(record.text);
+    setMemoryKind(record.kind);
+    setMemoryError(null);
+    setConfirmMemoryId(null);
+  }
+
+  function cancelMemoryEdit() {
+    setEditingMemoryId(null);
+    setMemoryError(null);
+  }
+
+  async function saveMemory(record: MemoryRecord) {
+    if (savingMemory) return;
+    const text = memoryText.trim();
+    if (!text) {
+      setMemoryError({ id: record.id, message: '记忆内容不能为空。' });
+      return;
+    }
+    setSavingMemory(true);
+    setMemoryError(null);
+    try {
+      await onUpdateMemory({
+        workspaceId: record.workspaceId,
+        id: record.id,
+        text,
+        kind: memoryKind
+      });
+      setEditingMemoryId(null);
+    } catch (cause) {
+      setMemoryError({ id: record.id, message: messageOf(cause) });
+    } finally {
+      setSavingMemory(false);
+    }
+  }
+
+  async function removeMemory(record: MemoryRecord) {
+    if (confirmMemoryId !== record.id) {
+      setConfirmMemoryId(record.id);
+      setMemoryError(null);
+      return;
+    }
+    setPendingMemoryId(record.id);
+    setMemoryError(null);
+    try {
+      await onDeleteMemory({ workspaceId: record.workspaceId, id: record.id });
+      setConfirmMemoryId(null);
+      setEditingMemoryId((current) => (current === record.id ? null : current));
+    } catch (cause) {
+      setMemoryError({ id: record.id, message: messageOf(cause) });
+    } finally {
+      setPendingMemoryId(null);
     }
   }
 
@@ -503,6 +643,133 @@ export function ProjectPanel({
             >
               让管家记一条
             </button>
+          </div>
+        ) : null}
+
+        {tab === 'memory' ? (
+          <div>
+            {filteredMemories.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-[#ddd8d0] px-3 py-5 text-center">
+                <p className="text-[11px] leading-5 text-[#8a8a8e]">
+                  还没有记忆。完成一次复盘后，管家会记住你的卡点和偏好。
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {filteredMemories.map((memory) => {
+                  const editing = editingMemoryId === memory.id;
+                  const confirming = confirmMemoryId === memory.id;
+                  return (
+                    <div
+                      key={memory.id}
+                      className="rounded-lg border border-[#e5e1da] bg-white p-2"
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <span
+                          className={cn(
+                            'rounded-full px-1.5 py-0.5 text-[9px] font-medium',
+                            memoryKindClass(memory.kind)
+                          )}
+                        >
+                          {MEMORY_KIND_LABELS[memory.kind]}
+                        </span>
+                        {!editing ? (
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              aria-label={`编辑记忆：${memory.text}`}
+                              disabled={pendingMemoryId === memory.id}
+                              onClick={() => startMemoryEdit(memory)}
+                              className={actionClass}
+                            >
+                              编辑
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={
+                                confirming
+                                  ? `确认删除记忆：${memory.text}`
+                                  : `删除记忆：${memory.text}`
+                              }
+                              disabled={pendingMemoryId === memory.id}
+                              onClick={() => void removeMemory(memory)}
+                              className={cn(actionClass, confirming ? 'text-[#d70015]' : '')}
+                            >
+                              {confirming ? '确认删除' : '删除'}
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+
+                      {editing ? (
+                        <div className="mt-1">
+                          <textarea
+                            aria-label="记忆内容"
+                            rows={3}
+                            value={memoryText}
+                            onChange={(event) => setMemoryText(event.target.value)}
+                            className="w-full resize-none rounded-md border border-[#e5e1da] bg-white px-2 py-1.5 text-[10px] leading-5 text-[#1d1d1f] outline-none focus:border-[#0071e3]/40 focus:ring-2 focus:ring-[#0071e3]/20"
+                          />
+                          <select
+                            aria-label="记忆类型"
+                            value={memoryKind}
+                            onChange={(event) =>
+                              setMemoryKind(event.target.value as MemoryKind)
+                            }
+                            className={`${inputClass} mt-1 w-full`}
+                          >
+                            {MEMORY_KIND_ORDER.map((kind) => (
+                              <option key={kind} value={kind}>
+                                {MEMORY_KIND_LABELS[kind]}
+                              </option>
+                            ))}
+                          </select>
+                          {memoryError?.id === memory.id ? (
+                            <p role="alert" className="mt-1 text-[10px] text-[#d70015]">
+                              {memoryError.message}
+                            </p>
+                          ) : null}
+                          <div className="mt-1 flex justify-end gap-1">
+                            <button
+                              type="button"
+                              onClick={cancelMemoryEdit}
+                              className={actionClass}
+                            >
+                              取消
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!memoryText.trim() || savingMemory}
+                              onClick={() => void saveMemory(memory)}
+                              className={primaryButtonClass}
+                            >
+                              保存记忆
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="mt-1 text-[11px] leading-5 text-[#1d1d1f]">
+                            {memory.text}
+                          </p>
+                          <p className="mt-1 text-[9px] text-[#8a8a8e]">
+                            {memorySourceLabel(memory.source)}
+                          </p>
+                          <p className="text-[9px] text-[#9a9a9e]">
+                            {memoryWhyRemembered(memory)}
+                          </p>
+                          {memoryError?.id === memory.id ? (
+                            <p role="alert" className="mt-1 text-[10px] text-[#d70015]">
+                              {memoryError.message}
+                            </p>
+                          ) : null}
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         ) : null}
 

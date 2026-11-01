@@ -43,10 +43,12 @@ import type {
 import { PRACTICE_INTERVALS } from '../src/shared/practice';
 import type {
   LearnerProfile,
+  DeleteMemoryInput,
   MemoryKind,
   MemoryRecord,
   MemorySynthesisResult,
-  SynthesizeMemoryInput
+  SynthesizeMemoryInput,
+  UpdateMemoryInput
 } from '../src/shared/memory';
 import type { PlanWorkspaceInput, WorkspacePlan } from '../src/shared/planning';
 import type { SearchResult, SearchResultKind } from '../src/shared/search';
@@ -78,6 +80,14 @@ interface MockState {
   practiceMistakes: PracticeMistake[];
   conversations: Conversation[];
 }
+
+const MOCK_MEMORY_KINDS = new Set<MemoryKind>([
+  'weakness',
+  'strength',
+  'preference',
+  'plan',
+  'fact'
+]);
 
 function inferMemoryKind(text: string): MemoryKind {
   if (/不稳|偏慢|卡|错|薄弱|不会/.test(text)) return 'weakness';
@@ -815,6 +825,33 @@ export function createMockApi(
 
     async getMemoryProfile(workspaceId?: string): Promise<LearnerProfile> {
       return structuredClone(profileFor(workspaceId));
+    },
+
+    async updateMemory(input: UpdateMemoryInput): Promise<MemoryRecord> {
+      const record = state.memory.find(
+        (entry) => entry.workspaceId === input.workspaceId && entry.id === input.id
+      );
+      if (!record) throw new Error('记忆不存在');
+      if (input.text !== undefined) {
+        const text = input.text.trim();
+        if (!text) throw new Error('记忆内容不能为空。');
+        record.text = text;
+      }
+      if (input.kind !== undefined) {
+        if (!MOCK_MEMORY_KINDS.has(input.kind)) throw new Error('记忆类型无效。');
+        record.kind = input.kind;
+      }
+      persist();
+      return structuredClone(record);
+    },
+
+    async deleteMemory(input: DeleteMemoryInput): Promise<void> {
+      const before = state.memory.length;
+      state.memory = state.memory.filter(
+        (entry) => !(entry.workspaceId === input.workspaceId && entry.id === input.id)
+      );
+      if (state.memory.length === before) throw new Error('记忆不存在');
+      persist();
     },
 
     async searchWorkspace(input: SearchWorkspaceInput): Promise<SearchResult[]> {

@@ -5,7 +5,12 @@ import type {
 } from '../../shared/butler-stream';
 import { formatLocalDate, parseLocalDate } from '../../shared/date';
 import type { ReviewRecord, StudyCoachApi } from '../../shared/ipc';
-import type { LearnerProfile, MemoryRecord } from '../../shared/memory';
+import type {
+  DeleteMemoryInput,
+  LearnerProfile,
+  MemoryRecord,
+  UpdateMemoryInput
+} from '../../shared/memory';
 import type {
   CreatePracticeSetInput,
   PracticeAttempt,
@@ -78,6 +83,8 @@ export type WorkspaceData = WorkspaceDataState & {
   submitReview: (date: string, answers: ReviewAnswers, workspaceId?: string) => Promise<void>;
   createReminder: (input: CreateReminderInput) => Promise<Reminder>;
   updateReminder: (input: UpdateReminderInput) => Promise<Reminder>;
+  updateMemory: (input: UpdateMemoryInput) => Promise<MemoryRecord>;
+  deleteMemory: (input: DeleteMemoryInput) => Promise<void>;
 };
 
 const EMPTY_PRACTICE: PracticeData = {
@@ -350,6 +357,42 @@ export function useWorkspaceData(): WorkspaceData {
     [reload]
   );
 
+  const refreshMemoryProfile = useCallback(async () => {
+    try {
+      const profile = await apiOrThrow().getMemoryProfile();
+      setState((current) => ({ ...current, memoryProfile: profile }));
+    } catch {
+      // Profile refresh is best-effort; the record change already succeeded.
+    }
+  }, []);
+
+  const updateMemory = useCallback(
+    async (input: UpdateMemoryInput) => {
+      const record = await apiOrThrow().updateMemory(input);
+      setState((current) => ({
+        ...current,
+        memoryRecords: current.memoryRecords.map((entry) =>
+          entry.id === record.id ? record : entry
+        )
+      }));
+      await refreshMemoryProfile();
+      return record;
+    },
+    [refreshMemoryProfile]
+  );
+
+  const deleteMemory = useCallback(
+    async (input: DeleteMemoryInput) => {
+      await apiOrThrow().deleteMemory(input);
+      setState((current) => ({
+        ...current,
+        memoryRecords: current.memoryRecords.filter((entry) => entry.id !== input.id)
+      }));
+      await refreshMemoryProfile();
+    },
+    [refreshMemoryProfile]
+  );
+
   const createReminder = useCallback(async (input: CreateReminderInput) => {
     const api = apiOrThrow();
     if (!api.createReminder) throw new Error('当前存储不支持提醒。');
@@ -410,6 +453,8 @@ export function useWorkspaceData(): WorkspaceData {
     cancelStream,
     submitReview,
     createReminder,
-    updateReminder
+    updateReminder,
+    updateMemory,
+    deleteMemory
   };
 }
