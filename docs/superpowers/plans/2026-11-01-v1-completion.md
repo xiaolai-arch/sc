@@ -76,6 +76,6 @@
 
 - Run: `run_ff9c07a5e79e`
 - Module 1 `task_ba629b385f83` / claude / `ctx_827b8e26eb3f` / `v1-agent-tools` — **done** (commits `c12475f`, `71a203d`, `1f55a95`; merged `d8571b8`; 204 tests/typecheck/build pass)
-- Module 2 `task_bc6c2f97384e` / codex / `ctx_43830f71ec5f` / `v1-workspace-planner`
+- Module 2 `task_bc6c2f97384e` / codex / `ctx_43830f71ec5f` / `v1-workspace-planner` — **done** (commits `f0a3636`, `cc83e6f`, `ad91bc1`; merged `5e5187f`; 264 tests/typecheck/build pass; worker ended without worker_done, released per nextAction)
 - Module 3 `task_546103c80b9b` / opencode / `ctx_ab4d64bb4edd` / `v1-practice-service` — **done** (commits `99e9dcf`, `3513aa1`, `f374bd0`; merged `a3a2e43`; 222 tests/typecheck/build pass)
 - Module 4 `task_3ac645878ae1` / zcode / `ctx_ec3ad6bf1a9b` / `v1-memory-profile` — **done** (commits `9330eb2`, `431e08f`; merged `b493458`; 244 tests/typecheck/build pass)
