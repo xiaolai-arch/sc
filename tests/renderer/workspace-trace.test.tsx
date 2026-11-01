@@ -88,3 +88,45 @@ test('orders reasoning and tool rows from the stream and keeps them in memory', 
   );
   await waitFor(() => expect(screen.getAllByText('思考')).toHaveLength(2));
 });
+
+test('reloads the conversation when it is reopened mid-turn', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  setup(async (input, onEvent) => {
+    onEvent({ type: 'reasoning', text: '先想一想' });
+    await gate;
+    const answer = '延迟到达的回答';
+    onEvent({ type: 'done', text: answer });
+    const live = window.studyCoach;
+    if (input.conversationId && input.assistantMessageId && live) {
+      await live.appendConversationMessage(input.conversationId, {
+        id: input.assistantMessageId,
+        role: 'assistant',
+        text: answer,
+        createdAt: new Date().toISOString()
+      });
+    }
+    return {
+      text: answer,
+      ...(input.conversationId ? { conversationId: input.conversationId } : {})
+    };
+  });
+
+  await screen.findByText('早上好，xiaolai。');
+  await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
+
+  const sidebar = screen.getAllByRole('complementary')[0]!;
+  const item = await within(sidebar).findByRole('button', {
+    name: /帮我排一下今天的优先级/
+  });
+  await userEvent.click(item);
+  release();
+
+  await waitFor(
+    () => expect(screen.getAllByText('延迟到达的回答').length).toBeGreaterThanOrEqual(2),
+    { timeout: 3000 }
+  );
+});

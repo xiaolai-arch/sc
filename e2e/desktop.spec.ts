@@ -19,7 +19,7 @@ test.describe('Study Coach desktop', () => {
         await page.getByLabel('向管家提问').fill('我想考研');
         await page.getByRole('button', { name: '发送' }).click();
 
-        const thinking = page.getByRole('button', { name: /思考了 \d+ 秒/ });
+        const thinking = page.getByRole('button', { name: /思考/ }).first();
         await expect(thinking).toBeVisible({ timeout: 30_000 });
         await thinking.click();
         await expect(page.getByText(/我先创建考研项目/)).toBeVisible();

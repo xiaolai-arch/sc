@@ -151,6 +151,8 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [modelLabel, setModelLabel] = useState('模板计划');
   const streamGenerationRef = useRef(0);
+  const activeConversationIdRef = useRef<string | null>(null);
+  activeConversationIdRef.current = conversations.active?.id ?? null;
 
   const currentWorkspace = workspaces.find((workspace) => workspace.id === projectId) ?? null;
   const filteredPracticeSets = practiceSets.filter(
@@ -488,6 +490,11 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
       const finalConversationId = result.conversationId ?? conversation.id;
       if (generation !== streamGenerationRef.current) {
         await conversations.refresh();
+        // Reopening the same conversation during a turn bumps the generation;
+        // reload it so the answer that was persisted meanwhile becomes visible.
+        if (activeConversationIdRef.current === finalConversationId) {
+          await conversations.select(finalConversationId);
+        }
         await reload();
         return;
       }
@@ -496,7 +503,10 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     } catch (cause) {
       flushNow();
       setActionError(streamError ?? messageOf(cause));
-      if (generation === streamGenerationRef.current) {
+      if (
+        generation === streamGenerationRef.current ||
+        activeConversationIdRef.current === conversation.id
+      ) {
         try {
           await conversations.select(conversation.id);
           await reload();
