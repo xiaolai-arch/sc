@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { sendPrompt } from './send-prompt';
 import { Workspace } from '../../src/renderer/shell/Workspace';
 import { createMockApi } from '../../web/mock-api';
 
@@ -18,7 +19,7 @@ test('shows the welcome draft and sends a message', async () => {
   expect(await screen.findByText('早上好，xiaolai。')).toBeInTheDocument();
   expect(screen.getByText('还没有对话。告诉阿咲你想做什么。')).toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
+  await sendPrompt('帮我排一下今天的优先级');
 
   expect((await screen.findAllByText(/我先按截止时间和精力排/)).length).toBeGreaterThan(0);
   expect(screen.getAllByText('帮我排一下今天的优先级').length).toBeGreaterThan(1);
@@ -27,7 +28,7 @@ test('shows the welcome draft and sends a message', async () => {
 test('starts a new draft and reopens a previous conversation', async () => {
   setup();
   await screen.findByText('早上好，xiaolai。');
-  await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
+  await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText(/我先按截止时间和精力排/);
 
   await userEvent.click(screen.getByRole('button', { name: '新对话' }));
@@ -57,7 +58,7 @@ test('opens the projects page and filters by project', async () => {
 test('records a note and previews it from the records tab', async () => {
   setup();
   await screen.findByText('早上好，xiaolai。');
-  await userEvent.click(screen.getByRole('button', { name: '记一下：今天数学卡在极限' }));
+  await sendPrompt('记一下：今天数学卡在极限');
   expect((await screen.findAllByText(/记下了/, {}, { timeout: 3000 })).length).toBeGreaterThan(0);
 
   await userEvent.click(screen.getByRole('button', { name: '项目' }));
@@ -126,7 +127,7 @@ test('stops an in-flight generation', async () => {
   setup(1);
   await screen.findByText('早上好，xiaolai。');
 
-  await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
+  await sendPrompt('帮我排一下今天的优先级');
   const stop = await screen.findByRole('button', { name: '停止生成' });
   await userEvent.click(stop);
 

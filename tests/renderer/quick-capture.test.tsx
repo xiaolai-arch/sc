@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { sendPrompt } from './send-prompt';
 import { Workspace } from '../../src/renderer/shell/Workspace';
 import { createMockApi } from '../../web/mock-api';
 
@@ -74,7 +75,7 @@ test('cancels without sending', async () => {
 test('starts a new draft with Cmd+N', async () => {
   setup();
   await screen.findByText('早上好，xiaolai。');
-  await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
+  await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText(/我先按截止时间和精力排/);
 
   fireEvent.keyDown(window, { key: 'n', metaKey: true });
@@ -85,7 +86,7 @@ test('starts a new draft with Cmd+N', async () => {
 test('does not start a draft from Cmd+N inside the composer', async () => {
   setup();
   await screen.findByText('早上好，xiaolai。');
-  await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
+  await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText(/我先按截止时间和精力排/);
 
   const composer = screen.getByLabelText('向阿咲提问');
@@ -99,7 +100,7 @@ test('does not start a draft from Cmd+N inside the composer', async () => {
 test('ignores Cmd+N while the quick capture dialog is open', async () => {
   const { openCapture } = setup();
   await screen.findByText('早上好，xiaolai。');
-  await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
+  await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText(/我先按截止时间和精力排/);
 
   act(() => openCapture());

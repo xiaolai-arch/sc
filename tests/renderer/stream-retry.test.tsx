@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { sendPrompt } from './send-prompt';
 import type { ButlerStreamListener } from '../../src/shared/butler-stream';
 import type { SendMessageInput, SendMessageResult } from '../../src/shared/workspace';
 import { Workspace } from '../../src/renderer/shell/Workspace';
@@ -40,7 +41,7 @@ test('shows the retry status until new output arrives', async () => {
   });
 
   await screen.findByText('早上好，xiaolai。');
-  await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
+  await sendPrompt('帮我排一下今天的优先级');
 
   expect(await screen.findByText('模型连接失败，正在重试…')).toBeInTheDocument();
   expect(await screen.findByText('最终回复')).toBeInTheDocument();
@@ -61,7 +62,7 @@ test('shows the classified error and clears the retry status', async () => {
   });
 
   await screen.findByText('早上好，xiaolai。');
-  await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
+  await sendPrompt('帮我排一下今天的优先级');
 
   expect(await screen.findByRole('alert')).toHaveTextContent('模型认证失败');
   await waitFor(() =>

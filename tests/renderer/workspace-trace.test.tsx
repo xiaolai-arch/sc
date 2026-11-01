@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { sendPrompt } from './send-prompt';
 import type { ButlerStreamListener } from '../../src/shared/butler-stream';
 import type { SendMessageInput, SendMessageResult } from '../../src/shared/workspace';
 import { Workspace } from '../../src/renderer/shell/Workspace';
@@ -61,7 +62,7 @@ test('orders reasoning and tool rows from the stream and keeps them in memory', 
   );
 
   await screen.findByText('早上好，xiaolai。');
-  await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
+  await sendPrompt('帮我排一下今天的优先级');
   await screen.findByText('最终回答');
 
   const titles = screen.getAllByText('思考');
@@ -116,7 +117,7 @@ test('reloads the conversation when it is reopened mid-turn', async () => {
   });
 
   await screen.findByText('早上好，xiaolai。');
-  await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
+  await sendPrompt('帮我排一下今天的优先级');
 
   const sidebar = screen.getAllByRole('complementary')[0]!;
   const item = await within(sidebar).findByRole('button', {

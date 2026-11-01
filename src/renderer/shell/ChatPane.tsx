@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { FolderIcon, MenuIcon, MoreHorizontalIcon } from '../ui/icons';
+import { MenuIcon, MoreHorizontalIcon } from '../ui/icons';
 import { Composer } from './Composer';
 import { MarkdownText } from './MarkdownText';
 import { MessageActions } from './MessageActions';
@@ -30,13 +30,6 @@ type ChatPaneProps = {
   onOpenModelPicker?: () => void;
   typingStatus?: string | null;
 };
-
-const suggestedPrompts = [
-  '帮我排一下今天的优先级',
-  '记一下：今天数学卡在极限',
-  '提醒我 21:30 复盘',
-  '教我一下洛必达法则'
-];
 
 export function ChatPane({
   workspace,
@@ -153,10 +146,7 @@ export function ChatPane({
           <div className="flex flex-1 items-center justify-center px-4 py-10 md:px-6">
             <div className="w-full max-w-[680px] -translate-y-[3vh]">
               <div className="flex flex-col items-center text-center">
-                <span className="text-[30px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
-                  阿咲
-                </span>
-                <h1 className="mt-6 text-[22px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
+                <h1 className="text-[22px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
                   早上好，xiaolai。
                 </h1>
                 <p className="mt-2 text-[14px] leading-6 text-gray-500 dark:text-[#8e8e93]">
@@ -164,22 +154,7 @@ export function ChatPane({
                 </p>
               </div>
 
-              <div className="mt-8 flex items-center justify-center gap-1.5 text-[13px] text-gray-500 dark:text-[#8e8e93]">
-                <FolderIcon className="h-4 w-4" />
-                {workspace && onOpenProjects ? (
-                  <button
-                    type="button"
-                    onClick={onOpenProjects}
-                    className="rounded-full px-2 py-1 transition-all duration-300 hover:bg-black/[0.04] hover:opacity-80 hover:text-[#0071e3] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:hover:bg-white/[0.06] dark:hover:text-[#4da3ff]"
-                  >
-                    {workspace.name}
-                  </button>
-                ) : (
-                  <span>{workspace?.name ?? '全部工作区'}</span>
-                )}
-              </div>
-
-              <div className="mt-2">
+              <div className="mt-8">
                 <Composer
                   hero
                   modelLabel={modelLabel}
@@ -188,19 +163,6 @@ export function ChatPane({
                   onSend={onSend}
                   disabled={typing}
                 />
-              </div>
-
-              <div className="mt-3 flex flex-wrap justify-center gap-2">
-                {suggestedPrompts.map((prompt) => (
-                  <button
-                    key={prompt}
-                    type="button"
-                    onClick={() => onSend(prompt)}
-                    className="rounded-full border border-gray-200/70 bg-white px-3.5 py-2 text-[12px] text-gray-500 transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:bg-[#f5f5f7] hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:border-white/10 dark:bg-[#1c1c1e] dark:text-[#a1a1a6] dark:hover:bg-white/[0.06]"
-                  >
-                    {prompt}
-                  </button>
-                ))}
               </div>
             </div>
           </div>

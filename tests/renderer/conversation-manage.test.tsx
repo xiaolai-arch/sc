@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { sendPrompt } from './send-prompt';
 import { Workspace } from '../../src/renderer/shell/Workspace';
 import type { Conversation } from '../../src/shared/conversations';
 import { createMockApi } from '../../web/mock-api';
@@ -33,7 +34,7 @@ beforeEach(() => {
 test('copies an assistant message and regenerates it without duplicating the user message', async () => {
   const api = setup();
   await screen.findByText('早上好，xiaolai。');
-  await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
+  await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText(/我先按截止时间和精力排/);
   await waitFor(() =>
     expect(screen.queryByRole('button', { name: '停止生成' })).not.toBeInTheDocument()
@@ -84,7 +85,7 @@ test('edits the last user message before resending it', async () => {
 test('renames and pins a conversation from the sidebar menu', async () => {
   const api = setup();
   await screen.findByText('早上好，xiaolai。');
-  await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
+  await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText(/我先按截止时间和精力排/);
 
   const menuButton = await screen.findByRole('button', { name: '对话操作' });
@@ -111,7 +112,7 @@ test('renames and pins a conversation from the sidebar menu', async () => {
 test('deletes a conversation only after confirmation and returns to the draft', async () => {
   const api = setup();
   await screen.findByText('早上好，xiaolai。');
-  await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
+  await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText(/我先按截止时间和精力排/);
 
   await userEvent.click(screen.getByRole('button', { name: '对话操作' }));
@@ -159,7 +160,7 @@ test('focuses the conversation search with Cmd+K', async () => {
 test('closes the conversation menu when clicking outside', async () => {
   setup();
   await screen.findByText('早上好，xiaolai。');
-  await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
+  await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText(/我先按截止时间和精力排/);
 
   await userEvent.click(screen.getByRole('button', { name: '对话操作' }));
@@ -172,7 +173,7 @@ test('closes the conversation menu when clicking outside', async () => {
 test('closes the conversation menu with Escape', async () => {
   setup();
   await screen.findByText('早上好，xiaolai。');
-  await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
+  await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText(/我先按截止时间和精力排/);
 
   await userEvent.click(screen.getByRole('button', { name: '对话操作' }));
