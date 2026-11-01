@@ -27,6 +27,8 @@ export type Conversation = {
   workspaceId?: string;
   /** Pinned conversations sort ahead of recent ones and survive restarts. */
   pinned?: boolean;
+  /** Per-conversation model override; absent follows the global provider. */
+  model?: string;
   createdAt: string;
   updatedAt: string;
   messages: ConversationMessage[];

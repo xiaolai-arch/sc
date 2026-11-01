@@ -124,6 +124,7 @@ function normalizeConversation(value: unknown): Conversation | null {
   const messages = value['messages']
     .map(normalizeMessage)
     .filter((message): message is ConversationMessage => message !== null);
+  const model = typeof value['model'] === 'string' ? value['model'].trim() : '';
 
   return {
     id,
@@ -131,6 +132,7 @@ function normalizeConversation(value: unknown): Conversation | null {
     kind,
     ...(workspaceId ? { workspaceId } : {}),
     ...(value['pinned'] === true ? { pinned: true } : {}),
+    ...(model ? { model } : {}),
     createdAt,
     updatedAt,
     messages
@@ -258,6 +260,22 @@ export class ConversationStore {
       if (trimmed.length === 0) throw new Error('对话标题不能为空。');
       conversation.title = truncate(trimmed, TITLE_LIMIT);
       conversation.updatedAt = this.now().toISOString();
+      await this.writeFile(conversation);
+      return clone(conversation);
+    });
+  }
+
+  async setModel(id: string, model: string | null): Promise<Conversation> {
+    return this.runExclusive(async () => {
+      const conversation = await this.readFile(assertSafeId(id));
+      if (conversation === null) throw new Error(`Conversation not found: ${id}`);
+      const trimmed = model?.trim() ?? '';
+      if (trimmed.length > 0) {
+        conversation.model = Array.from(trimmed).slice(0, 120).join('');
+      } else {
+        delete conversation.model;
+      }
+      // Keep the list order stable: a model change is not new activity.
       await this.writeFile(conversation);
       return clone(conversation);
     });

@@ -153,6 +153,41 @@ test('sorts summaries by updatedAt, newest first', async () => {
   expect(summaries.map((summary) => summary.id)).toEqual([second.id, first.id]);
 });
 
+test('sets and clears the per-conversation model without touching updatedAt', async () => {
+  const dir = await tempDir();
+  let now = new Date('2026-11-01T09:00:00.000Z');
+  const store = new ConversationStore(dir, { now: () => now });
+  const created = await store.create();
+  await store.appendMessage(
+    created.id,
+    message('m1', 'user', '你好', '2026-11-01T09:01:00.000Z')
+  );
+  const before = (await store.get(created.id))!.updatedAt;
+
+  now = new Date('2026-11-02T09:00:00.000Z');
+  const updated = await store.setModel(created.id, '  gpt-x  ');
+  expect(updated.model).toBe('gpt-x');
+  expect(updated.updatedAt).toBe(before);
+
+  const cleared = await store.setModel(created.id, null);
+  expect(cleared.model).toBeUndefined();
+  expect((await store.get(created.id))?.model).toBeUndefined();
+});
+
+test('truncates long conversation models and normalizes stored files', async () => {
+  const dir = await tempDir();
+  const store = new ConversationStore(dir);
+  const created = await store.create();
+
+  const updated = await store.setModel(created.id, 'x'.repeat(200));
+  expect(updated.model).toHaveLength(120);
+
+  const raw = JSON.parse(await readFile(join(dir, `${created.id}.json`), 'utf8'));
+  raw.model = '  claude-x  ';
+  await writeFile(join(dir, `${created.id}.json`), JSON.stringify(raw), 'utf8');
+  expect((await store.get(created.id))?.model).toBe('claude-x');
+});
+
 test('normalizes weekly check-in triggers from existing files', async () => {
   const dir = await tempDir();
   await writeFile(
