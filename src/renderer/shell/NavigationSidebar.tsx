@@ -412,12 +412,6 @@ export function NavigationSidebar({
         'md:static md:z-auto md:h-full md:w-[260px] md:max-w-none md:translate-x-0'
       )}
     >
-      <div aria-hidden="true" className="hidden items-center gap-1.5 px-4 pt-4 md:flex">
-        <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" />
-        <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" />
-        <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
-      </div>
-
       <div className="flex items-center justify-between px-4 pt-3 md:hidden">
         <span className="text-[12px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">导航</span>
         <button

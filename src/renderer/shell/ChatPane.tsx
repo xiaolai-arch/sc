@@ -190,11 +190,8 @@ export function ChatPane({
                 ) : null}
               </div>
             ) : (
-              <div key={message.id} className="group flex gap-3">
-                <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#0071e3] text-white">
-                  <SparklesIcon className="h-3.5 w-3.5" />
-                </span>
-                <div className="min-w-0 flex-1">
+              <div key={message.id} className="group">
+                <div className="min-w-0">
                   <p className="text-[11px] font-medium text-gray-500 dark:text-[#8e8e93]">阿咲</p>
                   <TraceFlow items={message.trace ?? stepsToTrace(message.steps)} />
                   {message.text ? (
