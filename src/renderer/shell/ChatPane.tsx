@@ -33,6 +33,7 @@ type ChatPaneProps = {
   onRegenerate?: (messageId: string) => void;
   onEditMessage?: (messageId: string) => void;
   onOpenModelPicker?: () => void;
+  typingStatus?: string | null;
 };
 
 const suggestedPrompts = [
@@ -56,6 +57,7 @@ export function ChatPane({
   onStop,
   onOpenSidebar,
   sidebarOpen = false,
+  typingStatus = null,
   composerText,
   onComposerTextChange,
   editing = false,
@@ -223,9 +225,9 @@ export function ChatPane({
             )
           )}
 
-          {typing && !messages.some((message) => message.streaming) ? (
+          {typing && (typingStatus || !messages.some((message) => message.streaming)) ? (
             <p className="ml-9 text-[12px] text-gray-500 dark:text-[#8e8e93]" role="status">
-              正在输入…
+              {typingStatus ?? '正在输入…'}
             </p>
           ) : null}
         </div>

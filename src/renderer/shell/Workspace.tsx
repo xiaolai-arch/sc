@@ -153,6 +153,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [modelSaving, setModelSaving] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
+  const [streamStatus, setStreamStatus] = useState<string | null>(null);
   const focusSessionCounterRef = useRef(0);
   const recordedFocusSessionsRef = useRef<Set<number>>(new Set());
   const tasksRef = useRef(tasks);
@@ -284,6 +285,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     if (typing) return;
     const generation = ++streamGenerationRef.current;
     setActionError(null);
+    setStreamStatus(null);
     setTyping(true);
 
     let conversation = options.conversation ?? conversations.active;
@@ -392,7 +394,11 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
         } satisfies SendMessageInput,
         (event) => {
           switch (event.type) {
+            case 'retry':
+              setStreamStatus(event.message);
+              break;
             case 'reasoning':
+              setStreamStatus(null);
               assistantReasoningStartedAt ??= Date.now();
               pendingReasoning += event.text;
               scheduleFlush();
@@ -410,6 +416,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               }));
               break;
             case 'text':
+              setStreamStatus(null);
               assistantReasoningEndedAt ??= Date.now();
               pendingText += event.text;
               scheduleFlush();
@@ -456,11 +463,13 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
             }
             case 'error':
               flushNow();
+              setStreamStatus(null);
               streamError = event.message;
               setActionError(event.message);
               break;
             case 'done':
               flushNow();
+              setStreamStatus(null);
               assistantReasoningEndedAt ??= Date.now();
               assistantText = event.text || assistantText;
               updateStreaming((message) => ({
@@ -512,6 +521,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
       flushNow();
       setStreamingMessage(null);
       setActiveAssistantId(null);
+      setStreamStatus(null);
       setTyping(false);
     }
   }
@@ -838,6 +848,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
             onEditMessage={editLastUserMessage}
             onOpenSidebar={() => setSidebarOpen(true)}
             sidebarOpen={sidebarOpen}
+            typingStatus={streamStatus}
             {...(conversations.active ? { onOpenModelPicker: openModelPicker } : {})}
           />
 
