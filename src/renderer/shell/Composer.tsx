@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import {
   ChevronDownIcon,
   LockIcon,
@@ -8,32 +7,52 @@ import {
 
 type ComposerProps = {
   modelLabel: string;
+  text: string;
+  onTextChange: (text: string) => void;
   onSend: (text: string) => void;
   disabled?: boolean;
   onStop?: () => void;
+  editing?: boolean;
+  onCancelEdit?: () => void;
 };
 
 export function Composer({
   modelLabel,
+  text,
+  onTextChange,
   onSend,
   disabled = false,
-  onStop
+  onStop,
+  editing = false,
+  onCancelEdit
 }: ComposerProps) {
-  const [text, setText] = useState('');
-
   function send() {
     const trimmed = text.trim();
     if (!trimmed || disabled) return;
     onSend(trimmed);
-    setText('');
+    onTextChange('');
   }
 
   return (
     <div className="shrink-0 px-4 pb-4 pt-2 md:px-6">
       <div className="mx-auto w-full max-w-[760px] rounded-2xl border border-black/[0.08] bg-white p-3 shadow-sm">
+        {editing ? (
+          <div className="mb-2 flex items-center justify-between rounded-md bg-[#f2f7fd] px-2 py-1 text-[11px] text-gray-600">
+            <span>正在编辑已发送的消息</span>
+            {onCancelEdit ? (
+              <button
+                type="button"
+                onClick={onCancelEdit}
+                className="font-medium text-[#0071e3] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+              >
+                取消编辑
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         <textarea
           value={text}
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => onTextChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault();

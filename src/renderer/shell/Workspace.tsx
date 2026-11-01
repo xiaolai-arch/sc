@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatChineseDate, formatLocalDate } from '../../shared/date';
-import type { ConversationMessage, ConversationStep } from '../../shared/conversations';
+import type {
+  Conversation,
+  ConversationMessage,
+  ConversationStep
+} from '../../shared/conversations';
 import type { SendMessageInput, WorkspaceNote } from '../../shared/workspace';
 import { SettingsPage } from '../settings/SettingsPage';
 import { Dialog } from '../ui/Dialog';
@@ -112,6 +116,8 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   const [activeAssistantId, setActiveAssistantId] = useState<string | null>(null);
   const [typing, setTyping] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState<ChatMessage | null>(null);
+  const [composerText, setComposerText] = useState('');
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [reasoningById, setReasoningById] = useState<Record<string, string>>({});
   const [reasoningMetaById, setReasoningMetaById] = useState<
     Record<string, { startedAt?: number; endedAt?: number }>
@@ -176,13 +182,16 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     ...(streamingMessage ? [streamingMessage] : [])
   ];
 
-  async function sendMessage(text: string) {
+  async function runTurn(
+    text: string,
+    options: { appendUser: boolean; conversation?: Conversation | null }
+  ) {
     if (typing) return;
     const generation = ++streamGenerationRef.current;
     setActionError(null);
     setTyping(true);
 
-    let conversation = conversations.active;
+    let conversation = options.conversation ?? conversations.active;
     try {
       if (!conversation) {
         conversation = await conversations.create({
@@ -195,19 +204,21 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
       return;
     }
 
-    const userMessage: ConversationMessage = {
-      id: chatMessageId('u'),
-      role: 'user',
-      text,
-      createdAt: new Date().toISOString(),
-      source: 'user'
-    };
-    try {
-      await conversations.append(conversation.id, userMessage);
-    } catch (cause) {
-      setActionError(messageOf(cause));
-      setTyping(false);
-      return;
+    if (options.appendUser) {
+      const userMessage: ConversationMessage = {
+        id: chatMessageId('u'),
+        role: 'user',
+        text,
+        createdAt: new Date().toISOString(),
+        source: 'user'
+      };
+      try {
+        await conversations.append(conversation.id, userMessage);
+      } catch (cause) {
+        setActionError(messageOf(cause));
+        setTyping(false);
+        return;
+      }
     }
 
     const assistantId = chatMessageId('a');
@@ -410,6 +421,100 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     }
   }
 
+  async function sendMessage(text: string) {
+    await runTurn(text, { appendUser: true });
+  }
+
+  async function submitComposer(text: string) {
+    if (typing) return;
+    const conversation = conversations.active;
+    if (editingMessageId && conversation) {
+      const index = conversation.messages.findIndex(
+        (message) => message.id === editingMessageId
+      );
+      if (index >= 0) {
+        try {
+          await conversations.truncate(conversation.id, index);
+        } catch (cause) {
+          setActionError(messageOf(cause));
+          return;
+        }
+      }
+    }
+    setEditingMessageId(null);
+    await runTurn(text, { appendUser: true, conversation });
+  }
+
+  async function regenerateMessage(messageId: string) {
+    if (typing) return;
+    const conversation = conversations.active;
+    if (!conversation) return;
+    const lastAssistant = [...conversation.messages]
+      .reverse()
+      .find((message) => message.role === 'assistant');
+    const index = conversation.messages.findIndex((message) => message.id === messageId);
+    if (!lastAssistant || lastAssistant.id !== messageId || index < 0) return;
+    const userMessage = conversation.messages
+      .slice(0, index)
+      .reverse()
+      .find((message) => message.role === 'user');
+    if (!userMessage) return;
+    try {
+      await conversations.truncate(conversation.id, index);
+    } catch (cause) {
+      setActionError(messageOf(cause));
+      return;
+    }
+    await runTurn(userMessage.text, { appendUser: false, conversation });
+  }
+
+  function editLastUserMessage(messageId: string) {
+    if (typing) return;
+    const conversation = conversations.active;
+    if (!conversation) return;
+    const lastUser = [...conversation.messages]
+      .reverse()
+      .find((message) => message.role === 'user');
+    if (!lastUser || lastUser.id !== messageId) return;
+    setEditingMessageId(messageId);
+    setComposerText(lastUser.text);
+  }
+
+  function cancelEdit() {
+    setEditingMessageId(null);
+    setComposerText('');
+  }
+
+  async function renameConversation(id: string, title: string) {
+    try {
+      await conversations.rename(id, title);
+    } catch (cause) {
+      setActionError(messageOf(cause));
+    }
+  }
+
+  async function togglePinnedConversation(id: string, pinned: boolean) {
+    try {
+      await conversations.setPinned(id, pinned);
+    } catch (cause) {
+      setActionError(messageOf(cause));
+    }
+  }
+
+  async function deleteConversation(id: string) {
+    if (conversations.active?.id === id) {
+      streamGenerationRef.current += 1;
+      setStreamingMessage(null);
+      setEditingMessageId(null);
+      setComposerText('');
+    }
+    try {
+      await conversations.remove(id);
+    } catch (cause) {
+      setActionError(messageOf(cause));
+    }
+  }
+
   function stopStreaming() {
     if (activeAssistantId) {
       void cancelStream(activeAssistantId);
@@ -421,12 +526,16 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     conversations.startDraft();
     setStreamingMessage(null);
     setActionError(null);
+    setEditingMessageId(null);
+    setComposerText('');
   }
 
   function selectConversation(id: string) {
     streamGenerationRef.current += 1;
     setStreamingMessage(null);
     setActionError(null);
+    setEditingMessageId(null);
+    setComposerText('');
     void conversations.select(id);
   }
 
@@ -498,6 +607,10 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
           onSelectConversation={selectConversation}
           onSelectProject={selectProject}
           onOpenSettings={() => setSettingsOpen(true)}
+          onRenameConversation={(id, title) => void renameConversation(id, title)}
+          onTogglePinned={(id, pinned) => void togglePinnedConversation(id, pinned)}
+          onDeleteConversation={(id) => void deleteConversation(id)}
+          onSearchConversations={conversations.search}
         />
 
         <div className="flex min-h-0 min-w-0 flex-1">
@@ -505,7 +618,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
             workspace={currentWorkspace}
             messages={chatMessages}
             typing={typing}
-            onSend={(text) => void sendMessage(text)}
+            onSend={(text) => void submitComposer(text)}
             modelLabel={displayModel}
             hasApiKey={hasApiKey}
             onOpenSettings={() => setSettingsOpen(true)}
@@ -513,6 +626,12 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
             panelOpen={panelOpen}
             onTogglePanel={() => setPanelOpen((open) => !open)}
             onStop={stopStreaming}
+            composerText={composerText}
+            onComposerTextChange={setComposerText}
+            editing={editingMessageId !== null}
+            onCancelEdit={cancelEdit}
+            onRegenerate={(id) => void regenerateMessage(id)}
+            onEditMessage={editLastUserMessage}
           />
 
           <ProjectPanel

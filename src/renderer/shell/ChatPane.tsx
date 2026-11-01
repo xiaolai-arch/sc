@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { ChevronRightIcon, MoreHorizontalIcon, SparklesIcon } from '../ui/icons';
 import { Composer } from './Composer';
 import { MarkdownText } from './MarkdownText';
+import { MessageActions } from './MessageActions';
 import { ReasoningBlock } from './ReasoningBlock';
 import type { Workspace } from '../../shared/workspace';
 import type { ChatMessage } from './types';
@@ -18,6 +19,12 @@ type ChatPaneProps = {
   panelOpen?: boolean;
   onTogglePanel?: () => void;
   onStop?: () => void;
+  composerText: string;
+  onComposerTextChange: (text: string) => void;
+  editing?: boolean;
+  onCancelEdit?: () => void;
+  onRegenerate?: (messageId: string) => void;
+  onEditMessage?: (messageId: string) => void;
 };
 
 const suggestedPrompts = [
@@ -38,12 +45,22 @@ export function ChatPane({
   dateLabel,
   panelOpen = false,
   onTogglePanel,
-  onStop
+  onStop,
+  composerText,
+  onComposerTextChange,
+  editing = false,
+  onCancelEdit,
+  onRegenerate,
+  onEditMessage
 }: ChatPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
   const showWelcome = messages.length === 0 && !typing;
   const lastRole = messages[messages.length - 1]?.role;
+  const lastUserMessageId = [...messages].reverse().find((message) => message.role === 'user')?.id;
+  const lastAssistantMessageId = [...messages]
+    .reverse()
+    .find((message) => message.role === 'assistant')?.id;
 
   useEffect(() => {
     if (messages.length === 0 && !typing) return;
@@ -140,13 +157,21 @@ export function ChatPane({
 
           {messages.map((message) =>
             message.role === 'user' ? (
-              <div key={message.id} className="flex justify-end">
+              <div key={message.id} className="group flex flex-col items-end">
                 <p className="max-w-[85%] rounded-2xl bg-[#0071e3] px-3.5 py-2 text-[13px] leading-6 text-white">
                   {message.text}
                 </p>
+                {message.id === lastUserMessageId && onEditMessage ? (
+                  <MessageActions
+                    text={message.text}
+                    showCopy={false}
+                    disabled={typing || Boolean(message.streaming)}
+                    onEdit={() => onEditMessage(message.id)}
+                  />
+                ) : null}
               </div>
             ) : (
-              <div key={message.id} className="flex gap-3">
+              <div key={message.id} className="group flex gap-3">
                 <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#0071e3] text-white">
                   <SparklesIcon className="h-3.5 w-3.5" />
                 </span>
@@ -164,6 +189,13 @@ export function ChatPane({
                       <MarkdownText text={message.text} />
                     </div>
                   ) : null}
+                  <MessageActions
+                    text={message.text}
+                    disabled={typing || Boolean(message.streaming)}
+                    {...(message.id === lastAssistantMessageId && onRegenerate
+                      ? { onRegenerate: () => onRegenerate(message.id) }
+                      : {})}
+                  />
                 </div>
               </div>
             )
@@ -179,9 +211,13 @@ export function ChatPane({
 
       <Composer
         modelLabel={modelLabel}
+        text={composerText}
+        onTextChange={onComposerTextChange}
         onSend={onSend}
         disabled={typing}
+        editing={editing}
         {...(onStop ? { onStop } : {})}
+        {...(onCancelEdit ? { onCancelEdit } : {})}
       />
     </div>
   );

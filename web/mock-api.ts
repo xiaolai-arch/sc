@@ -258,6 +258,38 @@ function truncateConversationText(value: string, limit: number): string {
   return Array.from(value.trim()).slice(0, limit).join('');
 }
 
+const MOCK_GREETINGS = new Set(['你好', 'hi', 'hello', '在吗', '嗨', '嗯', 'ok']);
+
+function conversationTitleFromText(text: string): string {
+  const normalized = text
+    .toLowerCase()
+    .replace(/[\s\p{P}\p{S}]/gu, '');
+  if (normalized.length === 0 || MOCK_GREETINGS.has(normalized)) return '';
+  return truncateConversationText(text, 24);
+}
+
+function compareConversationSummaries(
+  a: ConversationSummary,
+  b: ConversationSummary
+): number {
+  const pinned = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned));
+  if (pinned !== 0) return pinned;
+  return b.updatedAt.localeCompare(a.updatedAt);
+}
+
+function summarizeConversation(conversation: Conversation): ConversationSummary {
+  const last = conversation.messages[conversation.messages.length - 1];
+  return {
+    id: conversation.id,
+    title: conversation.title,
+    kind: conversation.kind,
+    ...(conversation.workspaceId ? { workspaceId: conversation.workspaceId } : {}),
+    ...(conversation.pinned ? { pinned: true } : {}),
+    updatedAt: conversation.updatedAt,
+    preview: last ? truncateConversationText(last.text, 80) : ''
+  };
+}
+
 export type MockApiOptions = {
   /** Multiplier for stream pacing. Tests use the fast default; the web demo passes 1. */
   streamPace?: number;
@@ -883,19 +915,24 @@ export function createMockApi(
     async listConversations(): Promise<ConversationSummary[]> {
       return state.conversations
         .filter((conversation) => conversation.messages.length > 0)
-        .slice()
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-        .map((conversation) => {
-          const last = conversation.messages[conversation.messages.length - 1];
-          return {
-            id: conversation.id,
-            title: conversation.title,
-            kind: conversation.kind,
-            ...(conversation.workspaceId ? { workspaceId: conversation.workspaceId } : {}),
-            updatedAt: conversation.updatedAt,
-            preview: last ? truncateConversationText(last.text, 80) : ''
-          };
-        });
+        .map(summarizeConversation)
+        .sort(compareConversationSummaries);
+    },
+
+    async searchConversations(query: string): Promise<ConversationSummary[]> {
+      const needle = query.trim().toLowerCase();
+      return state.conversations
+        .filter((conversation) => conversation.messages.length > 0)
+        .filter(
+          (conversation) =>
+            needle.length === 0 ||
+            conversation.title.toLowerCase().includes(needle) ||
+            conversation.messages.some((message) =>
+              message.text.toLowerCase().includes(needle)
+            )
+        )
+        .map(summarizeConversation)
+        .sort(compareConversationSummaries);
     },
 
     async getConversation(id: string): Promise<Conversation | null> {
@@ -928,7 +965,7 @@ export function createMockApi(
       conversation.messages.push(structuredClone(message));
       conversation.updatedAt = new Date().toISOString();
       if (conversation.title === '新对话' && message.role === 'user') {
-        const title = truncateConversationText(message.text, 24);
+        const title = conversationTitleFromText(message.text);
         if (title) conversation.title = title;
       }
       persist();
@@ -938,6 +975,40 @@ export function createMockApi(
     async deleteConversation(id: string): Promise<void> {
       state.conversations = state.conversations.filter((entry) => entry.id !== id);
       persist();
+    },
+
+    async renameConversation(id: string, title: string): Promise<Conversation> {
+      const conversation = state.conversations.find((entry) => entry.id === id);
+      if (!conversation) throw new Error('对话不存在');
+      const trimmed = title.trim();
+      if (!trimmed) throw new Error('对话标题不能为空。');
+      conversation.title = truncateConversationText(trimmed, 24);
+      conversation.updatedAt = new Date().toISOString();
+      persist();
+      return structuredClone(conversation);
+    },
+
+    async setConversationPinned(id: string, pinned: boolean): Promise<Conversation> {
+      const conversation = state.conversations.find((entry) => entry.id === id);
+      if (!conversation) throw new Error('对话不存在');
+      if (pinned) conversation.pinned = true;
+      else delete conversation.pinned;
+      persist();
+      return structuredClone(conversation);
+    },
+
+    async truncateConversationMessages(id: string, keepCount: number): Promise<Conversation> {
+      if (!Number.isInteger(keepCount) || keepCount < 0) {
+        throw new Error('保留消息数无效。');
+      }
+      const conversation = state.conversations.find((entry) => entry.id === id);
+      if (!conversation) throw new Error('对话不存在');
+      if (keepCount < conversation.messages.length) {
+        conversation.messages = conversation.messages.slice(0, keepCount);
+        conversation.updatedAt = new Date().toISOString();
+      }
+      persist();
+      return structuredClone(conversation);
     },
 
     async cancelStream(messageId: string): Promise<void> {

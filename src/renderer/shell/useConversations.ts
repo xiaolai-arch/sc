@@ -18,6 +18,10 @@ export type ConversationController = {
   create: (input?: CreateConversationInput) => Promise<Conversation>;
   append: (id: string, message: ConversationMessage) => Promise<Conversation>;
   remove: (id: string) => Promise<void>;
+  rename: (id: string, title: string) => Promise<void>;
+  setPinned: (id: string, pinned: boolean) => Promise<void>;
+  truncate: (id: string, keepCount: number) => Promise<Conversation>;
+  search: (query: string) => Promise<ConversationSummary[]>;
 };
 
 function apiOrThrow(): StudyCoachApi {
@@ -109,6 +113,42 @@ export function useConversations(): ConversationController {
     [refresh]
   );
 
+  const rename = useCallback(
+    async (id: string, title: string) => {
+      const api = apiOrThrow();
+      const conversation = await api.renameConversation(id, title);
+      setActive((current) => (current?.id === conversation.id ? conversation : current));
+      await refresh();
+    },
+    [refresh]
+  );
+
+  const setPinned = useCallback(
+    async (id: string, pinned: boolean) => {
+      const api = apiOrThrow();
+      const conversation = await api.setConversationPinned(id, pinned);
+      setActive((current) => (current?.id === conversation.id ? conversation : current));
+      await refresh();
+    },
+    [refresh]
+  );
+
+  const truncate = useCallback(
+    async (id: string, keepCount: number) => {
+      const api = apiOrThrow();
+      const conversation = await api.truncateConversationMessages(id, keepCount);
+      setActive((current) => (current?.id === conversation.id ? conversation : current));
+      await refresh();
+      return conversation;
+    },
+    [refresh]
+  );
+
+  const search = useCallback(
+    async (query: string) => apiOrThrow().searchConversations(query),
+    []
+  );
+
   return {
     summaries,
     active,
@@ -119,6 +159,10 @@ export function useConversations(): ConversationController {
     startDraft,
     create,
     append,
-    remove
+    remove,
+    rename,
+    setPinned,
+    truncate,
+    search
   };
 }
