@@ -10,6 +10,12 @@ import type { ChatMessage } from './types';
 
 type ChatPaneProps = {
   workspace: Workspace | null;
+  /** Label for the current chat scope: a workspace, 日常 or 未分组. */
+  contextLabel: string;
+  homeTitle: string;
+  homeGoal: string;
+  homeHint: string;
+  stats?: string[];
   messages: ChatMessage[];
   typing: boolean;
   onSend: (text: string) => void;
@@ -33,6 +39,11 @@ type ChatPaneProps = {
 
 export function ChatPane({
   workspace,
+  contextLabel,
+  homeTitle,
+  homeGoal,
+  homeHint,
+  stats = [],
   messages,
   typing,
   onSend,
@@ -58,9 +69,11 @@ export function ChatPane({
   const showWelcome = messages.length === 0 && !typing;
   const lastRole = messages[messages.length - 1]?.role;
   const lastUserMessageId = [...messages].reverse().find((message) => message.role === 'user')?.id;
-  const lastAssistantMessageId = [...messages]
-    .reverse()
-    .find((message) => message.role === 'assistant')?.id;
+  const lastMessage = messages[messages.length - 1];
+  // A trailing user message means the previous assistant is not regeneratable:
+  // doing so would truncate and lose the unanswered question.
+  const lastAssistantMessageId =
+    lastMessage?.role === 'assistant' ? lastMessage.id : undefined;
 
   useEffect(() => {
     if (messages.length === 0 && !typing) return;
@@ -118,7 +131,7 @@ export function ChatPane({
             </button>
           ) : (
             <span className="truncate text-[12px] text-gray-500 dark:text-[#8e8e93]">
-              {workspace?.name ?? '全部工作区'}
+              {contextLabel}
             </span>
           )}
           <span className="truncate text-[12px] text-gray-500 dark:text-[#8e8e93]">
@@ -146,12 +159,30 @@ export function ChatPane({
           <div className="flex flex-1 items-center justify-center px-4 py-10 md:px-6">
             <div className="w-full max-w-[680px] -translate-y-[3vh]">
               <div className="flex flex-col items-center text-center">
-                <h1 className="text-[22px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
+                <p className="text-[12px] text-gray-400 dark:text-[#8e8e93]">
                   早上好，xiaolai。
+                </p>
+                <h1 className="mt-1 text-[22px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
+                  {homeTitle}
                 </h1>
                 <p className="mt-2 text-[14px] leading-6 text-gray-500 dark:text-[#8e8e93]">
-                  今天想推进什么？把目标交给阿咲，他会帮你拆成下一步。
+                  {homeGoal}
                 </p>
+                <p className="mt-1 text-[13px] leading-6 text-gray-400 dark:text-[#8e8e93]">
+                  {homeHint}
+                </p>
+                {stats.length > 0 ? (
+                  <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                    {stats.map((stat) => (
+                      <span
+                        key={stat}
+                        className="rounded-full bg-[#f5f5f7] px-3 py-1 text-[11px] text-gray-500 dark:bg-white/[0.08] dark:text-[#a1a1a6]"
+                      >
+                        {stat}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
               </div>
 
               <div className="mt-8">

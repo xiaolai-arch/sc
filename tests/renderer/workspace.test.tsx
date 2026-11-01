@@ -17,7 +17,7 @@ function setup(streamPace = 0.05) {
 test('shows the welcome draft and sends a message', async () => {
   setup();
   expect(await screen.findByText('早上好，xiaolai。')).toBeInTheDocument();
-  expect(screen.getByText('还没有对话。告诉阿咲你想做什么。')).toBeInTheDocument();
+  expect(screen.getByText('还没有对话。')).toBeInTheDocument();
 
   await sendPrompt('帮我排一下今天的优先级');
 
@@ -45,10 +45,10 @@ test('starts a new draft and reopens a previous conversation', async () => {
 test('opens the projects page and filters by project', async () => {
   setup();
   await screen.findByText('早上好，xiaolai。');
-  await userEvent.click(screen.getByRole('button', { name: '项目' }));
+  await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
   expect(await screen.findByText('外刊精读')).toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole('button', { name: '考研' }));
+  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'kaoyan');
 
   expect(await screen.findByText('极限与连续')).toBeInTheDocument();
   expect(screen.getByText('2027 考研：数学一 / 英语一 / 政治')).toBeInTheDocument();
@@ -61,7 +61,8 @@ test('records a note and previews it from the records tab', async () => {
   await sendPrompt('记一下：今天数学卡在极限');
   expect((await screen.findAllByText(/记下了/, {}, { timeout: 3000 })).length).toBeGreaterThan(0);
 
-  await userEvent.click(screen.getByRole('button', { name: '项目' }));
+  await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
+  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'kaoyan');
   const noteButton = await screen.findByRole(
     'button',
     { name: /^今天数学卡在极限/ },
@@ -88,7 +89,7 @@ test('opens the settings page and returns to chat', async () => {
   setup();
   await screen.findByText('早上好，xiaolai。');
 
-  await userEvent.click(screen.getByRole('button', { name: '设置' }));
+  await userEvent.click(screen.getByRole('button', { name: '打开设置' }));
   expect(await screen.findByLabelText('模型名称')).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole('button', { name: '返回对话' }));
@@ -107,7 +108,8 @@ test('creates a project through the conversation', async () => {
     await screen.findByText(/已(创建|找到)项目「考研」/, {}, { timeout: 3000 })
   ).toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole('button', { name: '项目' }));
+  await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
+  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'kaoyan');
   expect(await screen.findByRole('heading', { name: '考研' })).toBeInTheDocument();
   expect(await screen.findByText('2027 考研：数学一 / 英语一 / 政治')).toBeInTheDocument();
 });
@@ -115,7 +117,7 @@ test('creates a project through the conversation', async () => {
 test('opens practice from the projects page', async () => {
   setup();
   await screen.findByText('早上好，xiaolai。');
-  await userEvent.click(screen.getByRole('button', { name: '项目' }));
+  await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
 
   await userEvent.click(screen.getByRole('button', { name: '练习' }));
   expect((await screen.findAllByText('极限基础 3 题')).length).toBeGreaterThan(0);

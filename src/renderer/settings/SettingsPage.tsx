@@ -41,10 +41,18 @@ const THEME_OPTIONS: Array<{ value: ThemePreference; label: string }> = [
   { value: 'dark', label: '深色' }
 ];
 
+/** A saved key belongs to one endpoint; changing it requires re-entry. */
+function providerEndpoint(provider: ProviderConfig): string {
+  if (provider.kind === 'anthropic') return 'anthropic';
+  if (provider.kind === 'local-cli') return `local-cli:${provider.agent}`;
+  return `${provider.kind}:${provider.baseURL}`;
+}
+
 export function SettingsPage({ onClose, embedded = false, page = false }: SettingsPageProps) {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [kind, setKind] = useState<ProviderConfig['kind']>('anthropic');
+  const [savedProvider, setSavedProvider] = useState<ProviderConfig | null>(null);
   const [model, setModel] = useState('');
   const [baseURL, setBaseURL] = useState('');
   const [cliAgent, setCliAgent] = useState<LocalCliAgent>('codex');
@@ -97,6 +105,7 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
             })
           : Promise.resolve(null);
       const [value, usageSummary] = await Promise.all([api.getSettings(), usagePromise]);
+      setSavedProvider(value.provider);
       setKind(value.provider.kind);
       setModel(value.provider.model ?? '');
       setBaseURL('baseURL' in value.provider ? value.provider.baseURL : '');
@@ -204,6 +213,14 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
                 ...(cliAgent === 'claude' && cliIsolate ? { isolate: true } : {})
               }
             : { kind, baseURL, model };
+      const endpointChanged =
+        savedProvider !== null &&
+        providerEndpoint(savedProvider) !== providerEndpoint(provider);
+      if (endpointChanged) {
+        // A key issued for the previous endpoint must never be sent to the new
+        // one. Clear it before rebuilding services, then save a new key if given.
+        await api.setApiKey('');
+      }
       await api.updateSettings({
         provider,
         budget: {
@@ -218,6 +235,7 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
       if (apiKey.trim()) {
         await api.setApiKey(apiKey.trim());
       }
+      setSavedProvider(provider);
       setApiKey('');
       setStatus('已保存');
       // Re-price the existing summary with the just-saved prices. A refresh

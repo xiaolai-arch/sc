@@ -26,7 +26,7 @@ test.describe('ASAKI desktop', () => {
         await expect(page.getByText(/已创建项目「考研」/).last()).toBeVisible({
           timeout: 30_000
         });
-        await page.getByRole('button', { name: '项目', exact: true }).click();
+        await page.getByRole('button', { name: '打开项目：考研' }).click();
         await expect(page.getByRole('heading', { name: '考研', exact: true })).toBeVisible();
         await expect(page.getByText('2027 考研上岸')).toBeVisible();
       });
@@ -36,11 +36,12 @@ test.describe('ASAKI desktop', () => {
         await page.waitForLoadState('domcontentloaded');
         await expect(page.getByText('早上好，xiaolai。')).toBeVisible();
 
+        await page.getByRole('button', { name: '考研', exact: true }).click();
         await page.getByRole('button', { name: /我想考研/ }).click();
         await expect(page.getByText(/已创建项目「考研」/).last()).toBeVisible({
           timeout: 30_000
         });
-        await page.getByRole('button', { name: '项目', exact: true }).click();
+        await page.getByRole('button', { name: '打开项目：考研' }).click();
         await expect(page.getByRole('heading', { name: '考研', exact: true })).toBeVisible();
         await expect(page.getByText('2027 考研上岸')).toBeVisible();
       });

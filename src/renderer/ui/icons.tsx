@@ -358,6 +358,24 @@ export function FolderIcon({ className }: IconProps) {
   );
 }
 
+export function FolderPlusIcon({ className }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={iconClassName(className)}
+    >
+      <path d="M3 7.5A2.5 2.5 0 015.5 5H9l2 2h7.5A2.5 2.5 0 0121 9.5v7A2.5 2.5 0 0118.5 19h-13A2.5 2.5 0 013 16.5v-9z" />
+      <path d="M12 10.5v5M9.5 13h5" />
+    </svg>
+  );
+}
+
 export function BookOpenIcon({ className }: IconProps) {
   return (
     <svg

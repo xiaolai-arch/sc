@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { sendPrompt } from './send-prompt';
 import { Workspace } from '../../src/renderer/shell/Workspace';
 import { FOCUS_DURATION_MS } from '../../src/renderer/shell/focus-timer';
 import { createMockApi } from '../../web/mock-api';
@@ -22,7 +23,12 @@ function navButton(name: string) {
 
 async function openProjects() {
   await screen.findByText('早上好，xiaolai。');
-  await userEvent.click(navButton('项目'));
+  await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
+}
+
+async function reopenProjects() {
+  await userEvent.click(navButton('日常'));
+  await openProjects();
 }
 
 async function taskStatus(api: ReturnType<typeof setup>, taskId: string) {
@@ -94,7 +100,7 @@ test('keeps the focus session while switching sections', async () => {
   await userEvent.click(navButton('记忆'));
   expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
 
-  await userEvent.click(navButton('项目'));
+  await reopenProjects();
   expect(screen.getByRole('progressbar')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /暂停|继续/ })).toBeInTheDocument();
 });
@@ -108,7 +114,7 @@ test('keeps the focus session after visiting the reminders page', async () => {
   await userEvent.click(navButton('提醒'));
   expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
 
-  await userEvent.click(navButton('项目'));
+  await reopenProjects();
   expect(screen.getByRole('progressbar')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /暂停|继续/ })).toBeInTheDocument();
 });
@@ -126,7 +132,7 @@ test('records 25 minutes exactly once when focus completes', async () => {
   });
   await act(async () => {});
   await act(async () => {
-    navButton('项目').click();
+    screen.getByRole('button', { name: '全部工作区' }).click();
   });
   expect(screen.getByRole('button', { name: '专注：极限与连续' })).toBeInTheDocument();
 
@@ -156,7 +162,7 @@ test('records 25 minutes exactly once when focus completes', async () => {
 test('writes a note from the records section', async () => {
   const api = setup();
   await openProjects();
-  await userEvent.click(screen.getByRole('button', { name: '考研' }));
+  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'kaoyan');
 
   await userEvent.click(screen.getByRole('button', { name: '写一条记录' }));
   await userEvent.type(screen.getByLabelText('记录正文'), '今天数学卡在极限');
@@ -178,7 +184,7 @@ test('disables the quick note form without a project', async () => {
 test('keeps the note input when saving fails', async () => {
   const api = setup();
   await openProjects();
-  await userEvent.click(screen.getByRole('button', { name: '考研' }));
+  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'kaoyan');
   const spy = vi.spyOn(api, 'createNote').mockRejectedValueOnce(new Error('保存失败'));
 
   await userEvent.click(screen.getByRole('button', { name: '写一条记录' }));
@@ -236,4 +242,31 @@ test('rolls the reminder switch back when saving fails', async () => {
     )
   );
   spy.mockRestore();
+});
+
+test('routes a project prompt to the selected project, not the open chat', async () => {
+  const api = setup();
+  await screen.findByText('早上好，xiaolai。');
+  await sendPrompt('帮我排一下今天的优先级');
+  await screen.findAllByText(/我先按截止时间和精力排/);
+  await waitFor(() =>
+    expect(screen.queryByRole('button', { name: '停止生成' })).not.toBeInTheDocument()
+  );
+
+  await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
+  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'kaoyan');
+  await userEvent.click(screen.getByRole('button', { name: '让阿咲调整' }));
+
+  await waitFor(async () => {
+    const summaries = await api.listConversations();
+    const conversations = await Promise.all(
+      summaries.map((summary) => api.getConversation(summary.id))
+    );
+    const routed = conversations.find((conversation) =>
+      conversation?.messages.some(
+        (message) => message.text === '帮我调整一下今天的任务安排'
+      )
+    );
+    expect(routed?.workspaceId).toBe('kaoyan');
+  });
 });

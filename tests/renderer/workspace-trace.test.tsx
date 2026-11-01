@@ -63,7 +63,7 @@ test('orders reasoning and tool rows from the stream and keeps them in memory', 
 
   await screen.findByText('早上好，xiaolai。');
   await sendPrompt('帮我排一下今天的优先级');
-  await screen.findByText('最终回答');
+  await screen.findAllByText('最终回答');
 
   const titles = screen.getAllByText('思考');
   const toolTitle = screen.getByText('写入笔记');
@@ -127,7 +127,7 @@ test('reloads the conversation when it is reopened mid-turn', async () => {
   release();
 
   await waitFor(
-    () => expect(screen.getAllByText('延迟到达的回答').length).toBeGreaterThanOrEqual(2),
+    () => expect(screen.getAllByText('延迟到达的回答').length).toBeGreaterThanOrEqual(1),
     { timeout: 3000 }
   );
 });

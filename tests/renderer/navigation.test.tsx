@@ -25,17 +25,15 @@ function sidebar() {
   return screen.getAllByRole('complementary')[0]!;
 }
 
-test('switches across all six sections and marks the active one', async () => {
+test('switches across the top sections and marks the active one', async () => {
   const { api } = setup();
   await mount(api);
 
   const pages: Array<{ label: string; assert: () => Promise<unknown> }> = [
     {
-      label: '项目',
+      label: '今日安排',
       assert: async () =>
-        expect(
-          await screen.findByRole('heading', { name: '全部项目' })
-        ).toBeInTheDocument()
+        expect((await screen.findAllByText('今天的时间表')).length).toBeGreaterThan(0)
     },
     {
       label: '记忆',
@@ -55,10 +53,6 @@ test('switches across all six sections and marks the active one', async () => {
         expect(
           await screen.findByRole('switch', { name: '早间计划 提醒开关' })
         ).toBeInTheDocument()
-    },
-    {
-      label: '设置',
-      assert: async () => expect(await screen.findByLabelText('模型名称')).toBeInTheDocument()
     }
   ];
 
@@ -72,11 +66,12 @@ test('switches across all six sections and marks the active one', async () => {
     await page.assert();
   }
 
-  await userEvent.click(nav().getByRole('button', { name: '对话' }));
-  expect(nav().getByRole('button', { name: '对话' })).toHaveAttribute(
+  await userEvent.click(nav().getByRole('button', { name: '日常' }));
+  expect(nav().getByRole('button', { name: '日常' })).toHaveAttribute(
     'aria-current',
     'page'
   );
+  expect(await screen.findByRole('heading', { name: '日常' })).toBeInTheDocument();
   expect(await screen.findByText('早上好，xiaolai。')).toBeInTheDocument();
   expect(screen.getAllByRole('complementary')).toHaveLength(1);
 });
@@ -88,22 +83,19 @@ test('keeps the conversation and project when moving between sections', async ()
   await userEvent.type(screen.getByLabelText('向阿咲提问'), '我想考研');
   await userEvent.click(screen.getByRole('button', { name: '发送' }));
   expect(
-    await screen.findByText(/已(创建|找到)项目「考研」/, {}, { timeout: 3000 })
-  ).toBeInTheDocument();
-
-  await userEvent.click(nav().getByRole('button', { name: '项目' }));
-  expect(await screen.findByRole('heading', { name: '考研' })).toBeInTheDocument();
+    (await screen.findAllByText(/已(创建|找到)项目「考研」/, {}, { timeout: 3000 })).length
+  ).toBeGreaterThan(0);
 
   await userEvent.click(nav().getByRole('button', { name: '记忆' }));
   expect(
     await screen.findByText('极限定义还不稳，建议先复习再做新题。')
   ).toBeInTheDocument();
-  expect(screen.queryByText('外刊表达积累有效，继续保持。')).not.toBeInTheDocument();
+  expect(screen.getByText('外刊表达积累有效，继续保持。')).toBeInTheDocument();
 
-  await userEvent.click(nav().getByRole('button', { name: '对话' }));
+  await userEvent.click(within(sidebar()).getByRole('button', { name: '考研' }));
   expect(
-    await screen.findByText(/已(创建|找到)项目「考研」/, {}, { timeout: 3000 })
-  ).toBeInTheDocument();
+    (await screen.findAllByText(/已(创建|找到)项目「考研」/, {}, { timeout: 3000 })).length
+  ).toBeGreaterThan(0);
   expect(
     screen.getByRole('button', { name: '打开项目：考研' })
   ).toBeInTheDocument();
@@ -115,7 +107,7 @@ test('opens the projects page from the chat header project name', async () => {
 
   await userEvent.type(screen.getByLabelText('向阿咲提问'), '我想考研');
   await userEvent.click(screen.getByRole('button', { name: '发送' }));
-  await screen.findByText(/已(创建|找到)项目「考研」/, {}, { timeout: 3000 });
+  await screen.findAllByText(/已(创建|找到)项目「考研」/, {}, { timeout: 3000 });
 
   await userEvent.click(await screen.findByRole('button', { name: '打开项目：考研' }));
 
@@ -129,9 +121,9 @@ test('keeps a composer draft when switching sections', async () => {
 
   const composer = screen.getByLabelText('向阿咲提问');
   await userEvent.type(composer, '先记下这句话');
-  await userEvent.click(nav().getByRole('button', { name: '项目' }));
-  await screen.findByRole('heading', { name: '全部项目' });
-  await userEvent.click(nav().getByRole('button', { name: '对话' }));
+  await userEvent.click(nav().getByRole('button', { name: '今日安排' }));
+  await screen.findAllByText('今天的时间表');
+  await userEvent.click(nav().getByRole('button', { name: '日常' }));
 
   expect(screen.getByLabelText('向阿咲提问')).toHaveValue('先记下这句话');
 });
@@ -140,13 +132,13 @@ test('starts a new conversation from the settings page', async () => {
   const { api } = setup();
   await mount(api);
 
-  await userEvent.click(nav().getByRole('button', { name: '设置' }));
+  await userEvent.click(screen.getByRole('button', { name: '打开设置' }));
   expect(await screen.findByLabelText('模型名称')).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole('button', { name: '新对话' }));
 
-  expect(await screen.findByText('早上好，xiaolai。')).toBeInTheDocument();
-  expect(nav().getByRole('button', { name: '对话' })).toHaveAttribute(
+  expect(await screen.findByRole('heading', { name: '日常' })).toBeInTheDocument();
+  expect(nav().getByRole('button', { name: '日常' })).toHaveAttribute(
     'aria-current',
     'page'
   );
@@ -176,7 +168,7 @@ test('lists review history and starts a chat review', async () => {
   expect(
     await screen.findByText('我们开始今天复盘', { selector: 'p' })
   ).toBeInTheDocument();
-  expect(nav().getByRole('button', { name: '对话' })).toHaveAttribute(
+  expect(nav().getByRole('button', { name: '日常' })).toHaveAttribute(
     'aria-current',
     'page'
   );
@@ -191,7 +183,7 @@ test('filters memories from the project list on the memory page', async () => {
     await screen.findByText('外刊表达积累有效，继续保持。')
   ).toBeInTheDocument();
 
-  await userEvent.click(within(sidebar()).getByRole('button', { name: '考研' }));
+  await userEvent.selectOptions(screen.getByLabelText('按工作区筛选记忆'), 'kaoyan');
   expect(
     await screen.findByText('极限定义还不稳，建议先复习再做新题。')
   ).toBeInTheDocument();
@@ -199,8 +191,40 @@ test('filters memories from the project list on the memory page', async () => {
     expect(screen.queryByText('外刊表达积累有效，继续保持。')).not.toBeInTheDocument()
   );
 
-  await userEvent.click(within(sidebar()).getByRole('button', { name: '全部项目' }));
+  await userEvent.selectOptions(screen.getByLabelText('按工作区筛选记忆'), '');
   expect(
     await screen.findByText('外刊表达积累有效，继续保持。')
   ).toBeInTheDocument();
+});
+
+test('expands and collapses a workspace folder with repeated clicks', async () => {
+  const { api } = setup();
+  await mount(api);
+
+  const kaoyan = within(sidebar()).getByRole('button', { name: '考研' });
+  const group = within(kaoyan.parentElement as HTMLElement);
+  await userEvent.click(kaoyan);
+  expect(kaoyan).toHaveAttribute('aria-expanded', 'true');
+  expect(group.getByText('还没有对话。')).toBeInTheDocument();
+
+  await userEvent.click(kaoyan);
+  expect(kaoyan).toHaveAttribute('aria-expanded', 'false');
+  expect(group.queryByText('还没有对话。')).not.toBeInTheDocument();
+});
+
+test('expands and collapses the daily conversation list with repeated clicks', async () => {
+  const { api } = setup();
+  await mount(api);
+
+  const daily = nav().getByRole('button', { name: '日常' });
+  expect(daily).toHaveAttribute('aria-expanded', 'true');
+  expect(screen.getByText('还没有对话。')).toBeInTheDocument();
+
+  await userEvent.click(daily);
+  expect(daily).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByText('还没有对话。')).not.toBeInTheDocument();
+
+  await userEvent.click(daily);
+  expect(daily).toHaveAttribute('aria-expanded', 'true');
+  expect(screen.getByText('还没有对话。')).toBeInTheDocument();
 });

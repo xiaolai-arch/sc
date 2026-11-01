@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatChineseDate, formatLocalDate } from '../../shared/date';
-import type { Conversation, ConversationMessage } from '../../shared/conversations';
+import {
+  DAILY_WORKSPACE_ID,
+  type Conversation,
+  type ConversationMessage
+} from '../../shared/conversations';
 import type { SendMessageInput, WorkspaceNote } from '../../shared/workspace';
 import { SettingsPage } from '../settings/SettingsPage';
 import { Dialog } from '../ui/Dialog';
@@ -20,12 +24,18 @@ import {
 import { LearningPane } from './LearningPane';
 import { MemoryPage } from './MemoryPage';
 import { ModelPickerDialog } from './ModelPickerDialog';
-import { NavigationSidebar, type Section } from './NavigationSidebar';
+import {
+  NavigationSidebar,
+  type ChatScope,
+  type NavSection,
+  type Section
+} from './NavigationSidebar';
 import { PageFrame } from './PageFrame';
 import { ProjectsPage } from './ProjectsPage';
 import { QuickCaptureDialog } from './QuickCaptureDialog';
 import { RemindersPage } from './RemindersPage';
 import { ReviewPage } from './ReviewPage';
+import { SchedulePage } from './SchedulePage';
 import { stepsToTrace } from './trace';
 import type { ChatMessage, ChatTraceItem } from './types';
 import { useConversations } from './useConversations';
@@ -127,6 +137,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   } = useWorkspaceData();
   const conversations = useConversations();
   const [section, setSection] = useState<Section>('chat');
+  const [chatScope, setChatScope] = useState<ChatScope>('daily');
   const [projectId, setProjectId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [previewNote, setPreviewNote] = useState<WorkspaceNote | null>(null);
@@ -157,6 +168,34 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   activeConversationIdRef.current = conversations.active?.id ?? null;
 
   const currentWorkspace = workspaces.find((workspace) => workspace.id === projectId) ?? null;
+  const chatWorkspaceId =
+    chatScope === 'workspace'
+      ? projectId
+      : chatScope === 'daily'
+        ? DAILY_WORKSPACE_ID
+        : null;
+  const chatWorkspaceTasks = projectId
+    ? tasks.filter((task) => task.workspaceId === projectId)
+    : [];
+  const chatStats = currentWorkspace
+    ? [
+        `${chatWorkspaceTasks.filter((task) => task.status !== 'done' && task.status !== 'skipped').length} 个待办`,
+        `${notes.filter((note) => note.workspaceId === currentWorkspace.id).length} 条记录`,
+        `${memoryRecords.filter((record) => record.workspaceId === currentWorkspace.id).length} 条记忆`
+      ]
+    : [];
+  const contextLabel = currentWorkspace?.name ?? (chatScope === 'unfiled' ? '未分组' : '日常');
+  const homeTitle = currentWorkspace?.name ?? contextLabel;
+  const homeGoal = currentWorkspace
+    ? currentWorkspace.goal
+    : chatScope === 'unfiled'
+      ? '还没有归入工作区的对话'
+      : '每天的检查、随手记和日常对话';
+  const homeHint = currentWorkspace
+    ? `在这里和阿咲聊${currentWorkspace.name}，或直接开始一个新对话。`
+    : chatScope === 'unfiled'
+      ? '在这里和阿咲聊，创建后会留在未分组。'
+      : '在这里和阿咲聊日常，或直接开始一个新对话。';
   const filteredPracticeSets = practiceSets.filter(
     (set) => !projectId || set.workspaceId === projectId
   );
@@ -246,9 +285,36 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   }, [focus?.remainingMs, focus?.recorded, focus?.sessionId, updateTask]);
 
   useEffect(() => {
-    if (!conversations.active) return;
-    setProjectId(conversations.active.workspaceId ?? null);
-  }, [conversations.active?.id, conversations.active?.workspaceId]);
+    const active = conversations.active;
+    if (!active) return;
+    if (active.workspaceId === DAILY_WORKSPACE_ID) {
+      setProjectId(null);
+      setChatScope('daily');
+      return;
+    }
+    if (active.workspaceId) {
+      setProjectId(active.workspaceId);
+      setChatScope('workspace');
+      return;
+    }
+    setProjectId(null);
+    setChatScope(active.kind === 'check-in' ? 'daily' : 'unfiled');
+  }, [conversations.active?.id, conversations.active?.workspaceId, conversations.active?.kind]);
+
+  // Tray/notification opens bypass the sidebar, so make sure the renderer
+  // actually leaves Settings/Projects and shows the selected conversation.
+  useEffect(() => {
+    if (!conversations.externalOpen) return;
+    stopActiveStreamForNavigation();
+    setStreamingMessage(null);
+    setActionError(null);
+    setEditingMessageId(null);
+    setComposerText('');
+    setModelPickerOpen(false);
+    setModelError(null);
+    setSidebarOpen(false);
+    setSection('chat');
+  }, [conversations.externalOpen?.seq]);
 
   const chatMessages: ChatMessage[] = [
     ...(conversations.active?.messages ?? []).map((message): ChatMessage => {
@@ -269,7 +335,14 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
 
   async function runTurn(
     text: string,
-    options: { appendUser: boolean; conversation?: Conversation | null }
+    options: {
+      appendUser: boolean;
+      conversation?: Conversation | null;
+      /** Ignores the currently open conversation and creates a fresh one. */
+      newConversation?: boolean;
+      /** Overrides the chat scope for a newly created conversation. */
+      workspaceId?: string | null;
+    }
   ) {
     if (typing) return;
     const generation = ++streamGenerationRef.current;
@@ -277,11 +350,19 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     setStreamStatus(null);
     setTyping(true);
 
-    let conversation = options.conversation ?? conversations.active;
+    let conversation = options.newConversation
+      ? null
+      : options.conversation ?? conversations.active;
+    const creationWorkspaceId =
+      options.workspaceId !== undefined
+        ? options.workspaceId
+        : conversation
+          ? conversation.workspaceId ?? null
+          : chatWorkspaceId;
     try {
       if (!conversation) {
         conversation = await conversations.create({
-          workspaceId: projectId ?? undefined
+          ...(creationWorkspaceId ? { workspaceId: creationWorkspaceId } : {})
         });
       }
     } catch (cause) {
@@ -406,9 +487,13 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     };
 
     try {
+      const runtimeWorkspaceId =
+        conversation.workspaceId && conversation.workspaceId !== DAILY_WORKSPACE_ID
+          ? conversation.workspaceId
+          : undefined;
       const result = await stream(
         {
-          workspaceId: conversation.workspaceId ?? projectId ?? undefined,
+          ...(runtimeWorkspaceId ? { workspaceId: runtimeWorkspaceId } : {}),
           conversationId: conversation.id,
           assistantMessageId: assistantId,
           message: text
@@ -508,20 +593,24 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
         return;
       }
       await conversations.select(finalConversationId);
+      await conversations.refresh();
       await reload();
     } catch (cause) {
       flushNow();
+      if (generation !== streamGenerationRef.current) {
+        // The user navigated away or started another turn; a cancellation is
+        // not an error worth showing in the new view.
+        await conversations.refresh().catch(() => undefined);
+        await reload().catch(() => undefined);
+        return;
+      }
       setActionError(streamError ?? messageOf(cause));
-      if (
-        generation === streamGenerationRef.current ||
-        activeConversationIdRef.current === conversation.id
-      ) {
-        try {
-          await conversations.select(conversation.id);
-          await reload();
-        } catch {
-          // The visible error banner already explains the failure.
-        }
+      try {
+        await conversations.select(conversation.id);
+        await conversations.refresh();
+        await reload();
+      } catch {
+        // The visible error banner already explains the failure.
       }
     } finally {
       flushNow();
@@ -532,10 +621,13 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
           [assistantId]: trace.map((item) => ({ ...item }))
         }));
       }
-      setStreamingMessage(null);
-      setActiveAssistantId(null);
-      setStreamStatus(null);
-      setTyping(false);
+      // A superseded turn must not clear the state of the turn that replaced it.
+      if (generation === streamGenerationRef.current) {
+        setStreamingMessage(null);
+        setActiveAssistantId(null);
+        setStreamStatus(null);
+        setTyping(false);
+      }
     }
   }
 
@@ -572,6 +664,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
       .find((message) => message.role === 'assistant');
     const index = conversation.messages.findIndex((message) => message.id === messageId);
     if (!lastAssistant || lastAssistant.id !== messageId || index < 0) return;
+    if (conversation.messages[conversation.messages.length - 1]?.id !== messageId) return;
     const userMessage = conversation.messages
       .slice(0, index)
       .reverse()
@@ -717,18 +810,18 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     setSidebarOpen(false);
   }
 
-  function openSettings() {
-    changeSection('settings');
+  /** Leaving a turn must not leave its Stop button bound to the new view. */
+  function stopActiveStreamForNavigation() {
+    if (typing && activeAssistantId) {
+      void cancelStream(activeAssistantId);
+    }
+    setTyping(false);
+    setActiveAssistantId(null);
   }
 
-  /** Every "ask the butler" affordance lands in chat and sends the prompt. */
-  function promptButler(prompt: string) {
-    changeSection('chat');
-    void sendMessage(prompt);
-  }
-
-  function startDraft() {
+  function resetDraftState() {
     streamGenerationRef.current += 1;
+    stopActiveStreamForNavigation();
     conversations.startDraft();
     setStreamingMessage(null);
     setActionError(null);
@@ -737,11 +830,158 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     setSidebarOpen(false);
     setModelPickerOpen(false);
     setModelError(null);
+  }
+
+  /** Leaves the open conversation but keeps a typed composer draft. */
+  function leaveConversation() {
+    streamGenerationRef.current += 1;
+    stopActiveStreamForNavigation();
+    conversations.startDraft();
+    setStreamingMessage(null);
+    setActionError(null);
+    setEditingMessageId(null);
+    setModelPickerOpen(false);
+    setModelError(null);
+  }
+
+  function selectDaily() {
+    const alreadyHere = section === 'chat' && chatScope === 'daily';
+    setSidebarOpen(false);
+    setSection('chat');
+    setProjectId(null);
+    setChatScope('daily');
+    const active = conversations.active;
+    const belongsDaily =
+      active?.workspaceId === DAILY_WORKSPACE_ID ||
+      (!active?.workspaceId && active?.kind === 'check-in');
+    if (active && belongsDaily) {
+      if (alreadyHere) leaveConversation();
+      return;
+    }
+    if (active) leaveConversation();
+  }
+
+  function selectUnfiled() {
+    setSidebarOpen(false);
+    setSection('chat');
+    setProjectId(null);
+    setChatScope('unfiled');
+    const active = conversations.active;
+    if (active && !active.workspaceId && active.kind !== 'check-in') return;
+    if (active) leaveConversation();
+  }
+
+  function selectWorkspace(id: string) {
+    setSidebarOpen(false);
+    setSection('chat');
+    setProjectId(id);
+    setChatScope('workspace');
+    // Keep an open conversation in this workspace; the folder row is a
+    // disclosure toggle, not a "go home" action. 新对话 starts a fresh draft.
+    if (conversations.active?.workspaceId === id) return;
+    if (conversations.active) leaveConversation();
+  }
+
+  function selectAll() {
+    setSidebarOpen(false);
+    setProjectId(null);
+    if (section === 'memory' || section === 'review') return;
+    setSection('projects');
+  }
+
+  function changeNavigation(next: NavSection) {
+    if (next === 'daily') {
+      selectDaily();
+      return;
+    }
+    if (next === 'memory' || next === 'review') {
+      // These pages have their own workspace filter; keep chat scope intact.
+      setProjectId(null);
+      changeSection(next);
+      return;
+    }
+    changeSection(next);
+  }
+
+  function openSettings() {
+    changeSection('settings');
+  }
+
+  /** Every "ask the butler" affordance lands in chat and sends the prompt. */
+  function promptButler(prompt: string, workspaceIdOverride?: string) {
+    if (typing) return;
+    changeSection('chat');
+    const explicitWorkspaceId =
+      workspaceIdOverride ??
+      projectId ??
+      (chatScope === 'unfiled' ? null : DAILY_WORKSPACE_ID);
+    const active = conversations.active;
+    const activeWorkspaceId =
+      active?.workspaceId === DAILY_WORKSPACE_ID
+        ? DAILY_WORKSPACE_ID
+        : active?.workspaceId ?? (active ? null : explicitWorkspaceId);
+    const needsNewConversation = Boolean(
+      active && activeWorkspaceId !== explicitWorkspaceId
+    );
+    if (needsNewConversation) {
+      leaveConversation();
+      if (explicitWorkspaceId === DAILY_WORKSPACE_ID) {
+        setProjectId(null);
+        setChatScope('daily');
+      } else if (explicitWorkspaceId === null) {
+        setProjectId(null);
+        setChatScope('unfiled');
+      } else {
+        setProjectId(explicitWorkspaceId);
+        setChatScope('workspace');
+      }
+    }
+    void runTurn(prompt, {
+      appendUser: true,
+      workspaceId: explicitWorkspaceId,
+      ...(needsNewConversation ? { newConversation: true } : {})
+    });
+  }
+
+  /** Schedule actions always start a cross-workspace daily conversation. */
+  function promptDaily(prompt: string) {
+    if (typing) return;
+    resetDraftState();
+    setProjectId(null);
+    setChatScope('daily');
+    setSection('chat');
+    void runTurn(prompt, {
+      appendUser: true,
+      newConversation: true,
+      workspaceId: DAILY_WORKSPACE_ID
+    });
+  }
+
+  function startDraft() {
+    resetDraftState();
+    if (projectId && section !== 'chat') {
+      setChatScope('workspace');
+    } else if (chatScope === 'workspace' && !projectId) {
+      setChatScope('daily');
+    }
     setSection('chat');
   }
 
+  function startNewWorkspace() {
+    resetDraftState();
+    setProjectId(null);
+    setChatScope('daily');
+    setSection('chat');
+    setComposerText('我想新建一个工作区：');
+  }
+
   function selectConversation(id: string) {
+    // Reopening the streaming conversation should let it finish and reload, not
+    // cancel it; switching away cancels so Stop can never target the old turn.
+    const sameStreamingConversation =
+      typing && conversations.active?.id === id;
     streamGenerationRef.current += 1;
+    if (!sameStreamingConversation) stopActiveStreamForNavigation();
     setStreamingMessage(null);
     setActionError(null);
     setEditingMessageId(null);
@@ -760,15 +1000,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
       return;
     }
     setProjectId(id);
-    // Outside the chat section a project is only a filter; stay on the page.
-    if (section !== 'chat') return;
-    if (conversations.active?.workspaceId === id) return;
-    const recent = conversations.summaries.find((summary) => summary.workspaceId === id);
-    if (recent) {
-      selectConversation(recent.id);
-      return;
-    }
-    startDraft();
+    setChatScope('workspace');
   }
 
   if (loading && workspaces.length === 0) {
@@ -829,14 +1061,18 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
         ) : null}
         <NavigationSidebar
           section={section}
+          chatScope={chatScope}
           conversations={conversations.summaries}
           projects={workspaces}
           activeConversationId={conversations.active?.id ?? null}
           selectedProjectId={projectId}
-          onSectionChange={changeSection}
+          onSectionChange={changeNavigation}
           onNewConversation={startDraft}
           onSelectConversation={selectConversation}
-          onSelectProject={selectProject}
+          onSelectWorkspace={selectWorkspace}
+          onSelectUnfiled={selectUnfiled}
+          onSelectAll={selectAll}
+          onNewWorkspace={startNewWorkspace}
           onRenameConversation={(id, title) => void renameConversation(id, title)}
           onTogglePinned={(id, pinned) => void togglePinnedConversation(id, pinned)}
           onDeleteConversation={(id) => void deleteConversation(id)}
@@ -849,6 +1085,11 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
           {section === 'chat' ? (
             <ChatPane
               workspace={currentWorkspace}
+              contextLabel={contextLabel}
+              homeTitle={homeTitle}
+              homeGoal={homeGoal}
+              homeHint={homeHint}
+              stats={chatStats}
               messages={chatMessages}
               typing={typing}
               onSend={(text) => void submitComposer(text)}
@@ -868,6 +1109,17 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               sidebarOpen={sidebarOpen}
               typingStatus={streamStatus}
               {...(conversations.active ? { onOpenModelPicker: openModelPicker } : {})}
+            />
+          ) : null}
+
+          {section === 'schedule' ? (
+            <SchedulePage
+              dateLabel={dateLabel}
+              tasks={tasks}
+              workspaces={workspaces}
+              onOpenSidebar={() => setSidebarOpen(true)}
+              onOpenWorkspace={selectWorkspace}
+              onPrompt={promptDaily}
             />
           ) : null}
 
@@ -904,7 +1156,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
 
           {section === 'memory' ? (
             <MemoryPage
-              workspace={currentWorkspace}
+              workspaces={workspaces}
               memoryRecords={memoryRecords}
               profile={memoryProfile}
               onOpenSidebar={() => setSidebarOpen(true)}
@@ -915,7 +1167,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
 
           {section === 'review' ? (
             <ReviewPage
-              workspace={currentWorkspace}
+              workspaces={workspaces}
               reviews={reviews}
               onOpenSidebar={() => setSidebarOpen(true)}
               onPrompt={promptButler}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   Conversation,
   ConversationMessage,
@@ -12,6 +12,8 @@ export type ConversationController = {
   active: Conversation | null;
   loading: boolean;
   error: string | null;
+  /** Set when a tray/notification opens a conversation outside the renderer. */
+  externalOpen: { id: string; seq: number } | null;
   refresh: () => Promise<void>;
   select: (id: string) => Promise<void>;
   startDraft: () => void;
@@ -40,6 +42,11 @@ export function useConversations(): ConversationController {
   const [active, setActive] = useState<Conversation | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [externalOpen, setExternalOpen] = useState<{ id: string; seq: number } | null>(
+    null
+  );
+  const selectRequestRef = useRef(0);
+  const externalOpenSeqRef = useRef(0);
 
   const refresh = useCallback(async () => {
     try {
@@ -59,16 +66,19 @@ export function useConversations(): ConversationController {
   }, [refresh]);
 
   const select = useCallback(async (id: string) => {
+    const request = ++selectRequestRef.current;
     setLoading(true);
     try {
       const api = apiOrThrow();
       const conversation = await api.getConversation(id);
+      if (request !== selectRequestRef.current) return;
       setActive(conversation);
       setError(null);
     } catch (cause) {
+      if (request !== selectRequestRef.current) return;
       setError(messageOf(cause));
     } finally {
-      setLoading(false);
+      if (request === selectRequestRef.current) setLoading(false);
     }
   }, []);
 
@@ -76,19 +86,26 @@ export function useConversations(): ConversationController {
     const api = window.studyCoach;
     if (!api?.onConversationOpened) return undefined;
     return api.onConversationOpened((id) => {
+      externalOpenSeqRef.current += 1;
+      setExternalOpen({ id, seq: externalOpenSeqRef.current });
       void select(id);
     });
   }, [select]);
 
   const startDraft = useCallback(() => {
+    selectRequestRef.current += 1;
     setActive(null);
     setError(null);
+    setLoading(false);
   }, []);
 
   const create = useCallback(async (input?: CreateConversationInput) => {
+    const request = ++selectRequestRef.current;
     const api = apiOrThrow();
     const conversation = await api.createConversation(input);
-    setActive(conversation);
+    if (request === selectRequestRef.current) {
+      setActive(conversation);
+    }
     await refresh();
     return conversation;
   }, [refresh]);
@@ -165,6 +182,7 @@ export function useConversations(): ConversationController {
     active,
     loading,
     error,
+    externalOpen,
     refresh,
     select,
     startDraft,

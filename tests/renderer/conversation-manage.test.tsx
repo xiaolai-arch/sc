@@ -63,6 +63,9 @@ test('edits the last user message before resending it', async () => {
   await userEvent.type(screen.getByLabelText('向阿咲提问'), '记一下：今天数学卡在极限');
   await userEvent.click(screen.getByRole('button', { name: '发送' }));
   await screen.findAllByText(/记下了/);
+  await waitFor(() =>
+    expect(screen.queryByRole('button', { name: '停止生成' })).not.toBeInTheDocument()
+  );
 
   await userEvent.click(screen.getByRole('button', { name: '编辑' }));
   const composer = screen.getByLabelText('向阿咲提问');
@@ -136,7 +139,7 @@ test('searches conversations by message body with a debounced input', async () =
   await userEvent.type(search, '极限');
   const sidebar = screen.getAllByRole('complementary')[0]!;
   expect(
-    await within(sidebar).findByText('记一下：今天数学卡在极限')
+    await within(sidebar).findByRole('button', { name: /记一下：今天数学卡在极限/ })
   ).toBeInTheDocument();
 
   await userEvent.clear(search);
@@ -181,4 +184,31 @@ test('closes the conversation menu with Escape', async () => {
 
   await userEvent.keyboard('{Escape}');
   await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+});
+
+test('does not offer regenerate when an unanswered user message trails the answer', async () => {
+  const api = setup();
+  await screen.findByText('早上好，xiaolai。');
+  await sendPrompt('帮我排一下今天的优先级');
+  await screen.findAllByText(/我先按截止时间和精力排/);
+  await waitFor(() =>
+    expect(screen.queryByRole('button', { name: '停止生成' })).not.toBeInTheDocument()
+  );
+
+  const summary = (await api.listConversations())[0]!;
+  await api.appendConversationMessage(summary.id, {
+    id: 'u-trailing',
+    role: 'user',
+    text: '那下午呢',
+    createdAt: new Date().toISOString()
+  });
+
+  await userEvent.click(screen.getByRole('button', { name: '新对话' }));
+  const sidebar = screen.getAllByRole('complementary')[0]!;
+  await userEvent.click(
+    within(sidebar).getByRole('button', { name: /帮我排一下今天的优先级/ })
+  );
+
+  expect(await screen.findByText('那下午呢')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '重新生成' })).not.toBeInTheDocument();
 });

@@ -147,3 +147,24 @@ test('saves a local cli provider without an api key', async () => {
   );
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });
+
+test('clears the saved key before switching to a different endpoint', async () => {
+  const update = vi.fn().mockResolvedValue(settings);
+  const setKey = vi.fn().mockResolvedValue(undefined);
+  window.studyCoach = {
+    getSettings: vi.fn().mockResolvedValue(settings),
+    updateSettings: update,
+    setApiKey: setKey
+  } as never;
+  render(<SettingsPage onClose={() => {}} />);
+  await screen.findByLabelText('模型名称');
+
+  await userEvent.selectOptions(screen.getByLabelText('提供商'), 'openai-compatible');
+  await userEvent.type(screen.getByLabelText('Base URL'), 'https://api.example.com/v1');
+  await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+
+  expect(setKey).toHaveBeenCalledWith('');
+  expect(setKey.mock.invocationCallOrder[0]).toBeLessThan(
+    update.mock.invocationCallOrder[0]!
+  );
+});

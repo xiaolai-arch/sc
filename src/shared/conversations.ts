@@ -1,6 +1,12 @@
 export type ConversationKind = 'chat' | 'check-in';
 export type CheckInTrigger = 'morning' | 'evening' | 'weekly' | 'custom';
 
+/**
+ * Virtual workspace for cross-workspace chats (daily planning and check-ins).
+ * It is never written to the vault; the butler receives no workspaceId for it.
+ */
+export const DAILY_WORKSPACE_ID = '__daily__';
+
 export type ConversationStep = {
   id: string;
   name: string;

@@ -44,7 +44,7 @@ test('shows the retry status until new output arrives', async () => {
   await sendPrompt('帮我排一下今天的优先级');
 
   expect(await screen.findByText('模型连接失败，正在重试…')).toBeInTheDocument();
-  expect(await screen.findByText('最终回复')).toBeInTheDocument();
+  expect((await screen.findAllByText('最终回复')).length).toBeGreaterThan(0);
   await waitFor(() =>
     expect(screen.queryByText('模型连接失败，正在重试…')).not.toBeInTheDocument()
   );
