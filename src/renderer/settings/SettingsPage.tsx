@@ -447,6 +447,7 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
                 <p className="text-sm text-gray-600 dark:text-[#a1a1a6] md:col-span-2">
                   使用本机已登录的 CLI agent，不需要 API key；命令会在临时目录中运行。
                   Codex 使用 -c model_reasoning_effort，Claude 使用 --effort。
+                  Claude 会逐字返回思考；Codex 的 --json 只在思考完成后返回整段。
                 </p>
               </div>
             ) : null}

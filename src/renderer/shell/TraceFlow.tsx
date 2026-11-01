@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { cn } from '../ui/cn';
 import { ChevronDownIcon, TerminalIcon, ThinkIcon } from '../ui/icons';
 import { MarkdownText } from './MarkdownText';
@@ -49,12 +49,44 @@ function ReasoningRow({
   item: Extract<ChatTraceItem, { kind: 'reasoning' }>;
 }) {
   const [open, setOpen] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const panelId = useId();
   const hasText = item.text.trim().length > 0;
+  const pending = item.streaming === true && !hasText;
   const summary = truncateSummary(summaryText(item.text, item.streaming)) || '正在思考…';
   const expandable = hasText;
 
-  if (!expandable) return null;
+  useEffect(() => {
+    if (!pending) return undefined;
+    setElapsed(0);
+    const timer = window.setInterval(() => {
+      setElapsed((value) => value + 1);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [pending, item.id]);
+
+  if (!hasText && !pending) return null;
+
+  if (pending) {
+    return (
+      <div className={rowClass}>
+        <ThinkIcon className="h-3.5 w-3.5 shrink-0 animate-pulse text-[#0071e3] dark:text-[#4da3ff]" />
+        <span className="shrink-0 text-[12px] font-medium text-gray-600 dark:text-[#a1a1a6]">
+          思考
+        </span>
+        <span
+          aria-hidden="true"
+          className="h-0.5 w-0.5 shrink-0 rounded-full bg-gray-400 dark:bg-[#8e8e93]"
+        />
+        <span
+          role="status"
+          className="min-w-0 flex-1 truncate text-[12px] animate-pulse text-[#0071e3] dark:text-[#4da3ff]"
+        >
+          正在思考…{elapsed > 0 ? ` ${elapsed}s` : ''}
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div>

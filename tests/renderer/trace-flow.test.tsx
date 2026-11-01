@@ -120,3 +120,10 @@ test('maps persisted steps to tool rows', () => {
     }
   ]);
 });
+
+test('shows a live placeholder before reasoning text arrives', () => {
+  render(<TraceFlow items={[reasoning('r1', '', true)]} />);
+
+  expect(screen.getByText(/正在思考…/)).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /思考/ })).not.toBeInTheDocument();
+});

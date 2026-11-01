@@ -306,17 +306,24 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     }
 
     const assistantId = chatMessageId('a');
+    const pendingTrace: ChatTraceItem[] = [
+      {
+        kind: 'reasoning',
+        id: `trace-${assistantId}-pending`,
+        text: '',
+        streaming: true
+      }
+    ];
+    let trace: ChatTraceItem[] = pendingTrace;
+    let reasoningCount = 0;
     setActiveAssistantId(assistantId);
     setStreamingMessage({
       id: assistantId,
       role: 'assistant',
       text: '',
-      trace: [],
+      trace: pendingTrace,
       streaming: true
     });
-
-    let trace: ChatTraceItem[] = [];
-    let reasoningCount = 0;
     let pendingReasoning = '';
     let pendingText = '';
     let frameId: number | null = null;
