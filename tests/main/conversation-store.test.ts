@@ -31,6 +31,34 @@ test('creates a conversation and filters empty ones from the list', async () => 
   expect((await store.get(created.id))?.id).toBe(created.id);
 });
 
+test('persists a rolling summary and drops it when messages are truncated', async () => {
+  const dir = await tempDir();
+  const store = new ConversationStore(dir, {
+    now: () => new Date('2026-11-01T09:00:00.000Z')
+  });
+  const created = await store.create();
+  for (let index = 0; index < 4; index += 1) {
+    await store.appendMessage(
+      created.id,
+      message(`m${index}`, index % 2 === 0 ? 'user' : 'assistant', `消息 ${index}`, '2026-11-01T09:00:00.000Z')
+    );
+  }
+  await store.update(created.id, (conversation) => ({
+    ...conversation,
+    summary: '用户在准备考研，极限是薄弱点。',
+    summaryCount: 2
+  }));
+
+  const reloaded = await new ConversationStore(dir).get(created.id);
+  expect(reloaded?.summary).toBe('用户在准备考研，极限是薄弱点。');
+  expect(reloaded?.summaryCount).toBe(2);
+
+  const truncated = await store.truncateMessages(created.id, 2);
+  expect(truncated.summary).toBeUndefined();
+  expect(truncated.summaryCount).toBeUndefined();
+  expect((await new ConversationStore(dir).get(created.id))?.summary).toBeUndefined();
+});
+
 test('uses the first user message as the title and summary preview', async () => {
   const dir = await tempDir();
   const store = new ConversationStore(dir, {

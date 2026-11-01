@@ -14,6 +14,8 @@ import type {
   WorkspaceTask
 } from '../../src/shared/workspace';
 import { FakeModelClient } from '../../src/main/agent/model-client';
+import type { Conversation } from '../../src/shared/conversations';
+import type { ConversationStore } from '../../src/main/conversations/conversation-store';
 import {
   ButlerServiceImpl,
   type ButlerServiceOptions
@@ -188,7 +190,103 @@ function lastToolMessage(client: FakeModelClient, callIndex: number) {
   return request?.messages.filter((message) => message.role === 'tool').at(-1);
 }
 
+function longConversation(count: number): Conversation {
+  return {
+    id: 'c1',
+    title: '长对话',
+    kind: 'chat',
+    workspaceId: 'ws-exam',
+    createdAt: NOW.toISOString(),
+    updatedAt: NOW.toISOString(),
+    messages: Array.from({ length: count }, (_, index) => ({
+      id: `m${index}`,
+      role: (index % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+      text: `旧消息 ${index + 1}`,
+      createdAt: NOW.toISOString()
+    }))
+  };
+}
+
+function fakeConversationStore(conversation: Conversation) {
+  let stored = conversation;
+  const store = {
+    get: async () => structuredClone(conversation),
+    update: async (
+      _id: string,
+      mutator: (current: Conversation) => Conversation
+    ) => {
+      stored = mutator(structuredClone(conversation));
+      return structuredClone(stored);
+    },
+    appendMessage: vi.fn(async () => undefined),
+    linkWorkspace: vi.fn(async () => undefined)
+  } as unknown as ConversationStore;
+  return { store, current: () => stored };
+}
+
 describe('ButlerServiceImpl replies', () => {
+  test('summarizes older history and keeps using it instead of dropping it', async () => {
+    const client = new FakeModelClient([
+      {
+        text: '用户在准备考研，极限是薄弱点。',
+        usage: { inputTokens: 5, outputTokens: 3 }
+      },
+      { text: '继续。', usage: { inputTokens: 12, outputTokens: 8 } }
+    ]);
+    const { store, current } = fakeConversationStore(longConversation(26));
+    const service = makeService(client, new MemoryWorkspaceService(), {
+      conversationStore: store
+    });
+
+    const result = await service.send({ conversationId: 'c1', message: '接下来呢？' });
+
+    expect(result.text).toBe('继续。');
+    expect(result.usage).toEqual({ inputTokens: 17, outputTokens: 11 });
+
+    expect(client.calls[0]?.tools).toBeUndefined();
+    expect(client.calls[0]?.messages.some((message) => message.content.includes('摘要'))).toBe(
+      true
+    );
+
+    const stored = current();
+    expect(stored.summary).toContain('极限');
+    expect(stored.summaryCount).toBeGreaterThan(0);
+
+    const system = systemPromptOf(client, 1);
+    expect(system).toContain('此前对话摘要');
+    expect(system).toContain('极限');
+    // The summarized prefix is no longer sent verbatim.
+    expect(client.calls[1]?.messages.some((message) => message.content === '旧消息 1')).toBe(
+      false
+    );
+  });
+
+  test('does not summarize a short conversation', async () => {
+    const client = new FakeModelClient(['好。']);
+    const { store } = fakeConversationStore(longConversation(4));
+    const service = makeService(client, new MemoryWorkspaceService(), {
+      conversationStore: store
+    });
+
+    await service.send({ conversationId: 'c1', message: '继续？' });
+
+    expect(client.calls).toHaveLength(1);
+  });
+
+  test('continues the turn when summarization fails', async () => {
+    const client = new FakeModelClient([new Error('summary failed'), '继续。']);
+    const { store, current } = fakeConversationStore(longConversation(26));
+    const service = makeService(client, new MemoryWorkspaceService(), {
+      conversationStore: store
+    });
+
+    const result = await service.send({ conversationId: 'c1', message: '接下来呢？' });
+
+    expect(result.text).toBe('继续。');
+    expect(current().summary).toBeUndefined();
+    expect(systemPromptOf(client, 1)).not.toContain('此前对话摘要');
+  });
+
   test('returns the fake model response and builds Chinese context', async () => {
     const client = new FakeModelClient([
       { text: '先把极限做完。', usage: { inputTokens: 12, outputTokens: 8 } }

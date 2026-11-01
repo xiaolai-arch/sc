@@ -41,6 +41,15 @@ import {
   type ButlerToolResult
 } from './tools';
 
+/** Unsummarized history beyond this count is compressed before the turn. */
+const SUMMARY_TRIGGER = 24;
+/** The newest messages always stay verbatim for local coherence. */
+const SUMMARY_KEEP_RECENT = 12;
+/** Cap one summarization request; later turns summarize the next slice. */
+const SUMMARY_CHUNK = 60;
+const SUMMARY_LIMIT = 1500;
+const SUMMARY_PROMPT = `你是阿咲的对话摘要器。把给出的历史对话压缩成一段中文摘要，保留仍然有用的信息：用户的目标与偏好、已确认的事实、未完成的任务、卡点与已做出的决定。不要寒暄，不要编造，不要逐条复述，控制在 300 字以内。如果提供了“现有摘要”，请在此基础上合并更新，不要丢掉仍然有效的旧信息。`;
+
 export interface ButlerServiceOptions {
   /** Injected vault-backed workspace service; null keeps the butler read-only. */
   workspaceService?: WorkspaceService | null;
@@ -117,9 +126,10 @@ export class ButlerServiceImpl implements ButlerService {
       return { text, ...(conversation ? { conversationId: conversation.id } : {}) };
     }
 
+    const summaryUsage = await this.maybeSummarize(conversation, client);
     const messages = this.buildModelMessages(context, conversation, input);
     const steps: ConversationStep[] = [];
-    let usage: ModelUsage | undefined;
+    let usage = summaryUsage;
     let lastText = '';
     let lastToolFailure: string | undefined;
     let retried = false;
@@ -227,9 +237,11 @@ export class ButlerServiceImpl implements ButlerService {
       return { text, ...(conversation ? { conversationId: conversation.id } : {}) };
     }
 
+    const summaryUsage = await this.maybeSummarize(conversation, client, signal);
+    throwIfAborted(signal);
     const messages = this.buildModelMessages(context, conversation, input);
     const steps: ConversationStep[] = [];
-    let usage: ModelUsage | undefined;
+    let usage = summaryUsage;
     let lastToolFailure: string | undefined;
     let streamedSoFar = '';
     let retried = false;
@@ -427,19 +439,26 @@ export class ButlerServiceImpl implements ButlerService {
     conversation: Conversation | null,
     input: SendMessageInput
   ): ModelMessage[] {
+    const summary = conversation?.summary?.trim();
+    const system = summary
+      ? `${buildSystemPrompt(context)}\n\n## 此前对话摘要\n${summary}\n（更早的消息已压缩在这里；最近的消息仍以原文为准。）`
+      : buildSystemPrompt(context);
     return [
-      { role: 'system', content: buildSystemPrompt(context) },
-      ...(conversation ? this.historyBefore(conversation.messages, input.message.trim()) : []),
+      { role: 'system', content: system },
+      ...(conversation ? this.historyBefore(conversation, input.message.trim()) : []),
       { role: 'user', content: buildUserPrompt(input) }
     ];
   }
 
-  private historyBefore(messages: ConversationMessage[], current: string): ModelMessage[] {
+  private historyBefore(conversation: Conversation, current: string): ModelMessage[] {
+    const messages = conversation.messages;
+    const first = Math.min(conversation.summaryCount ?? 0, messages.length);
     const last = messages[messages.length - 1];
-    const prior =
+    const end =
       last && last.role === 'user' && last.text.trim() === current
-        ? messages.slice(0, -1)
-        : messages;
+        ? messages.length - 1
+        : messages.length;
+    const prior = messages.slice(first, end);
     const selected: ModelMessage[] = [];
     let chars = 0;
     for (let index = prior.length - 1; index >= 0; index -= 1) {
@@ -452,6 +471,57 @@ export class ButlerServiceImpl implements ButlerService {
       chars += content.length;
     }
     return selected;
+  }
+
+  /**
+   * Compresses the oldest uncompressed messages into a rolling summary. Runs
+   * before the turn's model call and silently skips on failure, so a summary
+   * problem never blocks the reply. Only one bounded slice is summarized per
+   * turn; a very long conversation catches up over several turns.
+   */
+  private async maybeSummarize(
+    conversation: Conversation | null,
+    client: ModelClient,
+    signal?: AbortSignal
+  ): Promise<ModelUsage | undefined> {
+    if (!this.conversationStore || !conversation) return undefined;
+    const covered = Math.min(conversation.summaryCount ?? 0, conversation.messages.length);
+    const pending = conversation.messages.length - covered;
+    if (pending <= SUMMARY_TRIGGER) return undefined;
+    const end = conversation.messages.length - SUMMARY_KEEP_RECENT;
+    if (end <= covered) return undefined;
+    const chunk = conversation.messages
+      .slice(covered, Math.min(covered + SUMMARY_CHUNK, end))
+      .filter((message) => message.text.trim().length > 0);
+    if (chunk.length === 0) return undefined;
+
+    const messages: ModelMessage[] = [
+      { role: 'system', content: SUMMARY_PROMPT },
+      ...(conversation.summary
+        ? [{ role: 'assistant' as const, content: `现有摘要：\n${conversation.summary}` }]
+        : []),
+      ...chunk.map((message) => ({ role: message.role, content: message.text })),
+      { role: 'user', content: '请输出更新后的摘要。' }
+    ];
+
+    try {
+      const response = await this.complete(messages, signal, client, false);
+      const summary = Array.from(response.text.trim())
+        .slice(0, SUMMARY_LIMIT)
+        .join('');
+      if (!summary) return response.usage;
+      const updated = await this.conversationStore.update(conversation.id, (current) => ({
+        ...current,
+        summary,
+        summaryCount: Math.min(covered + SUMMARY_CHUNK, end)
+      }));
+      conversation.summary = updated.summary;
+      conversation.summaryCount = updated.summaryCount;
+      return response.usage;
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      return undefined;
+    }
   }
 
   private async persistAssistant(
@@ -521,9 +591,12 @@ export class ButlerServiceImpl implements ButlerService {
   private async complete(
     messages: ModelMessage[],
     signal: AbortSignal | undefined,
-    client: ModelClient
+    client: ModelClient,
+    withTools = true
   ): Promise<ModelResponse> {
-    return client.complete(this.buildRequest(messages, signal));
+    const request = this.buildRequest(messages, signal);
+    if (!withTools) delete request.tools;
+    return client.complete(request);
   }
 
   private async runTool(

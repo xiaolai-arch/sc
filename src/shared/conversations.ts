@@ -35,6 +35,10 @@ export type Conversation = {
   pinned?: boolean;
   /** Per-conversation model override; absent follows the global provider. */
   model?: string;
+  /** Rolling summary of messages before `summaryCount`. */
+  summary?: string;
+  /** Number of leading messages covered by `summary`. */
+  summaryCount?: number;
   createdAt: string;
   updatedAt: string;
   messages: ConversationMessage[];

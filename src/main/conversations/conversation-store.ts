@@ -12,6 +12,7 @@ import type {
 const DEFAULT_TITLE = '新对话';
 const TITLE_LIMIT = 24;
 const PREVIEW_LIMIT = 80;
+const SUMMARY_LIMIT = 4000;
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 const GREETING_TEXTS = new Set(['你好', 'hi', 'hello', '在吗', '嗨', '嗯', 'ok']);
 
@@ -125,6 +126,15 @@ function normalizeConversation(value: unknown): Conversation | null {
     .map(normalizeMessage)
     .filter((message): message is ConversationMessage => message !== null);
   const model = typeof value['model'] === 'string' ? value['model'].trim() : '';
+  const summary =
+    typeof value['summary'] === 'string'
+      ? Array.from(value['summary'].trim()).slice(0, SUMMARY_LIMIT).join('')
+      : '';
+  const rawCount = value['summaryCount'];
+  const summaryCount =
+    summary && typeof rawCount === 'number' && Number.isInteger(rawCount) && rawCount >= 0
+      ? rawCount
+      : undefined;
 
   return {
     id,
@@ -133,6 +143,7 @@ function normalizeConversation(value: unknown): Conversation | null {
     ...(workspaceId ? { workspaceId } : {}),
     ...(value['pinned'] === true ? { pinned: true } : {}),
     ...(model ? { model } : {}),
+    ...(summary && summaryCount !== undefined ? { summary, summaryCount } : {}),
     createdAt,
     updatedAt,
     messages
@@ -301,6 +312,10 @@ export class ConversationStore {
       if (conversation === null) throw new Error(`Conversation not found: ${id}`);
       if (keepCount >= conversation.messages.length) return clone(conversation);
       conversation.messages = conversation.messages.slice(0, keepCount);
+      if (conversation.summaryCount !== undefined && keepCount <= conversation.summaryCount) {
+        delete conversation.summary;
+        delete conversation.summaryCount;
+      }
       conversation.updatedAt = this.now().toISOString();
       await this.writeFile(conversation);
       return clone(conversation);
