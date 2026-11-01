@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { formatLocalDate } from '../shared/date';
 import type { Bootstrap } from '../shared/ipc';
 import { Workspace } from './shell/Workspace';
+import { initTheme } from './theme';
 import { PageShell } from './ui/PageShell';
 
 export function App() {
@@ -24,12 +25,14 @@ export function App() {
     void refresh();
   }, [refresh]);
 
+  useEffect(() => initTheme(), []);
+
   return (
     <>
       <h1 className="sr-only">Study Coach</h1>
       {bootstrap === null ? (
         <PageShell>
-          <div className="mx-auto max-w-[980px] px-6 py-20 text-gray-600">正在准备…</div>
+          <div className="mx-auto max-w-[980px] px-6 py-20 text-gray-600 dark:text-[#a1a1a6]">正在准备…</div>
         </PageShell>
       ) : (
         <Workspace
