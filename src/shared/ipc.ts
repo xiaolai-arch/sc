@@ -118,6 +118,8 @@ export interface ConversationApi {
   onConversationOpened(listener: (conversationId: string) => void): () => void;
   /** Global shortcut / tray asks the renderer to open the quick capture dialog. */
   onQuickCapture?(listener: () => void): () => void;
+  /** Opens a native directory picker and writes a local backup. */
+  exportBackup?(): Promise<BackupResult | null>;
 }
 
 /** Partial settings update; nested notifications/budget accept partials. */
@@ -133,6 +135,19 @@ export interface SettingsPatch {
 export interface UsageApi {
   getUsageSummary(days?: number): Promise<UsageSummary>;
   clearUsage(): Promise<void>;
+}
+
+export interface BackupCopied {
+  vault: boolean;
+  conversations: boolean;
+  state: boolean;
+  usage: boolean;
+}
+
+/** Result of a local backup; the backup never contains secrets. */
+export interface BackupResult {
+  path: string;
+  copied: BackupCopied;
 }
 
 export interface StudyCoachApi
