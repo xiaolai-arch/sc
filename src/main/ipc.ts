@@ -89,6 +89,11 @@ export const CONVERSATION_EVENT_CHANNELS = {
   open: 'study-coach:conversations:open'
 } as const;
 
+/** Outbound app events (global shortcut, tray). */
+export const APP_EVENT_CHANNELS = {
+  quickCapture: 'study-coach:app:quick-capture'
+} as const;
+
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
 export type IpcChannelName = keyof typeof IPC_CHANNELS;
 
@@ -731,6 +736,10 @@ export function createStudyCoachBridge(
           listener(payload['conversationId']);
         }
       });
+    },
+    onQuickCapture(listener) {
+      if (!subscribe) return () => undefined;
+      return subscribe(APP_EVENT_CHANNELS.quickCapture, () => listener());
     },
     send: (input) => call(IPC_CHANNELS.send, input),
     async stream(input, onEvent) {

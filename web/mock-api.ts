@@ -1109,6 +1109,10 @@ export function createMockApi(
       return () => undefined;
     },
 
+    onQuickCapture() {
+      return () => undefined;
+    },
+
     async send(input: SendMessageInput): Promise<SendMessageResult> {
       recordNoteIfNeeded(input);
       return {

@@ -1,7 +1,13 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, globalShortcut, ipcMain } from 'electron';
 import { join } from 'node:path';
 import { createAppContext } from './context';
-import { CONVERSATION_EVENT_CHANNELS, registerIpcHandlers, serializeError } from './ipc';
+import {
+  APP_EVENT_CHANNELS,
+  CONVERSATION_EVENT_CHANNELS,
+  registerIpcHandlers,
+  serializeError
+} from './ipc';
+import { registerAppShortcuts } from './shortcuts';
 import { createContextScheduler, planFirstEmptyWorkspace } from './scheduler';
 import { DEFAULT_VAULT_DIRECTORY } from './settings/defaults';
 import { createElectronNotificationSink, createElectronTray } from './tray';
@@ -70,6 +76,21 @@ function openConversation(conversationId: string): void {
   }
 }
 
+function openQuickCapture(): void {
+  showWindow();
+  const send = () => {
+    if (mainWindow === null) return;
+    mainWindow.webContents.send(APP_EVENT_CHANNELS.quickCapture);
+  };
+  if (mainWindow?.webContents.isLoading()) {
+    mainWindow.webContents.once('did-finish-load', () => {
+      setTimeout(send, 300);
+    });
+  } else {
+    send();
+  }
+}
+
 
 app.whenReady().then(async () => {
   const context = await createAppContext({
@@ -78,6 +99,14 @@ app.whenReady().then(async () => {
   });
   registerIpcHandlers(context.api, ipcMain);
   createWindow();
+
+  const shortcuts = registerAppShortcuts(globalShortcut, [
+    { accelerator: 'CommandOrControl+Shift+Space', run: openQuickCapture }
+  ]);
+  for (const accelerator of shortcuts.failed) {
+    console.warn(`Study Coach shortcut unavailable: ${accelerator}`);
+  }
+  app.on('will-quit', () => shortcuts.dispose());
 
   let scheduler: ReturnType<typeof createContextScheduler> | null = null;
   let trayController: { destroy(): void } | null = null;
@@ -110,6 +139,7 @@ app.whenReady().then(async () => {
       getSettings: () => context.settings.get(),
       actions: {
         onOpen: showWindow,
+        onQuickCapture: openQuickCapture,
         onGeneratePlan: () => {
           void planFirstEmptyWorkspace(context).catch((error: unknown) => {
             console.error('Study Coach tray plan failed:', serializeError(error).message);

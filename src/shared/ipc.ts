@@ -115,6 +115,8 @@ export interface ConversationApi {
   cancelStream(messageId: string): Promise<void>;
   /** Proactive check-ins ask the renderer to open a conversation. */
   onConversationOpened(listener: (conversationId: string) => void): () => void;
+  /** Global shortcut / tray asks the renderer to open the quick capture dialog. */
+  onQuickCapture?(listener: () => void): () => void;
 }
 
 /** Partial settings update; nested notifications/budget accept partials. */

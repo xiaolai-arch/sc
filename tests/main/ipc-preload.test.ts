@@ -1,11 +1,38 @@
 import type { StudyCoachApi } from '../../src/shared/ipc';
 import {
+  APP_EVENT_CHANNELS,
   BUTLER_STREAM_CHANNELS,
   IPC_CHANNELS,
   createStudyCoachBridge,
   type Invoke,
   type Subscribe
 } from '../../src/main/ipc';
+
+test('locks the app event channels', () => {
+  expect(APP_EVENT_CHANNELS).toEqual({
+    quickCapture: 'study-coach:app:quick-capture'
+  });
+});
+
+test('bridge subscribes to quick capture events and unsubscribes', () => {
+  const listeners = new Map<string, (payload: unknown) => void>();
+  const unsubscribed: string[] = [];
+  const subscribe: Subscribe = (channel, listener) => {
+    listeners.set(channel, listener);
+    return () => unsubscribed.push(channel);
+  };
+  const bridge: StudyCoachApi = createStudyCoachBridge(async () => null, subscribe);
+  let captured = 0;
+
+  const unsubscribe = bridge.onQuickCapture?.(() => {
+    captured += 1;
+  });
+  listeners.get(APP_EVENT_CHANNELS.quickCapture)?.({});
+  expect(captured).toBe(1);
+
+  unsubscribe?.();
+  expect(unsubscribed).toEqual([APP_EVENT_CHANNELS.quickCapture]);
+});
 
 test('locks the public channel names', () => {
   expect(IPC_CHANNELS).toEqual({
