@@ -1,5 +1,3 @@
-export type ShellView = 'chat' | 'today' | 'notes' | 'learn' | 'review' | 'settings';
-
 export type ChatStep = {
   id: string;
   name: string;
