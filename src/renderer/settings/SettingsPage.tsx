@@ -320,7 +320,7 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
             设置
           </h2>
           {!page ? (
-            <p className={embedded ? 'mt-0.5 text-[12px] text-gray-500 dark:text-[#8e8e93]' : 'mt-2 text-gray-600 dark:text-[#a1a1a6]'}>
+            <p className={embedded ? 'mt-0.5 text-[12px] text-gray-500 dark:text-[#8e8e93]' : 'mt-2 text-gray-500 dark:text-[#a1a1a6]'}>
               管理模型、预算与提醒。
             </p>
           ) : null}
@@ -363,12 +363,12 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
           </Button>
         </div>
       ) : !loaded ? (
-        <p className="mt-10 text-gray-600 dark:text-[#a1a1a6]">正在加载设置…</p>
+        <p className="mt-10 text-gray-500 dark:text-[#a1a1a6]">正在加载设置…</p>
       ) : (
         <div className="mt-8 grid gap-8">
           <Card id="settings-model-section">
-            <h3 className="text-xl font-semibold tracking-tight text-black dark:text-[#f5f5f7] md:text-2xl">模型</h3>
-            <p className="mt-2 text-gray-600 dark:text-[#a1a1a6]">选择模型提供商并配置访问凭据。</p>
+            <h3 className="text-[17px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">模型</h3>
+            <p className="mt-2 text-gray-500 dark:text-[#a1a1a6]">选择模型提供商并配置访问凭据。</p>
             <div className="mt-6 grid gap-5 md:grid-cols-2">
               <div>
                 <Label htmlFor="settings-provider">提供商</Label>
@@ -437,12 +437,12 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
                   </div>
                 ) : null}
                 {cliAgent === 'claude' ? (
-                  <label className="flex items-start gap-3 text-sm text-gray-600 dark:text-[#a1a1a6] md:col-span-2">
+                  <label className="flex items-start gap-3 text-sm text-gray-500 dark:text-[#a1a1a6] md:col-span-2">
                     <input
                       type="checkbox"
                       checked={cliIsolate}
                       onChange={(event) => setCliIsolate(event.target.checked)}
-                      className="mt-0.5 h-4 w-4 rounded accent-[#0071e3]"
+                      className="mt-0.5 h-4 w-4 rounded-[4px] accent-[#0071e3]"
                     />
                     <span>
                       隔离 Claude Code 全局配置（--bare）
@@ -452,7 +452,7 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
                     </span>
                   </label>
                 ) : null}
-                <p className="text-sm text-gray-600 dark:text-[#a1a1a6] md:col-span-2">
+                <p className="text-sm text-gray-500 dark:text-[#a1a1a6] md:col-span-2">
                   使用本机已登录的 CLI agent，不需要 API key；命令会在临时目录中运行。
                   Codex 使用 -c model_reasoning_effort，Claude 使用 --effort。
                   Claude 会逐字返回思考；Codex 的 --json 只在思考完成后返回整段。
@@ -483,7 +483,7 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
                   placeholder="已保存则留空"
                   autoComplete="off"
                 />
-                <p className="mt-2 text-sm text-gray-600 dark:text-[#a1a1a6]">
+                <p className="mt-2 text-sm text-gray-500 dark:text-[#a1a1a6]">
                   原型模式下，API Key 只保存在当前页面内存，不会写入浏览器存储或发送到服务器。
                 </p>
               </div>
@@ -491,8 +491,8 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
           </Card>
 
           <Card id="settings-budget">
-            <h3 className="text-xl font-semibold tracking-tight text-black dark:text-[#f5f5f7] md:text-2xl">预算</h3>
-            <p className="mt-2 text-gray-600 dark:text-[#a1a1a6]">限制每天主动调用模型的次数与 token 用量。</p>
+            <h3 className="text-[17px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">预算</h3>
+            <p className="mt-2 text-gray-500 dark:text-[#a1a1a6]">限制每天主动调用模型的次数与 token 用量。</p>
             <div className="mt-6 grid gap-5 md:grid-cols-2">
               <div>
                 <Label htmlFor="settings-sessions">每日主动会话次数</Label>
@@ -540,38 +540,38 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
           </Card>
 
           <Card id="settings-usage">
-            <h3 className="text-xl font-semibold tracking-tight text-black dark:text-[#f5f5f7] md:text-2xl">
+            <h3 className="text-[17px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
               用量与成本
             </h3>
-            <p className="mt-2 text-gray-600 dark:text-[#a1a1a6]">本地统计，只记录 token 与调用次数，不上传。</p>
+            <p className="mt-2 text-gray-500 dark:text-[#a1a1a6]">本地统计，只记录 token 与调用次数，不上传。</p>
             {usageError ? (
               <p role="alert" className="mt-3 text-sm text-[#d70015] dark:text-[#ff7b72]">
                 {usageError}
               </p>
             ) : null}
             {usage === null || usage.totals.calls === 0 ? (
-              <p className="mt-4 text-sm text-gray-600 dark:text-[#a1a1a6]">
+              <p className="mt-4 text-sm text-gray-500 dark:text-[#a1a1a6]">
                 还没有用量记录。和阿咲对话后这里会显示本地统计。
               </p>
             ) : (
               <>
                 <div className="mt-6 grid gap-5 md:grid-cols-2">
                   <div>
-                    <p className="text-sm font-medium text-gray-600 dark:text-[#a1a1a6]">今日</p>
+                    <p className="text-sm font-medium text-gray-500 dark:text-[#a1a1a6]">今日</p>
                     <p className="mt-1 text-sm text-black dark:text-[#f5f5f7]">
                       输入 {todayUsage.inputTokens} · 输出 {todayUsage.outputTokens} · 调用{' '}
                       {todayUsage.calls}
                     </p>
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-gray-600 dark:text-[#a1a1a6]">最近 7 天</p>
+                    <p className="text-sm font-medium text-gray-500 dark:text-[#a1a1a6]">最近 7 天</p>
                     <p className="mt-1 text-sm text-black dark:text-[#f5f5f7]">
                       输入 {usage.totals.inputTokens} · 输出 {usage.totals.outputTokens} · 调用{' '}
                       {usage.totals.calls}
                     </p>
                   </div>
                 </div>
-                <p className="mt-4 text-sm text-gray-600 dark:text-[#a1a1a6]">
+                <p className="mt-4 text-sm text-gray-500 dark:text-[#a1a1a6]">
                   {usage.estimatedCost === null
                     ? '设置单价后可估算成本'
                     : `估算成本 ¥${usage.estimatedCost.toFixed(2)}`}
@@ -580,7 +580,7 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
                   {usage.days.map((day) => (
                     <div
                       key={day.date}
-                      className="flex items-center justify-between gap-3 py-1.5 text-xs text-gray-600 dark:text-[#a1a1a6]"
+                      className="flex items-center justify-between gap-3 py-1.5 text-xs text-gray-500 dark:text-[#a1a1a6]"
                     >
                       <span>{day.date}</span>
                       <span>
@@ -614,10 +614,10 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
           </Card>
 
           <Card id="settings-backup">
-            <h3 className="text-xl font-semibold tracking-tight text-black dark:text-[#f5f5f7] md:text-2xl">
+            <h3 className="text-[17px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
               数据与备份
             </h3>
-            <p className="mt-2 text-gray-600 dark:text-[#a1a1a6]">
+            <p className="mt-2 text-gray-500 dark:text-[#a1a1a6]">
               备份包含项目、记录、对话、设置和用量，不包含 API Key。
             </p>
             <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -638,7 +638,7 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
                   className={
                     backupStatus.kind === 'error'
                       ? 'text-sm text-[#d70015] dark:text-[#ff7b72]'
-                      : 'text-sm text-gray-600 dark:text-[#a1a1a6]'
+                      : 'text-sm text-gray-500 dark:text-[#a1a1a6]'
                   }
                 >
                   {backupStatus.message}
@@ -648,16 +648,16 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
           </Card>
 
           <Card id="settings-notifications">
-            <h3 className="text-xl font-semibold tracking-tight text-black dark:text-[#f5f5f7] md:text-2xl">通知</h3>
-            <p className="mt-2 text-gray-600 dark:text-[#a1a1a6]">设置早间计划、晚间复盘与周日复盘提醒。</p>
-            <label className="mt-6 flex min-h-11 items-center gap-3 text-sm font-medium text-gray-600 dark:text-[#a1a1a6]">
+            <h3 className="text-[17px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">通知</h3>
+            <p className="mt-2 text-gray-500 dark:text-[#a1a1a6]">设置早间计划、晚间复盘与周日复盘提醒。</p>
+            <label className="mt-6 flex min-h-11 items-center gap-3 text-sm font-medium text-gray-500 dark:text-[#a1a1a6]">
               <input
                 type="checkbox"
                 checked={notifications.enabled}
                 onChange={(event) =>
                   setNotifications((current) => ({ ...current, enabled: event.target.checked }))
                 }
-                className="h-5 w-5 rounded accent-[#0071e3]"
+                className="h-5 w-5 rounded-[4px] accent-[#0071e3]"
               />
               启用提醒
             </label>
@@ -707,7 +707,7 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
                 />
               </div>
             </div>
-            <label className="mt-5 flex min-h-11 items-center gap-3 text-sm font-medium text-gray-600 dark:text-[#a1a1a6]">
+            <label className="mt-5 flex min-h-11 items-center gap-3 text-sm font-medium text-gray-500 dark:text-[#a1a1a6]">
               <input
                 type="checkbox"
                 checked={notifications.weeklyEnabled}
@@ -717,7 +717,7 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
                     weeklyEnabled: event.target.checked
                   }))
                 }
-                className="h-5 w-5 rounded accent-[#0071e3]"
+                className="h-5 w-5 rounded-[4px] accent-[#0071e3]"
               />
               周日复盘
             </label>
@@ -735,14 +735,14 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
           </Card>
 
           <Card id="settings-appearance">
-            <h3 className="text-xl font-semibold tracking-tight text-black dark:text-[#f5f5f7] md:text-2xl">
+            <h3 className="text-[17px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
               外观
             </h3>
-            <p className="mt-2 text-gray-600 dark:text-[#a1a1a6]">默认跟随系统；偏好只保存在本机。</p>
+            <p className="mt-2 text-gray-500 dark:text-[#a1a1a6]">默认跟随系统；偏好只保存在本机。</p>
             <div
               role="group"
               aria-label="主题"
-              className="mt-4 inline-flex rounded-full bg-[#f1eee8] dark:bg-white/[0.08] p-1"
+              className="mt-4 inline-flex rounded-full bg-[#f5f5f7] dark:bg-white/[0.08] p-1"
             >
               {THEME_OPTIONS.map((option) => (
                 <button
@@ -750,10 +750,10 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
                   type="button"
                   aria-pressed={theme === option.value}
                   onClick={() => chooseTheme(option.value)}
-                  className={`rounded-full px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/30 ${
+                  className={`rounded-full px-4 py-2 text-sm font-medium transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 ${
                     theme === option.value
                       ? 'bg-white text-black dark:bg-[#242426] dark:text-[#f5f5f7] shadow-sm'
-                      : 'text-[#6b6b70] dark:text-[#a1a1a6] hover:text-black dark:hover:text-[#f5f5f7]'
+                      : 'text-gray-500 dark:text-[#a1a1a6] hover:text-black dark:hover:text-[#f5f5f7]'
                   }`}
                 >
                   {option.label}
@@ -763,13 +763,13 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
           </Card>
 
           <Card id="settings-launch">
-            <h3 className="text-xl font-semibold tracking-tight text-black dark:text-[#f5f5f7] md:text-2xl">启动</h3>
-            <label className="mt-4 flex min-h-11 items-center gap-3 text-sm font-medium text-gray-600 dark:text-[#a1a1a6]">
+            <h3 className="text-[17px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">启动</h3>
+            <label className="mt-4 flex min-h-11 items-center gap-3 text-sm font-medium text-gray-500 dark:text-[#a1a1a6]">
               <input
                 type="checkbox"
                 checked={launchAtLogin}
                 onChange={(event) => setLaunchAtLogin(event.target.checked)}
-                className="h-5 w-5 rounded accent-[#0071e3]"
+                className="h-5 w-5 rounded-[4px] accent-[#0071e3]"
               />
               开机自启
             </label>

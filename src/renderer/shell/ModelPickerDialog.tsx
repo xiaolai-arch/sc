@@ -49,11 +49,11 @@ export function ModelPickerDialog({
           onChange={(event) => setText(event.target.value)}
           placeholder={`跟随全局（${globalModel}）`}
         />
-        <p className="mt-2 text-sm text-gray-600 dark:text-[#a1a1a6]">
+        <p className="mt-2 text-[13px] leading-6 text-gray-500 dark:text-[#a1a1a6]">
           填写 CLI/API 支持的模型 ID；留空跟随全局设置。
         </p>
         {error ? (
-          <p role="alert" className="mt-2 text-sm text-[#d70015] dark:text-[#ff7b72]">
+          <p role="alert" className="mt-2 text-[13px] text-[#d70015] dark:text-[#ff7b72]">
             {error}
           </p>
         ) : null}
