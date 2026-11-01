@@ -16,13 +16,11 @@ test('shows live reasoning and collapses after the answer starts', async () => {
   await screen.findByText('早上好，xiaolai。');
   await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
 
-  expect(await screen.findByText('正在思考…')).toBeInTheDocument();
+  const header = await screen.findByRole('button', { name: /思考/ });
+  expect(header).toHaveAttribute('aria-expanded', 'false');
   expect(
     await screen.findByText(/我先按截止时间和精力排/, {}, { timeout: 3000 })
   ).toBeInTheDocument();
-
-  const header = await screen.findByRole('button', { name: /思考了 \d+ 秒/ });
-  expect(header).toHaveAttribute('aria-expanded', 'false');
 
   await userEvent.click(header);
   expect(header).toHaveAttribute('aria-expanded', 'true');
@@ -37,7 +35,7 @@ test('shows tool steps and keeps narration out of the final answer', async () =>
   expect(await screen.findByText('写入笔记', {}, { timeout: 3000 })).toBeInTheDocument();
   expect(await screen.findByText(/记下了/, {}, { timeout: 3000 })).toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole('button', { name: /思考了 \d+ 秒/ }));
+  await userEvent.click(screen.getByRole('button', { name: /思考/ }));
   expect(screen.getByText(/我先把这条记下来/)).toBeInTheDocument();
 
   const answer = screen.getByText(/记下了/);

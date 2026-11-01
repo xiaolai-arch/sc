@@ -8,7 +8,8 @@ import {
 import { Composer } from './Composer';
 import { MarkdownText } from './MarkdownText';
 import { MessageActions } from './MessageActions';
-import { ReasoningBlock } from './ReasoningBlock';
+import { stepsToTrace } from './trace';
+import { TraceFlow } from './TraceFlow';
 import type { Workspace } from '../../shared/workspace';
 import type { ChatMessage } from './types';
 
@@ -201,13 +202,7 @@ export function ChatPane({
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="text-[11px] font-medium text-gray-500 dark:text-[#8e8e93]">Study Coach</p>
-                  <ReasoningBlock
-                    reasoning={message.reasoning}
-                    steps={message.steps}
-                    streaming={message.streaming}
-                    startedAt={message.reasoningStartedAt}
-                    endedAt={message.reasoningEndedAt}
-                  />
+                  <TraceFlow items={message.trace ?? stepsToTrace(message.steps)} />
                   {message.text ? (
                     <div className="mt-1">
                       <MarkdownText text={message.text} />

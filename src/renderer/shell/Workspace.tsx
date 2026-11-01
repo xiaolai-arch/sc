@@ -1,10 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatChineseDate, formatLocalDate } from '../../shared/date';
-import type {
-  Conversation,
-  ConversationMessage,
-  ConversationStep
-} from '../../shared/conversations';
+import type { Conversation, ConversationMessage } from '../../shared/conversations';
 import type { SendMessageInput, WorkspaceNote } from '../../shared/workspace';
 import { SettingsPage } from '../settings/SettingsPage';
 import { Dialog } from '../ui/Dialog';
@@ -26,7 +22,8 @@ import { LearningPane } from './LearningPane';
 import { ModelPickerDialog } from './ModelPickerDialog';
 import { ProjectPanel, type ProjectPanelTab } from './ProjectPanel';
 import { QuickCaptureDialog } from './QuickCaptureDialog';
-import type { ChatMessage, ChatStep } from './types';
+import { stepsToTrace } from './trace';
+import type { ChatMessage, ChatTraceItem } from './types';
 import { useConversations } from './useConversations';
 import { useWorkspaceData } from './useWorkspaceData';
 
@@ -98,14 +95,6 @@ function WorkspaceStatus({
   );
 }
 
-function toConversationSteps(steps: ChatStep[]): ConversationStep[] {
-  return steps.map((step) => ({ ...step }));
-}
-
-function toChatSteps(steps: ConversationStep[] | undefined): ChatStep[] | undefined {
-  return steps?.map((step) => ({ ...step }));
-}
-
 export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   const {
     workspaces,
@@ -158,10 +147,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   const recordedFocusSessionsRef = useRef<Set<number>>(new Set());
   const tasksRef = useRef(tasks);
   tasksRef.current = tasks;
-  const [reasoningById, setReasoningById] = useState<Record<string, string>>({});
-  const [reasoningMetaById, setReasoningMetaById] = useState<
-    Record<string, { startedAt?: number; endedAt?: number }>
-  >({});
+  const [traceById, setTraceById] = useState<Record<string, ChatTraceItem[]>>({});
   const [actionError, setActionError] = useState<string | null>(null);
   const [modelLabel, setModelLabel] = useState('模板计划');
   const streamGenerationRef = useRef(0);
@@ -262,16 +248,15 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
 
   const chatMessages: ChatMessage[] = [
     ...(conversations.active?.messages ?? []).map((message): ChatMessage => {
-      const reasoning = reasoningById[message.id];
-      const meta = reasoningMetaById[message.id];
+      const trace =
+        message.role === 'assistant'
+          ? traceById[message.id] ?? stepsToTrace(message.steps)
+          : [];
       return {
         id: message.id,
         role: message.role,
         text: message.text,
-        ...(reasoning ? { reasoning } : {}),
-        ...(meta?.startedAt !== undefined ? { reasoningStartedAt: meta.startedAt } : {}),
-        ...(meta?.endedAt !== undefined ? { reasoningEndedAt: meta.endedAt } : {}),
-        ...(message.steps ? { steps: toChatSteps(message.steps) } : {}),
+        ...(trace.length > 0 ? { trace } : {}),
         streaming: false
       };
     }),
@@ -324,24 +309,59 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
       id: assistantId,
       role: 'assistant',
       text: '',
-      reasoning: '',
-      steps: [],
+      trace: [],
       streaming: true
     });
 
+    let trace: ChatTraceItem[] = [];
+    let reasoningCount = 0;
     let pendingReasoning = '';
     let pendingText = '';
     let frameId: number | null = null;
-    let assistantReasoning = '';
     let assistantText = '';
-    let assistantSteps: ChatStep[] = [];
-    let assistantReasoningStartedAt: number | undefined;
-    let assistantReasoningEndedAt: number | undefined;
     let streamError: string | null = null;
+
+    const cloneTrace = (): ChatTraceItem[] => trace.map((item) => ({ ...item }));
 
     const updateStreaming = (updater: (message: ChatMessage) => ChatMessage) => {
       setStreamingMessage((current) =>
         current && current.id === assistantId ? updater(current) : current
+      );
+    };
+
+    const publishTrace = () => {
+      updateStreaming((message) => ({ ...message, trace: cloneTrace() }));
+    };
+
+    const appendReasoning = (chunk: string) => {
+      let current = trace[trace.length - 1];
+      if (!current || current.kind !== 'reasoning') {
+        reasoningCount += 1;
+        current = {
+          kind: 'reasoning',
+          id: `trace-${assistantId}-${reasoningCount}`,
+          text: '',
+          streaming: true
+        };
+        trace = [...trace, current];
+      }
+      current.text += chunk;
+      current.streaming = true;
+    };
+
+    const settleReasoning = () => {
+      for (const item of trace) {
+        if (item.kind === 'reasoning') item.streaming = false;
+      }
+    };
+
+    const settleTrace = () => {
+      trace = trace.map((item) =>
+        item.kind === 'reasoning'
+          ? { ...item, streaming: false }
+          : item.status === 'running'
+            ? { ...item, status: 'failed' }
+            : item
       );
     };
 
@@ -352,22 +372,12 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
       pendingReasoning = '';
       pendingText = '';
       if (!reasoning && !text) return;
-      assistantReasoning += reasoning;
-      assistantText += text;
+      if (reasoning) appendReasoning(reasoning);
+      if (text) assistantText += text;
       updateStreaming((message) => ({
         ...message,
-        ...(reasoning
-          ? {
-              reasoning: `${message.reasoning ?? ''}${reasoning}`,
-              reasoningStartedAt: message.reasoningStartedAt ?? Date.now()
-            }
-          : {}),
-        ...(text
-          ? {
-              text: `${message.text}${text}`,
-              reasoningEndedAt: message.reasoningEndedAt ?? Date.now()
-            }
-          : {})
+        ...(reasoning ? { trace: cloneTrace() } : {}),
+        ...(text ? { text: `${message.text}${text}` } : {})
       }));
     };
 
@@ -399,84 +409,75 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               break;
             case 'reasoning':
               setStreamStatus(null);
-              assistantReasoningStartedAt ??= Date.now();
               pendingReasoning += event.text;
               scheduleFlush();
               break;
             case 'narration':
               flushNow();
-              assistantReasoningStartedAt ??= Date.now();
-              assistantReasoning += assistantReasoning ? `\n\n${event.text}` : event.text;
-              updateStreaming((message) => ({
-                ...message,
-                reasoning: message.reasoning
-                  ? `${message.reasoning}\n\n${event.text}`
-                  : event.text,
-                reasoningStartedAt: message.reasoningStartedAt ?? Date.now()
-              }));
+              appendReasoning(
+                trace[trace.length - 1]?.kind === 'reasoning'
+                  ? `\n\n${event.text}`
+                  : event.text
+              );
+              publishTrace();
               break;
             case 'text':
               setStreamStatus(null);
-              assistantReasoningEndedAt ??= Date.now();
+              flushNow();
+              settleReasoning();
+              publishTrace();
               pendingText += event.text;
               scheduleFlush();
               break;
             case 'tool-start': {
               flushNow();
-              const step: ChatStep = {
-                id: event.id,
-                name: event.name,
-                label: event.label,
-                status: 'running'
-              };
-              assistantSteps = [...assistantSteps, step];
-              updateStreaming((message) => ({
-                ...message,
-                steps: [...(message.steps ?? []), step]
-              }));
+              settleReasoning();
+              trace = [
+                ...trace,
+                {
+                  kind: 'tool',
+                  id: event.id,
+                  name: event.name,
+                  label: event.label,
+                  status: 'running'
+                }
+              ];
+              publishTrace();
               break;
             }
             case 'tool-result': {
               flushNow();
-              assistantSteps = assistantSteps.map((step) =>
-                step.id === event.id
+              trace = trace.map((item) =>
+                item.kind === 'tool' && item.id === event.id
                   ? {
-                      ...step,
+                      ...item,
                       status: event.ok ? 'done' : 'failed',
-                      ...(event.detail ? { detail: event.detail } : {})
+                      ...(event.detail !== undefined ? { detail: event.detail } : {})
                     }
-                  : step
+                  : item
               );
-              updateStreaming((message) => ({
-                ...message,
-                steps: (message.steps ?? []).map((step) =>
-                  step.id === event.id
-                    ? {
-                        ...step,
-                        status: event.ok ? 'done' : 'failed',
-                        ...(event.detail ? { detail: event.detail } : {})
-                      }
-                    : step
-                )
-              }));
+              publishTrace();
               break;
             }
             case 'error':
               flushNow();
               setStreamStatus(null);
+              settleTrace();
+              publishTrace();
               streamError = event.message;
               setActionError(event.message);
               break;
             case 'done':
               flushNow();
               setStreamStatus(null);
-              assistantReasoningEndedAt ??= Date.now();
+              settleTrace();
+              publishTrace();
               assistantText = event.text || assistantText;
               updateStreaming((message) => ({
                 ...message,
                 text: event.text || message.text,
                 streaming: false,
-                reasoningEndedAt: message.reasoningEndedAt ?? Date.now()
+                trace: cloneTrace()
               }));
               break;
           }
@@ -489,20 +490,6 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
         await conversations.refresh();
         await reload();
         return;
-      }
-      if (assistantReasoning) {
-        setReasoningById((current) => ({ ...current, [assistantId]: assistantReasoning }));
-        setReasoningMetaById((current) => ({
-          ...current,
-          [assistantId]: {
-            ...(assistantReasoningStartedAt !== undefined
-              ? { startedAt: assistantReasoningStartedAt }
-              : {}),
-            ...(assistantReasoningEndedAt !== undefined
-              ? { endedAt: assistantReasoningEndedAt }
-              : {})
-          }
-        }));
       }
       await conversations.select(finalConversationId);
       await reload();
@@ -519,6 +506,13 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
       }
     } finally {
       flushNow();
+      if (trace.length > 0) {
+        settleTrace();
+        setTraceById((current) => ({
+          ...current,
+          [assistantId]: trace.map((item) => ({ ...item }))
+        }));
+      }
       setStreamingMessage(null);
       setActiveAssistantId(null);
       setStreamStatus(null);
