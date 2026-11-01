@@ -39,6 +39,19 @@ const workspaceService = {
   updateWorkspaceTask: async () => {
     throw new Error('not used');
   },
+  updateWorkspace: async (input: {
+    workspaceId: string;
+    name?: string;
+    goal?: string;
+    description?: string;
+  }) => ({
+    id: input.workspaceId,
+    name: input.name ?? '考研',
+    kind: 'exam',
+    color: '#ef4444',
+    goal: input.goal ?? '2027 上岸',
+    description: input.description ?? ''
+  }),
   createNote: async () => {
     throw new Error('not used');
   },
@@ -141,4 +154,87 @@ test('reports missing workspace and reminder capability', async () => {
   );
   expect(noReminder.ok).toBe(false);
   expect(noReminder.content).toContain('不支持写入提醒');
+});
+
+
+test('saves a review and synthesizes memory', async () => {
+  const memory = {
+    synthesizeFromReview: async () => ({
+      items: [{ id: 'm1', workspaceId: 'ws-exam', text: '极限还不稳', source: 'review:2026-11-01' }],
+      generatedBy: 'rules' as const
+    })
+  };
+  const result = await executeButlerTool(
+    {
+      id: 'c6',
+      name: 'save_review',
+      arguments: {
+        date: '2026-11-01',
+        completed: '数学两小时',
+        stuck: '极限',
+        tomorrow: '先复习'
+      }
+    },
+    tools,
+    { ...context, memory: memory as never }
+  );
+  expect(result.ok).toBe(true);
+  expect(JSON.parse(result.content)).toMatchObject({
+    ok: true,
+    result: {
+      date: '2026-11-01',
+      workspaceId: 'ws-exam',
+      answers: { completed: '数学两小时', stuck: '极限', tomorrow: '先复习' },
+      memory: [{ text: '极限还不稳' }]
+    }
+  });
+});
+
+test('plans a workspace and persists the plan tasks', async () => {
+  const planner = {
+    plan: async (input: { workspaceId: string; date?: string }) => ({
+      workspaceId: input.workspaceId,
+      date: input.date ?? '2026-11-01',
+      generatedBy: 'template' as const,
+      tasks: [
+        {
+          title: '极限 10 题',
+          subject: '数学',
+          durationMin: 45,
+          acceptance: '正确率 80%'
+        }
+      ]
+    })
+  };
+  const result = await executeButlerTool(
+    { id: 'c7', name: 'plan_workspace', arguments: { availableMinutes: 90 } },
+    tools,
+    { ...context, planner: planner as never }
+  );
+  expect(result.ok).toBe(true);
+  expect(JSON.parse(result.content)).toMatchObject({
+    ok: true,
+    result: {
+      workspaceId: 'ws-exam',
+      generatedBy: 'template',
+      tasks: [{ title: '极限 10 题', workspaceId: 'ws-exam' }]
+    }
+  });
+});
+
+test('updates workspace metadata', async () => {
+  const result = await executeButlerTool(
+    {
+      id: 'c8',
+      name: 'update_workspace',
+      arguments: { goal: '2027 考研 400 分' }
+    },
+    tools,
+    context
+  );
+  expect(result.ok).toBe(true);
+  expect(JSON.parse(result.content)).toMatchObject({
+    ok: true,
+    result: { id: 'ws-exam', goal: '2027 考研 400 分' }
+  });
 });

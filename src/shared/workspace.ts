@@ -73,6 +73,13 @@ export interface CreateWorkspaceInput {
   color?: string;
 }
 
+export interface UpdateWorkspaceInput {
+  workspaceId: string;
+  name?: string;
+  goal?: string;
+  description?: string;
+}
+
 export interface WorkspaceOnboardingInput {
   name: string;
   kind: WorkspaceKind;
@@ -157,6 +164,7 @@ export interface SendMessageResult {
 export interface WorkspaceService {
   listWorkspaces(): Promise<Workspace[]>;
   createWorkspace(input: CreateWorkspaceInput): Promise<Workspace>;
+  updateWorkspace?(input: UpdateWorkspaceInput): Promise<Workspace>;
   getWorkspaceSnapshot(workspaceId: string): Promise<WorkspaceSnapshot>;
   createTask(input: CreateTaskInput): Promise<WorkspaceTask>;
   updateWorkspaceTask(input: UpdateWorkspaceTaskInput): Promise<WorkspaceTask>;

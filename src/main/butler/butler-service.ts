@@ -10,6 +10,8 @@ import type {
   ConversationMessage,
   ConversationStep
 } from '../../shared/conversations';
+import type { MemoryService } from '../../shared/memory';
+import type { WorkspacePlanner } from '../../shared/planning';
 import type { ButlerStreamListener } from '../../shared/butler-stream';
 import { butlerToolLabel } from '../../shared/butler-stream';
 import type {
@@ -40,6 +42,8 @@ export interface ButlerServiceOptions {
   modelClient?: ModelClient | null;
   /** Optional conversation persistence. Null keeps send/stream stateless. */
   conversationStore?: ConversationStore | null;
+  memoryService?: MemoryService | null;
+  planner?: WorkspacePlanner | null;
   now?: () => Date;
   /** Maximum number of tool-call rounds before the butler stops. */
   maxToolSteps?: number;
@@ -53,6 +57,8 @@ export class ButlerServiceImpl implements ButlerService {
   private readonly workspaceService: WorkspaceService | null;
   private readonly modelClient: ModelClient | null;
   private readonly conversationStore: ConversationStore | null;
+  private readonly memoryService: MemoryService | null;
+  private readonly planner: WorkspacePlanner | null;
   private readonly now: () => Date;
   private readonly maxToolSteps: number;
   private readonly temperature: number | undefined;
@@ -63,6 +69,8 @@ export class ButlerServiceImpl implements ButlerService {
     this.workspaceService = options.workspaceService ?? null;
     this.modelClient = options.modelClient ?? null;
     this.conversationStore = options.conversationStore ?? null;
+    this.memoryService = options.memoryService ?? null;
+    this.planner = options.planner ?? null;
     this.now = options.now ?? (() => new Date());
     this.maxToolSteps = Math.max(
       0,
@@ -460,6 +468,8 @@ export class ButlerServiceImpl implements ButlerService {
     return executeButlerTool(call, this.tools, {
       workspace: this.workspaceService,
       workspaceId: context.workspaceId,
+      memory: this.memoryService,
+      planner: this.planner,
       now: this.now
     });
   }

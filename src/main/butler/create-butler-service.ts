@@ -7,6 +7,8 @@ import {
 } from '../agent/model-client';
 import { ButlerServiceImpl, type ButlerServiceOptions } from './butler-service';
 import type { ConversationStore } from '../conversations/conversation-store';
+import type { MemoryService } from '../../shared/memory';
+import type { WorkspacePlanner } from '../../shared/planning';
 
 export interface CreateButlerServiceOptions {
   /**
@@ -18,6 +20,8 @@ export interface CreateButlerServiceOptions {
   modelClient?: ModelClient | null;
   /** Optional conversation store used to load history and persist replies. */
   conversationStore?: ConversationStore | null;
+  memoryService?: MemoryService | null;
+  planner?: WorkspacePlanner | null;
   provider?: ProviderConfig;
   /** Kept in memory only; never logged, stored, or echoed in replies. */
   apiKey?: string | null;
@@ -48,6 +52,8 @@ export function createButlerService(
     ...(options.conversationStore !== undefined
       ? { conversationStore: options.conversationStore }
       : {}),
+    ...(options.memoryService !== undefined ? { memoryService: options.memoryService } : {}),
+    ...(options.planner !== undefined ? { planner: options.planner } : {}),
     ...(options.now ? { now: options.now } : {}),
     ...(options.maxToolSteps !== undefined ? { maxToolSteps: options.maxToolSteps } : {}),
     ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),

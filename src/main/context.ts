@@ -30,6 +30,8 @@ export interface ButlerFactoryDependencies {
   provider: ProviderConfig;
   apiKey: string | null;
   conversationStore?: ConversationStore;
+  memoryService?: MemoryService;
+  planner?: WorkspacePlanner;
   modelClient?: ModelClient | null;
 }
 
@@ -174,6 +176,8 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       provider: dependencies.provider,
       apiKey: dependencies.apiKey,
       conversationStore,
+      ...(dependencies.memoryService ? { memoryService: dependencies.memoryService } : {}),
+      ...(dependencies.planner ? { planner: dependencies.planner } : {}),
       now,
       ...(dependencies.modelClient !== undefined ? { modelClient: dependencies.modelClient } : {})
     });
@@ -215,19 +219,22 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
   async function buildServices(nextSettings: AppSettings): Promise<ActiveServices> {
     const apiKey = await secrets.getApiKey();
     const workspace = createWorkspace(nextSettings.vaultPath);
-    const dependencies: ButlerFactoryDependencies = {
-      workspaceService: workspace,
-      provider: nextSettings.provider,
-      apiKey,
-      conversationStore
-    };
-    if (options.modelClient !== undefined) dependencies.modelClient = options.modelClient;
-    const butler = createButler(nextSettings.vaultPath, dependencies);
-
     const modelClient =
       options.modelClient !== undefined
         ? options.modelClient
         : resolveModelClient(nextSettings.provider, apiKey);
+    const memory = createMemory(nextSettings.vaultPath, modelClient);
+    const planner = createPlanner(nextSettings.vaultPath, workspace, modelClient);
+    const dependencies: ButlerFactoryDependencies = {
+      workspaceService: workspace,
+      provider: nextSettings.provider,
+      apiKey,
+      conversationStore,
+      memoryService: memory,
+      planner
+    };
+    if (options.modelClient !== undefined) dependencies.modelClient = options.modelClient;
+    const butler = createButler(nextSettings.vaultPath, dependencies);
 
     const checkIns = new ProactiveCheckInService({
       conversationStore,
@@ -244,8 +251,8 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       workspace,
       butler,
       practice: createPractice(nextSettings.vaultPath),
-      memory: createMemory(nextSettings.vaultPath, modelClient),
-      planner: createPlanner(nextSettings.vaultPath, workspace, modelClient),
+      memory,
+      planner,
       checkIns,
       get search() {
         if (searchInstance === null) {

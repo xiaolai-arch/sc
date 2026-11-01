@@ -1,4 +1,7 @@
+
 import { formatLocalDate } from '../../shared/date';
+import type { MemoryService } from '../../shared/memory';
+import type { WorkspacePlanner } from '../../shared/planning';
 import type {
   WorkspaceKind,
   WorkspaceService,
@@ -10,6 +13,8 @@ export interface ButlerToolContext {
   workspace: WorkspaceService;
   /** Workspace selected in the UI, used when a tool call omits workspaceId. */
   workspaceId?: string;
+  memory?: MemoryService | null;
+  planner?: WorkspacePlanner | null;
   now: () => Date;
 }
 
@@ -147,6 +152,150 @@ export function createButlerTools(): ButlerToolDefinition[] {
         const label = requiredString(input, 'label');
         const enabled = typeof input.enabled === 'boolean' ? input.enabled : true;
         return createReminder.call(context.workspace, { time, label, enabled });
+      }
+    },
+    {
+      name: 'save_review',
+      description:
+        '保存一次复盘，并在有工作区时同步更新记忆。日期省略时使用今天；workspaceId 省略时使用当前项目。',
+      parameters: {
+        type: 'object',
+        properties: {
+          date: { type: 'string', description: '复盘日期 YYYY-MM-DD，省略为今天' },
+          workspaceId: { type: 'string', description: '项目 ID；省略时使用当前项目' },
+          completed: { type: 'string', description: '今天完成了什么' },
+          stuck: { type: 'string', description: '卡在哪里' },
+          tomorrow: { type: 'string', description: '明天想怎么调整' }
+        },
+        additionalProperties: false
+      },
+      async execute(input, context) {
+        const date = optionalString(input, 'date') ?? formatLocalDate(context.now());
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+          throw new ToolInputError('date 必须是 YYYY-MM-DD。');
+        }
+        const workspaceId = optionalString(input, 'workspaceId') ?? context.workspaceId;
+        const answers = {
+          completed: optionalString(input, 'completed') ?? '',
+          stuck: optionalString(input, 'stuck') ?? '',
+          tomorrow: optionalString(input, 'tomorrow') ?? ''
+        };
+        await context.workspace.submitReview({
+          date,
+          ...(workspaceId ? { workspaceId } : {}),
+          answers
+        });
+        if (!context.memory || !workspaceId) {
+          return { date, workspaceId: workspaceId ?? null, answers, memory: [], generatedBy: null };
+        }
+        try {
+          const result = await context.memory.synthesizeFromReview({
+            workspaceId,
+            date,
+            answers
+          });
+          return {
+            date,
+            workspaceId,
+            answers,
+            memory: result.items,
+            generatedBy: result.generatedBy
+          };
+        } catch (error) {
+          return {
+            date,
+            workspaceId,
+            answers,
+            memory: [],
+            generatedBy: null,
+            memoryError: describeError(error)
+          };
+        }
+      }
+    },
+    {
+      name: 'plan_workspace',
+      description:
+        '用工作区 planner 生成一份今日/本周计划，并把计划中的任务写入当前项目。适合用户说「帮我排计划」时使用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          workspaceId: { type: 'string', description: '项目 ID；省略时使用当前项目' },
+          date: { type: 'string', description: '计划日期 YYYY-MM-DD，省略为今天' },
+          availableMinutes: { type: 'number', minimum: 1, description: '今天可用总分钟数' }
+        },
+        additionalProperties: false
+      },
+      async execute(input, context) {
+        const workspaceId = optionalString(input, 'workspaceId') ?? context.workspaceId;
+        if (!workspaceId) {
+          throw new ToolInputError('缺少 workspaceId：请先创建或选择项目。');
+        }
+        if (!context.planner) {
+          throw new ToolInputError('当前没有可用的计划生成器。');
+        }
+        const date = optionalString(input, 'date');
+        const availableMinutes = optionalNumber(input, 'availableMinutes');
+        const plan = await context.planner.plan({
+          workspaceId,
+          ...(date ? { date } : {}),
+          ...(availableMinutes !== undefined ? { availableMinutes } : {})
+        });
+        const tasks = [];
+        for (const task of plan.tasks) {
+          tasks.push(
+            await context.workspace.createTask({
+              workspaceId,
+              title: task.title,
+              subject: task.subject,
+              durationMin: task.durationMin,
+              acceptance: task.acceptance
+            })
+          );
+        }
+        return {
+          workspaceId,
+          date: plan.date,
+          generatedBy: plan.generatedBy,
+          tasks
+        };
+      }
+    },
+    {
+      name: 'update_workspace',
+      description:
+        '更新当前项目的名称、目标或说明。只在用户明确要求修改项目信息时使用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          workspaceId: { type: 'string', description: '项目 ID；省略时使用当前项目' },
+          name: { type: 'string', description: '新的项目名称' },
+          goal: { type: 'string', description: '新的项目目标' },
+          description: { type: 'string', description: '新的项目说明' }
+        },
+        additionalProperties: false
+      },
+      async execute(input, context) {
+        const workspaceId = optionalString(input, 'workspaceId') ?? context.workspaceId;
+        if (!workspaceId) {
+          throw new ToolInputError('缺少 workspaceId：请先创建或选择项目。');
+        }
+        const update = context.workspace.updateWorkspace;
+        if (!update) {
+          throw new ToolInputError('当前工作区不支持更新项目。');
+        }
+        const name = optionalString(input, 'name');
+        const goal = optionalString(input, 'goal');
+        const description = optionalString(input, 'description');
+        if (name === undefined && goal === undefined && description === undefined) {
+          throw new ToolInputError('至少提供 name / goal / description 之一。');
+        }
+        return update.call(context.workspace, {
+          workspaceId,
+          ...(name !== undefined ? { name } : {}),
+          ...(goal !== undefined ? { goal } : {}),
+          ...(description !== undefined ? { description } : {})
+        });
       }
     },
     {

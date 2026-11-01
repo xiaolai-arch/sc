@@ -10,6 +10,7 @@ import type {
   Reminder,
   SubmitReviewInput,
   UpdateReminderInput,
+  UpdateWorkspaceInput,
   UpdateWorkspaceNoteInput,
   UpdateWorkspaceTaskInput,
   Workspace,
@@ -253,6 +254,35 @@ export function createWorkspaceService(
         await writeFileAtomic(workspaceFile(vaultRoot, workspace.id), serializeWorkspaceFile(workspace));
       });
       return workspace;
+    },
+
+    async updateWorkspace(input: UpdateWorkspaceInput): Promise<Workspace> {
+      await ensureVault();
+      const workspaceId = requireString(input?.workspaceId, 'Workspace id');
+      const name =
+        input?.name !== undefined ? requireString(input.name, 'Workspace name') : undefined;
+      const goal =
+        input?.goal !== undefined ? optionalString(input.goal) : undefined;
+      const description =
+        input?.description !== undefined ? optionalString(input.description) : undefined;
+      if (name === undefined && goal === undefined && description === undefined) {
+        throw new Error('No workspace fields to update');
+      }
+      return runExclusively(async () => {
+        const current = await readWorkspaceOrThrow(workspaceId);
+        const next: Workspace = {
+          ...current,
+          ...(name !== undefined ? { name } : {}),
+          ...(goal !== undefined ? { goal } : {}),
+          ...(description !== undefined ? { description } : {}),
+          updatedAt: new Date().toISOString()
+        };
+        await writeFileAtomic(
+          workspaceFile(vaultRoot, workspaceId),
+          serializeWorkspaceFile(next)
+        );
+        return next;
+      });
     },
 
     async getWorkspaceSnapshot(workspaceId: string): Promise<WorkspaceSnapshot> {
