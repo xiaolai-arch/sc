@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-01-conversation-first-butler-design.md`
 
+> **Status (2026-11-01):** Tasks 1–6 implemented. `npm run typecheck` + 329 unit tests + Electron e2e + `npm run package` pass. The old six-page shell is no longer rendered; its components remain available for future modals/cleanup.
+
 ## Global Constraints
 
 - 本地优先；对话存 `userData/conversations/`，项目数据继续在 vault；不写日志、不写遥测。
