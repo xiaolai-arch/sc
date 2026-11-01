@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
+import { formatLocalDate } from '../../shared/date';
 import type {
   LocalCliAgent,
   NotificationSettings,
   ProviderConfig
 } from '../../shared/types';
+import type { UsageSummary } from '../../shared/usage';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { CheckIcon } from '../ui/icons';
@@ -37,6 +39,12 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
   const [apiKey, setApiKey] = useState('');
   const [sessions, setSessions] = useState('4');
   const [tokens, setTokens] = useState('200000');
+  const [inputPrice, setInputPrice] = useState('0');
+  const [outputPrice, setOutputPrice] = useState('0');
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
+  const [usageError, setUsageError] = useState<string | null>(null);
+  const [confirmClearUsage, setConfirmClearUsage] = useState(false);
+  const [clearingUsage, setClearingUsage] = useState(false);
   const [notifications, setNotifications] = useState<NotificationSettings>({
     enabled: true,
     morning: '08:00',
@@ -60,7 +68,14 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
     }
     setLoadError(null);
     try {
-      const value = await api.getSettings();
+      const usagePromise: Promise<UsageSummary | null> =
+        typeof api.getUsageSummary === 'function'
+          ? api.getUsageSummary(7).catch((cause: unknown) => {
+              setUsageError(cause instanceof Error ? cause.message : '用量读取失败。');
+              return null;
+            })
+          : Promise.resolve(null);
+      const [value, usageSummary] = await Promise.all([api.getSettings(), usagePromise]);
       setKind(value.provider.kind);
       setModel(value.provider.model ?? '');
       setBaseURL('baseURL' in value.provider ? value.provider.baseURL : '');
@@ -71,6 +86,9 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
       }
       setSessions(String(value.budget.proactiveSessionsPerDay));
       setTokens(String(value.budget.dailyTokens));
+      setInputPrice(String(value.budget.inputPricePerMillion ?? 0));
+      setOutputPrice(String(value.budget.outputPricePerMillion ?? 0));
+      setUsage(usageSummary);
       setNotifications({
         enabled: value.notifications.enabled ?? true,
         morning: value.notifications.morning ?? '08:00',
@@ -115,6 +133,8 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
     setStatus(null);
     const sessionsNumber = Number(sessions);
     const tokensNumber = Number(tokens);
+    const inputPriceNumber = Number(inputPrice);
+    const outputPriceNumber = Number(outputPrice);
     if (kind !== 'local-cli' && !model.trim()) {
       setError('请填写模型名称。');
       return;
@@ -135,6 +155,14 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
       setError('每日 token 上限需为非负整数。');
       return;
     }
+    if (!Number.isFinite(inputPriceNumber) || inputPriceNumber < 0) {
+      setError('输入价格需为非负数字。');
+      return;
+    }
+    if (!Number.isFinite(outputPriceNumber) || outputPriceNumber < 0) {
+      setError('输出价格需为非负数字。');
+      return;
+    }
     setSaving(true);
     try {
       const provider: ProviderConfig =
@@ -153,7 +181,9 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
         provider,
         budget: {
           proactiveSessionsPerDay: sessionsNumber,
-          dailyTokens: tokensNumber
+          dailyTokens: tokensNumber,
+          inputPricePerMillion: inputPriceNumber,
+          outputPricePerMillion: outputPriceNumber
         },
         notifications,
         launchAtLogin
@@ -170,12 +200,37 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
     }
   }
 
+  async function clearUsage() {
+    const api = window.studyCoach;
+    if (!api || typeof api.clearUsage !== 'function') return;
+    setClearingUsage(true);
+    setUsageError(null);
+    try {
+      await api.clearUsage();
+      setConfirmClearUsage(false);
+      if (typeof api.getUsageSummary === 'function') {
+        setUsage(await api.getUsageSummary(7));
+      }
+    } catch (cause) {
+      setUsageError(cause instanceof Error ? cause.message : '清空用量失败，请重试。');
+    } finally {
+      setClearingUsage(false);
+    }
+  }
+
   function resetPrototype() {
     if (!window.studyCoachPrototype) return;
     if (window.confirm('清除原型数据并重新开始？')) {
       window.studyCoachPrototype.reset();
     }
   }
+
+  const today = formatLocalDate(new Date());
+  const todayUsage = usage?.days.find((day) => day.date === today) ?? {
+    inputTokens: 0,
+    outputTokens: 0,
+    calls: 0
+  };
 
   return (
     <div>
@@ -368,7 +423,103 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
                   onChange={(event) => setTokens(event.target.value)}
                 />
               </div>
+              <div>
+                <Label htmlFor="settings-input-price">输入价格（元/百万 token）</Label>
+                <Input
+                  id="settings-input-price"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={inputPrice}
+                  onChange={(event) => setInputPrice(event.target.value)}
+                />
+              </div>
+              <div>
+                <Label htmlFor="settings-output-price">输出价格（元/百万 token）</Label>
+                <Input
+                  id="settings-output-price"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={outputPrice}
+                  onChange={(event) => setOutputPrice(event.target.value)}
+                />
+              </div>
             </div>
+          </Card>
+
+          <Card id="settings-usage">
+            <h3 className="text-xl font-semibold tracking-tight text-black md:text-2xl">
+              用量与成本
+            </h3>
+            <p className="mt-2 text-gray-600">本地统计，只记录 token 与调用次数，不上传。</p>
+            {usageError ? (
+              <p role="alert" className="mt-3 text-sm text-[#d70015]">
+                {usageError}
+              </p>
+            ) : null}
+            {usage === null || usage.totals.calls === 0 ? (
+              <p className="mt-4 text-sm text-gray-600">
+                还没有用量记录。和管家对话后这里会显示本地统计。
+              </p>
+            ) : (
+              <>
+                <div className="mt-6 grid gap-5 md:grid-cols-2">
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">今日</p>
+                    <p className="mt-1 text-sm text-black">
+                      输入 {todayUsage.inputTokens} · 输出 {todayUsage.outputTokens} · 调用{' '}
+                      {todayUsage.calls}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">最近 7 天</p>
+                    <p className="mt-1 text-sm text-black">
+                      输入 {usage.totals.inputTokens} · 输出 {usage.totals.outputTokens} · 调用{' '}
+                      {usage.totals.calls}
+                    </p>
+                  </div>
+                </div>
+                <p className="mt-4 text-sm text-gray-600">
+                  {usage.estimatedCost === null
+                    ? '设置单价后可估算成本'
+                    : `估算成本 ¥${usage.estimatedCost.toFixed(2)}`}
+                </p>
+                <div className="mt-4 divide-y divide-gray-100">
+                  {usage.days.map((day) => (
+                    <div
+                      key={day.date}
+                      className="flex items-center justify-between gap-3 py-1.5 text-xs text-gray-600"
+                    >
+                      <span>{day.date}</span>
+                      <span>
+                        输入 {day.inputTokens} · 输出 {day.outputTokens} · {day.calls} 次
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 flex justify-end">
+                  {confirmClearUsage ? (
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      disabled={clearingUsage}
+                      onClick={() => void clearUsage()}
+                    >
+                      确认清空
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setConfirmClearUsage(true)}
+                    >
+                      清空用量
+                    </Button>
+                  )}
+                </div>
+              </>
+            )}
           </Card>
 
           <Card id="settings-notifications">
