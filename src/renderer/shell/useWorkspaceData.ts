@@ -263,16 +263,21 @@ export function useWorkspaceData(): WorkspaceData {
   const generatePlan = useCallback(async (workspaceId: string) => {
     const api = apiOrThrow();
     const plan = await api.planWorkspace({ workspaceId });
+    // Regenerating the same goal must not duplicate tasks already in the workspace.
+    const snapshot = await api.getWorkspaceSnapshot(workspaceId);
+    const existing = new Set(snapshot.tasks.map((task) => task.title.trim()));
     const created = await Promise.all(
-      plan.tasks.map((task) =>
-        api.createTask({
-          workspaceId,
-          title: task.title,
-          subject: task.subject,
-          durationMin: task.durationMin,
-          acceptance: task.acceptance
-        })
-      )
+      plan.tasks
+        .filter((task) => !existing.has(task.title.trim()))
+        .map((task) =>
+          api.createTask({
+            workspaceId,
+            title: task.title,
+            subject: task.subject,
+            durationMin: task.durationMin,
+            acceptance: task.acceptance
+          })
+        )
     );
     setState((current) => ({ ...current, tasks: [...created, ...current.tasks] }));
     return plan;

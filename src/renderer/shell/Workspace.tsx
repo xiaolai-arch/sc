@@ -78,6 +78,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     createNote,
     submitPracticeAnswer,
     generatePlan,
+    searchWorkspace,
     send,
     submitReview
   } = useWorkspaceData();
@@ -190,6 +191,13 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
       setActionError(messageOf(cause));
       throw cause;
     }
+  }
+
+  async function handleSearch(query: string) {
+    const ids = workspaceId !== null ? [workspaceId] : workspaces.map((workspace) => workspace.id);
+    if (ids.length === 0) return [];
+    const batches = await Promise.all(ids.map((id) => searchWorkspace(id, query)));
+    return batches.flat().sort((a, b) => b.score - a.score).slice(0, 20);
   }
 
   async function sendMessage(text: string) {
@@ -379,6 +387,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
                 onSelectNote={setSelectedNoteId}
                 onOpenChat={() => setView('chat')}
                 onCreateNote={handleCreateNote}
+                onSearch={handleSearch}
               />
             ) : view === 'learn' ? (
               <LearningPane

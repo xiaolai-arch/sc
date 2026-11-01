@@ -213,3 +213,19 @@ test('shows recent notes, tasks, practice and review activity in the records sur
   expect(screen.getByText(/条复盘/)).toHaveTextContent('1 条复盘');
   expect(screen.getByText('极限基础 3 题 · 答对')).toBeInTheDocument();
 });
+
+test('searches the vault from the records surface and opens a note hit', async () => {
+  setup();
+  await screen.findByText('早上好，xiaolai。');
+  await userEvent.click(screen.getByRole('button', { name: '记录' }));
+  await userEvent.type(screen.getByLabelText('搜索全库'), '洛必达');
+  await userEvent.click(screen.getByRole('button', { name: '搜索' }));
+
+  expect((await screen.findAllByText(/洛必达法则的适用条件/)).length).toBeGreaterThan(0);
+  await userEvent.click(
+    screen.getByRole('button', { name: '笔记：错题：洛必达法则的适用条件' })
+  );
+  expect(
+    await screen.findByRole('heading', { name: '错题：洛必达法则的适用条件' })
+  ).toBeInTheDocument();
+});
