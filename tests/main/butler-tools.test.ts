@@ -110,6 +110,66 @@ test('creates a task in the current workspace by default', async () => {
   });
 });
 
+test('creates a task pinned to a start time', async () => {
+  const createTask = vi.fn(async (input: { workspaceId: string; startAt?: string }) => ({
+    id: 'task-1',
+    ...input,
+    title: '真题',
+    status: 'pending'
+  }));
+  const result = await executeButlerTool(
+    {
+      id: 'c2b',
+      name: 'create_task',
+      arguments: {
+        title: '真题',
+        subject: '数学',
+        durationMin: 45,
+        startAt: '2026-11-01T14:00'
+      }
+    },
+    tools,
+    {
+      ...context,
+      workspace: { ...workspaceService, createTask } as unknown as WorkspaceService
+    }
+  );
+
+  expect(result.ok).toBe(true);
+  expect(createTask).toHaveBeenCalledWith(
+    expect.objectContaining({ startAt: '2026-11-01T14:00' })
+  );
+});
+
+test('reschedules a task without changing its status', async () => {
+  const updateWorkspaceTask = vi.fn(async (input: { taskId: string; startAt?: string }) => ({
+    id: input.taskId,
+    status: 'pending',
+    startAt: input.startAt
+  }));
+  const result = await executeButlerTool(
+    {
+      id: 'c2c',
+      name: 'update_task',
+      arguments: { taskId: 't-1', startAt: '2026-11-01T15:30' }
+    },
+    tools,
+    {
+      ...context,
+      workspace: {
+        ...workspaceService,
+        updateWorkspaceTask
+      } as unknown as WorkspaceService
+    }
+  );
+
+  expect(result.ok).toBe(true);
+  expect(updateWorkspaceTask).toHaveBeenCalledWith({
+    taskId: 't-1',
+    startAt: '2026-11-01T15:30'
+  });
+});
+
 test('sets a global reminder', async () => {
   const result = await executeButlerTool(
     {

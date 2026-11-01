@@ -28,6 +28,8 @@ export interface WorkspaceTask {
   status: WorkspaceTaskStatus;
   actualMin?: number;
   due?: string;
+  /** Local start time (YYYY-MM-DDTHH:mm) pinned on the daily schedule. */
+  startAt?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -99,12 +101,16 @@ export interface CreateTaskInput {
   durationMin: number;
   acceptance: string;
   due?: string;
+  /** Local start time (YYYY-MM-DDTHH:mm) to pin on the daily schedule. */
+  startAt?: string;
 }
 
 export interface UpdateWorkspaceTaskInput {
   taskId: string;
-  status: WorkspaceTaskStatus;
+  status?: WorkspaceTaskStatus;
   actualMin?: number;
+  /** Local start time to pin; null clears the pin. */
+  startAt?: string | null;
 }
 
 export interface CreateNoteInput {
@@ -176,6 +182,8 @@ export interface WorkspaceService {
   updateNote(input: UpdateWorkspaceNoteInput): Promise<WorkspaceNote>;
   getMemory(workspaceId?: string): Promise<MemoryItem[]>;
   getReminders(): Promise<Reminder[]>;
+  /** Open tasks pinned to a start time, used by the scheduler. */
+  getScheduledTasks?(): Promise<WorkspaceTask[]>;
   createReminder?(input: CreateReminderInput): Promise<Reminder>;
   updateReminder?(input: UpdateReminderInput): Promise<Reminder>;
   submitReview(input: SubmitReviewInput): Promise<void>;

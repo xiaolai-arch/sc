@@ -926,6 +926,7 @@ export function createMockApi(
         acceptance: input.acceptance,
         status: 'pending',
         due: input.due,
+        ...(input.startAt ? { startAt: input.startAt } : {}),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -937,7 +938,9 @@ export function createMockApi(
     async updateWorkspaceTask(input: UpdateWorkspaceTaskInput): Promise<WorkspaceTask> {
       const task = state.tasks.find((entry) => entry.id === input.taskId);
       if (!task) throw new Error('任务不存在');
-      task.status = input.status;
+      if (input.status !== undefined) task.status = input.status;
+      if (input.startAt === null) delete task.startAt;
+      else if (input.startAt !== undefined) task.startAt = input.startAt;
       if (input.actualMin !== undefined) task.actualMin = input.actualMin;
       task.updatedAt = new Date().toISOString();
       persist();

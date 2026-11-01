@@ -53,3 +53,29 @@ test('includes workspace and task ids so check-ins can call project tools', () =
   expect(prompt).toContain('ID：kaoyan');
   expect(prompt).toContain('ID：t-1');
 });
+
+test('shows pinned start times and teaches the butler to reschedule', () => {
+  expect(BUTLER_SYSTEM_PROMPT).toContain('startAt');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('update_task');
+
+  const prompt = buildSystemPrompt({
+    now: new Date('2026-11-01T12:00:00.000Z'),
+    workspaces: [],
+    tasks: [
+      {
+        id: 't-1',
+        workspaceId: 'kaoyan',
+        title: '极限',
+        subject: '数学',
+        durationMin: 45,
+        acceptance: '完成 10 题',
+        status: 'pending',
+        startAt: '2026-11-01T09:00'
+      }
+    ],
+    memory: [],
+    contextError: false
+  });
+
+  expect(prompt).toContain('09:00 开始');
+});

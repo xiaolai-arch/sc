@@ -48,6 +48,25 @@ export function createContextScheduler(options: ContextSchedulerOptions): Schedu
   const schedulerOptions: SchedulerOptions = {
     getSettings: () => options.context.settings.get(),
     getReminders: () => options.context.workspace.getReminders(),
+    // Read only task files; snapshots would also load notes and memory on
+    // every 30-second tick. The snapshot path is a fallback for implementations
+    // that do not expose the lightweight query.
+    getScheduledTasks: async () => {
+      if (options.context.workspace.getScheduledTasks) {
+        return options.context.workspace.getScheduledTasks();
+      }
+      const workspaces = await options.context.api.listWorkspaces();
+      const snapshots = await Promise.all(
+        workspaces.map((workspace) => options.context.api.getWorkspaceSnapshot(workspace.id))
+      );
+      return snapshots
+        .flatMap((snapshot) => snapshot.tasks)
+        .filter(
+          (task) =>
+            task.startAt !== undefined &&
+            (task.status === 'pending' || task.status === 'in-progress')
+        );
+    },
     notify: options.notify,
     onCheckIn: (kind, date) => options.context.checkIns.check(kind, date),
     ...(options.onEveningReview ? { onEveningReview: options.onEveningReview } : {}),

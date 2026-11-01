@@ -1,6 +1,6 @@
 import { formatLocalDate } from '../../shared/date';
 import type { AppSettings } from '../../shared/types';
-import type { Reminder } from '../../shared/workspace';
+import type { Reminder, WorkspaceTask } from '../../shared/workspace';
 import {
   isTimeReached,
   notificationState,
@@ -11,7 +11,8 @@ export type SchedulerTriggerKind =
   | 'morning-plan'
   | 'evening-review'
   | 'weekly-review'
-  | 'reminder';
+  | 'reminder'
+  | 'task';
 
 export interface SchedulerNotification {
   /** Stable per calendar day so a trigger can only be delivered once. */
@@ -22,6 +23,7 @@ export interface SchedulerNotification {
   title: string;
   body: string;
   reminderId?: string;
+  taskId?: string;
   conversationId?: string;
 }
 
@@ -43,6 +45,8 @@ export interface SchedulerOptions {
   getSettings: () => Promise<AppSettings>;
   /** Vault-global reminders (`Reminder` has no workspace id in the contract). */
   getReminders?: () => Promise<Reminder[]>;
+  /** Tasks pinned to a start time on today's schedule. */
+  getScheduledTasks?: () => Promise<WorkspaceTask[]>;
   notify: (notification: SchedulerNotification) => void | Promise<void>;
   /** Called once before the morning notification is shown. */
   onMorningPlan?: (date: string) => void | Promise<void>;
@@ -68,6 +72,7 @@ interface Trigger {
   title: string;
   body: string;
   reminderId?: string;
+  taskId?: string;
   conversationId?: string;
 }
 
@@ -77,7 +82,12 @@ function keyFor(date: string, trigger: Trigger): string {
   return `${date}:${trigger.kind}:${trigger.id}`;
 }
 
-function buildTriggers(settings: AppSettings, reminders: Reminder[]): Trigger[] {
+function buildTriggers(
+  settings: AppSettings,
+  reminders: Reminder[],
+  tasks: WorkspaceTask[] = [],
+  date = ''
+): Trigger[] {
   const triggers: Trigger[] = [
     {
       kind: 'morning-plan',
@@ -126,6 +136,21 @@ function buildTriggers(settings: AppSettings, reminders: Reminder[]): Trigger[] 
     });
   }
 
+  for (const task of tasks) {
+    if (task.status !== 'pending' && task.status !== 'in-progress') continue;
+    const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})$/.exec(task.startAt ?? '');
+    if (match === null || match[1] !== date) continue;
+    const time = `${match[2]}:${match[3]}`;
+    triggers.push({
+      kind: 'task',
+      id: task.id,
+      time,
+      title: `现在该做：${task.title}`,
+      body: `${task.subject} · 预计 ${Math.max(task.durationMin, 0)} 分钟`,
+      taskId: task.id
+    });
+  }
+
   return triggers;
 }
 
@@ -143,6 +168,7 @@ export class Scheduler {
   private readonly now: () => Date;
   private readonly getSettings: () => Promise<AppSettings>;
   private readonly getReminders: () => Promise<Reminder[]>;
+  private readonly getScheduledTasks: () => Promise<WorkspaceTask[]>;
   private readonly notify: (notification: SchedulerNotification) => void | Promise<void>;
   private readonly onMorningPlan: ((date: string) => void | Promise<void>) | undefined;
   private readonly onEveningReview: ((date: string) => void | Promise<void>) | undefined;
@@ -161,6 +187,7 @@ export class Scheduler {
     this.now = options.now ?? (() => new Date());
     this.getSettings = options.getSettings;
     this.getReminders = options.getReminders ?? (async () => []);
+    this.getScheduledTasks = options.getScheduledTasks ?? (async () => []);
     this.notify = options.notify;
     this.onMorningPlan = options.onMorningPlan;
     this.onEveningReview = options.onEveningReview;
@@ -189,11 +216,18 @@ export class Scheduler {
       // A broken reminder file must not stop the morning/evening triggers.
       reminders = [];
     }
+    let scheduledTasks: WorkspaceTask[] = [];
+    try {
+      scheduledTasks = await this.getScheduledTasks();
+    } catch {
+      // A broken task file must not stop the morning/evening triggers either.
+      scheduledTasks = [];
+    }
 
     const result: SchedulerTickResult = { delivered: [], suppressed: [], failed: [] };
     const state = notificationState(settings, at);
 
-    for (const trigger of buildTriggers(settings, reminders)) {
+    for (const trigger of buildTriggers(settings, reminders, scheduledTasks, date)) {
       if (trigger.dayOfWeek !== undefined && at.getDay() !== trigger.dayOfWeek) continue;
       if (
         trigger.kind === 'reminder' &&
@@ -219,7 +253,8 @@ export class Scheduler {
         scheduledTime: trigger.time,
         title: trigger.title,
         body: trigger.body,
-        ...(trigger.reminderId ? { reminderId: trigger.reminderId } : {})
+        ...(trigger.reminderId ? { reminderId: trigger.reminderId } : {}),
+        ...(trigger.taskId ? { taskId: trigger.taskId } : {})
       };
 
       try {

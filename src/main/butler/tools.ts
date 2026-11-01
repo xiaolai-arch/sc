@@ -106,7 +106,11 @@ export function createButlerTools(): ButlerToolDefinition[] {
           subject: { type: 'string', description: '科目或主题' },
           durationMin: { type: 'number', minimum: 1, description: '预计时长（分钟）' },
           acceptance: { type: 'string', description: '验收标准' },
-          due: { type: 'string', description: '可选截止日期，YYYY-MM-DD' }
+          due: { type: 'string', description: '可选截止日期，YYYY-MM-DD' },
+          startAt: {
+            type: 'string',
+            description: '可选开始时间，YYYY-MM-DDTHH:mm（本地时间），用于固定到今日时间表'
+          }
         },
         required: ['title', 'durationMin'],
         additionalProperties: false
@@ -121,13 +125,15 @@ export function createButlerTools(): ButlerToolDefinition[] {
         const durationMin = requiredPositiveNumber(input, 'durationMin');
         const acceptance = optionalString(input, 'acceptance') ?? '完成并记录结果';
         const due = optionalString(input, 'due');
+        const startAt = optionalString(input, 'startAt');
         return context.workspace.createTask({
           workspaceId,
           title,
           subject,
           durationMin,
           acceptance,
-          ...(due ? { due } : {})
+          ...(due ? { due } : {}),
+          ...(startAt ? { startAt } : {})
         });
       }
     },
@@ -401,7 +407,7 @@ export function createButlerTools(): ButlerToolDefinition[] {
     {
       name: 'update_task',
       description:
-        '更新任务状态（pending / in-progress / done / skipped），可以同时记录实际用时（分钟）。',
+        '更新任务状态（pending / in-progress / done / skipped）、记录实际用时，或把任务固定到某个开始时间（startAt）。',
       parameters: {
         type: 'object',
         properties: {
@@ -411,19 +417,29 @@ export function createButlerTools(): ButlerToolDefinition[] {
             enum: [...TASK_STATUSES],
             description: '新的任务状态'
           },
-          actualMin: { type: 'number', minimum: 0, description: '实际用时（分钟）' }
+          actualMin: { type: 'number', minimum: 0, description: '实际用时（分钟）' },
+          startAt: {
+            type: 'string',
+            description: '开始时间，YYYY-MM-DDTHH:mm（本地时间）；传 null 清除固定时间'
+          }
         },
-        required: ['taskId', 'status'],
+        required: ['taskId'],
         additionalProperties: false
       },
       async execute(input, context) {
         const taskId = requiredString(input, 'taskId');
-        const status = requiredTaskStatus(input);
+        const status = input.status === undefined ? undefined : requiredTaskStatus(input);
         const actualMin = optionalNumber(input, 'actualMin');
+        const startAt =
+          input.startAt === null ? null : optionalString(input, 'startAt');
+        if (status === undefined && startAt === undefined && actualMin === undefined) {
+          throw new ToolInputError('请提供 status、startAt 或 actualMin 中的至少一项。');
+        }
 
         return context.workspace.updateWorkspaceTask({
           taskId,
-          status,
+          ...(status !== undefined ? { status } : {}),
+          ...(startAt !== undefined ? { startAt } : {}),
           ...(actualMin !== undefined ? { actualMin } : {})
         });
       }

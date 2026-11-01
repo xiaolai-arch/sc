@@ -23,6 +23,7 @@ import { createMutex, listDirectories, listMarkdownFiles, readFileOrNull, writeF
 import { newId, slugify, uniqueFileName } from './ids';
 import {
   assertIsoDate,
+  assertLocalDateTime,
   assertSafeSegment,
   memoryFile,
   notesDir,
@@ -332,6 +333,10 @@ export function createWorkspaceService(
       await readWorkspaceOrThrow(workspaceId);
       const title = requireString(input?.title, 'Task title');
       const due = input?.due === undefined ? undefined : assertIsoDate(input.due, 'task due date');
+      const startAt =
+        input?.startAt === undefined
+          ? undefined
+          : assertLocalDateTime(input.startAt, 'task start time');
       const record: TaskRecord = {
         id: newId('t'),
         title,
@@ -344,10 +349,11 @@ export function createWorkspaceService(
         acceptance: optionalString(input?.acceptance) ?? '',
         status: 'pending',
         due,
+        ...(startAt ? { startAt } : {}),
         created: new Date().toISOString(),
         updated: new Date().toISOString()
       };
-      const date = due ?? formatLocalDate(new Date());
+      const date = startAt?.slice(0, 10) ?? due ?? formatLocalDate(new Date());
       await runExclusively(async () => {
         const existingRaw = await readFileOrNull(taskFile(vaultRoot, workspaceId, date));
         const records = existingRaw === null ? [] : parseTaskFile(existingRaw);
@@ -366,8 +372,15 @@ export function createWorkspaceService(
       await ensureVault();
       const taskId = requireString(input?.taskId, 'Task id');
       assertSafeSegment(taskId, 'task id');
+      const hasStatus = input?.status !== undefined;
+      const hasStartAt = input?.startAt !== undefined;
+      if (!hasStatus && !hasStartAt) throw new Error('No task fields to update');
       const status = input?.status;
-      if (!isTaskStatus(status)) throw new Error('Invalid task status');
+      if (hasStatus && !isTaskStatus(status)) throw new Error('Invalid task status');
+      const startAt =
+        input?.startAt === undefined || input.startAt === null
+          ? input?.startAt
+          : assertLocalDateTime(input.startAt, 'task start time');
       const actualMin =
         input?.actualMin === undefined
           ? undefined
@@ -379,7 +392,9 @@ export function createWorkspaceService(
         if (found === null) throw new Error(`Task not found: ${taskId}`);
         const record = found.records[found.index];
         if (record === undefined) throw new Error(`Task not found: ${taskId}`);
-        record.status = status;
+        if (hasStatus) record.status = status as TaskRecord['status'];
+        if (startAt === null) delete record.startAt;
+        else if (startAt !== undefined) record.startAt = startAt;
         record.actualMin = actualMin ?? record.actualMin;
         record.updated = new Date().toISOString();
         await writeFileAtomic(found.path, serializeTaskFile(found.date, found.records));
@@ -458,6 +473,26 @@ export function createWorkspaceService(
     async getReminders(): Promise<Reminder[]> {
       await ensureVault();
       return readReminders();
+    },
+
+    /**
+     * Lightweight task read for the scheduler: only open, pinned tasks, and
+     * only from task files, so a 30-second tick never loads notes or memory.
+     */
+    async getScheduledTasks(): Promise<WorkspaceTask[]> {
+      await ensureVault();
+      const tasks: WorkspaceTask[] = [];
+      for (const workspace of await listWorkspaceRecords()) {
+        for (const task of await readWorkspaceTasks(workspace.id)) {
+          if (
+            task.startAt !== undefined &&
+            (task.status === 'pending' || task.status === 'in-progress')
+          ) {
+            tasks.push(task);
+          }
+        }
+      }
+      return tasks;
     },
 
     async createReminder(input: CreateReminderInput): Promise<Reminder> {

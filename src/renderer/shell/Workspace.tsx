@@ -1114,12 +1114,14 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
 
           {section === 'schedule' ? (
             <SchedulePage
+              today={today}
               dateLabel={dateLabel}
               tasks={tasks}
               workspaces={workspaces}
               onOpenSidebar={() => setSidebarOpen(true)}
               onOpenWorkspace={selectWorkspace}
               onPrompt={promptDaily}
+              onUpdateTask={updateTask}
             />
           ) : null}
 

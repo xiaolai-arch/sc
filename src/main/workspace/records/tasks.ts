@@ -1,3 +1,4 @@
+import { isLocalDateTime } from '../../../shared/date';
 import type { NoteMeta, StudyTask, TaskStatus } from '../../../shared/types';
 import type { WorkspaceTask } from '../../../shared/workspace';
 import { parseNote, serializeNote } from '../../vault/note';
@@ -10,6 +11,7 @@ import { asFiniteNumber, asRecord, asString, asStringArray } from './coerce';
  */
 export type TaskRecord = StudyTask & {
   due?: string;
+  startAt?: string;
   created?: string;
   updated?: string;
 };
@@ -27,6 +29,7 @@ function coerceTask(value: unknown): TaskRecord | null {
   const title = asString(record.title);
   if (!id || !title) return null;
   const status = isTaskStatus(record.status) ? record.status : 'pending';
+  const startAt = record.startAt;
   return {
     id,
     title,
@@ -37,6 +40,7 @@ function coerceTask(value: unknown): TaskRecord | null {
     status,
     actualMin: asFiniteNumber(record.actualMin),
     due: asString(record.due),
+    ...(isLocalDateTime(startAt) ? { startAt } : {}),
     created: asString(record.created),
     updated: asString(record.updated)
   };
@@ -54,7 +58,12 @@ export function serializeTaskFile(date: string, tasks: readonly TaskRecord[]): s
   const meta: NoteMeta = { type: 'plan', source: 'user', date, tasks: [...tasks] };
   const lines = tasks.map((task) => {
     const checked = task.status === 'done' ? 'x' : ' ';
-    const context = [task.subject, task.durationMin > 0 ? `${task.durationMin} 分钟` : '']
+    const start = task.startAt ? `${task.startAt.slice(11, 16)} 开始` : '';
+    const context = [
+      task.subject,
+      task.durationMin > 0 ? `${task.durationMin} 分钟` : '',
+      start
+    ]
       .filter(Boolean)
       .join(' · ');
     const statusLabel =
@@ -77,6 +86,7 @@ export function toWorkspaceTask(record: TaskRecord, workspaceId: string): Worksp
     status: record.status,
     actualMin: record.actualMin,
     due: record.due,
+    ...(record.startAt ? { startAt: record.startAt } : {}),
     createdAt: record.created,
     updatedAt: record.updated
   };

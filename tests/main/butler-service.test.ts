@@ -106,7 +106,11 @@ class MemoryWorkspaceService implements WorkspaceService {
     if (!task) {
       throw new Error(`Task not found: ${input.taskId}`);
     }
-    task.status = input.status;
+    if (input.status !== undefined) task.status = input.status;
+    if (input.startAt !== undefined) {
+      if (input.startAt === null) delete task.startAt;
+      else task.startAt = input.startAt;
+    }
     if (input.actualMin !== undefined) {
       task.actualMin = input.actualMin;
     }

@@ -1,28 +1,71 @@
-import type { Workspace, WorkspaceTask } from '../../shared/workspace';
+import { useState, type PointerEvent as ReactPointerEvent } from 'react';
+import type {
+  UpdateWorkspaceTaskInput,
+  Workspace,
+  WorkspaceTask
+} from '../../shared/workspace';
+import { CheckIcon } from '../ui/icons';
 import { PageFrame } from './PageFrame';
-import { buildDailySchedule } from './schedule';
+import { buildDailySchedule, type ScheduleEntry } from './schedule';
 
 type SchedulePageProps = {
+  today: string;
   dateLabel: string;
   tasks: WorkspaceTask[];
   workspaces: Workspace[];
   onOpenSidebar: () => void;
   onOpenWorkspace: (workspaceId: string) => void;
   onPrompt: (prompt: string) => void;
+  onUpdateTask: (input: UpdateWorkspaceTaskInput) => Promise<WorkspaceTask>;
 };
 
 const ADJUST_PROMPT =
   '帮我调整今天的安排：结合各工作区的待办、优先级和预计时长，重新排一份具体时间表。';
 
+const SNAP_MINUTES = 5;
+const EARLIEST_MINUTES = 5 * 60;
+const LATEST_MINUTES = 23 * 60 + 55;
+
+function toMinutes(time: string): number {
+  const [hour, minute] = time.split(':').map(Number);
+  return (hour ?? 0) * 60 + (minute ?? 0);
+}
+
+function formatTime(minutes: number): string {
+  const hour = String(Math.floor(minutes / 60)).padStart(2, '0');
+  const minute = String(minutes % 60).padStart(2, '0');
+  return `${hour}:${minute}`;
+}
+
+function snapMinutes(minutes: number): number {
+  const snapped = Math.round(minutes / SNAP_MINUTES) * SNAP_MINUTES;
+  return Math.min(Math.max(snapped, EARLIEST_MINUTES), LATEST_MINUTES);
+}
+
+type DragState = {
+  id: string;
+  startY: number;
+  original: number;
+  preview: number;
+};
+
 export function SchedulePage({
+  today,
   dateLabel,
   tasks,
   workspaces,
   onOpenSidebar,
   onOpenWorkspace,
-  onPrompt
+  onPrompt,
+  onUpdateTask
 }: SchedulePageProps) {
-  const { entries, unscheduled } = buildDailySchedule(tasks, workspaces);
+  const [drag, setDrag] = useState<DragState | null>(null);
+  const { entries, unscheduled } = buildDailySchedule(
+    tasks,
+    workspaces,
+    8,
+    new Date(`${today}T00:00:00`)
+  );
   const sourceCounts = new Map<string, number>();
   for (const entry of entries) {
     sourceCounts.set(entry.tag, (sourceCounts.get(entry.tag) ?? 0) + 1);
@@ -30,6 +73,39 @@ export function SchedulePage({
   const sources = [...sourceCounts.entries()]
     .map(([tag, count]) => `${tag} ${count}`)
     .join(' · ');
+
+  function update(input: UpdateWorkspaceTaskInput) {
+    void onUpdateTask(input).catch(() => undefined);
+  }
+
+  function startDrag(entry: ScheduleEntry, event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    const original = toMinutes(entry.time);
+    setDrag({ id: entry.id, startY: event.clientY, original, preview: original });
+  }
+
+  function moveDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (drag === null) return;
+    const delta = event.clientY - drag.startY;
+    const preview = snapMinutes(drag.original + Math.round(delta));
+    if (preview !== drag.preview) setDrag({ ...drag, preview });
+  }
+
+  function endDrag() {
+    if (drag === null) return;
+    const { id, original, preview } = drag;
+    setDrag(null);
+    if (preview === original) return;
+    update({ taskId: id, startAt: `${today}T${formatTime(preview)}` });
+  }
+
+  function nudge(entry: ScheduleEntry, deltaMinutes: number) {
+    const next = snapMinutes(toMinutes(entry.time) + deltaMinutes);
+    if (next === toMinutes(entry.time)) return;
+    update({ taskId: entry.id, startAt: `${today}T${formatTime(next)}` });
+  }
 
   return (
     <PageFrame
@@ -53,7 +129,7 @@ export function SchedulePage({
           </h2>
           <p className="mt-2 text-[13px] leading-6 text-gray-500 dark:text-[#8e8e93]">
             {entries.length > 0
-              ? '阿咲按各工作区的待办和预计时长顺排，可以随时让他调整。'
+              ? '拖动左侧时间可以改时间，点圆点标记完成。'
               : '阿咲还没有排今天的任务。'}
           </p>
         </div>
@@ -61,7 +137,9 @@ export function SchedulePage({
         <section className="rounded-2xl bg-white p-6 shadow-sm dark:bg-[#1c1c1e] md:p-8">
           {entries.length > 0 ? (
             <div className="flex items-center justify-end">
-              <span className="text-[11px] text-gray-400 dark:text-[#8e8e93]">阿咲排的</span>
+              <span className="text-[11px] text-gray-400 dark:text-[#8e8e93]">
+                {entries.some((entry) => entry.pinned) ? '已固定的时间会保留' : '阿咲排的'}
+              </span>
             </div>
           ) : null}
 
@@ -83,41 +161,100 @@ export function SchedulePage({
             </div>
           ) : (
             <ol className="mt-3 divide-y divide-gray-100 dark:divide-white/[0.08]">
-              {entries.map((entry) => (
-                <li key={entry.id} className="flex items-start gap-3 py-3.5">
-                  <span className="w-11 shrink-0 pt-0.5 text-right text-[12px] tabular-nums text-gray-400 dark:text-[#8e8e93]">
-                    {entry.time}
-                  </span>
-                  <span
-                    aria-hidden="true"
-                    className={`mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full ${
-                      entry.status === 'in-progress' ? 'bg-[#0071e3]' : 'bg-gray-300 dark:bg-white/30'
+              {entries.map((entry) => {
+                const dragging = drag?.id === entry.id;
+                const done = entry.status === 'done';
+                const time =
+                  drag !== null && drag.id === entry.id ? formatTime(drag.preview) : entry.time;
+                return (
+                  <li
+                    key={entry.id}
+                    className={`flex items-start gap-3 py-3.5 ${
+                      dragging ? 'rounded-xl bg-[#0071e3]/5 dark:bg-[#0a84ff]/10' : ''
                     }`}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => onOpenWorkspace(entry.workspaceId)}
-                        className="max-w-full truncate text-left text-[14px] font-medium text-[#1d1d1f] transition-colors duration-200 hover:text-[#0071e3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:text-[#f5f5f7] dark:hover:text-[#4da3ff]"
-                      >
-                        {entry.title}
-                      </button>
-                      <span className="shrink-0 rounded-full bg-[#f5f5f7] px-2 py-0.5 text-[11px] text-gray-500 dark:bg-white/[0.08] dark:text-[#a1a1a6]">
-                        {entry.tag}
-                      </span>
-                      {entry.status === 'in-progress' ? (
-                        <span className="shrink-0 rounded-full bg-[#0071e3]/10 px-2 py-0.5 text-[11px] text-[#0071e3] dark:bg-[#0a84ff]/15 dark:text-[#4da3ff]">
-                          进行中
+                  >
+                    <button
+                      type="button"
+                      aria-label={`调整「${entry.title}」的时间`}
+                      title="上下拖动调整时间，或用方向键微调"
+                      onPointerDown={(event) => startDrag(entry, event)}
+                      onPointerMove={moveDrag}
+                      onPointerUp={endDrag}
+                      onPointerCancel={endDrag}
+                      onLostPointerCapture={endDrag}
+                      onKeyDown={(event) => {
+                        if (event.key === 'ArrowUp') {
+                          event.preventDefault();
+                          nudge(entry, -15);
+                        } else if (event.key === 'ArrowDown') {
+                          event.preventDefault();
+                          nudge(entry, 15);
+                        }
+                      }}
+                      className={`w-12 shrink-0 cursor-grab touch-none rounded-lg pt-0.5 text-right text-[12px] tabular-nums transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 active:cursor-grabbing ${
+                        dragging
+                          ? 'text-[#0071e3] dark:text-[#4da3ff]'
+                          : 'text-gray-400 hover:text-[#0071e3] dark:text-[#8e8e93] dark:hover:text-[#4da3ff]'
+                      }`}
+                    >
+                      {time}
+                    </button>
+                    <button
+                      type="button"
+                      role="checkbox"
+                      aria-checked={done}
+                      aria-label={`完成任务：${entry.title}`}
+                      onClick={() =>
+                        // Pin the block when it is checked so the completed or
+                        // reopened task keeps its place for the rest of the day.
+                        update({
+                          taskId: entry.id,
+                          status: done ? 'pending' : 'done',
+                          startAt: entry.startAt ?? `${today}T${entry.time}`
+                        })
+                      }
+                      className={`mt-[3px] flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 ${
+                        done
+                          ? 'border-[#0071e3] bg-[#0071e3] text-white dark:border-[#0a84ff] dark:bg-[#0a84ff]'
+                          : 'border-gray-300 bg-transparent text-transparent hover:border-[#0071e3] dark:border-white/30 dark:hover:border-[#4da3ff]'
+                      }`}
+                    >
+                      <CheckIcon className="h-2.5 w-2.5" />
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onOpenWorkspace(entry.workspaceId)}
+                          className={`max-w-full truncate text-left text-[14px] font-medium transition-colors duration-200 hover:text-[#0071e3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:hover:text-[#4da3ff] ${
+                            done
+                              ? 'text-gray-400 line-through dark:text-[#8e8e93]'
+                              : 'text-[#1d1d1f] dark:text-[#f5f5f7]'
+                          }`}
+                        >
+                          {entry.title}
+                        </button>
+                        <span className="shrink-0 rounded-full bg-[#f5f5f7] px-2 py-0.5 text-[11px] text-gray-500 dark:bg-white/[0.08] dark:text-[#a1a1a6]">
+                          {entry.tag}
                         </span>
-                      ) : null}
+                        {entry.status === 'in-progress' ? (
+                          <span className="shrink-0 rounded-full bg-[#0071e3]/10 px-2 py-0.5 text-[11px] text-[#0071e3] dark:bg-[#0a84ff]/15 dark:text-[#4da3ff]">
+                            进行中
+                          </span>
+                        ) : null}
+                        {entry.pinned ? (
+                          <span className="shrink-0 text-[10px] text-gray-400 dark:text-[#8e8e93]">
+                            已固定
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="mt-0.5 text-[12px] text-gray-500 dark:text-[#8e8e93]">
+                        {entry.detail}
+                      </p>
                     </div>
-                    <p className="mt-0.5 text-[12px] text-gray-500 dark:text-[#8e8e93]">
-                      {entry.detail}
-                    </p>
-                  </div>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ol>
           )}
 

@@ -19,6 +19,8 @@ export const BUTLER_SYSTEM_PROMPT = `你是阿咲，用户的个人管家，同�
 - 用户做完复盘、或主动检查里问到「完成什么 / 卡在哪 / 明天怎么调整」时，用 save_review 保存这次复盘和记忆。
 - 当对话是周复盘、用户回答本周完成 / 卡点 / 下周重点时，先用 save_review 保存这次复盘，再调用 plan_workspace 为下周生成任务；工具失败时如实说明，不要假装已保存或已生成。
 - 用户要改项目名称、目标或说明时调用 update_workspace。
+- 用户要求调整今天的安排时，用 update_task 给任务设置 startAt（YYYY-MM-DDTHH:mm，本地时间），或把时间块挪到合适的空档；没有 startAt 的任务会按顺序自动排入时间表。
+- 安排时间时避开已有 startAt 的任务和用户已说明的固定事项，不要把两个任务排在同一时间。
 - 工具失败时不要假装成功，要向用户说明，并给出不依赖工具的建议。
 - 不要编造用户没有提供的记录；不确定时先问一个简短的问题。
 - 你的名字是阿咲；需要自称时用「阿咲」，不要自称助手或机器人。
@@ -66,8 +68,9 @@ function renderContext(context: ButlerContext): string {
   if (context.tasks.length > 0) {
     lines.push(`任务：共 ${context.tasks.length} 项，未完成 ${activeTasks.length} 项。`);
     for (const task of activeTasks.slice(0, MAX_PROMPT_TASKS)) {
+      const start = task.startAt ? `${task.startAt.slice(11, 16)} 开始；` : '';
       lines.push(
-        `- [${task.status}] ${task.title}（${task.subject}，${task.durationMin} 分钟；验收：${task.acceptance}；ID：${task.id}）`
+        `- [${task.status}] ${task.title}（${task.subject}，${task.durationMin} 分钟；${start}验收：${task.acceptance}；ID：${task.id}）`
       );
     }
     if (activeTasks.length > MAX_PROMPT_TASKS) {

@@ -1,3 +1,4 @@
+import { isLocalDateTime } from '../shared/date';
 import type { AppSettings } from '../shared/types';
 import type { BackupResult, SettingsPatch, StudyCoachApi } from '../shared/ipc';
 import type { ButlerStreamEvent } from '../shared/butler-stream';
@@ -190,13 +191,22 @@ function requireCreateTask(value: unknown): CreateTaskInput {
   if (typeof input.durationMin !== 'number' || !Number.isFinite(input.durationMin) || input.durationMin <= 0) {
     throw new Error('任务时长无效。');
   }
+  if (input.startAt !== undefined && !isLocalDateTime(input.startAt)) {
+    throw new Error('任务开始时间无效。');
+  }
   return input as unknown as CreateTaskInput;
 }
 
 function requireUpdateWorkspaceTask(value: unknown): UpdateWorkspaceTaskInput {
   const input = requireObject(value, '更新任务');
   requireString(input.taskId, '任务 ID');
-  requireTaskStatus(input.status);
+  if (input.status === undefined && input.startAt === undefined) {
+    throw new Error('没有要更新的任务字段。');
+  }
+  if (input.status !== undefined) requireTaskStatus(input.status);
+  if (input.startAt !== undefined && input.startAt !== null && !isLocalDateTime(input.startAt)) {
+    throw new Error('任务开始时间无效。');
+  }
   if (input.actualMin !== undefined && (typeof input.actualMin !== 'number' || input.actualMin < 0)) {
     throw new Error('实际用时无效。');
   }

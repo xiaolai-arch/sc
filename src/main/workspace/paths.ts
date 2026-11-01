@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { isLocalDateTime } from '../../shared/date';
 
 /**
  * Vault layout (Obsidian-readable markdown + YAML frontmatter):
@@ -36,6 +37,14 @@ export function assertIsoDate(value: string, label: string): string {
   ) {
     throw new Error(`Invalid ${label}: expected a YYYY-MM-DD date`);
   }
+  return value;
+}
+
+export function assertLocalDateTime(value: string, label: string): string {
+  if (!isLocalDateTime(value)) {
+    throw new Error(`Invalid ${label}: expected a YYYY-MM-DDTHH:mm local time`);
+  }
+  assertIsoDate(value.slice(0, 10), label);
   return value;
 }
 
