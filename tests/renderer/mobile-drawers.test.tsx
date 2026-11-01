@@ -118,7 +118,7 @@ test('keeps the desktop single-column layout classes', async () => {
   }
   await waitFor(() =>
     expect(screen.getByText(/早上好，xiaolai。/).closest('[class*="max-w-"]')?.className).toContain(
-      'max-w-[760px]'
+      'max-w-[680px]'
     )
   );
 });

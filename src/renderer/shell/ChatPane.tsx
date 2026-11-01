@@ -1,10 +1,5 @@
 import { useEffect, useRef } from 'react';
-import {
-  FolderIcon,
-  MenuIcon,
-  MoreHorizontalIcon,
-  SparklesIcon
-} from '../ui/icons';
+import { FolderIcon, MenuIcon, MoreHorizontalIcon } from '../ui/icons';
 import { Composer } from './Composer';
 import { MarkdownText } from './MarkdownText';
 import { MessageActions } from './MessageActions';
@@ -156,16 +151,11 @@ export function ChatPane({
             </div>
           ) : null}
           <div className="flex flex-1 items-center justify-center px-4 py-10 md:px-6">
-            <div className="w-full max-w-[760px] -translate-y-[3vh]">
+            <div className="w-full max-w-[680px] -translate-y-[3vh]">
               <div className="flex flex-col items-center text-center">
-                <div className="flex items-center gap-3">
-                  <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#1d1d1f] text-white dark:bg-[#f5f5f7] dark:text-[#1d1d1f]">
-                    <SparklesIcon className="h-6 w-6" />
-                  </span>
-                  <span className="text-[30px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
-                    阿咲
-                  </span>
-                </div>
+                <span className="text-[30px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
+                  阿咲
+                </span>
                 <h1 className="mt-6 text-[22px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
                   早上好，xiaolai。
                 </h1>
