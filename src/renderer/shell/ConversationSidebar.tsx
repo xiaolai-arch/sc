@@ -60,6 +60,8 @@ export function ConversationSidebar({
   const [renameText, setRenameText] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -93,6 +95,29 @@ export function ConversationSidebar({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+
+  useEffect(() => {
+    if (menuOpenId === null) return undefined;
+    function dismiss() {
+      setMenuOpenId(null);
+      setConfirmDeleteId(null);
+    }
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (menuRef.current?.contains(target) || menuButtonRef.current?.contains(target)) return;
+      dismiss();
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') dismiss();
+    }
+    document.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [menuOpenId]);
 
   const projectName = (id: string | undefined) =>
     projects.find((project) => project.id === id)?.name;
@@ -250,6 +275,7 @@ export function ConversationSidebar({
 
                   <button
                     type="button"
+                    ref={menuOpenId === conversation.id ? menuButtonRef : undefined}
                     aria-label="对话操作"
                     aria-haspopup="menu"
                     aria-expanded={menuOpenId === conversation.id}
@@ -266,6 +292,7 @@ export function ConversationSidebar({
 
                   {menuOpenId === conversation.id ? (
                     <div
+                      ref={menuRef}
                       role="menu"
                       className="absolute right-1 top-7 z-10 w-28 rounded-lg border border-black/[0.08] bg-white p-1 shadow-lg"
                     >

@@ -150,3 +150,29 @@ test('focuses the conversation search with Cmd+K', async () => {
   fireEvent.keyDown(window, { key: 'k', metaKey: true });
   expect(screen.getByLabelText('搜索对话')).toHaveFocus();
 });
+
+test('closes the conversation menu when clicking outside', async () => {
+  setup();
+  await screen.findByText('早上好，xiaolai。');
+  await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
+  await screen.findAllByText(/我先按截止时间和精力排/);
+
+  await userEvent.click(screen.getByRole('button', { name: '对话操作' }));
+  expect(screen.getByRole('menu')).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: '新对话' }));
+  await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+});
+
+test('closes the conversation menu with Escape', async () => {
+  setup();
+  await screen.findByText('早上好，xiaolai。');
+  await userEvent.click(screen.getByRole('button', { name: '帮我排一下今天的优先级' }));
+  await screen.findAllByText(/我先按截止时间和精力排/);
+
+  await userEvent.click(screen.getByRole('button', { name: '对话操作' }));
+  expect(screen.getByRole('menu')).toBeInTheDocument();
+
+  await userEvent.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+});
