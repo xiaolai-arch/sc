@@ -83,6 +83,41 @@ test('fires once per Sunday and again on the next Sunday', async () => {
   expect(notified).toHaveLength(2);
 });
 
+test('suppresses a user reminder at the weekly recap time', async () => {
+  const now = at(1, 20, 0); // Sunday 20:00
+  const notified: string[] = [];
+  const scheduler = new Scheduler({
+    now: () => now,
+    getSettings: async () => settings(),
+    getReminders: async () => [{ id: 'r1', time: '20:00', label: '拉伸', enabled: true }],
+    notify: (notification) => {
+      notified.push(notification.kind);
+    }
+  });
+
+  const result = await scheduler.tick();
+
+  expect(result.delivered.map((notification) => notification.kind)).toEqual([
+    'weekly-review'
+  ]);
+  expect(notified).toEqual(['weekly-review']);
+});
+
+test('keeps the reminder at that time when the weekly recap is disabled', async () => {
+  const now = at(1, 20, 0);
+  const scheduler = new Scheduler({
+    now: () => now,
+    getSettings: async () => settings({ weeklyEnabled: false }),
+    getReminders: async () => [{ id: 'r1', time: '20:00', label: '拉伸', enabled: true }],
+    notify: () => undefined
+  });
+
+  const result = await scheduler.tick();
+
+  expect(result.delivered).toHaveLength(1);
+  expect(result.delivered[0]).toMatchObject({ kind: 'reminder', reminderId: 'r1' });
+});
+
 test('passes weekly to the check-in callback and forwards its notification', async () => {
   let now = at(1, 20, 0);
   const calls: string[] = [];

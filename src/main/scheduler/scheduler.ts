@@ -106,10 +106,15 @@ function buildTriggers(settings: AppSettings, reminders: Reminder[]): Trigger[] 
     });
   }
 
-  // The seed vault mirrors the built-in morning/evening check-ins as
-  // reminders. The check-ins stay authoritative, so a reminder at the same
-  // minute would otherwise produce a duplicate notification.
-  const checkInTimes = new Set([settings.notifications.morning, settings.notifications.evening]);
+  // The seed vault mirrors the built-in check-ins as reminders. The check-ins
+  // stay authoritative, so a reminder at the same minute would otherwise
+  // produce a duplicate notification. The weekly recap only runs on Sundays,
+  // but a reminder colliding with its time is still skipped while enabled.
+  const checkInTimes = new Set([
+    settings.notifications.morning,
+    settings.notifications.evening,
+    ...(settings.notifications.weeklyEnabled ? [settings.notifications.weekly] : [])
+  ]);
   for (const reminder of reminders) {
     if (!reminder.enabled || checkInTimes.has(reminder.time)) continue;
     triggers.push({
