@@ -436,6 +436,16 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     async getReminders() {
       return (await getServices()).workspace.getReminders();
     },
+    async createReminder(input) {
+      const workspace = (await getServices()).workspace;
+      if (!workspace.createReminder) throw new Error('当前存储不支持提醒。');
+      return workspace.createReminder(input);
+    },
+    async updateReminder(input) {
+      const workspace = (await getServices()).workspace;
+      if (!workspace.updateReminder) throw new Error('当前存储不支持提醒。');
+      return workspace.updateReminder(input);
+    },
     async submitReview(input) {
       const services = await getServices();
       await services.workspace.submitReview(input);

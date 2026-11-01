@@ -7,11 +7,13 @@ import type {
 } from '../shared/conversations';
 import type {
   CreateNoteInput,
+  CreateReminderInput,
   CreateTaskInput,
   CreateWorkspaceInput,
   SendMessageInput,
   SendMessageResult,
   SubmitReviewInput,
+  UpdateReminderInput,
   UpdateWorkspaceNoteInput,
   UpdateWorkspaceTaskInput,
   WorkspaceOnboardingInput
@@ -36,6 +38,8 @@ export const IPC_CHANNELS = {
   updateNote: 'study-coach:workspaces:update-note',
   getMemory: 'study-coach:workspaces:memory',
   getReminders: 'study-coach:reminders:list',
+  createReminder: 'study-coach:reminders:create',
+  updateReminder: 'study-coach:reminders:update',
   submitReview: 'study-coach:review:submit',
   listReviews: 'study-coach:review:list',
   planWorkspace: 'study-coach:planning:plan-workspace',
@@ -172,6 +176,38 @@ function requireUpdateNote(value: unknown): UpdateWorkspaceNoteInput {
   const input = requireObject(value, '更新笔记');
   requireString(input.noteId, '笔记 ID');
   return input as unknown as UpdateWorkspaceNoteInput;
+}
+
+const REMINDER_TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function requireReminderTime(value: unknown): string {
+  const time = requireString(value, '提醒时间');
+  if (!REMINDER_TIME.test(time)) throw new Error('提醒时间格式必须是 HH:MM。');
+  return time;
+}
+
+function requireReminderEnabled(value: unknown): boolean {
+  if (typeof value !== 'boolean') throw new Error('提醒启用状态无效。');
+  return value;
+}
+
+function requireCreateReminder(value: unknown): CreateReminderInput {
+  const input = requireObject(value, '创建提醒');
+  return {
+    time: requireReminderTime(input.time),
+    label: requireString(input.label, '提醒内容'),
+    ...(input.enabled !== undefined ? { enabled: requireReminderEnabled(input.enabled) } : {})
+  };
+}
+
+function requireUpdateReminder(value: unknown): UpdateReminderInput {
+  const input = requireObject(value, '更新提醒');
+  return {
+    id: requireString(input.id, '提醒 ID'),
+    ...(input.time !== undefined ? { time: requireReminderTime(input.time) } : {}),
+    ...(input.label !== undefined ? { label: requireString(input.label, '提醒内容') } : {}),
+    ...(input.enabled !== undefined ? { enabled: requireReminderEnabled(input.enabled) } : {})
+  };
 }
 
 function requireReview(value: unknown): SubmitReviewInput {
@@ -404,6 +440,16 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
     updateNote: async (input) => api.updateNote(requireUpdateNote(input)),
     getMemory: async (input) => api.getMemory(optionalString(input, '工作区 ID')),
     getReminders: async () => api.getReminders(),
+    createReminder: async (input) => {
+      const parsed = requireCreateReminder(input);
+      if (!api.createReminder) throw new Error('当前存储不支持提醒。');
+      return api.createReminder(parsed);
+    },
+    updateReminder: async (input) => {
+      const parsed = requireUpdateReminder(input);
+      if (!api.updateReminder) throw new Error('当前存储不支持提醒。');
+      return api.updateReminder(parsed);
+    },
     submitReview: async (input) => api.submitReview(requireReview(input)),
     listReviews: async (input) => api.listReviews(requireListReviews(input)),
     planWorkspace: async (input) => api.planWorkspace(requirePlanWorkspace(input)),
@@ -584,6 +630,8 @@ export function createStudyCoachBridge(
     updateNote: (input) => call(IPC_CHANNELS.updateNote, input),
     getMemory: (workspaceId) => call(IPC_CHANNELS.getMemory, workspaceId),
     getReminders: () => call(IPC_CHANNELS.getReminders),
+    createReminder: (input) => call(IPC_CHANNELS.createReminder, input),
+    updateReminder: (input) => call(IPC_CHANNELS.updateReminder, input),
     submitReview: (input) => call(IPC_CHANNELS.submitReview, input),
     listReviews: (input) => call(IPC_CHANNELS.listReviews, input),
     planWorkspace: (input) => call(IPC_CHANNELS.planWorkspace, input),
