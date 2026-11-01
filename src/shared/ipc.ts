@@ -92,6 +92,11 @@ export interface ConversationApi {
     message: ConversationMessage
   ): Promise<Conversation>;
   deleteConversation(id: string): Promise<void>;
+  renameConversation(id: string, title: string): Promise<Conversation>;
+  setConversationPinned(id: string, pinned: boolean): Promise<Conversation>;
+  /** Keeps the first `keepCount` messages; used by regenerate and edit. */
+  truncateConversationMessages(id: string, keepCount: number): Promise<Conversation>;
+  searchConversations(query: string): Promise<ConversationSummary[]>;
   /** Abort the in-flight turn identified by the renderer's assistant message id. */
   cancelStream(messageId: string): Promise<void>;
   /** Proactive check-ins ask the renderer to open a conversation. */

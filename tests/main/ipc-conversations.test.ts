@@ -36,6 +36,44 @@ function fakeApi(): { api: StudyCoachApi; calls: unknown[][] } {
     },
     async deleteConversation(id: string) {
       calls.push(['delete', id]);
+    },
+    async renameConversation(id: string, title: string) {
+      calls.push(['rename', id, title]);
+      return {
+        id,
+        title,
+        kind: 'chat',
+        createdAt: '2026-11-01T09:00:00.000Z',
+        updatedAt: '2026-11-01T09:00:00.000Z',
+        messages: []
+      };
+    },
+    async setConversationPinned(id: string, pinned: boolean) {
+      calls.push(['pin', id, pinned]);
+      return {
+        id,
+        title: '新对话',
+        kind: 'chat',
+        pinned,
+        createdAt: '2026-11-01T09:00:00.000Z',
+        updatedAt: '2026-11-01T09:00:00.000Z',
+        messages: []
+      };
+    },
+    async truncateConversationMessages(id: string, keepCount: number) {
+      calls.push(['truncate', id, keepCount]);
+      return {
+        id,
+        title: '新对话',
+        kind: 'chat',
+        createdAt: '2026-11-01T09:00:00.000Z',
+        updatedAt: '2026-11-01T09:00:00.000Z',
+        messages: []
+      };
+    },
+    async searchConversations(query: string) {
+      calls.push(['search', query]);
+      return [];
     }
   } as unknown as StudyCoachApi;
   return { api, calls };
@@ -58,6 +96,10 @@ test('routes conversation channels and validates payloads', async () => {
     }
   });
   await handlers.deleteConversation('c1');
+  await handlers.renameConversation({ conversationId: 'c1', title: '数学复盘' });
+  await handlers.setConversationPinned({ conversationId: 'c1', pinned: true });
+  await handlers.truncateConversationMessages({ conversationId: 'c1', keepCount: 2 });
+  await handlers.searchConversations('极限');
 
   expect(calls).toEqual([
     ['list'],
@@ -73,7 +115,11 @@ test('routes conversation channels and validates payloads', async () => {
         createdAt: '2026-11-01T09:00:00.000Z'
       }
     ],
-    ['delete', 'c1']
+    ['delete', 'c1'],
+    ['rename', 'c1', '数学复盘'],
+    ['pin', 'c1', true],
+    ['truncate', 'c1', 2],
+    ['search', '极限']
   ]);
 });
 
@@ -91,4 +137,14 @@ test('rejects malformed conversation payloads', async () => {
       message: { id: 'm1', role: 'system', text: 'x', createdAt: 'now' }
     })
   ).rejects.toThrow(/消息角色/);
+  await expect(
+    handlers.renameConversation({ conversationId: 'c1', title: '   ' })
+  ).rejects.toThrow(/对话标题/);
+  await expect(
+    handlers.setConversationPinned({ conversationId: 'c1', pinned: 'yes' })
+  ).rejects.toThrow(/置顶状态/);
+  await expect(
+    handlers.truncateConversationMessages({ conversationId: 'c1', keepCount: -1 })
+  ).rejects.toThrow(/保留消息数/);
+  await expect(handlers.searchConversations(42)).rejects.toThrow(/搜索关键词/);
 });

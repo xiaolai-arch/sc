@@ -43,6 +43,10 @@ test('locks the public channel names', () => {
     createConversation: 'study-coach:conversations:create',
     appendConversationMessage: 'study-coach:conversations:append-message',
     deleteConversation: 'study-coach:conversations:delete',
+    renameConversation: 'study-coach:conversations:rename',
+    setConversationPinned: 'study-coach:conversations:set-pinned',
+    truncateConversationMessages: 'study-coach:conversations:truncate-messages',
+    searchConversations: 'study-coach:conversations:search',
     send: 'study-coach:butler:send'
   });
 });
@@ -108,6 +112,10 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
     createdAt: '2026-11-01T09:00:00.000Z'
   });
   await bridge.deleteConversation('c1');
+  await bridge.renameConversation('c1', '数学复盘');
+  await bridge.setConversationPinned('c1', true);
+  await bridge.truncateConversationMessages('c1', 2);
+  await bridge.searchConversations('极限');
   await bridge.send({ message: 'hi' });
 
   expect(calls.map((entry) => entry.channel)).toEqual(Object.values(IPC_CHANNELS));
@@ -138,7 +146,23 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
       }
     ]
   });
-  expect(calls[34]?.args).toEqual([{ message: 'hi' }]);
+  expect(calls[34]).toEqual({
+    channel: IPC_CHANNELS.renameConversation,
+    args: [{ conversationId: 'c1', title: '数学复盘' }]
+  });
+  expect(calls[35]).toEqual({
+    channel: IPC_CHANNELS.setConversationPinned,
+    args: [{ conversationId: 'c1', pinned: true }]
+  });
+  expect(calls[36]).toEqual({
+    channel: IPC_CHANNELS.truncateConversationMessages,
+    args: [{ conversationId: 'c1', keepCount: 2 }]
+  });
+  expect(calls[37]).toEqual({
+    channel: IPC_CHANNELS.searchConversations,
+    args: ['极限']
+  });
+  expect(calls[38]?.args).toEqual([{ message: 'hi' }]);
 });
 
 test('bridge does not swallow rejected invokes', async () => {

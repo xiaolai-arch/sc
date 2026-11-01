@@ -56,6 +56,10 @@ export const IPC_CHANNELS = {
   createConversation: 'study-coach:conversations:create',
   appendConversationMessage: 'study-coach:conversations:append-message',
   deleteConversation: 'study-coach:conversations:delete',
+  renameConversation: 'study-coach:conversations:rename',
+  setConversationPinned: 'study-coach:conversations:set-pinned',
+  truncateConversationMessages: 'study-coach:conversations:truncate-messages',
+  searchConversations: 'study-coach:conversations:search',
   send: 'study-coach:butler:send'
 } as const;
 
@@ -199,6 +203,49 @@ function requireCreateConversation(value: unknown): CreateConversationInput {
     ...(kind !== undefined ? { kind } : {}),
     ...(workspaceId !== undefined ? { workspaceId } : {})
   };
+}
+
+function requireRenameConversation(value: unknown): { conversationId: string; title: string } {
+  const input = requireObject(value, '重命名对话');
+  return {
+    conversationId: requireString(input.conversationId, '对话 ID'),
+    title: requireString(input.title, '对话标题')
+  };
+}
+
+function requireSetConversationPinned(value: unknown): {
+  conversationId: string;
+  pinned: boolean;
+} {
+  const input = requireObject(value, '置顶对话');
+  if (typeof input.pinned !== 'boolean') throw new Error('置顶状态无效。');
+  return {
+    conversationId: requireString(input.conversationId, '对话 ID'),
+    pinned: input.pinned
+  };
+}
+
+function requireTruncateConversation(value: unknown): {
+  conversationId: string;
+  keepCount: number;
+} {
+  const input = requireObject(value, '截断对话消息');
+  if (
+    typeof input.keepCount !== 'number' ||
+    !Number.isInteger(input.keepCount) ||
+    input.keepCount < 0
+  ) {
+    throw new Error('保留消息数无效。');
+  }
+  return {
+    conversationId: requireString(input.conversationId, '对话 ID'),
+    keepCount: input.keepCount
+  };
+}
+
+function requireConversationSearch(value: unknown): string {
+  if (typeof value !== 'string') throw new Error('搜索关键词无效。');
+  return value;
 }
 
 function requireConversationMessage(value: unknown): ConversationMessage {
@@ -384,6 +431,20 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
       );
     },
     deleteConversation: async (input) => api.deleteConversation(requireString(input, '对话 ID')),
+    renameConversation: async (input) => {
+      const { conversationId, title } = requireRenameConversation(input);
+      return api.renameConversation(conversationId, title);
+    },
+    setConversationPinned: async (input) => {
+      const { conversationId, pinned } = requireSetConversationPinned(input);
+      return api.setConversationPinned(conversationId, pinned);
+    },
+    truncateConversationMessages: async (input) => {
+      const { conversationId, keepCount } = requireTruncateConversation(input);
+      return api.truncateConversationMessages(conversationId, keepCount);
+    },
+    searchConversations: async (input) =>
+      api.searchConversations(requireConversationSearch(input)),
     send: async (input) => api.send(requireSend(input))
   };
 
@@ -544,6 +605,13 @@ export function createStudyCoachBridge(
     appendConversationMessage: (id, message) =>
       call(IPC_CHANNELS.appendConversationMessage, { conversationId: id, message }),
     deleteConversation: (id) => call(IPC_CHANNELS.deleteConversation, id),
+    renameConversation: (id, title) =>
+      call(IPC_CHANNELS.renameConversation, { conversationId: id, title }),
+    setConversationPinned: (id, pinned) =>
+      call(IPC_CHANNELS.setConversationPinned, { conversationId: id, pinned }),
+    truncateConversationMessages: (id, keepCount) =>
+      call(IPC_CHANNELS.truncateConversationMessages, { conversationId: id, keepCount }),
+    searchConversations: (query) => call(IPC_CHANNELS.searchConversations, query),
     cancelStream: (messageId) => call(BUTLER_STREAM_CHANNELS.cancel, messageId),
     onConversationOpened(listener) {
       if (!subscribe) return () => undefined;

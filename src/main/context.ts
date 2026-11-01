@@ -510,6 +510,18 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     async deleteConversation(id) {
       await conversationStore.delete(id);
     },
+    async renameConversation(id, title) {
+      return conversationStore.rename(id, title);
+    },
+    async setConversationPinned(id, pinned) {
+      return conversationStore.setPinned(id, pinned);
+    },
+    async truncateConversationMessages(id, keepCount) {
+      return conversationStore.truncateMessages(id, keepCount);
+    },
+    async searchConversations(query) {
+      return conversationStore.search(query);
+    },
     onConversationOpened() {
       return () => undefined;
     },
