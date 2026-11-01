@@ -364,3 +364,24 @@ describe('CliAgentClient structured tool protocol', () => {
     });
   });
 });
+
+test('adds --bare when claude isolation is enabled', async () => {
+  const calls: string[][] = [];
+  const client = new CliAgentClient(
+    {
+      kind: 'local-cli',
+      agent: 'claude',
+      command: 'claude',
+      isolate: true
+    },
+    {
+      runner: async (_command, args) => {
+        calls.push(args);
+        return { stdout: 'ok', stderr: '', code: 0 };
+      }
+    }
+  );
+
+  await client.complete({ messages: [{ role: 'user', content: 'hi' }] });
+  expect(calls[0]).toContain('--bare');
+});

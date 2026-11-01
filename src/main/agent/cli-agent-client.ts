@@ -438,6 +438,9 @@ export class CliAgentClient implements StreamingModelClient {
     const command = this.provider.command?.trim() || this.provider.agent;
     const prompt = buildPrompt(request);
     const args = [...config.args];
+    if (this.provider.agent === 'claude' && this.provider.isolate) {
+      args.push('--bare');
+    }
     if (!config.stdin) args.push(prompt);
 
     const result = await (this.options.runner ?? defaultRunner)(
@@ -486,6 +489,9 @@ export class CliAgentClient implements StreamingModelClient {
     const command = this.provider.command?.trim() || this.provider.agent;
     const prompt = buildPrompt(request);
     const args = [...config.streamArgs];
+    if (this.provider.agent === 'claude' && this.provider.isolate) {
+      args.push('--bare');
+    }
     if (!config.stdin) args.push(prompt);
 
     const state: StreamState = {

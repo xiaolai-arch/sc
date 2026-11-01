@@ -42,7 +42,8 @@ function validateProvider(value: unknown): ProviderConfig {
       kind: 'local-cli',
       agent: agent as (typeof LOCAL_CLI_AGENTS)[number],
       ...(command ? { command } : {}),
-      ...(model ? { model } : {})
+      ...(model ? { model } : {}),
+      ...(value.isolate === true ? { isolate: true } : {})
     };
   }
   const model = nonEmptyString(value.model, '模型名称');

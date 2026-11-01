@@ -33,6 +33,7 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
   const [baseURL, setBaseURL] = useState('');
   const [cliAgent, setCliAgent] = useState<LocalCliAgent>('codex');
   const [cliCommand, setCliCommand] = useState('codex');
+  const [cliIsolate, setCliIsolate] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [sessions, setSessions] = useState('4');
   const [tokens, setTokens] = useState('200000');
@@ -64,6 +65,7 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
       if (value.provider.kind === 'local-cli') {
         setCliAgent(value.provider.agent);
         setCliCommand(value.provider.command ?? value.provider.agent);
+        setCliIsolate(value.provider.isolate === true);
       }
       setSessions(String(value.budget.proactiveSessionsPerDay));
       setTokens(String(value.budget.dailyTokens));
@@ -133,7 +135,8 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
                 kind,
                 agent: cliAgent,
                 command: cliCommand.trim(),
-                ...(model.trim() ? { model: model.trim() } : {})
+                ...(model.trim() ? { model: model.trim() } : {}),
+                ...(cliAgent === 'claude' && cliIsolate ? { isolate: true } : {})
               }
             : { kind, baseURL, model };
       await api.updateSettings({
@@ -279,6 +282,22 @@ export function SettingsPage({ onClose, embedded = false }: SettingsPageProps) {
                     placeholder="codex"
                   />
                 </div>
+                {cliAgent === 'claude' ? (
+                  <label className="flex items-start gap-3 text-sm text-gray-600 md:col-span-2">
+                    <input
+                      type="checkbox"
+                      checked={cliIsolate}
+                      onChange={(event) => setCliIsolate(event.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded accent-[#0071e3]"
+                    />
+                    <span>
+                      隔离 Claude Code 全局配置（--bare）
+                      <span className="mt-1 block text-xs text-gray-500">
+                        跳过 hooks / skills / CLAUDE.md，思考过程不会被本机全局配置污染。需要 API Key，OAuth 登录可能不可用。
+                      </span>
+                    </span>
+                  </label>
+                ) : null}
                 <p className="text-sm text-gray-600 md:col-span-2">
                   使用本机已登录的 CLI agent，不需要 API key；命令会在临时目录中运行。
                 </p>

@@ -34,7 +34,14 @@ export type ProviderConfig =
   | { kind: 'anthropic'; model: string }
   | { kind: 'openai-compatible'; baseURL: string; model: string }
   | { kind: 'ollama'; baseURL: string; model: string }
-  | { kind: 'local-cli'; agent: LocalCliAgent; command?: string; model?: string };
+  | {
+      kind: 'local-cli';
+      agent: LocalCliAgent;
+      command?: string;
+      model?: string;
+      /** Claude Code only: run with --bare to skip global hooks/CLAUDE.md. */
+      isolate?: boolean;
+    };
 
 export interface NotificationSettings {
   enabled: boolean;
