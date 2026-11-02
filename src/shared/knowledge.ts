@@ -124,6 +124,9 @@ export interface KnowledgeApi {
   createKnowledgeTopic(input: CreateKnowledgeTopicInput): Promise<KnowledgeTopic>;
   updateKnowledgeTopic(input: UpdateKnowledgeTopicInput): Promise<KnowledgeTopic>;
   deleteKnowledgeTopic(id: string): Promise<void>;
+  getKnowledgeNote(topicId: string): Promise<KnowledgeNote>;
+  saveKnowledgeNote(input: SaveKnowledgeNoteInput): Promise<KnowledgeNote>;
+  getKnowledgeBacklinks(topicId: string): Promise<KnowledgeBacklink[]>;
 }
 
 const CJK = /[㐀-鿿぀-ヿ가-힯]/;

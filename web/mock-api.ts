@@ -28,8 +28,16 @@ import type {
 import type { StreamingButlerApi } from '../src/shared/butler-stream';
 import type {
   CreateKnowledgeTopicInput,
+  KnowledgeBacklink,
+  KnowledgeNote,
   KnowledgeTopic,
+  SaveKnowledgeNoteInput,
   UpdateKnowledgeTopicInput
+} from '../src/shared/knowledge';
+import {
+  MAX_KNOWLEDGE_NOTE_LENGTH,
+  resolveKnowledgeLink,
+  wikiLinkTargets
 } from '../src/shared/knowledge';
 import type { UsageSummary } from '../src/shared/usage';
 import type { LocalCliScanResult } from '../src/shared/local-cli';
@@ -95,6 +103,7 @@ interface MockState {
   practiceMistakes: PracticeMistake[];
   plans: LongPlan[];
   knowledgeTopics: KnowledgeTopic[];
+  knowledgeNotes: Record<string, KnowledgeNote>;
   conversations: Conversation[];
 }
 
@@ -209,6 +218,7 @@ function defaultState(): MockState {
     conversations: [],
     plans: [],
     knowledgeTopics: [],
+    knowledgeNotes: {},
     ...seedWorkspaceData()
   };
 }
@@ -255,6 +265,10 @@ function readState(storage: Storage | null): MockState {
       knowledgeTopics: Array.isArray(parsed.knowledgeTopics)
         ? (parsed.knowledgeTopics as KnowledgeTopic[])
         : [],
+      knowledgeNotes:
+        parsed.knowledgeNotes !== null && typeof parsed.knowledgeNotes === 'object'
+          ? (parsed.knowledgeNotes as Record<string, KnowledgeNote>)
+          : {},
       conversations: Array.isArray(parsed.conversations)
         ? (parsed.conversations as Conversation[])
         : []
@@ -1074,7 +1088,50 @@ export function createMockApi(
       const before = state.knowledgeTopics.length;
       state.knowledgeTopics = state.knowledgeTopics.filter((topic) => topic.id !== id);
       if (state.knowledgeTopics.length === before) throw new Error('知识主题不存在。');
+      delete state.knowledgeNotes[id];
       persist();
+    },
+
+    async getKnowledgeNote(topicId: string): Promise<KnowledgeNote> {
+      return structuredClone(
+        state.knowledgeNotes[topicId] ?? { topicId, body: '', updatedAt: '' }
+      );
+    },
+
+    async saveKnowledgeNote(input: SaveKnowledgeNoteInput): Promise<KnowledgeNote> {
+      if (!state.knowledgeTopics.some((topic) => topic.id === input.topicId)) {
+        throw new Error('知识主题不存在。');
+      }
+      if (typeof input.body !== 'string') throw new Error('笔记内容无效。');
+      if (input.body.length > MAX_KNOWLEDGE_NOTE_LENGTH) {
+        throw new Error(`笔记不能超过 ${MAX_KNOWLEDGE_NOTE_LENGTH} 字。`);
+      }
+      const note: KnowledgeNote = {
+        topicId: input.topicId,
+        body: input.body,
+        updatedAt: new Date().toISOString()
+      };
+      state.knowledgeNotes[input.topicId] = note;
+      persist();
+      return structuredClone(note);
+    },
+
+    async getKnowledgeBacklinks(topicId: string): Promise<KnowledgeBacklink[]> {
+      if (!state.knowledgeTopics.some((topic) => topic.id === topicId)) return [];
+      const backlinks: KnowledgeBacklink[] = [];
+      for (const source of state.knowledgeTopics) {
+        if (source.id === topicId) continue;
+        const note = state.knowledgeNotes[source.id];
+        if (!note) continue;
+        if (
+          wikiLinkTargets(note.body).some(
+            (target) => resolveKnowledgeLink(state.knowledgeTopics, target)?.id === topicId
+          )
+        ) {
+          backlinks.push({ topicId: source.id, name: source.name });
+        }
+      }
+      return backlinks.sort((a, b) => a.name.localeCompare(b.name, 'zh'));
     },
 
     async searchWorkspace(input: SearchWorkspaceInput): Promise<SearchResult[]> {

@@ -670,6 +670,15 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     async deleteKnowledgeTopic(id) {
       await (await getServices()).knowledge.delete(id);
     },
+    async getKnowledgeNote(topicId) {
+      return (await getServices()).knowledge.getNote(topicId);
+    },
+    async saveKnowledgeNote(input) {
+      return (await getServices()).knowledge.saveNote(input);
+    },
+    async getKnowledgeBacklinks(topicId) {
+      return (await getServices()).knowledge.getBacklinks(topicId);
+    },
     async searchWorkspace(input) {
       return (await getServices()).search.search(input.workspaceId, input.query, input.limit);
     },

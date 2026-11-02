@@ -317,6 +317,28 @@ test('creates, filters, updates and deletes knowledge topics in the prototype', 
   await expect(reopened.createKnowledgeTopic({ name: '  ' })).rejects.toThrow(/知识主题名称/);
 });
 
+test('saves knowledge notes and derives backlinks in the prototype', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage);
+  const target = await api.createKnowledgeTopic({ name: 'LangChain' });
+  const source = await api.createKnowledgeTopic({ name: 'LangGraph' });
+
+  await api.saveKnowledgeNote({ topicId: source.id, body: '参考 [[LangChain]]' });
+  const reopened = createMockApi(localStorage);
+  expect((await reopened.getKnowledgeNote(source.id)).body).toBe('参考 [[LangChain]]');
+  expect(await reopened.getKnowledgeBacklinks(target.id)).toEqual([
+    { topicId: source.id, name: 'LangGraph' }
+  ]);
+  expect(await reopened.getKnowledgeNote(target.id)).toEqual({
+    topicId: target.id,
+    body: '',
+    updatedAt: ''
+  });
+  await expect(
+    reopened.saveKnowledgeNote({ topicId: target.id, body: 'x'.repeat(200_001) })
+  ).rejects.toThrow(/200000/);
+});
+
 test('streams reasoning, a tool step and the final reply', async () => {
   localStorage.clear();
   const api = createMockApi(localStorage);

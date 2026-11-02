@@ -29,8 +29,10 @@ import type { CreatePracticeSetInput, SubmitAnswerInput } from '../shared/practi
 import type {
   CreateKnowledgeTopicInput,
   KnowledgeStatus,
+  SaveKnowledgeNoteInput,
   UpdateKnowledgeTopicInput
 } from '../shared/knowledge';
+import { MAX_KNOWLEDGE_NOTE_LENGTH } from '../shared/knowledge';
 import type {
   DeleteMemoryInput,
   MemoryKind,
@@ -83,6 +85,9 @@ export const IPC_CHANNELS = {
   createKnowledgeTopic: 'study-coach:knowledge:create',
   updateKnowledgeTopic: 'study-coach:knowledge:update',
   deleteKnowledgeTopic: 'study-coach:knowledge:delete',
+  getKnowledgeNote: 'study-coach:knowledge:note:get',
+  saveKnowledgeNote: 'study-coach:knowledge:note:save',
+  getKnowledgeBacklinks: 'study-coach:knowledge:backlinks',
   searchWorkspace: 'study-coach:search:query',
   rebuildSearchIndex: 'study-coach:search:rebuild',
   listConversations: 'study-coach:conversations:list',
@@ -602,6 +607,17 @@ function requireUpdateKnowledgeTopic(value: unknown): UpdateKnowledgeTopicInput 
   };
 }
 
+function requireSaveKnowledgeNote(value: unknown): SaveKnowledgeNoteInput {
+  const input = requireObject(value, '保存知识笔记');
+  const topicId = requireString(input.topicId, '知识主题 ID').trim();
+  // An empty body is meaningful: it clears the note.
+  if (typeof input.body !== 'string') throw new Error('笔记内容无效。');
+  if (input.body.length > MAX_KNOWLEDGE_NOTE_LENGTH) {
+    throw new Error(`笔记不能超过 ${MAX_KNOWLEDGE_NOTE_LENGTH} 字。`);
+  }
+  return { topicId, body: input.body };
+}
+
 function requirePlanWorkspace(value: unknown): PlanWorkspaceInput {
   const input = requireObject(value, '生成计划');
   requireString(input.workspaceId, '工作区 ID');
@@ -771,6 +787,11 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
       api.updateKnowledgeTopic(requireUpdateKnowledgeTopic(input)),
     deleteKnowledgeTopic: async (input) =>
       api.deleteKnowledgeTopic(requireString(input, '知识主题 ID').trim()),
+    getKnowledgeNote: async (input) =>
+      api.getKnowledgeNote(requireString(input, '知识主题 ID').trim()),
+    saveKnowledgeNote: async (input) => api.saveKnowledgeNote(requireSaveKnowledgeNote(input)),
+    getKnowledgeBacklinks: async (input) =>
+      api.getKnowledgeBacklinks(requireString(input, '知识主题 ID').trim()),
     searchWorkspace: async (input) => api.searchWorkspace(requireSearchWorkspace(input)),
     rebuildSearchIndex: async () => api.rebuildSearchIndex(),
     listConversations: async () => api.listConversations(),
@@ -972,6 +993,9 @@ export function createStudyCoachBridge(
     createKnowledgeTopic: (input) => call(IPC_CHANNELS.createKnowledgeTopic, input),
     updateKnowledgeTopic: (input) => call(IPC_CHANNELS.updateKnowledgeTopic, input),
     deleteKnowledgeTopic: (id) => call(IPC_CHANNELS.deleteKnowledgeTopic, id),
+    getKnowledgeNote: (topicId) => call(IPC_CHANNELS.getKnowledgeNote, topicId),
+    saveKnowledgeNote: (input) => call(IPC_CHANNELS.saveKnowledgeNote, input),
+    getKnowledgeBacklinks: (topicId) => call(IPC_CHANNELS.getKnowledgeBacklinks, topicId),
     searchWorkspace: (input) => call(IPC_CHANNELS.searchWorkspace, input),
     rebuildSearchIndex: () => call(IPC_CHANNELS.rebuildSearchIndex),
     listConversations: () => call(IPC_CHANNELS.listConversations),

@@ -18,6 +18,18 @@ function fakeApi(): { api: StudyCoachApi; calls: unknown[][] } {
     },
     async deleteKnowledgeTopic(id: string) {
       calls.push(['delete', id]);
+    },
+    async getKnowledgeNote(topicId: string) {
+      calls.push(['note-get', topicId]);
+      return { topicId, body: '', updatedAt: '' };
+    },
+    async saveKnowledgeNote(input: { topicId: string; body: string }) {
+      calls.push(['note-save', input]);
+      return { ...input, updatedAt: '' };
+    },
+    async getKnowledgeBacklinks(topicId: string) {
+      calls.push(['backlinks', topicId]);
+      return [];
     }
   } as unknown as StudyCoachApi;
   return { api, calls };
@@ -37,4 +49,25 @@ test('routes knowledge channels and validates payloads', async () => {
   await expect(handlers.createKnowledgeTopic({ name: '  ' })).rejects.toThrow(/知识主题名称/);
   await expect(handlers.createKnowledgeTopic({ name: 'X', level: 6 })).rejects.toThrow(/掌握程度/);
   await expect(handlers.updateKnowledgeTopic({ id: '' })).rejects.toThrow(/主题 ID/);
+});
+
+test('routes knowledge note and backlink channels and validates payloads', async () => {
+  const { api, calls } = fakeApi();
+  const handlers = createIpcHandlers(api);
+
+  await handlers.getKnowledgeNote('kt-1');
+  await handlers.saveKnowledgeNote({ topicId: 'kt-1', body: '' });
+  await handlers.getKnowledgeBacklinks('kt-1');
+  expect(calls).toContainEqual(['note-get', 'kt-1']);
+  expect(calls).toContainEqual(['note-save', { topicId: 'kt-1', body: '' }]);
+  expect(calls).toContainEqual(['backlinks', 'kt-1']);
+
+  await expect(handlers.getKnowledgeNote('  ')).rejects.toThrow(/知识主题 ID/);
+  await expect(handlers.saveKnowledgeNote({ topicId: 'kt-1', body: 42 })).rejects.toThrow(
+    /笔记内容/
+  );
+  await expect(
+    handlers.saveKnowledgeNote({ topicId: 'kt-1', body: 'x'.repeat(200_001) })
+  ).rejects.toThrow(/200000/);
+  await expect(handlers.getKnowledgeBacklinks(' ')).rejects.toThrow(/知识主题 ID/);
 });

@@ -124,6 +124,9 @@ test('locks the public channel names', () => {
     createKnowledgeTopic: 'study-coach:knowledge:create',
     updateKnowledgeTopic: 'study-coach:knowledge:update',
     deleteKnowledgeTopic: 'study-coach:knowledge:delete',
+    getKnowledgeNote: 'study-coach:knowledge:note:get',
+    saveKnowledgeNote: 'study-coach:knowledge:note:save',
+    getKnowledgeBacklinks: 'study-coach:knowledge:backlinks',
     searchWorkspace: 'study-coach:search:query',
     rebuildSearchIndex: 'study-coach:search:rebuild',
     listConversations: 'study-coach:conversations:list',
@@ -222,6 +225,9 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
   await bridge.createKnowledgeTopic({ name: 'LangChain', workspaceId: 'ws-1' });
   await bridge.updateKnowledgeTopic({ id: 'kt-1', status: 'mastered' });
   await bridge.deleteKnowledgeTopic('kt-1');
+  await bridge.getKnowledgeNote('kt-1');
+  await bridge.saveKnowledgeNote({ topicId: 'kt-1', body: 'b' });
+  await bridge.getKnowledgeBacklinks('kt-1');
   await bridge.searchWorkspace({ workspaceId: 'ws-1', query: '极限', limit: 5 });
   await bridge.rebuildSearchIndex();
   await bridge.listConversations();
@@ -305,10 +311,22 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
     args: ['kt-1']
   });
   expect(calls[41]).toEqual({
+    channel: IPC_CHANNELS.getKnowledgeNote,
+    args: ['kt-1']
+  });
+  expect(calls[42]).toEqual({
+    channel: IPC_CHANNELS.saveKnowledgeNote,
+    args: [{ topicId: 'kt-1', body: 'b' }]
+  });
+  expect(calls[43]).toEqual({
+    channel: IPC_CHANNELS.getKnowledgeBacklinks,
+    args: ['kt-1']
+  });
+  expect(calls[44]).toEqual({
     channel: IPC_CHANNELS.searchWorkspace,
     args: [{ workspaceId: 'ws-1', query: '极限', limit: 5 }]
   });
-  expect(calls[46]).toEqual({
+  expect(calls[49]).toEqual({
     channel: IPC_CHANNELS.appendConversationMessage,
     args: [
       {
@@ -322,29 +340,29 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
       }
     ]
   });
-  expect(calls[48]).toEqual({
+  expect(calls[51]).toEqual({
     channel: IPC_CHANNELS.renameConversation,
     args: [{ conversationId: 'c1', title: '数学复盘' }]
   });
-  expect(calls[49]).toEqual({
+  expect(calls[52]).toEqual({
     channel: IPC_CHANNELS.setConversationPinned,
     args: [{ conversationId: 'c1', pinned: true }]
   });
-  expect(calls[50]).toEqual({
+  expect(calls[53]).toEqual({
     channel: IPC_CHANNELS.truncateConversationMessages,
     args: [{ conversationId: 'c1', keepCount: 2 }]
   });
-  expect(calls[51]).toEqual({
+  expect(calls[54]).toEqual({
     channel: IPC_CHANNELS.searchConversations,
     args: ['极限']
   });
-  expect(calls[52]).toEqual({
+  expect(calls[55]).toEqual({
     channel: IPC_CHANNELS.setConversationModel,
     args: [{ conversationId: 'c1', model: 'gpt-x' }]
   });
-  expect(calls[53]).toEqual({ channel: IPC_CHANNELS.getUsageSummary, args: [7] });
-  expect(calls[54]).toEqual({ channel: IPC_CHANNELS.clearUsage, args: [] });
-  expect(calls[55]?.args).toEqual([{ message: 'hi' }]);
+  expect(calls[56]).toEqual({ channel: IPC_CHANNELS.getUsageSummary, args: [7] });
+  expect(calls[57]).toEqual({ channel: IPC_CHANNELS.clearUsage, args: [] });
+  expect(calls[58]?.args).toEqual([{ message: 'hi' }]);
 });
 
 test('bridge does not swallow rejected invokes', async () => {
