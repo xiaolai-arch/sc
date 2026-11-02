@@ -35,6 +35,7 @@ import type {
   UpdateKnowledgeTopicInput
 } from '../src/shared/knowledge';
 import {
+  KNOWLEDGE_NOTE_CONFLICT_MESSAGE,
   MAX_KNOWLEDGE_NOTE_LENGTH,
   resolveKnowledgeLink,
   wikiLinkTargets
@@ -332,6 +333,16 @@ function compareConversationSummaries(
   const pinned = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned));
   if (pinned !== 0) return pinned;
   return b.updatedAt.localeCompare(a.updatedAt);
+}
+
+/** Stable, dependency-free body identifier for the browser demo's conflict check. */
+function noteRevision(body: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < body.length; index += 1) {
+    hash ^= body.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${(hash >>> 0).toString(16)}-${body.length}`;
 }
 
 function summarizeConversation(conversation: Conversation): ConversationSummary {
@@ -1093,9 +1104,9 @@ export function createMockApi(
     },
 
     async getKnowledgeNote(topicId: string): Promise<KnowledgeNote> {
-      return structuredClone(
-        state.knowledgeNotes[topicId] ?? { topicId, body: '', updatedAt: '' }
-      );
+      const note = state.knowledgeNotes[topicId];
+      if (!note) return { topicId, body: '', updatedAt: '', revision: '' };
+      return structuredClone({ ...note, revision: noteRevision(note.body) });
     },
 
     async saveKnowledgeNote(input: SaveKnowledgeNoteInput): Promise<KnowledgeNote> {
@@ -1106,10 +1117,20 @@ export function createMockApi(
       if (input.body.length > MAX_KNOWLEDGE_NOTE_LENGTH) {
         throw new Error(`笔记不能超过 ${MAX_KNOWLEDGE_NOTE_LENGTH} 字。`);
       }
+      const existing = state.knowledgeNotes[input.topicId];
+      const currentRevision = existing ? noteRevision(existing.body) : '';
+      if (
+        input.expectedRevision !== undefined &&
+        !input.force &&
+        input.expectedRevision !== currentRevision
+      ) {
+        throw new Error(KNOWLEDGE_NOTE_CONFLICT_MESSAGE);
+      }
       const note: KnowledgeNote = {
         topicId: input.topicId,
         body: input.body,
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
+        revision: noteRevision(input.body)
       };
       state.knowledgeNotes[input.topicId] = note;
       persist();

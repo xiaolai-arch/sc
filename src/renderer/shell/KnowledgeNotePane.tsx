@@ -1,5 +1,6 @@
 import { useState, type KeyboardEvent } from 'react';
 import {
+  KNOWLEDGE_NOTE_CONFLICT_MESSAGE,
   resolveKnowledgeLink,
   type KnowledgeBacklink,
   type KnowledgeNote,
@@ -32,7 +33,8 @@ const STATUS_TEXT: Record<KnowledgeNoteStatus, string> = {
   dirty: '未保存',
   saving: '保存中…',
   saved: '已保存',
-  error: '保存失败'
+  error: '保存失败',
+  conflict: '有冲突'
 };
 
 type Mode = 'edit' | 'preview';
@@ -68,9 +70,11 @@ export function KnowledgeNotePane({
     loadError,
     backlinks,
     backlinksError,
+    conflict,
     setBody,
     flush,
     retrySave,
+    overwriteConflict,
     reloadNote,
     reloadBacklinks
   } = useKnowledgeNote({ topicId: topic.id, getNote, saveNote, getBacklinks });
@@ -188,6 +192,32 @@ export function KnowledgeNotePane({
         </div>
 
         <div className="mt-2 flex min-h-0 flex-1 flex-col">
+          {conflict ? (
+            <div
+              role="alert"
+              className="mb-2 rounded-xl bg-[#ff9500]/[0.08] px-3 py-2.5"
+            >
+              <p className="text-[12px] leading-5 text-[#9a5b00] dark:text-[#ffb340]">
+                {KNOWLEDGE_NOTE_CONFLICT_MESSAGE}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void overwriteConflict()}
+                  className="rounded-lg bg-[#ff9500]/15 px-2.5 py-1 text-[11px] font-medium text-[#9a5b00] transition-colors hover:bg-[#ff9500]/25 dark:text-[#ffb340]"
+                >
+                  保留我的版本
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void reloadNote()}
+                  className="rounded-lg px-2.5 py-1 text-[11px] font-medium text-gray-600 transition-colors hover:bg-black/[0.04] dark:text-[#a1a1a6] dark:hover:bg-white/[0.06]"
+                >
+                  加载磁盘版本
+                </button>
+              </div>
+            </div>
+          ) : null}
           {status === 'loading' ? (
             <p className="text-[13px] text-gray-400 dark:text-[#8e8e93]">加载中…</p>
           ) : loadError ? (

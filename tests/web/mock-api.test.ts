@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { createMockApi, MOCK_STORAGE_KEY } from '../../web/mock-api';
 import type { ButlerStreamEvent } from '../../src/shared/butler-stream';
+import { KNOWLEDGE_NOTE_CONFLICT_MESSAGE } from '../../src/shared/knowledge';
 
 test('starts in onboarding and completes it with a workspace', async () => {
   localStorage.clear();
@@ -323,7 +324,11 @@ test('saves knowledge notes and derives backlinks in the prototype', async () =>
   const target = await api.createKnowledgeTopic({ name: 'LangChain' });
   const source = await api.createKnowledgeTopic({ name: 'LangGraph' });
 
-  await api.saveKnowledgeNote({ topicId: source.id, body: '参考 [[LangChain]]' });
+  const saved = await api.saveKnowledgeNote({
+    topicId: source.id,
+    body: '参考 [[LangChain]]'
+  });
+  expect(saved.revision).toBeTruthy();
   const reopened = createMockApi(localStorage);
   expect((await reopened.getKnowledgeNote(source.id)).body).toBe('参考 [[LangChain]]');
   expect(await reopened.getKnowledgeBacklinks(target.id)).toEqual([
@@ -332,7 +337,20 @@ test('saves knowledge notes and derives backlinks in the prototype', async () =>
   expect(await reopened.getKnowledgeNote(target.id)).toEqual({
     topicId: target.id,
     body: '',
-    updatedAt: ''
+    updatedAt: '',
+    revision: ''
+  });
+  await expect(
+    reopened.saveKnowledgeNote({
+      topicId: source.id,
+      body: 'stale draft',
+      expectedRevision: 'outdated'
+    })
+  ).rejects.toThrow(KNOWLEDGE_NOTE_CONFLICT_MESSAGE);
+  await reopened.saveKnowledgeNote({
+    topicId: source.id,
+    body: 'fresh draft',
+    expectedRevision: saved.revision
   });
   await expect(
     reopened.saveKnowledgeNote({ topicId: target.id, body: 'x'.repeat(200_001) })

@@ -71,3 +71,41 @@ test('routes knowledge note and backlink channels and validates payloads', async
   ).rejects.toThrow(/200000/);
   await expect(handlers.getKnowledgeBacklinks(' ')).rejects.toThrow(/知识主题 ID/);
 });
+
+test('passes note revisions through the IPC boundary', async () => {
+  const { api, calls } = fakeApi();
+  const handlers = createIpcHandlers(api);
+
+  await handlers.saveKnowledgeNote({
+    topicId: 'kt-1',
+    body: 'draft',
+    expectedRevision: 'rev-1',
+    force: true
+  });
+  expect(calls).toContainEqual([
+    'note-save',
+    { topicId: 'kt-1', body: 'draft', expectedRevision: 'rev-1', force: true }
+  ]);
+
+  // An empty revision means "the note did not exist when the editor opened".
+  await handlers.saveKnowledgeNote({
+    topicId: 'kt-1',
+    body: 'new',
+    expectedRevision: ''
+  });
+  expect(calls).toContainEqual([
+    'note-save',
+    { topicId: 'kt-1', body: 'new', expectedRevision: '' }
+  ]);
+
+  // Callers that do not track revisions keep the old payload shape.
+  await handlers.saveKnowledgeNote({ topicId: 'kt-1', body: 'plain' });
+  expect(calls).toContainEqual(['note-save', { topicId: 'kt-1', body: 'plain' }]);
+
+  await expect(
+    handlers.saveKnowledgeNote({ topicId: 'kt-1', body: 'x', expectedRevision: 42 })
+  ).rejects.toThrow(/笔记版本/);
+  await expect(
+    handlers.saveKnowledgeNote({ topicId: 'kt-1', body: 'x', force: 'yes' })
+  ).rejects.toThrow(/覆盖/);
+});

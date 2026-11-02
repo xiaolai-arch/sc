@@ -2,7 +2,11 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createKnowledgeService } from '../../src/main/knowledge/create-knowledge-service';
-import { parseKnowledgeNoteFile } from '../../src/main/knowledge/notes';
+import {
+  parseKnowledgeNoteFile,
+  serializeKnowledgeNoteFile
+} from '../../src/main/knowledge/notes';
+import { KNOWLEDGE_NOTE_CONFLICT_MESSAGE } from '../../src/shared/knowledge';
 
 const dirs: string[] = [];
 const NOW = new Date('2026-11-02T09:00:00.000Z');
@@ -205,9 +209,11 @@ test('saves and reads a note without touching the topic body', async () => {
     body: '# hi\n\n[[LangChain]]'
   });
   expect(saved.body).toBe('# hi\n\n[[LangChain]]');
+  expect(saved.revision).toBeTruthy();
   expect(await service.getNote(topic.id)).toMatchObject({
     topicId: topic.id,
-    body: '# hi\n\n[[LangChain]]'
+    body: '# hi\n\n[[LangChain]]',
+    revision: saved.revision
   });
 
   const noteRaw = await readFile(notePath(dir, topic.id), 'utf8');
@@ -243,6 +249,87 @@ test('keeps hand-added frontmatter keys when saving', async () => {
   expect(parsed.body).toBe('new body');
   expect(parsed.meta.tags).toEqual(['ai']);
   expect(parsed.meta.cssclass).toBe('wide');
+});
+
+test('rejects a stale save when another app changed the note body', async () => {
+  const { dir, service } = await setup();
+  const topic = await service.create({ name: 'LangGraph' });
+  const saved = await service.saveNote({ topicId: topic.id, body: 'from the app' });
+  const file = notePath(dir, topic.id);
+
+  // Simulate Obsidian rewriting the body while the app editor is open.
+  const parsed = parseKnowledgeNoteFile(await readFile(file, 'utf8'), topic.id);
+  await writeFile(
+    file,
+    serializeKnowledgeNoteFile({ ...parsed, body: 'from Obsidian' }),
+    'utf8'
+  );
+
+  await expect(
+    service.saveNote({
+      topicId: topic.id,
+      body: 'my draft',
+      expectedRevision: saved.revision
+    })
+  ).rejects.toThrow(KNOWLEDGE_NOTE_CONFLICT_MESSAGE);
+  expect(parseKnowledgeNoteFile(await readFile(file, 'utf8'), topic.id).body).toBe(
+    'from Obsidian'
+  );
+
+  const forced = await service.saveNote({
+    topicId: topic.id,
+    body: 'my draft',
+    expectedRevision: saved.revision,
+    force: true
+  });
+  expect(forced.revision).toBeTruthy();
+  expect(parseKnowledgeNoteFile(await readFile(file, 'utf8'), topic.id).body).toBe('my draft');
+});
+
+test('accepts a matching revision and detects a note deleted outside the app', async () => {
+  const { dir, service } = await setup();
+  const topic = await service.create({ name: 'LangGraph' });
+  const first = await service.saveNote({ topicId: topic.id, body: 'one' });
+
+  const second = await service.saveNote({
+    topicId: topic.id,
+    body: 'two',
+    expectedRevision: first.revision
+  });
+  expect(second.revision).not.toBe(first.revision);
+
+  await rm(notePath(dir, topic.id));
+  await expect(
+    service.saveNote({
+      topicId: topic.id,
+      body: 'three',
+      expectedRevision: second.revision
+    })
+  ).rejects.toThrow(KNOWLEDGE_NOTE_CONFLICT_MESSAGE);
+});
+
+test('frontmatter-only external edits do not conflict with a body save', async () => {
+  const { dir, service } = await setup();
+  const topic = await service.create({ name: 'LangGraph' });
+  const saved = await service.saveNote({ topicId: topic.id, body: 'stable body' });
+  const file = notePath(dir, topic.id);
+  const parsed = parseKnowledgeNoteFile(await readFile(file, 'utf8'), topic.id);
+
+  await writeFile(
+    file,
+    serializeKnowledgeNoteFile({ ...parsed, meta: { ...parsed.meta, tags: ['external'] } }),
+    'utf8'
+  );
+
+  const next = await service.saveNote({
+    topicId: topic.id,
+    body: 'stable body',
+    expectedRevision: saved.revision
+  });
+  expect(next.revision).toBe(saved.revision);
+  expect(parseKnowledgeNoteFile(await readFile(file, 'utf8'), topic.id).meta.tags).toEqual([
+    'external'
+  ]);
 });
 
 test('accepts empty and 200000-character notes but rejects 200001', async () => {
@@ -293,7 +380,8 @@ test('getNote returns an empty body for missing or unsafe ids', async () => {
   expect(await service.getNote('kt-missing')).toEqual({
     topicId: 'kt-missing',
     body: '',
-    updatedAt: ''
+    updatedAt: '',
+    revision: ''
   });
   expect(await service.getNote('../../etc/passwd')).toMatchObject({ body: '' });
 });

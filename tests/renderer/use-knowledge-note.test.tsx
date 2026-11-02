@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { act, renderHook } from '@testing-library/react';
-import type { KnowledgeBacklink, KnowledgeNote } from '../../src/shared/knowledge';
+import {
+  KNOWLEDGE_NOTE_CONFLICT_MESSAGE,
+  type KnowledgeBacklink,
+  type KnowledgeNote
+} from '../../src/shared/knowledge';
 import {
   clearKnowledgeNoteDrafts,
   useKnowledgeNote
@@ -8,6 +12,10 @@ import {
 
 function note(topicId: string, body: string): KnowledgeNote {
   return { topicId, body, updatedAt: '' };
+}
+
+function revisionedNote(topicId: string, body: string, revision: string): KnowledgeNote {
+  return { topicId, body, updatedAt: '', revision };
 }
 
 function deferred<T>() {
@@ -356,4 +364,174 @@ test('keeps a failed draft across an unmount and remount', async () => {
 
   expect(second.result.current.body).toBe('survives');
   expect(second.result.current.status).toBe('error');
+});
+
+test('sends the loaded revision with each save', async () => {
+  const { result, saveNote } = setup({
+    getNote: async (topicId: string) => revisionedNote(topicId, 'disk', 'rev-1')
+  });
+  await settle();
+
+  act(() => result.current.setBody('typed'));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(600);
+  });
+  await settle();
+
+  expect(saveNote).toHaveBeenCalledWith({
+    topicId: 'kt-1',
+    body: 'typed',
+    expectedRevision: 'rev-1'
+  });
+});
+
+test('a conflict stops autosave and keeps the draft', async () => {
+  const getNote = async (topicId: string) => revisionedNote(topicId, 'disk', 'rev-1');
+  const saveNote = vi.fn(async () => {
+    throw new Error(KNOWLEDGE_NOTE_CONFLICT_MESSAGE);
+  });
+  const { result } = setup({ getNote, saveNote });
+  await settle();
+
+  act(() => result.current.setBody('mine'));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(600);
+  });
+  await settle();
+
+  expect(saveNote).toHaveBeenCalledWith({
+    topicId: 'kt-1',
+    body: 'mine',
+    expectedRevision: 'rev-1'
+  });
+  expect(result.current.status).toBe('conflict');
+  expect(result.current.conflict).toBe(true);
+  expect(result.current.body).toBe('mine');
+
+  act(() => result.current.setBody('mine again'));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(600);
+  });
+  await settle();
+
+  expect(saveNote).toHaveBeenCalledTimes(1);
+  expect(result.current.status).toBe('conflict');
+  expect(result.current.body).toBe('mine again');
+});
+
+test('overwriteConflict force-saves and adopts the new revision', async () => {
+  const getNote = async (topicId: string) => revisionedNote(topicId, 'disk', 'rev-1');
+  const saveNote = vi
+    .fn()
+    .mockRejectedValueOnce(new Error(KNOWLEDGE_NOTE_CONFLICT_MESSAGE))
+    .mockImplementation(async (input: { topicId: string; body: string }) =>
+      revisionedNote(input.topicId, input.body, 'rev-2')
+    );
+  const { result } = setup({ getNote, saveNote });
+  await settle();
+
+  act(() => result.current.setBody('mine'));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(600);
+  });
+  await settle();
+  expect(result.current.status).toBe('conflict');
+
+  await act(async () => {
+    await result.current.overwriteConflict();
+  });
+  await settle();
+
+  expect(saveNote).toHaveBeenLastCalledWith({
+    topicId: 'kt-1',
+    body: 'mine',
+    expectedRevision: 'rev-1',
+    force: true
+  });
+  expect(result.current.status).toBe('saved');
+  expect(result.current.conflict).toBe(false);
+
+  act(() => result.current.setBody('next'));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(600);
+  });
+  await settle();
+
+  expect(saveNote).toHaveBeenLastCalledWith({
+    topicId: 'kt-1',
+    body: 'next',
+    expectedRevision: 'rev-2'
+  });
+});
+
+test('a conflicted draft survives a topic switch without being auto-saved', async () => {
+  const getNote = vi.fn(async (topicId: string) =>
+    revisionedNote(topicId, `disk ${topicId}`, `rev-${topicId}`)
+  );
+  const saveNote = vi.fn(async () => {
+    throw new Error(KNOWLEDGE_NOTE_CONFLICT_MESSAGE);
+  });
+  const { result, rerender } = renderHook(
+    ({ topicId }: { topicId: string }) =>
+      useKnowledgeNote({ topicId, getNote, saveNote, getBacklinks: async () => [] }),
+    { initialProps: { topicId: 'kt-1' } }
+  );
+  await settle();
+
+  act(() => result.current.setBody('A draft'));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(600);
+  });
+  await settle();
+  expect(result.current.status).toBe('conflict');
+
+  rerender({ topicId: 'kt-2' });
+  await settle();
+  expect(result.current.body).toBe('disk kt-2');
+  expect(saveNote).toHaveBeenCalledTimes(1);
+
+  rerender({ topicId: 'kt-1' });
+  await settle();
+  expect(result.current.body).toBe('A draft');
+  expect(result.current.status).toBe('conflict');
+  expect(result.current.conflict).toBe(true);
+  expect(saveNote).toHaveBeenCalledTimes(1);
+});
+
+test('reloading after a conflict shows the disk body and clears the draft', async () => {
+  const getNote = vi
+    .fn()
+    .mockResolvedValueOnce(revisionedNote('kt-1', 'disk', 'rev-1'))
+    .mockResolvedValue(revisionedNote('kt-1', 'from obsidian', 'rev-2'));
+  const saveNote = vi.fn(async () => {
+    throw new Error(KNOWLEDGE_NOTE_CONFLICT_MESSAGE);
+  });
+  const { result, rerender } = renderHook(
+    ({ topicId }: { topicId: string }) =>
+      useKnowledgeNote({ topicId, getNote, saveNote, getBacklinks: async () => [] }),
+    { initialProps: { topicId: 'kt-1' } }
+  );
+  await settle();
+
+  act(() => result.current.setBody('draft'));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(600);
+  });
+  await settle();
+  expect(result.current.status).toBe('conflict');
+
+  await act(async () => {
+    await result.current.reloadNote();
+  });
+  await settle();
+
+  expect(result.current.body).toBe('from obsidian');
+  expect(result.current.status).toBe('saved');
+  expect(result.current.conflict).toBe(false);
+
+  rerender({ topicId: 'kt-2' });
+  await settle();
+  rerender({ topicId: 'kt-1' });
+  await settle();
+  expect(result.current.body).toBe('from obsidian');
 });

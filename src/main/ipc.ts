@@ -615,7 +615,24 @@ function requireSaveKnowledgeNote(value: unknown): SaveKnowledgeNoteInput {
   if (input.body.length > MAX_KNOWLEDGE_NOTE_LENGTH) {
     throw new Error(`笔记不能超过 ${MAX_KNOWLEDGE_NOTE_LENGTH} 字。`);
   }
-  return { topicId, body: input.body };
+  // An empty revision is meaningful: the editor started from a missing note.
+  if (
+    input.expectedRevision !== undefined &&
+    typeof input.expectedRevision !== 'string'
+  ) {
+    throw new Error('笔记版本参数无效。');
+  }
+  if (input.force !== undefined && typeof input.force !== 'boolean') {
+    throw new Error('覆盖参数无效。');
+  }
+  return {
+    topicId,
+    body: input.body,
+    ...(input.expectedRevision !== undefined
+      ? { expectedRevision: input.expectedRevision }
+      : {}),
+    ...(input.force !== undefined ? { force: input.force } : {})
+  };
 }
 
 function requirePlanWorkspace(value: unknown): PlanWorkspaceInput {

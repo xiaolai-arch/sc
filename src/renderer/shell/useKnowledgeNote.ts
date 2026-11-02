@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type {
-  KnowledgeBacklink,
-  KnowledgeNote,
-  SaveKnowledgeNoteInput
+import {
+  KNOWLEDGE_NOTE_CONFLICT_MESSAGE,
+  type KnowledgeBacklink,
+  type KnowledgeNote,
+  type SaveKnowledgeNoteInput
 } from '../../shared/knowledge';
 import { friendlyErrorMessage } from '../../shared/errors';
 
-export type KnowledgeNoteStatus = 'loading' | 'dirty' | 'saving' | 'saved' | 'error';
+export type KnowledgeNoteStatus =
+  | 'loading'
+  | 'dirty'
+  | 'saving'
+  | 'saved'
+  | 'error'
+  | 'conflict';
 
 export interface UseKnowledgeNoteOptions {
   topicId: string;
@@ -24,9 +31,13 @@ export interface UseKnowledgeNoteResult {
   loadError: string | null;
   backlinks: KnowledgeBacklink[];
   backlinksError: string | null;
+  /** True when the note changed in another app while this draft was open. */
+  conflict: boolean;
   setBody(body: string): void;
   flush(): Promise<void>;
   retrySave(): Promise<void>;
+  /** Saves this draft over the external version. */
+  overwriteConflict(): Promise<void>;
   reloadNote(): Promise<void>;
   reloadBacklinks(): Promise<void>;
 }
@@ -43,11 +54,17 @@ const BACKLINKS_FAILED = '反向链接加载失败。';
  */
 const drafts = new Map<string, string>();
 const draftErrors = new Map<string, string>();
+/** Revision each draft was based on; null means the disk revision is unknown. */
+const draftRevisions = new Map<string, string | null>();
+/** Topics whose draft hit an external edit and must not autosave. */
+const draftConflicts = new Set<string>();
 
 /** Drops every in-memory draft, for tests and for switching vaults. */
 export function clearKnowledgeNoteDrafts(): void {
   drafts.clear();
   draftErrors.clear();
+  draftRevisions.clear();
+  draftConflicts.clear();
 }
 
 /**
@@ -73,6 +90,7 @@ export function useKnowledgeNote(options: UseKnowledgeNoteOptions): UseKnowledge
   const [loadError, setLoadError] = useState<string | null>(null);
   const [backlinks, setBacklinks] = useState<KnowledgeBacklink[]>([]);
   const [backlinksError, setBacklinksError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState(false);
 
   const topicRef = useRef(topicId);
   /** The topic the current body belongs to; null while loading a switch. */
@@ -80,6 +98,9 @@ export function useKnowledgeNote(options: UseKnowledgeNoteOptions): UseKnowledge
   const bodyRef = useRef('');
   /** Null means the on-disk body is unknown (a draft was restored). */
   const savedBodyRef = useRef<string | null>(null);
+  /** Revision the current body is based on; null when the disk revision is unknown. */
+  const revisionRef = useRef<string | null>(null);
+  const conflictRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tokenRef = useRef(0);
 
@@ -90,22 +111,37 @@ export function useKnowledgeNote(options: UseKnowledgeNoteOptions): UseKnowledge
     }
   }, []);
 
-  const save = useCallback(async () => {
+  const save = useCallback(async (force = false) => {
     const target = topicRef.current;
     // No body has arrived for this topic yet, or it belongs to another one.
     if (bodyTopicRef.current !== target) return;
+    // A conflict waits for an explicit choice; autosave must not clobber it.
+    if (conflictRef.current && !force) return;
     const draft = bodyRef.current;
-    if (savedBodyRef.current !== null && draft === savedBodyRef.current) return;
+    if (!force && savedBodyRef.current !== null && draft === savedBodyRef.current) return;
     setStatus('saving');
     setError(null);
+    const baseRevision = revisionRef.current;
     try {
-      const saved = await apiRef.current.saveNote({ topicId: target, body: draft });
+      const saved = await apiRef.current.saveNote({
+        topicId: target,
+        body: draft,
+        ...(baseRevision !== null ? { expectedRevision: baseRevision } : {}),
+        ...(force ? { force: true } : {})
+      });
       // Only clear the draft if it was not replaced while the save ran.
       if (drafts.get(target) === draft) {
         drafts.delete(target);
         draftErrors.delete(target);
+        draftRevisions.delete(target);
+      } else if (drafts.has(target)) {
+        draftRevisions.set(target, saved.revision ?? null);
       }
+      draftConflicts.delete(target);
       if (topicRef.current !== target || bodyTopicRef.current !== target) return;
+      revisionRef.current = saved.revision ?? null;
+      conflictRef.current = false;
+      setConflict(false);
       savedBodyRef.current = saved.body;
       if (bodyRef.current === saved.body) {
         setStatus('saved');
@@ -115,8 +151,24 @@ export function useKnowledgeNote(options: UseKnowledgeNoteOptions): UseKnowledge
       }
     } catch (cause) {
       const message = friendlyErrorMessage(cause, SAVE_FAILED);
-      drafts.set(target, draft);
+      // Never replace a newer draft with the body that just failed.
+      if (!drafts.has(target) || drafts.get(target) === draft) {
+        drafts.set(target, draft);
+        draftRevisions.set(target, baseRevision);
+      }
+      if (message === KNOWLEDGE_NOTE_CONFLICT_MESSAGE) {
+        draftErrors.delete(target);
+        draftConflicts.add(target);
+        draftRevisions.set(target, baseRevision);
+        if (topicRef.current !== target || bodyTopicRef.current !== target) return;
+        conflictRef.current = true;
+        setConflict(true);
+        setStatus('conflict');
+        setError(null);
+        return;
+      }
       draftErrors.set(target, message);
+      draftConflicts.delete(target);
       if (topicRef.current !== target || bodyTopicRef.current !== target) return;
       setStatus('error');
       setError(message);
@@ -131,14 +183,24 @@ export function useKnowledgeNote(options: UseKnowledgeNoteOptions): UseKnowledge
       bodyRef.current = next;
       setBodyState(next);
       clearTimer();
+      // While conflicted, every keystroke stays in the draft until the user
+      // chooses which version wins; it must not trigger an autosave.
+      if (conflictRef.current) {
+        drafts.set(target, next);
+        draftRevisions.set(target, revisionRef.current);
+        setStatus('conflict');
+        return;
+      }
       if (savedBodyRef.current !== null && next === savedBodyRef.current) {
         drafts.delete(target);
         draftErrors.delete(target);
+        draftRevisions.delete(target);
         setStatus('saved');
         setError(null);
         return;
       }
       drafts.set(target, next);
+      draftRevisions.set(target, revisionRef.current);
       setStatus('dirty');
       timerRef.current = setTimeout(() => {
         timerRef.current = null;
@@ -155,6 +217,10 @@ export function useKnowledgeNote(options: UseKnowledgeNoteOptions): UseKnowledge
 
   const retrySave = useCallback(async () => {
     await save();
+  }, [save]);
+
+  const overwriteConflict = useCallback(async () => {
+    await save(true);
   }, [save]);
 
   async function loadBacklinks(token: number, target: string) {
@@ -179,6 +245,9 @@ export function useKnowledgeNote(options: UseKnowledgeNoteOptions): UseKnowledge
       bodyTopicRef.current = target;
       bodyRef.current = note.body;
       savedBodyRef.current = note.body;
+      revisionRef.current = note.revision ?? null;
+      conflictRef.current = false;
+      setConflict(false);
       setBodyState(note.body);
       setStatus('saved');
       setError(null);
@@ -186,6 +255,9 @@ export function useKnowledgeNote(options: UseKnowledgeNoteOptions): UseKnowledge
       if (token !== tokenRef.current) return;
       bodyRef.current = '';
       savedBodyRef.current = null;
+      revisionRef.current = null;
+      conflictRef.current = false;
+      setConflict(false);
       setBodyState('');
       setStatus('saved');
       setLoadError(friendlyErrorMessage(cause, LOAD_FAILED));
@@ -200,6 +272,8 @@ export function useKnowledgeNote(options: UseKnowledgeNoteOptions): UseKnowledge
     const hadBody = bodyTopicRef.current === previousTopic;
     const previousBody = bodyRef.current;
     const previousSaved = savedBodyRef.current;
+    const previousRevision = revisionRef.current;
+    const previousConflict = conflictRef.current;
     const previousDirty = hadBody && (previousSaved === null || previousBody !== previousSaved);
 
     topicRef.current = topicId;
@@ -209,25 +283,48 @@ export function useKnowledgeNote(options: UseKnowledgeNoteOptions): UseKnowledge
     bodyTopicRef.current = null;
     bodyRef.current = '';
     savedBodyRef.current = null;
+    revisionRef.current = null;
+    conflictRef.current = false;
     setBodyState('');
     setStatus('loading');
     setError(null);
     setLoadError(null);
+    setConflict(false);
     setBacklinks([]);
     setBacklinksError(null);
 
     async function run() {
-      if (previousTopic !== topicId && previousDirty) {
+      // A conflicted draft is not saved on the way out: the user has not
+      // chosen between their version and the one on disk yet.
+      if (previousTopic !== topicId && previousDirty && !previousConflict) {
         try {
-          await apiRef.current.saveNote({ topicId: previousTopic, body: previousBody });
+          const saved = await apiRef.current.saveNote({
+            topicId: previousTopic,
+            body: previousBody,
+            ...(previousRevision !== null ? { expectedRevision: previousRevision } : {})
+          });
           if (drafts.get(previousTopic) === previousBody) {
             drafts.delete(previousTopic);
             draftErrors.delete(previousTopic);
+            draftRevisions.delete(previousTopic);
+          } else if (drafts.has(previousTopic)) {
+            draftRevisions.set(previousTopic, saved.revision ?? null);
           }
+          draftConflicts.delete(previousTopic);
         } catch (cause) {
           // Keep the draft; coming back to the topic restores it.
-          drafts.set(previousTopic, previousBody);
-          draftErrors.set(previousTopic, friendlyErrorMessage(cause, SAVE_FAILED));
+          const message = friendlyErrorMessage(cause, SAVE_FAILED);
+          if (!drafts.has(previousTopic) || drafts.get(previousTopic) === previousBody) {
+            drafts.set(previousTopic, previousBody);
+          }
+          if (message === KNOWLEDGE_NOTE_CONFLICT_MESSAGE) {
+            draftErrors.delete(previousTopic);
+            draftConflicts.add(previousTopic);
+            draftRevisions.set(previousTopic, previousRevision);
+          } else {
+            draftErrors.set(previousTopic, message);
+            draftConflicts.delete(previousTopic);
+          }
         }
       }
       if (token !== tokenRef.current) return;
@@ -237,10 +334,14 @@ export function useKnowledgeNote(options: UseKnowledgeNoteOptions): UseKnowledge
         bodyTopicRef.current = topicId;
         bodyRef.current = draft;
         savedBodyRef.current = null;
+        revisionRef.current = draftRevisions.get(topicId) ?? null;
+        const hasConflict = draftConflicts.has(topicId);
+        conflictRef.current = hasConflict;
+        setConflict(hasConflict);
         setBodyState(draft);
         const draftError = draftErrors.get(topicId);
-        setStatus(draftError ? 'error' : 'dirty');
-        setError(draftError ?? null);
+        setStatus(hasConflict ? 'conflict' : draftError ? 'error' : 'dirty');
+        setError(hasConflict ? null : draftError ?? null);
         await loadBacklinks(token, topicId);
         return;
       }
@@ -256,6 +357,10 @@ export function useKnowledgeNote(options: UseKnowledgeNoteOptions): UseKnowledge
     const target = topicRef.current;
     drafts.delete(target);
     draftErrors.delete(target);
+    draftRevisions.delete(target);
+    draftConflicts.delete(target);
+    conflictRef.current = false;
+    setConflict(false);
     await loadNote(token, target);
   }, []);
 
@@ -284,9 +389,11 @@ export function useKnowledgeNote(options: UseKnowledgeNoteOptions): UseKnowledge
     loadError,
     backlinks,
     backlinksError,
+    conflict,
     setBody,
     flush,
     retrySave,
+    overwriteConflict,
     reloadNote,
     reloadBacklinks
   };

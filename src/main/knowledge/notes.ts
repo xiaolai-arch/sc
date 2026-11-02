@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import matter from 'gray-matter';
 import type { NoteMeta } from '../../shared/types';
 import { parseNote, serializeNote } from '../vault/note';
@@ -47,6 +48,14 @@ export function parseKnowledgeNoteFile(raw: string, fallbackTopicId: string): Kn
     updatedAt: asString(meta.updated) ?? '',
     meta
   };
+}
+
+/**
+ * Identifies the note body for conflict detection. Frontmatter is excluded so
+ * an Obsidian edit that only touches tags or aliases never blocks a body save.
+ */
+export function knowledgeNoteRevision(body: string): string {
+  return createHash('sha256').update(body, 'utf8').digest('hex');
 }
 
 /** Writes the app-owned fields over the original meta, keeping unknown keys. */

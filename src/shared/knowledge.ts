@@ -75,12 +75,28 @@ export interface KnowledgeNote {
   body: string;
   /** Empty when the note has never been saved. */
   updatedAt: string;
+  /**
+   * Hash of the parsed note body as it was last read from disk. Empty when the
+   * note does not exist. Used to detect edits made in another app (e.g. Obsidian).
+   */
+  revision?: string;
 }
 
 export interface SaveKnowledgeNoteInput {
   topicId: string;
   body: string;
+  /**
+   * Revision the editor started from. When set, the save is rejected if the
+   * body on disk changed in the meantime. Absent keeps the legacy last-write-wins
+   * behavior for callers that do not track revisions.
+   */
+  expectedRevision?: string;
+  /** Overwrite the disk body even when `expectedRevision` no longer matches. */
+  force?: boolean;
 }
+
+export const KNOWLEDGE_NOTE_CONFLICT_MESSAGE =
+  '笔记已在其他应用中被修改，请选择要保留的版本。';
 
 export interface KnowledgeBacklink {
   topicId: string;
