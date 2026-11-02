@@ -1,0 +1,247 @@
+// @vitest-environment jsdom
+import { act, renderHook } from '@testing-library/react';
+import type { KnowledgeBacklink, KnowledgeNote } from '../../src/shared/knowledge';
+import { useKnowledgeNote } from '../../src/renderer/shell/useKnowledgeNote';
+
+function note(topicId: string, body: string): KnowledgeNote {
+  return { topicId, body, updatedAt: '' };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+async function settle() {
+  await act(async () => {
+    for (let index = 0; index < 8; index += 1) {
+      await Promise.resolve();
+    }
+  });
+}
+
+function setup(overrides: {
+  getNote?: (topicId: string) => Promise<KnowledgeNote>;
+  saveNote?: (input: { topicId: string; body: string }) => Promise<KnowledgeNote>;
+  getBacklinks?: (topicId: string) => Promise<KnowledgeBacklink[]>;
+  topicId?: string;
+} = {}) {
+  const getNote = vi.fn(overrides.getNote ?? (async (topicId: string) => note(topicId, 'disk')));
+  const saveNote = vi.fn(
+    overrides.saveNote ?? (async (input: { topicId: string; body: string }) => note(input.topicId, input.body))
+  );
+  const getBacklinks = vi.fn(overrides.getBacklinks ?? (async () => []));
+  const hook = renderHook(
+    ({ topicId }: { topicId: string }) =>
+      useKnowledgeNote({
+        topicId,
+        getNote,
+        saveNote,
+        getBacklinks,
+        debounceMs: 600
+      }),
+    { initialProps: { topicId: overrides.topicId ?? 'kt-1' } }
+  );
+  return { ...hook, getNote, saveNote, getBacklinks };
+}
+
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+test('loads the note and backlinks for the selected topic', async () => {
+  const { result } = setup({
+    getBacklinks: async () => [{ topicId: 'kt-2', name: 'B' }]
+  });
+
+  await settle();
+
+  expect(result.current.body).toBe('disk');
+  expect(result.current.status).toBe('saved');
+  expect(result.current.backlinks).toEqual([{ topicId: 'kt-2', name: 'B' }]);
+});
+
+test('debounces typing and saves once with the latest body', async () => {
+  const { result, saveNote } = setup();
+  await settle();
+
+  act(() => {
+    result.current.setBody('a');
+    result.current.setBody('ab');
+  });
+  expect(result.current.status).toBe('dirty');
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(599);
+  });
+  expect(saveNote).not.toHaveBeenCalled();
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1);
+  });
+  expect(saveNote).toHaveBeenCalledTimes(1);
+  expect(saveNote).toHaveBeenCalledWith({ topicId: 'kt-1', body: 'ab' });
+
+  await settle();
+  expect(result.current.status).toBe('saved');
+});
+
+test('switching topics awaits the previous save before loading the new note', async () => {
+  const pending = deferred<KnowledgeNote>();
+  const getNote = vi.fn(async (topicId: string) => note(topicId, topicId === 'kt-1' ? 'A' : 'B'));
+  const saveNote = vi.fn(() => pending.promise);
+  const { result, rerender } = renderHook(
+    ({ topicId }: { topicId: string }) =>
+      useKnowledgeNote({ topicId, getNote, saveNote, getBacklinks: async () => [] }),
+    { initialProps: { topicId: 'kt-1' } }
+  );
+  await settle();
+
+  act(() => result.current.setBody('draft A'));
+  rerender({ topicId: 'kt-2' });
+  await settle();
+
+  expect(saveNote).toHaveBeenCalledWith({ topicId: 'kt-1', body: 'draft A' });
+  expect(getNote).not.toHaveBeenCalledWith('kt-2');
+
+  await act(async () => {
+    pending.resolve(note('kt-1', 'draft A'));
+    await Promise.resolve();
+  });
+  await settle();
+
+  expect(getNote).toHaveBeenCalledWith('kt-2');
+  expect(result.current.body).toBe('B');
+});
+
+test('keeps an unsaved draft when saving fails and restores it on return', async () => {
+  const getNote = vi.fn(async (topicId: string) => note(topicId, `disk ${topicId}`));
+  const saveNote = vi.fn(async () => {
+    throw new Error('disk full');
+  });
+  const { result, rerender } = renderHook(
+    ({ topicId }: { topicId: string }) =>
+      useKnowledgeNote({ topicId, getNote, saveNote, getBacklinks: async () => [] }),
+    { initialProps: { topicId: 'kt-1' } }
+  );
+  await settle();
+
+  act(() => result.current.setBody('draft'));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(600);
+  });
+  await settle();
+  expect(result.current.status).toBe('error');
+  expect(result.current.error).toBeTruthy();
+
+  rerender({ topicId: 'kt-2' });
+  await settle();
+  expect(result.current.body).toBe('disk kt-2');
+
+  rerender({ topicId: 'kt-1' });
+  await settle();
+  expect(result.current.body).toBe('draft');
+  expect(result.current.status).toBe('error');
+
+  await act(async () => {
+    await result.current.retrySave();
+  });
+  await settle();
+  expect(saveNote).toHaveBeenLastCalledWith({ topicId: 'kt-1', body: 'draft' });
+});
+
+test('shows and retries a note load failure', async () => {
+  const getNote = vi
+    .fn()
+    .mockRejectedValueOnce(new Error('missing'))
+    .mockResolvedValue(note('kt-1', 'recovered'));
+  const { result } = setup({ getNote });
+
+  await settle();
+  expect(result.current.loadError).toBeTruthy();
+  expect(result.current.body).toBe('');
+
+  await act(async () => {
+    await result.current.reloadNote();
+  });
+  await settle();
+  expect(result.current.loadError).toBeNull();
+  expect(result.current.body).toBe('recovered');
+});
+
+test('ignores a stale load that resolves after switching topics', async () => {
+  const slowA = deferred<KnowledgeNote>();
+  const fastB = deferred<KnowledgeNote>();
+  const getNote = vi.fn((topicId: string) => (topicId === 'kt-1' ? slowA.promise : fastB.promise));
+  const { result, rerender } = renderHook(
+    ({ topicId }: { topicId: string }) =>
+      useKnowledgeNote({ topicId, getNote, saveNote: async () => note(topicId, ''), getBacklinks: async () => [] }),
+    { initialProps: { topicId: 'kt-1' } }
+  );
+
+  rerender({ topicId: 'kt-2' });
+  await act(async () => {
+    fastB.resolve(note('kt-2', 'B'));
+    await Promise.resolve();
+  });
+  await settle();
+  expect(result.current.body).toBe('B');
+
+  await act(async () => {
+    slowA.resolve(note('kt-1', 'late A'));
+    await Promise.resolve();
+  });
+  await settle();
+  expect(result.current.body).toBe('B');
+});
+
+test('does not save when the body is unchanged', async () => {
+  const { result, saveNote } = setup();
+  await settle();
+
+  act(() => result.current.setBody('disk'));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(600);
+  });
+  await settle();
+
+  expect(saveNote).not.toHaveBeenCalled();
+  expect(result.current.status).toBe('saved');
+});
+
+test('flush saves immediately and clears the debounce timer', async () => {
+  const { result, saveNote } = setup();
+  await settle();
+
+  act(() => result.current.setBody('quick'));
+  await act(async () => {
+    await result.current.flush();
+  });
+  await settle();
+  expect(saveNote).toHaveBeenCalledTimes(1);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(600);
+  });
+  expect(saveNote).toHaveBeenCalledTimes(1);
+});
+
+test('unmounting flushes the pending draft', async () => {
+  const { result, unmount, saveNote } = setup();
+  await settle();
+
+  act(() => result.current.setBody('bye'));
+  unmount();
+  await settle();
+
+  expect(saveNote).toHaveBeenCalledWith({ topicId: 'kt-1', body: 'bye' });
+});
