@@ -164,7 +164,8 @@ test('auto-links completed tasks, notes and reviews without blocking', async () 
       linkNote,
       linkReview,
       getNote: async (topicId) => ({ topicId, body: '', updatedAt: '' }),
-      saveNote: async (input) => ({ ...input, updatedAt: '' })
+      saveNote: async (input) => ({ ...input, updatedAt: '' }),
+      getBacklinks: async () => []
     },
     secretStore: new InMemorySecretStore(),
     now: () => new Date(2026, 10, 2, 9, 0, 0)

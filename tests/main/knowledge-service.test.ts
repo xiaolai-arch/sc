@@ -297,3 +297,36 @@ test('getNote returns an empty body for missing or unsafe ids', async () => {
   });
   expect(await service.getNote('../../etc/passwd')).toMatchObject({ body: '' });
 });
+
+test('lists topics whose notes link to the target', async () => {
+  const { service } = await setup();
+  const target = await service.create({ name: 'LangChain' });
+  const source = await service.create({ name: 'LangGraph' });
+  await service.saveNote({ topicId: source.id, body: '相关 [[LangChain]]' });
+
+  expect(await service.getBacklinks(target.id)).toEqual([
+    { topicId: source.id, name: 'LangGraph' }
+  ]);
+});
+
+test('ignores links inside code and ambiguous aliases', async () => {
+  const { service } = await setup();
+  const target = await service.create({ name: 'RAG' });
+  await service.create({ name: '检索增强', aliases: ['RAG'] });
+  const source = await service.create({ name: 'SourceNote' });
+  await service.saveNote({ topicId: source.id, body: '`[[RAG]]`\n```\n[[RAG]]\n```' });
+
+  expect(await service.getBacklinks(target.id)).toEqual([]);
+});
+
+test('ignores self-links and broken note files', async () => {
+  const { dir, service } = await setup();
+  const topic = await service.create({ name: 'LangGraph' });
+  await service.saveNote({ topicId: topic.id, body: '[[LangGraph]]' });
+  expect(await service.getBacklinks(topic.id)).toEqual([]);
+
+  await mkdir(join(dir, 'knowledge', 'notes'), { recursive: true });
+  await writeFile(join(dir, 'knowledge', 'notes', 'kt-broken.md'), 'not: [valid', 'utf8');
+  await service.create({ name: 'LangChain' });
+  expect(await service.getBacklinks(topic.id)).toEqual([]);
+});

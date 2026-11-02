@@ -115,6 +115,7 @@ export interface KnowledgeService {
   linkReview(input: LinkKnowledgeReviewInput): Promise<void>;
   getNote(topicId: string): Promise<KnowledgeNote>;
   saveNote(input: SaveKnowledgeNoteInput): Promise<KnowledgeNote>;
+  getBacklinks(topicId: string): Promise<KnowledgeBacklink[]>;
 }
 
 /** Renderer-facing knowledge contract over IPC. */

@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import type {
   CreateKnowledgeTopicInput,
+  KnowledgeBacklink,
   KnowledgeEvidence,
   KnowledgeNote,
   KnowledgeService,
@@ -11,7 +12,12 @@ import type {
   SaveKnowledgeNoteInput,
   UpdateKnowledgeTopicInput
 } from '../../shared/knowledge';
-import { MAX_KNOWLEDGE_NOTE_LENGTH, topicMatches } from '../../shared/knowledge';
+import {
+  MAX_KNOWLEDGE_NOTE_LENGTH,
+  resolveKnowledgeLink,
+  topicMatches,
+  wikiLinkTargets
+} from '../../shared/knowledge';
 import type { WorkspaceNote, WorkspaceTask } from '../../shared/workspace';
 import { formatLocalDate } from '../../shared/date';
 import { parseKnowledgeNoteFile, serializeKnowledgeNoteFile } from './notes';
@@ -137,6 +143,35 @@ export function createKnowledgeService(options: KnowledgeServiceOptions): Knowle
     if (raw === null) return { topicId, body: '', updatedAt: '' };
     const note = parseKnowledgeNoteFile(raw, topicId);
     return { topicId, body: note.body, updatedAt: note.updatedAt };
+  }
+
+  /**
+   * Topics whose notes link to `topicId`. Links that are ambiguous (two topics
+   * share the term) or point at the topic itself are skipped.
+   */
+  async function readBacklinks(topicId: string): Promise<KnowledgeBacklink[]> {
+    if (!isSafeTopicId(topicId)) return [];
+    const target = await readTopic(topicId);
+    if (target === null) return [];
+    const topics = await listTopics();
+    const seen = new Set<string>();
+    const backlinks: KnowledgeBacklink[] = [];
+    for (const source of topics) {
+      if (source.id === target.id || seen.has(source.id)) continue;
+      try {
+        const note = await readNote(source.id);
+        const links = wikiLinkTargets(note.body);
+        if (
+          links.some((linkTarget) => resolveKnowledgeLink(topics, linkTarget)?.id === target.id)
+        ) {
+          seen.add(source.id);
+          backlinks.push({ topicId: source.id, name: source.name });
+        }
+      } catch {
+        // A broken note must not hide every other backlink.
+      }
+    }
+    return backlinks.sort((a, b) => a.name.localeCompare(b.name, 'zh'));
   }
 
   /** Best-effort: keep a note's frontmatter in step with a renamed topic. */
@@ -294,6 +329,8 @@ export function createKnowledgeService(options: KnowledgeServiceOptions): Knowle
     },
 
     getNote: readNote,
+
+    getBacklinks: readBacklinks,
 
     async saveNote(input: SaveKnowledgeNoteInput): Promise<KnowledgeNote> {
       const topicId = typeof input?.topicId === 'string' ? input.topicId.trim() : '';
