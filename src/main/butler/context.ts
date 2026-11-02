@@ -1,5 +1,5 @@
-import type { KnowledgeService, KnowledgeTopic } from '../../shared/knowledge';
 import { isActiveKnowledgeTopic } from '../../shared/knowledge';
+import type { KnowledgeService } from '../../shared/knowledge';
 import type {
   MemoryItem,
   SendMessageInput,
@@ -7,6 +7,10 @@ import type {
   WorkspaceService,
   WorkspaceTask
 } from '../../shared/workspace';
+import {
+  attachKnowledgeNotes,
+  type KnowledgeTopicContext
+} from '../knowledge/context';
 
 /** Read-only snapshot of the local data the butler may mention in a reply. */
 export interface ButlerContext {
@@ -18,12 +22,14 @@ export interface ButlerContext {
   tasks: WorkspaceTask[];
   memory: MemoryItem[];
   /** Active topics (usually mastered + learning) the butler should remember. */
-  knowledge: KnowledgeTopic[];
+  knowledge: KnowledgeTopicContext[];
   /** True when at least part of the local data could not be read. */
   contextError: boolean;
 }
 
 const MAX_CONTEXT_KNOWLEDGE = 15;
+const MAX_CONTEXT_KNOWLEDGE_NOTES = 8;
+const MAX_CONTEXT_NOTE_CHARS = 240;
 
 function emptyContext(now: Date, contextError = false): ButlerContext {
   return { now, workspaces: [], tasks: [], memory: [], knowledge: [], contextError };
@@ -33,11 +39,11 @@ function emptyContext(now: Date, contextError = false): ButlerContext {
 async function selectKnowledge(
   knowledgeService: KnowledgeService | null,
   workspaceId: string | undefined
-): Promise<KnowledgeTopic[]> {
+): Promise<KnowledgeTopicContext[]> {
   if (knowledgeService === null) return [];
   try {
     const topics = await knowledgeService.list(workspaceId);
-    return topics
+    const selected = topics
       .filter(isActiveKnowledgeTopic)
       .sort((a, b) => {
         const aMastered = a.status === 'mastered' ? 0 : 1;
@@ -45,6 +51,10 @@ async function selectKnowledge(
         return aMastered - bMastered || b.updatedAt.localeCompare(a.updatedAt);
       })
       .slice(0, MAX_CONTEXT_KNOWLEDGE);
+    return attachKnowledgeNotes(selected, knowledgeService, {
+      maxNotes: MAX_CONTEXT_KNOWLEDGE_NOTES,
+      maxChars: MAX_CONTEXT_NOTE_CHARS
+    });
   } catch {
     return [];
   }

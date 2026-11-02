@@ -273,8 +273,24 @@ test('grounds plan generation in mastered topics and records the snapshot', asyn
     }
   });
   try {
-    await knowledge!.create({ name: 'LangChain', workspaceId, status: 'mastered' });
-    await knowledge!.create({ name: 'LangGraph', workspaceId, status: 'learning' });
+    const langChain = await knowledge!.create({
+      name: 'LangChain',
+      workspaceId,
+      status: 'mastered',
+      level: 4,
+      summary: '会搭 AgentExecutor 和自定义 tool'
+    });
+    await knowledge!.create({
+      name: 'LangGraph',
+      workspaceId,
+      status: 'learning',
+      level: 2,
+      summary: '只看过文档，还没动手'
+    });
+    await knowledge!.saveNote({
+      topicId: langChain.id,
+      body: 'RAG 还没做过；LangGraph 只看过文档。'
+    });
 
     const plan = await service.create({ workspaceId, goal: '系统学习 AI Agent', weeks: 1 });
 
@@ -282,6 +298,9 @@ test('grounds plan generation in mastered topics and records the snapshot', asyn
     expect(prompt).toContain('已掌握：LangChain');
     expect(prompt).toContain('正在学：LangGraph');
     expect(prompt).toContain('不要从头安排');
+    expect(prompt).toContain('L4');
+    expect(prompt).toContain('会搭 AgentExecutor 和自定义 tool');
+    expect(prompt).toContain('RAG 还没做过');
     expect(plan.knowledge).toEqual([
       { name: 'LangChain', status: 'mastered' },
       { name: 'LangGraph', status: 'learning' }
@@ -293,6 +312,7 @@ test('grounds plan generation in mastered topics and records the snapshot', asyn
     );
     expect(file).toContain('knowledge:');
     expect(file).toContain('name: LangChain');
+    expect(file).not.toContain('会搭 AgentExecutor');
     expect((await service.get(plan.id))?.knowledge).toEqual(plan.knowledge);
   } finally {
     await rm(dir, { recursive: true, force: true });

@@ -13,6 +13,7 @@ import type {
 import type { LongPlanGenerationInput } from '../../shared/plan-template';
 import type { Workspace, WorkspaceService } from '../../shared/workspace';
 import type { ModelClient } from '../agent/model-client';
+import { attachKnowledgeNotes } from '../knowledge/context';
 import { createMutex, listDirectories, listMarkdownFiles, readFileOrNull, writeFileAtomic } from '../workspace/fs-utils';
 import { newId } from '../workspace/ids';
 import { assertSafeSegment, planFile, plansDir, workspacesDir } from '../workspace/paths';
@@ -27,6 +28,8 @@ const MAX_WEEKLY_HOURS = 80;
 const MAX_GOAL_LENGTH = 300;
 const MAX_REFERENCES_LENGTH = 4_000;
 const MAX_KNOWN_TOPICS = 20;
+const MAX_KNOWN_NOTE_EXCERPTS = 6;
+const MAX_KNOWN_NOTE_CHARS = 280;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export interface LongPlanServiceOptions {
@@ -128,15 +131,25 @@ export function createLongPlanService(options: LongPlanServiceOptions): LongPlan
     if (knowledgeService === null) return [];
     try {
       const topics = await knowledgeService.list(workspaceId);
-      return topics
+      const active = topics
         .filter(isActiveKnowledgeTopic)
         .sort((a, b) => {
           const aMastered = a.status === 'mastered' ? 0 : 1;
           const bMastered = b.status === 'mastered' ? 0 : 1;
           return aMastered - bMastered || b.updatedAt.localeCompare(a.updatedAt);
         })
-        .slice(0, MAX_KNOWN_TOPICS)
-        .map(({ name, status }) => ({ name, status }));
+        .slice(0, MAX_KNOWN_TOPICS);
+      const enriched = await attachKnowledgeNotes(active, knowledgeService, {
+        maxNotes: MAX_KNOWN_NOTE_EXCERPTS,
+        maxChars: MAX_KNOWN_NOTE_CHARS
+      });
+      return enriched.map((topic) => ({
+        name: topic.name,
+        status: topic.status,
+        ...(typeof topic.level === 'number' ? { level: topic.level } : {}),
+        ...(topic.summary.trim() ? { summary: topic.summary.trim() } : {}),
+        ...(topic.noteExcerpt ? { noteExcerpt: topic.noteExcerpt } : {})
+      }));
     } catch {
       return [];
     }
@@ -241,8 +254,11 @@ export function createLongPlanService(options: LongPlanServiceOptions): LongPlan
         ...(references ? { references } : {}),
         sources: findings.sources,
         // The template cannot use knowledge; claiming a snapshot would be false.
+        // Prompt-only detail (summary/level/note) is deliberately not persisted.
         ...(generated.generatedBy === 'agent' && knownTopics.length
-          ? { knowledge: knownTopics }
+          ? {
+              knowledge: knownTopics.map(({ name, status }) => ({ name, status }))
+            }
           : {}),
         createdAt: timestamp,
         updatedAt: timestamp,

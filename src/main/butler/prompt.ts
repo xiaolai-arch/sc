@@ -1,5 +1,9 @@
 import { formatChineseDate, formatLocalDate } from '../../shared/date';
 import type { SendMessageInput } from '../../shared/workspace';
+import {
+  clipKnowledgeText,
+  KNOWLEDGE_STATUS_LABELS
+} from '../knowledge/context';
 import type { ButlerContext } from './context';
 
 /** The butler's four roles are fixed by the product spec. */
@@ -21,6 +25,7 @@ export const BUTLER_SYSTEM_PROMPT = `你是阿咲，用户的个人管家，同�
 - 用户要改项目名称、目标或说明时调用 update_workspace。
 - 用户要求调整今天的安排时，用 update_task 给任务设置 startAt（YYYY-MM-DDTHH:mm，本地时间），或把时间块挪到合适的空档；没有 startAt 的任务会按顺序自动排入时间表。
 - 用户说「今天学了 / 已经会了某个主题」时，用 record_knowledge 记录；规划或讲解时不要建议从头学习「已掌握」的主题，「正在学」的主题接着当前进度讲。
+- 上下文里的「知识库细节」用来判断用户已经会到哪一步：摘要或笔记里写到的内容不要重讲，笔记里提到的卡点优先安排练习。
 - 安排时间时避开已有 startAt 的任务和用户已说明的固定事项，不要把两个任务排在同一时间。
 - 工具失败时不要假装成功，要向用户说明，并给出不依赖工具的建议。
 - 不要编造用户没有提供的记录；不确定时先问一个简短的问题。
@@ -30,6 +35,9 @@ export const BUTLER_SYSTEM_PROMPT = `你是阿咲，用户的个人管家，同�
 const MAX_PROMPT_TASKS = 10;
 const MAX_PROMPT_MEMORY = 8;
 const MAX_PROMPT_EVIDENCE = 3;
+const MAX_PROMPT_KNOWLEDGE_DETAILS = 8;
+const MAX_PROMPT_KNOWLEDGE_SUMMARY = 160;
+const MAX_PROMPT_KNOWLEDGE_NOTE = 240;
 
 export function buildSystemPrompt(context: ButlerContext): string {
   return `${BUTLER_SYSTEM_PROMPT}\n\n${renderContext(context)}`;
@@ -112,6 +120,21 @@ function renderContext(context: ButlerContext): string {
       if (recent.length >= MAX_PROMPT_EVIDENCE) break;
     }
     if (recent.length > 0) lines.push(`最近证据：${recent.join('；')}`);
+
+    const details: string[] = [];
+    for (const topic of context.knowledge.slice(0, MAX_PROMPT_KNOWLEDGE_DETAILS)) {
+      const summary = clipKnowledgeText(topic.summary, MAX_PROMPT_KNOWLEDGE_SUMMARY);
+      const note = clipKnowledgeText(topic.noteExcerpt ?? '', MAX_PROMPT_KNOWLEDGE_NOTE);
+      if (!summary && !note) continue;
+      const level = typeof topic.level === 'number' ? `，L${topic.level}` : '';
+      const parts = [`- ${topic.name}（${KNOWLEDGE_STATUS_LABELS[topic.status]}${level}）`];
+      if (summary) parts.push(`摘要：${summary}`);
+      if (note) parts.push(`笔记摘录：${note}`);
+      details.push(parts.join('；'));
+    }
+    if (details.length > 0) {
+      lines.push('知识库细节（用来判断已经会到哪一步，不要原样复述）：', ...details);
+    }
   }
 
   if (context.contextError) {

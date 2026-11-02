@@ -83,6 +83,35 @@ test('shows pinned start times and teaches the butler to reschedule', () => {
   expect(prompt).toContain('09:00 开始');
 });
 
+test('renders knowledge summaries, levels and note excerpts for grounding', () => {
+  const prompt = buildSystemPrompt({
+    now: new Date('2026-11-02T12:00:00.000Z'),
+    workspaces: [],
+    tasks: [],
+    memory: [],
+    knowledge: [
+      {
+        id: 'kt-lc',
+        name: 'LangChain',
+        aliases: [],
+        status: 'mastered',
+        level: 4,
+        summary: '会搭 AgentExecutor 和自定义 tool',
+        noteExcerpt: '自定义 tool 已经跑通，RAG 还没做过。',
+        evidence: [],
+        createdAt: '2026-11-01T00:00:00.000Z',
+        updatedAt: '2026-11-01T00:00:00.000Z'
+      }
+    ],
+    contextError: false
+  });
+
+  expect(prompt).toContain('已掌握：LangChain');
+  expect(prompt).toContain('L4');
+  expect(prompt).toContain('会搭 AgentExecutor 和自定义 tool');
+  expect(prompt).toContain('自定义 tool 已经跑通，RAG 还没做过。');
+});
+
 test('renders mastered and learning topics from the knowledge base', () => {
   const topic = (name: string, status: 'mastered' | 'learning') => ({
     id: `kt-${name}`,

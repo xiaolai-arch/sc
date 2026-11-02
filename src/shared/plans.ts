@@ -13,6 +13,13 @@ export type LongPlanGeneratedBy = 'agent' | 'template';
 export interface LongPlanKnowledge {
   name: string;
   status: KnowledgeStatus;
+  /**
+   * Prompt-only detail used to decide where to start; plan files persist
+   * only name and status, so these never become vault data.
+   */
+  level?: number;
+  summary?: string;
+  noteExcerpt?: string;
 }
 
 /** A web page the plan was grounded in. */

@@ -1,9 +1,16 @@
 import type { CreateLongPlanInput, LongPlanKnowledge } from '../../shared/plans';
 import type { Workspace } from '../../shared/workspace';
+import {
+  clipKnowledgeText,
+  KNOWLEDGE_STATUS_LABELS
+} from '../knowledge/context';
 
 const MAX_GOAL_LENGTH = 300;
 const MAX_NOTES_LENGTH = 800;
 const MAX_REFERENCES_LENGTH = 4_000;
+const MAX_PROMPT_KNOWLEDGE_DETAILS = 8;
+const MAX_PROMPT_KNOWLEDGE_SUMMARY = 160;
+const MAX_PROMPT_KNOWLEDGE_NOTE = 280;
 
 export const LONG_PLAN_SYSTEM_PROMPT = `你是阿咲的长期规划助手。你要根据用户的目标、总周数、每周可投入时间和起始日期，制定一份分阶段的长期计划。
 规则：
@@ -19,6 +26,7 @@ export const LONG_PLAN_SYSTEM_PROMPT = `你是阿咲的长期规划助手。你�
 - 如果提供了「参考资料」，按资料的实际范围和顺序安排，不要加入资料没有覆盖的领域。
 - 如果提供了「联网调研事实」，优先据此安排工具、版本和验收项，不要写出事实里没有的结论。
 - 如果提供了「已掌握」主题，不要从头安排这些内容，最多安排一次复习检查；「正在学」的主题从当前进度继续，不要重讲基础。
+- 如果提供了「知识基础细节」，据此判断用户实际会到哪一步；摘要或笔记里已经写到的内容不要重讲，笔记里提到的卡点优先安排练习。
 格式：{"title":"计划标题","phases":[{"title":"阶段一：建立基础","subtitle":"重点","goal":"阶段目标","weeks":[{"title":"第 1 周：主题","goal":"本周目标","days":[{"tasks":["任务"],"output":"产出"}],"checks":["验收项"]}]}]}`;
 
 export interface LongPlanPrompt {
@@ -52,6 +60,18 @@ export function buildLongPlanPrompt({
   const learning = (knownTopics ?? [])
     .filter((topic) => topic.status === 'learning')
     .map((topic) => topic.name);
+  const details = (knownTopics ?? [])
+    .slice(0, MAX_PROMPT_KNOWLEDGE_DETAILS)
+    .flatMap((topic) => {
+      const summary = clipKnowledgeText(topic.summary ?? '', MAX_PROMPT_KNOWLEDGE_SUMMARY);
+      const note = clipKnowledgeText(topic.noteExcerpt ?? '', MAX_PROMPT_KNOWLEDGE_NOTE);
+      if (!summary && !note) return [];
+      const level = typeof topic.level === 'number' ? `，L${topic.level}` : '';
+      const parts = [`- ${topic.name}（${KNOWLEDGE_STATUS_LABELS[topic.status]}${level}）`];
+      if (summary) parts.push(`摘要：${summary}`);
+      if (note) parts.push(`笔记摘录：${note}`);
+      return [parts.join('；')];
+    });
   const lines = [
     `工作区：${workspace.name}（${workspace.kind}）`,
     workspace.goal.trim() ? `工作区目标：${clip(workspace.goal, MAX_GOAL_LENGTH)}` : null,
@@ -73,6 +93,9 @@ export function buildLongPlanPrompt({
       : null,
     mastered.length ? `已掌握：${mastered.join('、')}` : null,
     learning.length ? `正在学：${learning.join('、')}` : null,
+    details.length
+      ? `知识基础细节（据此判断从哪里开始，已经写到的内容不要重讲）：\n${details.join('\n')}`
+      : null,
     mastered.length || learning.length
       ? '不要从头安排已掌握的主题，正在学的主题从当前进度继续。'
       : null,
