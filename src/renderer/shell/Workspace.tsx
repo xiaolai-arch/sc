@@ -151,6 +151,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     updateMemory,
     deleteMemory,
     createLongPlan,
+    recalibrateLongPlan,
     setLongPlanItemDone,
     deleteLongPlan,
     createKnowledgeTopic,
@@ -1185,6 +1186,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               today={today}
               onOpenSidebar={() => setSidebarOpen(true)}
               onCreatePlan={createLongPlan}
+              onRecalibrate={recalibrateLongPlan}
               onSetItemDone={setLongPlanItemDone}
               onDeletePlan={deleteLongPlan}
               onAddDayToSchedule={addPlanDayToSchedule}

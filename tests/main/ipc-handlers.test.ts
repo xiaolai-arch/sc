@@ -149,6 +149,15 @@ test('rejects malformed handler parameters before they reach services', async ()
     })
   ).rejects.toThrow('联网调研选项无效。');
   await expect(
+    handlers.recalibrateLongPlan({ planId: '   ' })
+  ).rejects.toThrow('计划 ID不能为空。');
+  await expect(
+    handlers.recalibrateLongPlan({ planId: 'lp-1', weeklyHours: '8' })
+  ).rejects.toThrow('每周投入参数无效。');
+  await expect(
+    handlers.recalibrateLongPlan({ planId: 'lp-1', notes: 42 })
+  ).rejects.toThrow('重排说明无效。');
+  await expect(
     handlers.setLongPlanItemDone({
       planId: 'lp-1',
       weekId: 'w1',

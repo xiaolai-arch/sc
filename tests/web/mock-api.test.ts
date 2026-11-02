@@ -73,6 +73,47 @@ test('creates, tracks and deletes a long-term plan in the prototype', async () =
   expect(await reloaded.listLongPlans('english')).toEqual([]);
 });
 
+test('recalibrates the untouched remaining weeks in the prototype', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage);
+  const plan = await api.createLongPlan({
+    workspaceId: 'english',
+    goal: '系统提升英语',
+    weeks: 3,
+    weeklyHours: 8
+  });
+  const firstWeek = plan.phases[0]!.weeks[0]!;
+  await api.setLongPlanItemDone({
+    planId: plan.id,
+    weekId: firstWeek.id,
+    itemId: firstWeek.days[0]!.id,
+    kind: 'day',
+    done: true
+  });
+
+  const originalWeeks = plan.phases.flatMap((phase) => phase.weeks);
+  const updated = await api.recalibrateLongPlan({
+    planId: plan.id,
+    weeklyHours: 5,
+    notes: '这周加班'
+  });
+  const weeks = updated.phases.flatMap((phase) => phase.weeks);
+  expect(weeks).toHaveLength(3);
+  expect(weeks.map((week) => week.number)).toEqual([1, 2, 3]);
+  expect(weeks[0]!.days[0]!.done).toBe(true);
+  expect(weeks[1]!.id).toBe('w2');
+  expect(weeks[1]!.startDate).toBe(originalWeeks[1]!.startDate);
+  expect(updated.weeklyHours).toBe(5);
+  expect(updated.recalibratedFrom).toBe(2);
+  expect(updated.recalibratedAt).toBeTruthy();
+
+  const reloaded = createMockApi(localStorage);
+  expect((await reloaded.getLongPlan(plan.id))?.recalibratedFrom).toBe(2);
+  await expect(
+    reloaded.recalibrateLongPlan({ planId: plan.id, weeklyHours: 0 })
+  ).rejects.toThrow(/每周投入/);
+});
+
 test('keeps plan references and never invents sources in the prototype', async () => {
   localStorage.clear();
   const api = createMockApi(localStorage);

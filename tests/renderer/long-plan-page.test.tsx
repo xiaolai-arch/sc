@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { LongPlanPage } from '../../src/renderer/shell/LongPlanPage';
 import type {
   CreateLongPlanInput,
   LongPlan,
   LongPlanDay,
+  RecalibrateLongPlanInput,
   UpdateLongPlanItemInput
 } from '../../src/shared/plans';
 import type { Workspace } from '../../src/shared/workspace';
@@ -83,6 +84,7 @@ const plan: LongPlan = {
 function renderPage(options: {
   plans?: LongPlan[];
   onCreatePlan?: (input: CreateLongPlanInput) => Promise<LongPlan>;
+  onRecalibrate?: (input: RecalibrateLongPlanInput) => Promise<LongPlan>;
   onSetItemDone?: (input: UpdateLongPlanItemInput) => Promise<LongPlan>;
   onAddDayToSchedule?: (plan: LongPlan, day: LongPlanDay) => Promise<void>;
 } = {}) {
@@ -104,6 +106,7 @@ function renderPage(options: {
       today="2026-11-03"
       onOpenSidebar={vi.fn()}
       onCreatePlan={onCreatePlan}
+      {...(options.onRecalibrate ? { onRecalibrate: options.onRecalibrate } : {})}
       onSetItemDone={onSetItemDone}
       onAddDayToSchedule={options.onAddDayToSchedule}
     />
@@ -268,6 +271,59 @@ test('shows an empty state and explains the generic framework', async () => {
 test('marks template-generated plans so users know to refine them', () => {
   renderPage({ plans: [{ ...plan, generatedBy: 'template' }] });
   expect(screen.getByText(/通用框架/)).toBeInTheDocument();
+});
+
+test('recalibrates the remaining weeks with the current hours and notes', async () => {
+  const onRecalibrate = vi.fn(async (input: RecalibrateLongPlanInput) => ({
+    ...plan,
+    weeklyHours: input.weeklyHours ?? plan.weeklyHours,
+    recalibratedFrom: 2
+  }));
+  renderPage({ onRecalibrate });
+
+  await userEvent.click(screen.getByRole('button', { name: '重排剩余安排' }));
+  expect(screen.getByText(/会保留已经勾选进度的周/)).toBeInTheDocument();
+
+  const hours = screen.getByLabelText('接下来的每周投入（小时）');
+  await userEvent.clear(hours);
+  await userEvent.type(hours, '8');
+  await userEvent.type(screen.getByLabelText('最近的变化（可选）'), '这周加班');
+  await userEvent.click(screen.getByRole('button', { name: '开始重排' }));
+
+  await waitFor(() =>
+    expect(onRecalibrate).toHaveBeenCalledWith({
+      planId: 'lp-1',
+      weeklyHours: 8,
+      notes: '这周加班'
+    })
+  );
+  expect(await screen.findByText('已重排剩余安排。')).toBeInTheDocument();
+});
+
+test('shows recalibration progress and keeps the dialog open on failure', async () => {
+  let reject!: (cause: Error) => void;
+  const onRecalibrate = vi.fn(
+    () =>
+      new Promise<LongPlan>((_resolve, rejectPromise) => {
+        reject = rejectPromise;
+      })
+  );
+  renderPage({ onRecalibrate });
+
+  await userEvent.click(screen.getByRole('button', { name: '重排剩余安排' }));
+  await userEvent.click(screen.getByRole('button', { name: '开始重排' }));
+
+  expect(await screen.findByText(/正在根据你的进度重排/)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /重排中…/ })).toBeDisabled();
+
+  await act(async () => {
+    reject(new Error('重排剩余计划需要先配置模型。'));
+  });
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    '重排剩余计划需要先配置模型。'
+  );
+  expect(screen.getByRole('button', { name: '开始重排' })).toBeInTheDocument();
 });
 
 test('switches between multiple plans', async () => {

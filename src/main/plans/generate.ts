@@ -130,7 +130,8 @@ export async function generateLongPlan(
         input: toCreateInput(input),
         workspace: input.workspace,
         ...(input.researchFacts?.length ? { researchFacts: input.researchFacts } : {}),
-        ...(input.knownTopics?.length ? { knownTopics: input.knownTopics } : {})
+        ...(input.knownTopics?.length ? { knownTopics: input.knownTopics } : {}),
+        ...(input.recalibration ? { recalibration: input.recalibration } : {})
       });
       const response = await modelClient.complete({
         messages: [

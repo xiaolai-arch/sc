@@ -40,7 +40,11 @@ import type {
   UpdateMemoryInput
 } from '../shared/memory';
 import type { PlanWorkspaceInput } from '../shared/planning';
-import type { CreateLongPlanInput, UpdateLongPlanItemInput } from '../shared/plans';
+import type {
+  CreateLongPlanInput,
+  RecalibrateLongPlanInput,
+  UpdateLongPlanItemInput
+} from '../shared/plans';
 
 /** Every IPC channel exposed to the preload bridge. */
 export const IPC_CHANNELS = {
@@ -103,7 +107,8 @@ export const IPC_CHANNELS = {
   getUsageSummary: 'study-coach:usage:summary',
   clearUsage: 'study-coach:usage:clear',
   send: 'study-coach:butler:send',
-  scanLocalClis: 'study-coach:local-cli:scan'
+  scanLocalClis: 'study-coach:local-cli:scan',
+  recalibrateLongPlan: 'study-coach:plans:recalibrate'
 } as const;
 
 /** Streaming uses a separate request/event pair so the request map stays stable. */
@@ -643,6 +648,25 @@ function requirePlanWorkspace(value: unknown): PlanWorkspaceInput {
   return input as unknown as PlanWorkspaceInput;
 }
 
+function requireRecalibrateLongPlan(value: unknown): RecalibrateLongPlanInput {
+  const input = requireObject(value, '重排长期计划');
+  const planId = requireString(input.planId, '计划 ID').trim();
+  if (
+    input.weeklyHours !== undefined &&
+    (typeof input.weeklyHours !== 'number' || !Number.isFinite(input.weeklyHours))
+  ) {
+    throw new Error('每周投入参数无效。');
+  }
+  if (input.notes !== undefined && typeof input.notes !== 'string') {
+    throw new Error('重排说明无效。');
+  }
+  return {
+    planId,
+    ...(input.weeklyHours !== undefined ? { weeklyHours: input.weeklyHours } : {}),
+    ...(input.notes !== undefined ? { notes: input.notes } : {})
+  };
+}
+
 function requireCreateLongPlan(value: unknown): CreateLongPlanInput {
   const input = requireObject(value, '生成长期计划');
   const workspaceId = requireString(input.workspaceId, '工作区 ID');
@@ -781,6 +805,8 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
     listLongPlans: async (input) => api.listLongPlans(optionalString(input, '工作区 ID')),
     getLongPlan: async (input) => api.getLongPlan(requireString(input, '计划 ID')),
     createLongPlan: async (input) => api.createLongPlan(requireCreateLongPlan(input)),
+    recalibrateLongPlan: async (input) =>
+      api.recalibrateLongPlan(requireRecalibrateLongPlan(input)),
     setLongPlanItemDone: async (input) =>
       api.setLongPlanItemDone(requireLongPlanItemDone(input)),
     deleteLongPlan: async (input) => api.deleteLongPlan(requireString(input, '计划 ID')),
@@ -991,6 +1017,7 @@ export function createStudyCoachBridge(
     listLongPlans: (workspaceId) => call(IPC_CHANNELS.listLongPlans, workspaceId),
     getLongPlan: (planId) => call(IPC_CHANNELS.getLongPlan, planId),
     createLongPlan: (input) => call(IPC_CHANNELS.createLongPlan, input),
+    recalibrateLongPlan: (input) => call(IPC_CHANNELS.recalibrateLongPlan, input),
     setLongPlanItemDone: (input) => call(IPC_CHANNELS.setLongPlanItemDone, input),
     deleteLongPlan: (planId) => call(IPC_CHANNELS.deleteLongPlan, planId),
     listPracticeSets: (workspaceId) => call(IPC_CHANNELS.listPracticeSets, workspaceId),

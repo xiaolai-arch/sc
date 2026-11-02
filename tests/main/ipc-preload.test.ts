@@ -142,7 +142,8 @@ test('locks the public channel names', () => {
     getUsageSummary: 'study-coach:usage:summary',
     clearUsage: 'study-coach:usage:clear',
     send: 'study-coach:butler:send',
-    scanLocalClis: 'study-coach:local-cli:scan'
+    scanLocalClis: 'study-coach:local-cli:scan',
+    recalibrateLongPlan: 'study-coach:plans:recalibrate'
   });
 });
 
@@ -249,6 +250,11 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
   await bridge.clearUsage();
   await bridge.send({ message: 'hi' });
   await bridge.scanLocalClis();
+  await bridge.recalibrateLongPlan({
+    planId: 'lp-1',
+    weeklyHours: 8,
+    notes: '这周加班'
+  });
 
   expect(calls.map((entry) => entry.channel)).toEqual(Object.values(IPC_CHANNELS));
   expect(calls[0]).toEqual({ channel: IPC_CHANNELS.getBootstrap, args: [] });
@@ -286,6 +292,10 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
     args: [{ planId: 'lp-1', weekId: 'w1', itemId: 'w1d1', kind: 'day', done: true }]
   });
   expect(calls[24]).toEqual({ channel: IPC_CHANNELS.deleteLongPlan, args: ['lp-1'] });
+  expect(calls.at(-1)).toEqual({
+    channel: IPC_CHANNELS.recalibrateLongPlan,
+    args: [{ planId: 'lp-1', weeklyHours: 8, notes: '这周加班' }]
+  });
   expect(calls[35]).toEqual({
     channel: IPC_CHANNELS.updateMemory,
     args: [{ workspaceId: 'ws-1', id: 'm1', text: '新内容', kind: 'strength' }]

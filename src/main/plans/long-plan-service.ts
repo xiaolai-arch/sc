@@ -7,9 +7,13 @@ import type {
   CreateLongPlanInput,
   LongPlan,
   LongPlanKnowledge,
+  LongPlanPhase,
   LongPlanService,
+  LongPlanWeek,
+  RecalibrateLongPlanInput,
   UpdateLongPlanItemInput
 } from '../../shared/plans';
+import { planProgress, weekHasProgress, weekProgress } from '../../shared/plans';
 import type { LongPlanGenerationInput } from '../../shared/plan-template';
 import type { Workspace, WorkspaceService } from '../../shared/workspace';
 import type { ModelClient } from '../agent/model-client';
@@ -30,6 +34,11 @@ const MAX_REFERENCES_LENGTH = 4_000;
 const MAX_KNOWN_TOPICS = 20;
 const MAX_KNOWN_NOTE_EXCERPTS = 6;
 const MAX_KNOWN_NOTE_CHARS = 280;
+const MAX_RECALIBRATION_NOTES = 800;
+const MAX_PROGRESS_WEEKS = 4;
+const MAX_WEEK_SUMMARY_CHARS = 240;
+const MAX_OUTLINE_WEEKS = 6;
+const MAX_OUTLINE_WEEK_CHARS = 220;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export interface LongPlanServiceOptions {
@@ -111,6 +120,82 @@ function isSafePlanId(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function clipText(value: string, maxLength: number): string {
+  const text = value.replace(/\s+/g, ' ').trim();
+  return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
+}
+
+function dayNumber(date: string): number {
+  const [year, month, day] = date.split('-').map(Number);
+  return Date.UTC(year!, month! - 1, day!) / 86_400_000;
+}
+
+/** Keeps a model-written "第 1 周" title aligned with its real week number. */
+function renumberWeekTitle(title: string, number: number): string {
+  if (!title.trim()) return `第 ${number} 周`;
+  return /^第\s*\d+\s*周/.test(title)
+    ? title.replace(/^第\s*\d+\s*周/, `第 ${number} 周`)
+    : title;
+}
+
+function buildProgressSummary(
+  plan: LongPlan,
+  today: string,
+  pastWeeks: LongPlanWeek[]
+): string {
+  const progress = planProgress(plan);
+  const totalDays = plan.weeks * 7;
+  const elapsed = Math.max(
+    0,
+    Math.min(totalDays, dayNumber(today) - dayNumber(plan.startDate))
+  );
+  const lines = [
+    `计划共 ${plan.weeks} 周（${plan.startDate} 起，每周约 ${plan.weeklyHours} 小时），今天 ${today}，已过去 ${elapsed}/${totalDays} 天。`,
+    `整体完成 ${progress.done}/${progress.total} 项（${progress.percent}%）。`
+  ];
+  const recent = pastWeeks.slice(-MAX_PROGRESS_WEEKS);
+  if (recent.length === 0) lines.push('还没有已完成的周次。');
+  for (const week of recent) {
+    const weekDone = weekProgress(week);
+    const done = [
+      ...week.days.filter((day) => day.done).flatMap((day) => day.tasks),
+      ...week.checks.filter((check) => check.done).map((check) => check.text)
+    ]
+      .map((text) => clipText(text, 40))
+      .slice(0, 4);
+    lines.push(
+      `第 ${week.number} 周（${week.startDate}—${week.endDate}）：完成 ${weekDone.done}/${weekDone.total}${
+        done.length ? `；已完成：${done.join('；')}` : '；尚未勾选完成项'
+      }`
+    );
+  }
+  return lines.join('\n');
+}
+
+function buildRemainingOutline(weeks: LongPlanWeek[]): string {
+  const lines = weeks.slice(0, MAX_OUTLINE_WEEKS).map((week) => {
+    const tasks = week.days
+      .flatMap((day) => day.tasks)
+      .slice(0, 4)
+      .map((task) => clipText(task, 30))
+      .join(' / ');
+    const checks = week.checks
+      .slice(0, 3)
+      .map((check) => clipText(check.text, 30))
+      .join(' / ');
+    return clipText(
+      `第 ${week.number} 周（${week.startDate}—${week.endDate}）${week.title}：${week.goal}${
+        tasks ? `；任务示例：${tasks}` : ''
+      }${checks ? `；验收：${checks}` : ''}`,
+      MAX_OUTLINE_WEEK_CHARS
+    );
+  });
+  if (weeks.length > MAX_OUTLINE_WEEKS) {
+    lines.push(`…（后面 ${weeks.length - MAX_OUTLINE_WEEKS} 周略）`);
+  }
+  return lines.join('\n');
 }
 
 /**
@@ -269,6 +354,141 @@ export function createLongPlanService(options: LongPlanServiceOptions): LongPlan
         serializeLongPlanFile(plan)
       );
       return plan;
+    },
+
+    async recalibrate(input: RecalibrateLongPlanInput): Promise<LongPlan> {
+      const planId =
+        typeof input?.planId === 'string' ? input.planId.trim() : '';
+      if (!isSafePlanId(planId)) throw new Error('计划 ID 无效。');
+      if (input.notes !== undefined && typeof input.notes !== 'string') {
+        throw new Error('重排说明无效。');
+      }
+      const weeklyHours =
+        input.weeklyHours === undefined
+          ? undefined
+          : normalizeWeeklyHours(input.weeklyHours);
+      const notes = typeof input.notes === 'string' ? input.notes.trim() : '';
+      const found = await findPlanFile(planId);
+      if (found === null) throw new Error('计划不存在。');
+      if (modelClient === null) {
+        throw new Error('重排剩余计划需要先配置模型。');
+      }
+
+      const plan = found.plan;
+      const today = formatLocalDate(now());
+      const weeks = plan.phases.flatMap((phase) => phase.weeks);
+      const currentIndex = weeks.findIndex((week) => week.endDate >= today);
+      if (currentIndex === -1) {
+        throw new Error('计划已经结束，没有可重排的周次。');
+      }
+      // Never rewrite a week with checked work; start at the first untouched
+      // week in the current-or-future range.
+      let fromIndex = currentIndex;
+      while (fromIndex < weeks.length && weekHasProgress(weeks[fromIndex]!)) {
+        fromIndex += 1;
+      }
+      if (fromIndex >= weeks.length) {
+        throw new Error('剩余周次都已有进度，暂时没有可重排的内容。');
+      }
+      const fromWeek = weeks[fromIndex]!;
+      const remainingWeeks = weeks.slice(fromIndex);
+      const workspace = await readWorkspace(plan.workspaceId);
+      const knownTopics = await selectKnownTopics(workspace.id);
+      const nextWeeklyHours = weeklyHours ?? plan.weeklyHours;
+
+      const generation: LongPlanGenerationInput = {
+        workspace,
+        goal: plan.goal,
+        startDate: fromWeek.startDate,
+        weeks: remainingWeeks.length,
+        weeklyHours: nextWeeklyHours,
+        ...(notes ? { notes: clipText(notes, MAX_RECALIBRATION_NOTES) } : {}),
+        ...(plan.references ? { references: plan.references } : {}),
+        ...(knownTopics.length ? { knownTopics } : {}),
+        recalibration: {
+          fromWeekNumber: fromWeek.number,
+          totalWeeks: plan.weeks,
+          today,
+          progressSummary: buildProgressSummary(
+            plan,
+            today,
+            weeks.slice(0, fromIndex)
+          ),
+          previousOutline: buildRemainingOutline(remainingWeeks)
+        }
+      };
+      const generated = await generateLongPlan(generation, modelClient);
+      if (generated.generatedBy !== 'agent') {
+        throw new Error('模型没有返回可用的重排结果，计划未修改。');
+      }
+
+      const preservedPhases: LongPlanPhase[] = plan.phases
+        .map((phase) => ({
+          ...phase,
+          weeks: phase.weeks.filter((week) => week.number < fromWeek.number)
+        }))
+        .filter((phase) => phase.weeks.length > 0);
+      const usedTitles = new Set(preservedPhases.map((phase) => phase.title));
+      let weekOffset = 0;
+      const regeneratedPhases: LongPlanPhase[] = generated.phases.map((phase) => {
+        const phaseWeeks = phase.weeks.map((week) => {
+          const number = fromWeek.number + weekOffset;
+          weekOffset += 1;
+          const weekId = `w${number}`;
+          return {
+            ...week,
+            id: weekId,
+            number,
+            title: renumberWeekTitle(week.title, number),
+            days: week.days.map((day, index) => ({
+              ...day,
+              id: `${weekId}d${index + 1}`
+            })),
+            checks: week.checks.map((check, index) => ({
+              ...check,
+              id: `${weekId}c${index + 1}`
+            }))
+          };
+        });
+        return {
+          ...phase,
+          id: newId('ph'),
+          title: usedTitles.has(phase.title) ? `${phase.title}（重排）` : phase.title,
+          weeks: phaseWeeks
+        };
+      });
+      if (weekOffset !== remainingWeeks.length) {
+        throw new Error('模型没有返回可用的重排结果，计划未修改。');
+      }
+
+      const timestamp = now().toISOString();
+      const { knowledge: _previousKnowledge, ...rest } = plan;
+      const next: LongPlan = {
+        ...rest,
+        weeklyHours: nextWeeklyHours,
+        generatedBy: 'agent',
+        ...(knownTopics.length
+          ? {
+              knowledge: knownTopics.map(({ name, status }) => ({ name, status }))
+            }
+          : {}),
+        recalibratedAt: timestamp,
+        recalibratedFrom: fromWeek.number,
+        updatedAt: timestamp,
+        phases: [...preservedPhases, ...regeneratedPhases]
+      };
+
+      return runExclusively(async () => {
+        const current = await findPlanFile(planId);
+        if (current === null) throw new Error('计划不存在。');
+        // A checkbox toggled during the (long) model call means the progress
+        // used for this replan is stale; never overwrite that work.
+        if (current.plan.updatedAt !== plan.updatedAt) {
+          throw new Error('计划在重排期间发生了变化，请重试。');
+        }
+        await writeFileAtomic(current.path, serializeLongPlanFile(next));
+        return next;
+      });
     },
 
     async setItemDone(input: UpdateLongPlanItemInput): Promise<LongPlan> {

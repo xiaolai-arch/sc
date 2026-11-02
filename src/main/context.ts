@@ -612,6 +612,9 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     async createLongPlan(input) {
       return (await getServices()).longPlans.create(input);
     },
+    async recalibrateLongPlan(input) {
+      return (await getServices()).longPlans.recalibrate(input);
+    },
     async setLongPlanItemDone(input) {
       return (await getServices()).longPlans.setItemDone(input);
     },

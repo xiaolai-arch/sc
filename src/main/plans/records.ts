@@ -165,6 +165,8 @@ export function parseLongPlanFile(raw: string, fallbackId: string): LongPlan | n
     meta.generatedBy === 'agent' ? 'agent' : 'template';
   const references = asString(meta.references)?.trim();
   const knowledge = coerceKnowledge(meta.knowledge);
+  const recalibratedAt = asString(meta.recalibratedAt);
+  const recalibratedFrom = asInt(meta.recalibratedFrom);
   return {
     id,
     workspaceId,
@@ -178,6 +180,10 @@ export function parseLongPlanFile(raw: string, fallbackId: string): LongPlan | n
     ...(references ? { references } : {}),
     sources: coerceSources(meta.sources),
     ...(knowledge.length ? { knowledge } : {}),
+    ...(recalibratedAt ? { recalibratedAt } : {}),
+    ...(recalibratedFrom !== undefined && recalibratedFrom > 0
+      ? { recalibratedFrom }
+      : {}),
     createdAt: asString(meta.created) ?? '',
     updatedAt: asString(meta.updated) ?? '',
     phases
@@ -207,6 +213,10 @@ export function serializeLongPlanFile(plan: LongPlan): string {
             status: topic.status
           }))
         }
+      : {}),
+    ...(plan.recalibratedAt ? { recalibratedAt: plan.recalibratedAt } : {}),
+    ...(plan.recalibratedFrom !== undefined
+      ? { recalibratedFrom: plan.recalibratedFrom }
       : {}),
     created: plan.createdAt,
     updated: plan.updatedAt,

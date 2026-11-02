@@ -1,4 +1,8 @@
-import type { CreateLongPlanInput, LongPlanKnowledge } from '../../shared/plans';
+import type {
+  CreateLongPlanInput,
+  LongPlanKnowledge
+} from '../../shared/plans';
+import type { LongPlanRecalibrationContext } from '../../shared/plan-template';
 import type { Workspace } from '../../shared/workspace';
 import {
   clipKnowledgeText,
@@ -11,6 +15,8 @@ const MAX_REFERENCES_LENGTH = 4_000;
 const MAX_PROMPT_KNOWLEDGE_DETAILS = 8;
 const MAX_PROMPT_KNOWLEDGE_SUMMARY = 160;
 const MAX_PROMPT_KNOWLEDGE_NOTE = 280;
+const MAX_PROGRESS_SUMMARY = 2_000;
+const MAX_PREVIOUS_OUTLINE = 4_000;
 
 export const LONG_PLAN_SYSTEM_PROMPT = `你是阿咲的长期规划助手。你要根据用户的目标、总周数、每周可投入时间和起始日期，制定一份分阶段的长期计划。
 规则：
@@ -27,6 +33,7 @@ export const LONG_PLAN_SYSTEM_PROMPT = `你是阿咲的长期规划助手。你�
 - 如果提供了「联网调研事实」，优先据此安排工具、版本和验收项，不要写出事实里没有的结论。
 - 如果提供了「已掌握」主题，不要从头安排这些内容，最多安排一次复习检查；「正在学」的主题从当前进度继续，不要重讲基础。
 - 如果提供了「知识基础细节」，据此判断用户实际会到哪一步；摘要或笔记里已经写到的内容不要重讲，笔记里提到的卡点优先安排练习。
+- 如果提供了「重排范围」「当前进度」「原计划剩余安排」，这是在原计划上重排剩余周次：保留用户已经完成的成果，不要重复已完成内容；落后时压缩低价值任务、保住核心产出，进度正常时继续推进原目标；仍然只输出被重排的这几周。
 格式：{"title":"计划标题","phases":[{"title":"阶段一：建立基础","subtitle":"重点","goal":"阶段目标","weeks":[{"title":"第 1 周：主题","goal":"本周目标","days":[{"tasks":["任务"],"output":"产出"}],"checks":["验收项"]}]}]}`;
 
 export interface LongPlanPrompt {
@@ -41,6 +48,8 @@ export interface LongPlanPromptInput {
   researchFacts?: string[];
   /** Active knowledge topics the user already has. */
   knownTopics?: LongPlanKnowledge[];
+  /** Present when replacing the untouched tail of an existing plan. */
+  recalibration?: LongPlanRecalibrationContext;
 }
 
 function clip(value: string, maxLength: number): string {
@@ -52,7 +61,8 @@ export function buildLongPlanPrompt({
   input,
   workspace,
   researchFacts,
-  knownTopics
+  knownTopics,
+  recalibration
 }: LongPlanPromptInput): LongPlanPrompt {
   const mastered = (knownTopics ?? [])
     .filter((topic) => topic.status === 'mastered')
@@ -83,6 +93,22 @@ export function buildLongPlanPrompt({
     `每周投入：约 ${input.weeklyHours ?? 10} 小时`,
     `起始日期：${input.startDate ?? '由系统决定'}`,
     input.notes?.trim() ? `补充背景：${clip(input.notes, MAX_NOTES_LENGTH)}` : null,
+    recalibration ? `今天是：${recalibration.today}` : null,
+    recalibration
+      ? `重排范围：从第 ${recalibration.fromWeekNumber} 周开始，共 ${input.weeks} 周（计划共 ${recalibration.totalWeeks} 周）`
+      : null,
+    recalibration
+      ? `当前进度（已完成的内容不要重复安排）：\n${clip(
+          recalibration.progressSummary,
+          MAX_PROGRESS_SUMMARY
+        )}`
+      : null,
+    recalibration
+      ? `原计划剩余安排（只作参考，可以调整）：\n${clip(
+          recalibration.previousOutline,
+          MAX_PREVIOUS_OUTLINE
+        )}`
+      : null,
     input.references?.trim()
       ? `参考资料（请以此为准）：\n${clip(input.references, MAX_REFERENCES_LENGTH)}`
       : null,
@@ -99,7 +125,9 @@ export function buildLongPlanPrompt({
     mastered.length || learning.length
       ? '不要从头安排已掌握的主题，正在学的主题从当前进度继续。'
       : null,
-    `请按以上时长制定 ${input.weeks} 周的完整计划，只输出 JSON。`
+    recalibration
+      ? `请重排第 ${recalibration.fromWeekNumber} 周起的 ${input.weeks} 周，只输出 JSON。`
+      : `请按以上时长制定 ${input.weeks} 周的完整计划，只输出 JSON。`
   ];
   return {
     system: LONG_PLAN_SYSTEM_PROMPT.replace('{weeks}', String(input.weeks)),

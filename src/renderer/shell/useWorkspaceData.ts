@@ -31,6 +31,7 @@ import type {
 import type {
   CreateLongPlanInput,
   LongPlan,
+  RecalibrateLongPlanInput,
   UpdateLongPlanItemInput
 } from '../../shared/plans';
 import type { WorkspacePlan } from '../../shared/planning';
@@ -105,6 +106,7 @@ export type WorkspaceData = WorkspaceDataState & {
   deleteMemory: (input: DeleteMemoryInput) => Promise<void>;
   updateWorkspace: (input: UpdateWorkspaceInput) => Promise<Workspace>;
   createLongPlan: (input: CreateLongPlanInput) => Promise<LongPlan>;
+  recalibrateLongPlan: (input: RecalibrateLongPlanInput) => Promise<LongPlan>;
   setLongPlanItemDone: (input: UpdateLongPlanItemInput) => Promise<LongPlan>;
   deleteLongPlan: (planId: string) => Promise<void>;
   createKnowledgeTopic: (input: CreateKnowledgeTopicInput) => Promise<KnowledgeTopic>;
@@ -285,6 +287,15 @@ export function useWorkspaceData(): WorkspaceData {
   const createLongPlan = useCallback(async (input: CreateLongPlanInput) => {
     const plan = await apiOrThrow().createLongPlan(input);
     setState((current) => ({ ...current, longPlans: [plan, ...current.longPlans] }));
+    return plan;
+  }, []);
+
+  const recalibrateLongPlan = useCallback(async (input: RecalibrateLongPlanInput) => {
+    const plan = await apiOrThrow().recalibrateLongPlan(input);
+    setState((current) => ({
+      ...current,
+      longPlans: current.longPlans.map((entry) => (entry.id === plan.id ? plan : entry))
+    }));
     return plan;
   }, []);
 
@@ -595,6 +606,7 @@ export function useWorkspaceData(): WorkspaceData {
     updateMemory,
     deleteMemory,
     createLongPlan,
+    recalibrateLongPlan,
     setLongPlanItemDone,
     deleteLongPlan,
     createKnowledgeTopic,

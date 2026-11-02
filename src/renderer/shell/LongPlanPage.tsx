@@ -6,6 +6,7 @@ import type {
   LongPlanDay,
   LongPlanPhase,
   LongPlanWeek,
+  RecalibrateLongPlanInput,
   UpdateLongPlanItemInput
 } from '../../shared/plans';
 import {
@@ -36,6 +37,7 @@ type LongPlanPageProps = {
   today: string;
   onOpenSidebar: () => void;
   onCreatePlan: (input: CreateLongPlanInput) => Promise<LongPlan>;
+  onRecalibrate?: (input: RecalibrateLongPlanInput) => Promise<LongPlan>;
   onSetItemDone: (input: UpdateLongPlanItemInput) => Promise<LongPlan>;
   onDeletePlan?: (planId: string) => Promise<void>;
   onAddDayToSchedule?: (plan: LongPlan, day: LongPlanDay) => Promise<void>;
@@ -380,6 +382,7 @@ export function LongPlanPage({
   today,
   onOpenSidebar,
   onCreatePlan,
+  onRecalibrate,
   onSetItemDone,
   onDeletePlan,
   onAddDayToSchedule
@@ -391,6 +394,13 @@ export function LongPlanPage({
   const [formError, setFormError] = useState<string | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [recalibrateOpen, setRecalibrateOpen] = useState(false);
+  const [recalibrating, setRecalibrating] = useState(false);
+  const [recalibrateError, setRecalibrateError] = useState<string | null>(null);
+  const [recalibrateNotice, setRecalibrateNotice] = useState<string | null>(null);
+  const [recalibrateHours, setRecalibrateHours] = useState('10');
+  const [recalibrateNotes, setRecalibrateNotes] = useState('');
+  const [busySeconds, setBusySeconds] = useState(0);
   const [form, setForm] = useState<PlanForm>({
     workspaceId: defaultWorkspaceId ?? workspaces[0]?.id ?? '',
     goal: '',
@@ -420,7 +430,21 @@ export function LongPlanPage({
     }
     const week = currentPlanWeek(selectedPlan, today);
     setExpandedWeeks(new Set(week ? [week.id] : []));
+    setRecalibrateNotice(null);
   }, [selectedPlan?.id, today]);
+
+  const busy = creating || recalibrating;
+  useEffect(() => {
+    if (!busy) {
+      setBusySeconds(0);
+      return;
+    }
+    setBusySeconds(0);
+    const timer = setInterval(() => {
+      setBusySeconds((value) => value + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [busy]);
 
   function openForm() {
     setForm({
@@ -496,6 +520,47 @@ export function LongPlanPage({
       setFormError(errorText(cause));
     } finally {
       setCreating(false);
+    }
+  }
+
+  function openRecalibrate() {
+    if (!selectedPlan || !onRecalibrate) return;
+    setRecalibrateHours(String(selectedPlan.weeklyHours));
+    setRecalibrateNotes('');
+    setRecalibrateError(null);
+    setRecalibrateOpen(true);
+  }
+
+  function closeRecalibrate() {
+    if (recalibrating) return;
+    setRecalibrateOpen(false);
+    setRecalibrateError(null);
+  }
+
+  async function submitRecalibrate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedPlan || !onRecalibrate || recalibrating) return;
+    const hours = Number(recalibrateHours);
+    if (!Number.isFinite(hours) || hours < 1 || hours > 80) {
+      setRecalibrateError('每周投入必须在 1 到 80 小时之间。');
+      return;
+    }
+    setRecalibrating(true);
+    setRecalibrateError(null);
+    setRecalibrateNotice(null);
+    try {
+      const updated = await onRecalibrate({
+        planId: selectedPlan.id,
+        weeklyHours: hours,
+        ...(recalibrateNotes.trim() ? { notes: recalibrateNotes.trim() } : {})
+      });
+      setSelectedId(updated.id);
+      setRecalibrateOpen(false);
+      setRecalibrateNotice('已重排剩余安排。');
+    } catch (cause) {
+      setRecalibrateError(errorText(cause));
+    } finally {
+      setRecalibrating(false);
     }
   }
 
@@ -596,6 +661,11 @@ export function LongPlanPage({
                   {workspaceName(selectedPlan.workspaceId)} · {planRangeLabel(selectedPlan)} · 每周约{' '}
                   {selectedPlan.weeklyHours} 小时
                 </p>
+                {selectedPlan.recalibratedFrom !== undefined ? (
+                  <p className="mt-1 text-[12px] text-gray-500 dark:text-[#8e8e93]">
+                    已按进度重排第 {selectedPlan.recalibratedFrom} 周起的安排
+                  </p>
+                ) : null}
                 {selectedPlan.generatedBy === 'template' ? (
                   <p className="mt-2 rounded-xl bg-[#ff9f0a]/10 px-3 py-2 text-[12px] leading-5 text-[#8a5a00] dark:bg-[#ff9f0a]/15 dark:text-[#ffb340]">
                     阿咲没有连接到模型，这份是通用框架；配置模型后可以重新生成更贴合目标的计划。
@@ -646,6 +716,16 @@ export function LongPlanPage({
                 ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
+                {onRecalibrate ? (
+                  <button
+                    type="button"
+                    onClick={openRecalibrate}
+                    disabled={recalibrating}
+                    className={secondaryButton}
+                  >
+                    重排剩余安排
+                  </button>
+                ) : null}
                 {onDeletePlan ? (
                   <button
                     type="button"
@@ -683,6 +763,15 @@ export function LongPlanPage({
                 />
               </div>
             </div>
+
+            {recalibrateNotice ? (
+              <p
+                role="status"
+                className="mt-3 rounded-xl bg-[#34c759]/10 px-3 py-2 text-[12px] text-[#1f7a3a] dark:text-[#30d158]"
+              >
+                {recalibrateNotice}
+              </p>
+            ) : null}
 
             {planError ? (
               <p role="alert" className="mt-3 text-[12px] text-[#d70015] dark:text-[#ff7b72]">
@@ -899,7 +988,82 @@ export function LongPlanPage({
               取消
             </button>
             <button type="submit" disabled={creating} className={primaryButton}>
-              {creating ? '生成中…' : '生成计划'}
+              {creating ? `生成中… ${busySeconds}s` : '生成计划'}
+            </button>
+          </div>
+        </form>
+      </Dialog>
+
+      <Dialog open={recalibrateOpen} onClose={closeRecalibrate} title="重排剩余安排">
+        <form onSubmit={(event) => void submitRecalibrate(event)}>
+          <p className="text-[13px] leading-6 text-gray-600 dark:text-[#a1a1a6]">
+            阿咲会保留已经勾选进度的周，按当前进度、知识库和剩余周数重排后面的安排。需要连接模型，通常要 1–2 分钟。
+          </p>
+
+          {recalibrating ? (
+            <p
+              role="status"
+              className="mt-3 rounded-xl bg-[#0071e3]/[0.06] px-3 py-2.5 text-[12px] leading-5 text-[#0b5cad] dark:bg-[#0a84ff]/10 dark:text-[#4da3ff]"
+            >
+              阿咲正在根据你的进度重排剩余安排… 已用 {busySeconds} 秒
+            </p>
+          ) : null}
+
+          <div className="mt-4">
+            <label
+              htmlFor="recalibrate-hours"
+              className="mb-1.5 block text-[12px] font-medium text-gray-500 dark:text-[#a1a1a6]"
+            >
+              接下来的每周投入（小时）
+            </label>
+            <input
+              id="recalibrate-hours"
+              type="number"
+              min={1}
+              max={80}
+              value={recalibrateHours}
+              onChange={(event) => setRecalibrateHours(event.target.value)}
+              disabled={recalibrating}
+              className="h-10 w-full rounded-xl border-0 bg-[#f5f5f7] px-3 text-[13px] text-[#1d1d1f] outline-none focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#f5f5f7]"
+            />
+          </div>
+
+          <div className="mt-4">
+            <label
+              htmlFor="recalibrate-notes"
+              className="mb-1.5 block text-[12px] font-medium text-gray-500 dark:text-[#a1a1a6]"
+            >
+              最近的变化（可选）
+            </label>
+            <textarea
+              id="recalibrate-notes"
+              value={recalibrateNotes}
+              onChange={(event) => setRecalibrateNotes(event.target.value)}
+              rows={3}
+              maxLength={800}
+              disabled={recalibrating}
+              placeholder="例如：这周加班，只学了两个晚上；面试提前了……"
+              className="w-full rounded-xl border-0 bg-[#f5f5f7] px-3 py-2.5 text-[13px] leading-6 text-[#1d1d1f] outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#f5f5f7]"
+            />
+          </div>
+
+          {recalibrateError ? (
+            <p role="alert" className="mt-3 text-[12px] text-[#d70015] dark:text-[#ff7b72]">
+              {recalibrateError}
+            </p>
+          ) : null}
+
+          <div className="mt-5 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={closeRecalibrate}
+              disabled={recalibrating}
+              className="rounded-full px-4 py-2 text-[13px] font-medium text-gray-500 transition-all duration-300 hover:bg-black/[0.04] active:scale-[0.98] disabled:opacity-40 dark:text-[#a1a1a6] dark:hover:bg-white/[0.06]"
+            >
+              取消
+            </button>
+            <button type="submit" disabled={recalibrating} className={primaryButton}>
+              {recalibrating ? `重排中… ${busySeconds}s` : '开始重排'}
             </button>
           </div>
         </form>

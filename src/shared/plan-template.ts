@@ -35,6 +35,20 @@ export interface RawPhase {
   weeks: RawWeek[];
 }
 
+/** Prompt-only context for replanning the untouched tail of an existing plan. */
+export interface LongPlanRecalibrationContext {
+  /** 1-based number of the first week being rewritten. */
+  fromWeekNumber: number;
+  /** Total weeks in the plan, including the weeks that are kept. */
+  totalWeeks: number;
+  /** Local date the recalibration was requested. */
+  today: string;
+  /** Human-readable completion summary of the weeks already behind the user. */
+  progressSummary: string;
+  /** Outline of the weeks being replaced, so the model can adapt rather than restart. */
+  previousOutline: string;
+}
+
 export interface LongPlanGenerationInput {
   workspace: Workspace;
   goal: string;
@@ -48,6 +62,8 @@ export interface LongPlanGenerationInput {
   researchFacts?: string[];
   /** Topics the user has mastered or is learning; only the model can use them. */
   knownTopics?: LongPlanKnowledge[];
+  /** Present when generating replacement weeks for an existing plan. */
+  recalibration?: LongPlanRecalibrationContext;
 }
 
 export interface GeneratedLongPlan {

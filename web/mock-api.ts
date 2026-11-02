@@ -72,6 +72,7 @@ import type { PlanWorkspaceInput, WorkspacePlan } from '../src/shared/planning';
 import type {
   CreateLongPlanInput,
   LongPlan,
+  RecalibrateLongPlanInput,
   UpdateLongPlanItemInput
 } from '../src/shared/plans';
 import { buildTemplatePlan } from '../src/shared/plan-template';
@@ -798,6 +799,81 @@ export function createMockApi(
         phases: generated.phases
       };
       state.plans = [plan, ...state.plans];
+      persist();
+      return structuredClone(plan);
+    },
+
+    async recalibrateLongPlan(
+      input: RecalibrateLongPlanInput
+    ): Promise<LongPlan> {
+      const plan = state.plans.find((entry) => entry.id === input.planId);
+      if (!plan) throw new Error('计划不存在。');
+      const weeklyHours = input.weeklyHours ?? plan.weeklyHours;
+      if (!Number.isFinite(weeklyHours) || weeklyHours < 1 || weeklyHours > 80) {
+        throw new Error('每周投入必须在 1 到 80 小时之间。');
+      }
+      const weeks = plan.phases.flatMap((phase) => phase.weeks);
+      const todayValue = today();
+      const currentIndex = weeks.findIndex((week) => week.endDate >= todayValue);
+      if (currentIndex === -1) throw new Error('计划已经结束，没有可重排的周次。');
+      let fromIndex = currentIndex;
+      while (
+        fromIndex < weeks.length &&
+        (weeks[fromIndex]!.days.some((day) => day.done) ||
+          weeks[fromIndex]!.checks.some((check) => check.done))
+      ) {
+        fromIndex += 1;
+      }
+      if (fromIndex >= weeks.length) {
+        throw new Error('剩余周次都已有进度，暂时没有可重排的内容。');
+      }
+      const fromWeek = weeks[fromIndex]!;
+      const remaining = weeks.length - fromIndex;
+      const workspace = requireWorkspace(plan.workspaceId);
+      const generated = buildTemplatePlan({
+        workspace,
+        goal: plan.goal,
+        startDate: fromWeek.startDate,
+        weeks: remaining,
+        weeklyHours
+      });
+      const preservedPhases = plan.phases
+        .map((phase) => ({
+          ...phase,
+          weeks: phase.weeks.filter((week) => week.number < fromWeek.number)
+        }))
+        .filter((phase) => phase.weeks.length > 0);
+      let weekOffset = 0;
+      const regeneratedPhases = generated.phases.map((phase) => ({
+        ...phase,
+        id: nextId('ph'),
+        weeks: phase.weeks.map((week) => {
+          const number = fromWeek.number + weekOffset;
+          weekOffset += 1;
+          const weekId = `w${number}`;
+          return {
+            ...week,
+            id: weekId,
+            number,
+            title: week.title.replace(/^第\s*\d+\s*周/, `第 ${number} 周`),
+            days: week.days.map((day, index) => ({
+              ...day,
+              id: `${weekId}d${index + 1}`
+            })),
+            checks: week.checks.map((check, index) => ({
+              ...check,
+              id: `${weekId}c${index + 1}`
+            }))
+          };
+        })
+      }));
+      const timestamp = new Date().toISOString();
+      plan.weeklyHours = weeklyHours;
+      plan.generatedBy = 'template';
+      plan.recalibratedAt = timestamp;
+      plan.recalibratedFrom = fromWeek.number;
+      plan.updatedAt = timestamp;
+      plan.phases = [...preservedPhases, ...regeneratedPhases];
       persist();
       return structuredClone(plan);
     },

@@ -84,6 +84,10 @@ export interface LongPlan {
   sources?: LongPlanSource[];
   /** Active knowledge topics the agent saw; absent for template fallbacks. */
   knowledge?: LongPlanKnowledge[];
+  /** When the remaining weeks were last replanned from actual progress. */
+  recalibratedAt?: string;
+  /** First week number the last recalibration rewrote. */
+  recalibratedFrom?: number;
   createdAt: string;
   updatedAt: string;
   phases: LongPlanPhase[];
@@ -114,6 +118,14 @@ export interface UpdateLongPlanItemInput {
   done: boolean;
 }
 
+export interface RecalibrateLongPlanInput {
+  planId: string;
+  /** Hours per week for the remaining weeks; defaults to the plan's setting. */
+  weeklyHours?: number;
+  /** What changed since the plan was made (extra busy week, new material). */
+  notes?: string;
+}
+
 export interface LongPlanProgress {
   total: number;
   done: number;
@@ -124,6 +136,7 @@ export interface LongPlanService {
   list(workspaceId?: string): Promise<LongPlan[]>;
   get(planId: string): Promise<LongPlan | null>;
   create(input: CreateLongPlanInput): Promise<LongPlan>;
+  recalibrate(input: RecalibrateLongPlanInput): Promise<LongPlan>;
   setItemDone(input: UpdateLongPlanItemInput): Promise<LongPlan>;
   delete(planId: string): Promise<void>;
 }
@@ -133,6 +146,7 @@ export interface LongPlanApi {
   listLongPlans(workspaceId?: string): Promise<LongPlan[]>;
   getLongPlan(planId: string): Promise<LongPlan | null>;
   createLongPlan(input: CreateLongPlanInput): Promise<LongPlan>;
+  recalibrateLongPlan(input: RecalibrateLongPlanInput): Promise<LongPlan>;
   setLongPlanItemDone(input: UpdateLongPlanItemInput): Promise<LongPlan>;
   deleteLongPlan(planId: string): Promise<void>;
 }
@@ -161,6 +175,11 @@ export function planWeekday(date: string): string {
 export function planMonthDay(date: string): string {
   const parsed = parseDate(date);
   return `${parsed.getMonth() + 1}/${parsed.getDate()}`;
+}
+
+/** True once the user checked any day or acceptance item in the week. */
+export function weekHasProgress(week: LongPlanWeek): boolean {
+  return week.days.some((day) => day.done) || week.checks.some((check) => check.done);
 }
 
 export function weekProgress(week: LongPlanWeek): LongPlanProgress {

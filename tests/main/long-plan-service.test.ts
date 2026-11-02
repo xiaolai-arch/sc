@@ -6,7 +6,7 @@ import { createKnowledgeService } from '../../src/main/knowledge/create-knowledg
 import { createWorkspaceService } from '../../src/main/workspace/create-workspace-service';
 import { createLongPlanService } from '../../src/main/plans/long-plan-service';
 import type { KnowledgeService } from '../../src/shared/knowledge';
-import { planWeekday } from '../../src/shared/plans';
+import { planWeekday, type LongPlan } from '../../src/shared/plans';
 
 const NOW = new Date('2026-11-01T09:00:00.000Z');
 
@@ -431,6 +431,211 @@ test('completes the plan without sources when research finds nothing', async () 
     });
     expect(plan.generatedBy).toBe('agent');
     expect(plan.sources).toEqual([]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+function planWeeks(plan: LongPlan): number[] {
+  return plan.phases.flatMap((phase) => phase.weeks).map((week) => week.number);
+}
+
+test('recalibrates the untouched remaining weeks from actual progress', async () => {
+  const client = new FakeModelClient([modelReply(4), modelReply(3)]);
+  const { dir, workspaceId, service, setNow } = await setup(client);
+  try {
+    const plan = await service.create({
+      workspaceId,
+      goal: '学会 AI Agent',
+      startDate: '2026-11-02',
+      weeks: 4,
+      weeklyHours: 12
+    });
+    const weeks = plan.phases.flatMap((phase) => phase.weeks);
+    await service.setItemDone({
+      planId: plan.id,
+      weekId: weeks[0]!.id,
+      itemId: weeks[0]!.days[0]!.id,
+      kind: 'day',
+      done: true
+    });
+    setNow(new Date('2026-11-11T09:00:00.000Z'));
+
+    const updated = await service.recalibrate({
+      planId: plan.id,
+      weeklyHours: 6,
+      notes: '这周加班，只学了两个晚上'
+    });
+
+    const resultWeeks = updated.phases.flatMap((phase) => phase.weeks);
+    expect(resultWeeks.map((week) => week.number)).toEqual([1, 2, 3, 4]);
+    expect(resultWeeks[0]!.days[0]!.done).toBe(true);
+    expect(resultWeeks[1]!.title).toBe('第 2 周：基础 1');
+    expect(resultWeeks[1]!.id).toBe('w2');
+    expect(resultWeeks[1]!.startDate).toBe('2026-11-09');
+    expect(resultWeeks[1]!.days[0]!.id).toBe('w2d1');
+    expect(resultWeeks[2]!.startDate).toBe('2026-11-16');
+    expect(resultWeeks[3]!.endDate).toBe('2026-11-29');
+    expect(resultWeeks.every((week) => week.days.length === 7)).toBe(true);
+    expect(updated.generatedBy).toBe('agent');
+    expect(updated.weeklyHours).toBe(6);
+    expect(updated.recalibratedFrom).toBe(2);
+    expect(updated.recalibratedAt).toBeTruthy();
+
+    const prompt = client.calls[1]?.messages[1]?.content ?? '';
+    expect(prompt).toContain('重排范围：从第 2 周开始，共 3 周（计划共 4 周）');
+    expect(prompt).toContain('整体完成 1/');
+    expect(prompt).toContain('这周加班');
+    expect(prompt).toContain('每周投入：约 6 小时');
+    expect(prompt).toContain('原计划剩余安排');
+
+    const file = await readFile(
+      join(dir, 'workspaces', workspaceId, 'plans', `${plan.id}.md`),
+      'utf8'
+    );
+    expect(file).toContain('recalibratedFrom: 2');
+    expect((await service.get(plan.id))?.recalibratedFrom).toBe(2);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('does not rewrite a week that already has completed work', async () => {
+  const client = new FakeModelClient([modelReply(3), modelReply(2)]);
+  const { dir, workspaceId, service, setNow } = await setup(client);
+  try {
+    const plan = await service.create({
+      workspaceId,
+      goal: '学会 AI Agent',
+      startDate: '2026-11-02',
+      weeks: 3
+    });
+    const weeks = plan.phases.flatMap((phase) => phase.weeks);
+    await service.setItemDone({
+      planId: plan.id,
+      weekId: weeks[0]!.id,
+      itemId: weeks[0]!.checks[0]!.id,
+      kind: 'check',
+      done: true
+    });
+    setNow(new Date('2026-11-04T09:00:00.000Z'));
+
+    const updated = await service.recalibrate({ planId: plan.id });
+    const resultWeeks = updated.phases.flatMap((phase) => phase.weeks);
+
+    expect(planWeeks(updated)).toEqual([1, 2, 3]);
+    expect(resultWeeks[0]!.id).toBe('w1');
+    expect(resultWeeks[0]!.checks[0]!.done).toBe(true);
+    expect(resultWeeks[0]!.title).toBe('第 1 周：基础 1');
+    expect(resultWeeks[1]!.startDate).toBe('2026-11-09');
+    expect(updated.recalibratedFrom).toBe(2);
+    // The preserved phase and the regenerated phase remain separate sections.
+    expect(updated.phases).toHaveLength(2);
+    expect(updated.phases[0]!.weeks.map((week) => week.number)).toEqual([1]);
+    expect(updated.phases[1]!.weeks.map((week) => week.number)).toEqual([2, 3]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('recalibration requires a model and leaves the plan untouched without one', async () => {
+  const { dir, workspaceId, service } = await setup(null);
+  try {
+    const plan = await service.create({
+      workspaceId,
+      goal: '学会 AI Agent',
+      startDate: '2026-11-02',
+      weeks: 2
+    });
+
+    await expect(service.recalibrate({ planId: plan.id })).rejects.toThrow(/模型/);
+    expect(await service.get(plan.id)).toEqual(plan);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('does not overwrite the plan when the model cannot produce a replan', async () => {
+  const client = new FakeModelClient([modelReply(2), '我看过了，建议先学 Python。']);
+  const { dir, workspaceId, service } = await setup(client);
+  try {
+    const plan = await service.create({
+      workspaceId,
+      goal: '学会 AI Agent',
+      startDate: '2026-11-02',
+      weeks: 2
+    });
+
+    await expect(service.recalibrate({ planId: plan.id })).rejects.toThrow(/重排结果/);
+    expect(await service.get(plan.id)).toEqual(plan);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('refuses to recalibrate when every remaining week already has progress', async () => {
+  const { dir, workspaceId, service, setNow } = await setup(
+    new FakeModelClient([modelReply(1)])
+  );
+  try {
+    const plan = await service.create({
+      workspaceId,
+      goal: '学会 AI Agent',
+      startDate: '2026-11-02',
+      weeks: 1
+    });
+    const week = plan.phases[0]!.weeks[0]!;
+    await service.setItemDone({
+      planId: plan.id,
+      weekId: week.id,
+      itemId: week.days[0]!.id,
+      kind: 'day',
+      done: true
+    });
+    setNow(new Date('2026-11-04T09:00:00.000Z'));
+
+    await expect(service.recalibrate({ planId: plan.id })).rejects.toThrow(/没有可重排/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('recalibration re-reads the knowledge base before generating', async () => {
+  const client = new FakeModelClient([modelReply(2), modelReply(1)]);
+  let knowledge: KnowledgeService | null = null;
+  const { dir, workspaceId, service, setNow } = await setup(client, {
+    knowledgeService: (root) => {
+      knowledge = createKnowledgeService({ root, now: () => NOW });
+      return knowledge;
+    }
+  });
+  try {
+    const langChain = await knowledge!.create({
+      name: 'LangChain',
+      workspaceId,
+      status: 'learning',
+      level: 2
+    });
+    const plan = await service.create({
+      workspaceId,
+      goal: '系统学习 AI Agent',
+      startDate: '2026-11-02',
+      weeks: 2
+    });
+
+    await knowledge!.update({ id: langChain.id, status: 'mastered', level: 4 });
+    await knowledge!.saveNote({
+      topicId: langChain.id,
+      body: 'AgentExecutor 已经跑通，RAG 还没做。'
+    });
+    setNow(new Date('2026-11-09T09:00:00.000Z'));
+
+    const updated = await service.recalibrate({ planId: plan.id });
+    const prompt = client.calls[1]?.messages[1]?.content ?? '';
+
+    expect(prompt).toContain('已掌握：LangChain');
+    expect(prompt).toContain('AgentExecutor 已经跑通');
+    expect(updated.knowledge).toEqual([{ name: 'LangChain', status: 'mastered' }]);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
