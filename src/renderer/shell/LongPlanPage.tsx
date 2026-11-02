@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { friendlyErrorMessage } from '../../shared/errors';
 import type {
   CreateLongPlanInput,
   LongPlan,
@@ -52,7 +53,7 @@ type PlanForm = {
 };
 
 function messageOf(cause: unknown): string {
-  return cause instanceof Error ? cause.message : '操作失败，请重试。';
+  return friendlyErrorMessage(cause);
 }
 
 function errorText(cause: unknown): string {

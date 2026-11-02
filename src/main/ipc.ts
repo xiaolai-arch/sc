@@ -166,6 +166,12 @@ function requireString(value: unknown, label: string): string {
   return value;
 }
 
+/** An empty key is meaningful: it clears the key when the endpoint changes. */
+function requireApiKey(value: unknown): string {
+  if (typeof value !== 'string') throw new Error('API key不能为空。');
+  return value;
+}
+
 function optionalString(value: unknown, label: string): string | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== 'string') throw new Error(`${label}参数无效。`);
@@ -710,7 +716,7 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
     updateSettings: async (input) =>
       api.updateSettings(requireObject(input, '更新设置') as SettingsPatch),
     scanLocalClis: async () => api.scanLocalClis(),
-    setApiKey: async (input) => api.setApiKey(requireString(input, 'API key')),
+    setApiKey: async (input) => api.setApiKey(requireApiKey(input)),
     listWorkspaces: async () => api.listWorkspaces(),
     createWorkspace: async (input) => api.createWorkspace(requireCreateWorkspace(input)),
     updateWorkspace: async (input) => {

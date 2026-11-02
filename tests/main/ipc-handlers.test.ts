@@ -179,6 +179,21 @@ test('serializes service errors and redacts secret-like values', async () => {
   expect(serializeError(new Error('sk-ant-abcdefgh12345678')).message).toBe('[redacted]');
 });
 
+test('an empty API key clears the stored key when switching endpoints', async () => {
+  const { context } = await makeContext();
+  const handlers = createIpcHandlers(context.api);
+  // A keyed provider makes bootstrap report the stored-key state.
+  await context.api.updateSettings({
+    provider: { kind: 'anthropic', model: 'claude-sonnet-5-5' }
+  });
+
+  await handlers.setApiKey('sk-live-clear-me-987654321');
+  expect(await handlers.getBootstrap()).toMatchObject({ hasApiKey: true });
+
+  await expect(handlers.setApiKey('')).resolves.toBeUndefined();
+  expect(await handlers.getBootstrap()).toMatchObject({ hasApiKey: false });
+});
+
 test('api key is never echoed by settings, bootstrap or workspace payloads', async () => {
   const { context, dir } = await makeContext();
   const handlers = createIpcHandlers(context.api);

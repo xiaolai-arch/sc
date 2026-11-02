@@ -66,6 +66,26 @@ test('record creates a learning topic and appends later mentions', async () => {
   expect(second.evidence).toHaveLength(2);
 });
 
+test('record appends to an existing topic when the mention contains its name', async () => {
+  const { service } = await setup();
+  const topic = await service.record({ name: 'LangGraph', workspaceId: 'agent', note: '开始学' });
+
+  const mentioned = await service.record({
+    name: 'LangGraph 状态图',
+    workspaceId: 'agent',
+    note: '今天学了状态图'
+  });
+
+  expect(mentioned.id).toBe(topic.id);
+  expect(mentioned.evidence).toHaveLength(2);
+  expect(await service.list('agent')).toHaveLength(1);
+
+  // A genuinely different topic still creates its own card.
+  const other = await service.record({ name: 'LangChain', workspaceId: 'agent' });
+  expect(other.id).not.toBe(topic.id);
+  expect(await service.list('agent')).toHaveLength(2);
+});
+
 test('links a completed task once and only within workspace or global scope', async () => {
   const { service } = await setup();
   const topic = await service.create({ name: 'LangChain', workspaceId: 'agent' });

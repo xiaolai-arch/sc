@@ -4,6 +4,7 @@ import type {
   StreamingButlerApi
 } from '../../shared/butler-stream';
 import { formatLocalDate, parseLocalDate } from '../../shared/date';
+import { friendlyErrorMessage } from '../../shared/errors';
 import type { ReviewRecord, StudyCoachApi } from '../../shared/ipc';
 import type {
   CreateKnowledgeTopicInput,
@@ -78,6 +79,7 @@ type WorkspaceDataState = {
 
 export type WorkspaceData = WorkspaceDataState & {
   reload: () => Promise<void>;
+  refreshKnowledge: () => Promise<void>;
   retry: () => Promise<void>;
   createTask: (input: CreateTaskInput) => Promise<WorkspaceTask>;
   updateTask: (input: UpdateWorkspaceTaskInput) => Promise<WorkspaceTask>;
@@ -121,7 +123,7 @@ function apiOrThrow(): StudyCoachApi {
 }
 
 function messageOf(cause: unknown) {
-  return cause instanceof Error ? cause.message : '数据加载失败，请重试。';
+  return friendlyErrorMessage(cause, '数据加载失败，请重试。');
 }
 
 function replaceWorkspaceSlice<T extends { workspaceId: string }>(
@@ -552,6 +554,7 @@ export function useWorkspaceData(): WorkspaceData {
   return {
     ...state,
     reload,
+    refreshKnowledge,
     retry: reload,
     createTask,
     updateTask,

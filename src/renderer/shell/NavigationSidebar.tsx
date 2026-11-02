@@ -4,8 +4,6 @@ import { DAILY_WORKSPACE_ID } from '../../shared/conversations';
 import {
   BookOpenIcon,
   CalendarIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
   ClockIcon,
   FolderIcon,
   FolderPlusIcon,
@@ -849,18 +847,6 @@ export function NavigationSidebar({
               >
                 <Icon className="h-4 w-4 shrink-0" />
                 {label}
-                {id === 'daily' ? (
-                  <span
-                    aria-hidden="true"
-                    className="ml-auto flex h-4 w-4 shrink-0 items-center justify-center text-gray-400 dark:text-[#8e8e93]"
-                  >
-                    {dailyExpanded ? (
-                      <ChevronDownIcon className="h-3.5 w-3.5" />
-                    ) : (
-                      <ChevronRightIcon className="h-3.5 w-3.5" />
-                    )}
-                  </span>
-                ) : null}
               </button>
               {id === 'daily' && dailyExpanded && showConversations && !searching
                 ? dailyConversationList()

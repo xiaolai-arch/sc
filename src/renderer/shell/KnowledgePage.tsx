@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react';
+import { friendlyErrorMessage } from '../../shared/errors';
 import type {
   CreateKnowledgeTopicInput,
   KnowledgeStatus,
@@ -169,7 +170,7 @@ export function KnowledgePage({
       setDialogOpen(false);
       setEditing(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '保存失败，请重试。');
+      setError(friendlyErrorMessage(cause, '保存失败，请重试。'));
     } finally {
       setSaving(false);
     }

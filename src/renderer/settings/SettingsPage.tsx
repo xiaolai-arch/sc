@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { formatLocalDate } from '../../shared/date';
+import { friendlyErrorMessage } from '../../shared/errors';
 import type {
   LocalCliAgent,
   LocalCliEffort,
@@ -146,7 +147,7 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
     try {
       setCliScan(await api.scanLocalClis());
     } catch (cause) {
-      setCliScanError(cause instanceof Error ? cause.message : '扫描本机 CLI 失败。');
+      setCliScanError(friendlyErrorMessage(cause, '扫描本机 CLI 失败。'));
     } finally {
       setCliScanning(false);
     }
@@ -164,7 +165,7 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
       const usagePromise: Promise<UsageSummary | null> =
         typeof api.getUsageSummary === 'function'
           ? api.getUsageSummary(7).catch((cause: unknown) => {
-              setUsageError(cause instanceof Error ? cause.message : '用量读取失败。');
+              setUsageError(friendlyErrorMessage(cause, '用量读取失败。'));
               return null;
             })
           : Promise.resolve(null);
@@ -197,7 +198,7 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
       setLaunchAtLogin(value.launchAtLogin);
       setLoaded(true);
     } catch (cause) {
-      setLoadError(cause instanceof Error ? cause.message : '加载设置失败。');
+      setLoadError(friendlyErrorMessage(cause, '加载设置失败。'));
       setLoaded(true);
     }
   }, []);
@@ -330,10 +331,10 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
           setUsage(await api.getUsageSummary(7));
         }
       } catch (cause) {
-        setUsageError(cause instanceof Error ? cause.message : '用量读取失败。');
+        setUsageError(friendlyErrorMessage(cause, '用量读取失败。'));
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '保存设置失败，请重试。');
+      setError(friendlyErrorMessage(cause, '保存设置失败，请重试。'));
     } finally {
       setSaving(false);
     }
@@ -351,7 +352,7 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
         setUsage(await api.getUsageSummary(7));
       }
     } catch (cause) {
-      setUsageError(cause instanceof Error ? cause.message : '清空用量失败，请重试。');
+      setUsageError(friendlyErrorMessage(cause, '清空用量失败，请重试。'));
     } finally {
       setClearingUsage(false);
     }
@@ -380,7 +381,7 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
     } catch (cause) {
       setBackupStatus({
         kind: 'error',
-        message: cause instanceof Error ? cause.message : '导出备份失败，请重试。'
+        message: friendlyErrorMessage(cause, '导出备份失败，请重试。')
       });
     } finally {
       setExportingBackup(false);
@@ -414,7 +415,7 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
     } catch (cause) {
       setBackupStatus({
         kind: 'error',
-        message: cause instanceof Error ? cause.message : '恢复备份失败，请重试。'
+        message: friendlyErrorMessage(cause, '恢复备份失败，请重试。')
       });
     } finally {
       setRestoringBackup(false);

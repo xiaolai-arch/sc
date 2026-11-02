@@ -42,7 +42,8 @@ export const BUTLER_TOOL_LABELS: Record<string, string> = {
   get_today_plan: '读取今日计划',
   write_note: '写入笔记',
   update_task: '更新任务',
-  get_memory: '读取记忆'
+  get_memory: '读取记忆',
+  record_knowledge: '记录知识'
 };
 
 export function butlerToolLabel(name: string): string {

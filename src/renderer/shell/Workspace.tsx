@@ -43,6 +43,7 @@ import { stepsToTrace } from './trace';
 import type { ChatMessage, ChatTraceItem } from './types';
 import { useConversations } from './useConversations';
 import { useWorkspaceData } from './useWorkspaceData';
+import { friendlyErrorMessage } from '../../shared/errors';
 
 type WorkspaceProps = {
   hasApiKey: boolean;
@@ -50,8 +51,16 @@ type WorkspaceProps = {
 };
 
 function messageOf(cause: unknown) {
-  return cause instanceof Error ? cause.message : '操作失败，请重试。';
+  return friendlyErrorMessage(cause);
 }
+
+/** Butler tools that may append knowledge evidence as a side effect. */
+const KNOWLEDGE_TOOLS = new Set([
+  'record_knowledge',
+  'write_note',
+  'update_task',
+  'save_review'
+]);
 
 /** True when Tailwind's `md` breakpoint (768px) is not met. */
 function isNarrowScreen(): boolean {
@@ -128,6 +137,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     error,
     retry,
     reload,
+    refreshKnowledge,
     stream,
     cancelStream,
     submitPracticeAnswer,
@@ -565,6 +575,10 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
                   : item
               );
               publishTrace();
+              // Show tool-written knowledge immediately, even mid-turn.
+              if (event.ok && KNOWLEDGE_TOOLS.has(event.name)) {
+                void refreshKnowledge();
+              }
               break;
             }
             case 'error':

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { friendlyErrorMessage } from '../../shared/errors';
 import { Button } from '../ui/Button';
 import { BookOpenIcon, CheckIcon, TargetIcon } from '../ui/icons';
 import { Progress } from '../ui/Progress';
@@ -116,7 +117,7 @@ export function LearningPane({
       setResult(submitted);
       if (submitted.correct) setScore((current) => current + 1);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '提交答案失败，请重试。');
+      setError(friendlyErrorMessage(cause, '提交答案失败，请重试。'));
     } finally {
       setChecking(false);
     }

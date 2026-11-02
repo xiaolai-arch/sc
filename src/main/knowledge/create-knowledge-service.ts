@@ -220,6 +220,40 @@ export function createKnowledgeService(options: KnowledgeServiceOptions): Knowle
     return [topic.name, ...topic.aliases].some((term) => normalizeTerm(term) === needle);
   }
 
+  /**
+   * The longest name/alias of the topic that appears in `text`. Models often
+   * mention a topic with extra words ("LangGraph 状态图"), which must enrich
+   * the existing card instead of creating a near-duplicate one.
+   */
+  function matchedTermLength(topic: KnowledgeTopic, text: string): number {
+    let longest = 0;
+    for (const term of [topic.name, ...topic.aliases]) {
+      if (!normalizeTerm(term)) continue;
+      if (topicMatches(text, { ...topic, name: term, aliases: [] })) {
+        longest = Math.max(longest, normalizeTerm(term).length);
+      }
+    }
+    return longest;
+  }
+
+  function findMentionedTopic(
+    topics: KnowledgeTopic[],
+    name: string
+  ): KnowledgeTopic | undefined {
+    const exact = topics.find((topic) => matchesExactName(topic, name));
+    if (exact !== undefined) return exact;
+    let best: KnowledgeTopic | undefined;
+    let bestLength = 0;
+    for (const topic of topics) {
+      const length = matchedTermLength(topic, name);
+      if (length > bestLength) {
+        best = topic;
+        bestLength = length;
+      }
+    }
+    return best;
+  }
+
   return {
     list: listTopics,
 
@@ -305,7 +339,7 @@ export function createKnowledgeService(options: KnowledgeServiceOptions): Knowle
       const note = typeof input?.note === 'string' ? input.note.trim() : '';
       return runExclusively(async () => {
         const topics = await listTopics(workspaceId);
-        const existing = topics.find((topic) => matchesExactName(topic, name));
+        const existing = findMentionedTopic(topics, name);
         const timestamp = now().toISOString();
         const evidence: KnowledgeEvidence = {
           id: newId('kev'),

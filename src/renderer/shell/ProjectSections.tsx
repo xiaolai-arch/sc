@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { friendlyErrorMessage } from '../../shared/errors';
 import { cn } from '../ui/cn';
 import { CheckIcon } from '../ui/icons';
 import type { ReviewRecord } from '../../shared/ipc';
@@ -90,7 +91,7 @@ const inputClass =
   'h-9 min-w-0 rounded-xl border-0 bg-[#f5f5f7] px-3 text-[13px] text-[#1d1d1f] outline-none transition-all duration-200 [color-scheme:light] placeholder:text-gray-400 focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#f5f5f7] dark:[color-scheme:dark]';
 
 function messageOf(cause: unknown) {
-  return cause instanceof Error ? cause.message : '操作失败，请重试。';
+  return friendlyErrorMessage(cause);
 }
 
 /** The next full hour, used as the default reminder time. */

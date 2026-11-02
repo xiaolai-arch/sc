@@ -693,6 +693,34 @@ describe('CliAgentClient native agent mode', () => {
     expect(args).not.toContain('--bare');
   });
 
+  test('passes the zcode prompt as the value of -p, after its flags', async () => {
+    let args: string[] = [];
+    const client = new CliAgentClient(
+      { kind: 'local-cli', agent: 'zcode', command: 'zcode', nativeTools: true },
+      {
+        runner: async (_command, nextArgs) => {
+          args = nextArgs;
+          return { stdout: 'ok', stderr: '', code: 0 };
+        }
+      }
+    );
+
+    await client.complete({
+      cwd: '/tmp/vault/workspaces/ws-1',
+      messages: [{ role: 'user', content: 'hi' }]
+    });
+
+    expect(args.slice(0, 5)).toEqual([
+      '--mode',
+      'edit',
+      '--cwd',
+      '/tmp/vault/workspaces/ws-1',
+      '-p'
+    ]);
+    expect(args).toHaveLength(6);
+    expect(args[args.length - 1]).toContain('hi');
+  });
+
   test('runs opencode as a native agent in the workspace', async () => {
     let args: string[] = [];
     let input = '';

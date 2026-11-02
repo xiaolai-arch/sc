@@ -45,6 +45,8 @@ type AgentConfig = {
   args: string[];
   streamArgs?: string[];
   stdin: boolean;
+  /** CLI flag that takes the prompt as its value; appended right before it. */
+  promptFlag?: string;
 };
 
 const AGENT_CONFIG: Record<LocalCliAgent, AgentConfig> = {
@@ -73,10 +75,7 @@ const AGENT_CONFIG: Record<LocalCliAgent, AgentConfig> = {
  * use its own tools and keep the process inside the user's vault instead of a
  * temp directory. Streaming output stays machine-readable where supported.
  */
-const NATIVE_AGENT_CONFIG: Record<
-  LocalCliAgent,
-  { args: string[]; streamArgs?: string[]; stdin: boolean }
-> = {
+const NATIVE_AGENT_CONFIG: Record<LocalCliAgent, AgentConfig> = {
   codex: {
     args: ['exec', '--skip-git-repo-check', '--sandbox', 'workspace-write', '-'],
     streamArgs: [
@@ -101,9 +100,12 @@ const NATIVE_AGENT_CONFIG: Record<
     stdin: true
   },
   zcode: {
-    args: ['-p', '--mode', 'edit'],
-    streamArgs: ['-p', '--json', '--mode', 'edit'],
-    stdin: false
+    // `-p <text>` takes the prompt as its value, so it must come last: flags
+    // placed after it would be swallowed as the prompt.
+    args: ['--mode', 'edit'],
+    streamArgs: ['--json', '--mode', 'edit'],
+    stdin: false,
+    promptFlag: '-p'
   },
   opencode: {
     args: ['run', '--auto'],
@@ -659,7 +661,10 @@ export class CliAgentClient implements StreamingModelClient {
       ...(request.webTools ? { webTools: true } : {}),
       ...(native ? { nativeTools: true, cwd: request.cwd! } : {})
     });
-    if (!config.stdin) args.push(prompt);
+    if (!config.stdin) {
+      if (config.promptFlag) args.push(config.promptFlag, prompt);
+      else args.push(prompt);
+    }
 
     const result = await (this.options.runner ?? defaultRunner)(
       command,
@@ -730,7 +735,10 @@ export class CliAgentClient implements StreamingModelClient {
       ...(request.webTools ? { webTools: true } : {}),
       ...(native ? { nativeTools: true, cwd: request.cwd! } : {})
     });
-    if (!config.stdin) args.push(prompt);
+    if (!config.stdin) {
+      if (config.promptFlag) args.push(config.promptFlag, prompt);
+      else args.push(prompt);
+    }
 
     const state: StreamState = {
       emitted: false,

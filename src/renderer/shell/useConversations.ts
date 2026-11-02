@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { friendlyErrorMessage } from '../../shared/errors';
 import type {
   Conversation,
   ConversationMessage,
@@ -34,7 +35,7 @@ function apiOrThrow(): StudyCoachApi {
 }
 
 function messageOf(cause: unknown): string {
-  return cause instanceof Error ? cause.message : '对话加载失败，请重试。';
+  return friendlyErrorMessage(cause, '对话加载失败，请重试。');
 }
 
 export function useConversations(): ConversationController {

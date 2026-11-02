@@ -86,6 +86,15 @@ test('switches across the top sections and marks the active one', async () => {
   expect(screen.getAllByRole('complementary')).toHaveLength(1);
 });
 
+test('the daily section has no trailing disclosure arrow', async () => {
+  const { api } = setup();
+  await mount(api);
+
+  const daily = nav().getByRole('button', { name: '日常' });
+  // Only the leading sun icon remains; the right-side chevron is gone.
+  expect(daily.querySelectorAll('svg')).toHaveLength(1);
+});
+
 test('keeps the conversation and project when moving between sections', async () => {
   const { api } = setup();
   await mount(api);

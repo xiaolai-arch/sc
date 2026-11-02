@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { friendlyErrorMessage } from '../../shared/errors';
 import type { LearnerProfile } from '../../shared/memory';
 import type {
   CreateNoteInput,
@@ -71,7 +72,7 @@ export function ProjectsPage({
     try {
       await onUpdateWorkspace({ workspaceId: workspace.id, checkIn });
     } catch (cause) {
-      setWorkspaceError(cause instanceof Error ? cause.message : '保存失败，请重试。');
+      setWorkspaceError(friendlyErrorMessage(cause, '保存失败，请重试。'));
     }
   }
 
