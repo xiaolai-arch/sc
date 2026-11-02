@@ -2,16 +2,19 @@ import { promises as fs } from 'node:fs';
 import type {
   CreateKnowledgeTopicInput,
   KnowledgeEvidence,
+  KnowledgeNote,
   KnowledgeService,
   KnowledgeStatus,
   KnowledgeTopic,
   LinkKnowledgeReviewInput,
   RecordKnowledgeInput,
+  SaveKnowledgeNoteInput,
   UpdateKnowledgeTopicInput
 } from '../../shared/knowledge';
-import { topicMatches } from '../../shared/knowledge';
+import { MAX_KNOWLEDGE_NOTE_LENGTH, topicMatches } from '../../shared/knowledge';
 import type { WorkspaceNote, WorkspaceTask } from '../../shared/workspace';
 import { formatLocalDate } from '../../shared/date';
+import { parseKnowledgeNoteFile, serializeKnowledgeNoteFile } from './notes';
 import { isKnowledgeStatus } from './records';
 import { parseKnowledgeTopicFile, serializeKnowledgeTopicFile } from './records';
 import {
@@ -23,6 +26,7 @@ import {
 import { newId } from '../workspace/ids';
 import {
   assertSafeSegment,
+  knowledgeNoteFile,
   knowledgeTopicFile,
   knowledgeTopicsDir
 } from '../workspace/paths';
@@ -125,6 +129,34 @@ export function createKnowledgeService(options: KnowledgeServiceOptions): Knowle
     if (!isSafeTopicId(topicId)) return null;
     const raw = await readFileOrNull(knowledgeTopicFile(vaultRoot, topicId));
     return raw === null ? null : parseKnowledgeTopicFile(raw, topicId);
+  }
+
+  async function readNote(topicId: string): Promise<KnowledgeNote> {
+    if (!isSafeTopicId(topicId)) return { topicId, body: '', updatedAt: '' };
+    const raw = await readFileOrNull(knowledgeNoteFile(vaultRoot, topicId));
+    if (raw === null) return { topicId, body: '', updatedAt: '' };
+    const note = parseKnowledgeNoteFile(raw, topicId);
+    return { topicId, body: note.body, updatedAt: note.updatedAt };
+  }
+
+  /** Best-effort: keep a note's frontmatter in step with a renamed topic. */
+  async function syncNoteMeta(topic: KnowledgeTopic): Promise<void> {
+    try {
+      const file = knowledgeNoteFile(vaultRoot, topic.id);
+      const raw = await readFileOrNull(file);
+      if (raw === null) return;
+      const note = parseKnowledgeNoteFile(raw, topic.id);
+      await writeFileAtomic(
+        file,
+        serializeKnowledgeNoteFile({
+          ...note,
+          title: topic.name,
+          aliases: topic.aliases
+        })
+      );
+    } catch {
+      // The topic update is the user's write; note sync is cosmetic.
+    }
   }
 
   async function writeTopic(topic: KnowledgeTopic): Promise<KnowledgeTopic> {
@@ -261,6 +293,39 @@ export function createKnowledgeService(options: KnowledgeServiceOptions): Knowle
       return readTopic(topicId);
     },
 
+    getNote: readNote,
+
+    async saveNote(input: SaveKnowledgeNoteInput): Promise<KnowledgeNote> {
+      const topicId = typeof input?.topicId === 'string' ? input.topicId.trim() : '';
+      if (!isSafeTopicId(topicId)) throw new Error('知识主题 ID 无效。');
+      if (typeof input?.body !== 'string') throw new Error('笔记内容无效。');
+      if (input.body.length > MAX_KNOWLEDGE_NOTE_LENGTH) {
+        throw new Error(`笔记不能超过 ${MAX_KNOWLEDGE_NOTE_LENGTH} 字。`);
+      }
+      return runExclusively(async () => {
+        const topic = await readTopic(topicId);
+        if (topic === null) throw new Error('知识主题不存在。');
+        const existingRaw = await readFileOrNull(knowledgeNoteFile(vaultRoot, topicId));
+        const meta =
+          existingRaw === null
+            ? { type: 'note' as const, source: 'user' as const }
+            : parseKnowledgeNoteFile(existingRaw, topicId).meta;
+        const updatedAt = now().toISOString();
+        await writeFileAtomic(
+          knowledgeNoteFile(vaultRoot, topicId),
+          serializeKnowledgeNoteFile({
+            topicId,
+            title: topic.name,
+            aliases: topic.aliases,
+            body: input.body,
+            updatedAt,
+            meta
+          })
+        );
+        return { topicId, body: input.body, updatedAt };
+      });
+    },
+
     async create(input: CreateKnowledgeTopicInput): Promise<KnowledgeTopic> {
       const name = requireName(input?.name);
       const timestamp = now().toISOString();
@@ -316,7 +381,13 @@ export function createKnowledgeService(options: KnowledgeServiceOptions): Knowle
           if (workspaceId) next.workspaceId = workspaceId;
           else delete next.workspaceId;
         }
-        return writeTopic(next);
+        const renamed =
+          next.name !== current.name ||
+          next.aliases.length !== current.aliases.length ||
+          next.aliases.some((alias, index) => alias !== current.aliases[index]);
+        const written = await writeTopic(next);
+        if (renamed) await syncNoteMeta(written);
+        return written;
       });
     },
 
@@ -327,6 +398,11 @@ export function createKnowledgeService(options: KnowledgeServiceOptions): Knowle
         const raw = await readFileOrNull(file);
         if (raw === null) return;
         await fs.rm(file, { force: true });
+        try {
+          await fs.rm(knowledgeNoteFile(vaultRoot, topicId), { force: true });
+        } catch {
+          // An unremovable note file must not resurrect a deleted topic.
+        }
       });
     },
 

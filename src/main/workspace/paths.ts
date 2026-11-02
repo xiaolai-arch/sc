@@ -12,6 +12,7 @@ import { isLocalDateTime } from '../../shared/date';
  *   <root>/workspaces/<id>/reviews/YYYY-MM-DD.md  per-workspace reviews
  *   <root>/reviews/YYYY-MM-DD.md             vault-wide reviews
  *   <root>/knowledge/topics/*.md             knowledge topics (global + per workspace)
+ *   <root>/knowledge/notes/*.md              user-authored note per knowledge topic
  *   <root>/reminders.md                      reminders are vault-global
  *
  * Frontmatter is the machine-readable source of truth; the markdown body is a
@@ -112,4 +113,12 @@ export function knowledgeTopicsDir(root: string): string {
 
 export function knowledgeTopicFile(root: string, topicId: string): string {
   return join(knowledgeTopicsDir(root), `${topicId}.md`);
+}
+
+export function knowledgeNotesDir(root: string): string {
+  return join(knowledgeDir(root), 'notes');
+}
+
+export function knowledgeNoteFile(root: string, topicId: string): string {
+  return join(knowledgeNotesDir(root), `${topicId}.md`);
 }

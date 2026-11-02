@@ -19,6 +19,8 @@ function knowledgeStub(overrides: Partial<KnowledgeService> = {}): KnowledgeServ
     linkTask: async () => undefined,
     linkNote: async () => undefined,
     linkReview: async () => undefined,
+    getNote: async (topicId) => ({ topicId, body: '', updatedAt: '' }),
+    saveNote: async (input) => ({ ...input, updatedAt: '' }),
     ...overrides
   };
 }

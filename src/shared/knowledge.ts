@@ -113,6 +113,8 @@ export interface KnowledgeService {
   linkTask(task: WorkspaceTask): Promise<void>;
   linkNote(note: WorkspaceNote): Promise<void>;
   linkReview(input: LinkKnowledgeReviewInput): Promise<void>;
+  getNote(topicId: string): Promise<KnowledgeNote>;
+  saveNote(input: SaveKnowledgeNoteInput): Promise<KnowledgeNote>;
 }
 
 /** Renderer-facing knowledge contract over IPC. */

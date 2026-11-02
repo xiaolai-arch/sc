@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createKnowledgeService } from '../../src/main/knowledge/create-knowledge-service';
+import { parseKnowledgeNoteFile } from '../../src/main/knowledge/notes';
 
 const dirs: string[] = [];
 const NOW = new Date('2026-11-02T09:00:00.000Z');
@@ -187,4 +188,112 @@ test('an unsafe frontmatter id cannot redirect a write outside the vault', async
   expect(updated.summary).toBe('已经把基础补完了');
   expect(await readdir(topicsDir)).toEqual([`${created.id}.md`]);
   await expect(readFile(join(dir, 'escaped-by-frontmatter.md'), 'utf8')).rejects.toThrow();
+});
+
+function notePath(dir: string, topicId: string): string {
+  return join(dir, 'knowledge', 'notes', `${topicId}.md`);
+}
+
+test('saves and reads a note without touching the topic body', async () => {
+  const { dir, service } = await setup();
+  const topic = await service.create({ name: 'LangGraph' });
+  const topicFile = join(dir, 'knowledge', 'topics', `${topic.id}.md`);
+  const topicBefore = await readFile(topicFile, 'utf8');
+
+  const saved = await service.saveNote({
+    topicId: topic.id,
+    body: '# hi\n\n[[LangChain]]'
+  });
+  expect(saved.body).toBe('# hi\n\n[[LangChain]]');
+  expect(await service.getNote(topic.id)).toMatchObject({
+    topicId: topic.id,
+    body: '# hi\n\n[[LangChain]]'
+  });
+
+  const noteRaw = await readFile(notePath(dir, topic.id), 'utf8');
+  expect(noteRaw).toContain('kind: knowledge-note');
+  expect(noteRaw).toContain('[[LangChain]]');
+  expect(await readFile(topicFile, 'utf8')).toBe(topicBefore);
+});
+
+test('keeps hand-added frontmatter keys when saving', async () => {
+  const { dir, service } = await setup();
+  const topic = await service.create({ name: 'LangGraph' });
+  const file = notePath(dir, topic.id);
+  await mkdir(join(dir, 'knowledge', 'notes'), { recursive: true });
+  await writeFile(
+    file,
+    [
+      '---',
+      'type: note',
+      'kind: knowledge-note',
+      `topicId: ${topic.id}`,
+      'title: LangGraph',
+      'aliases: [LangGraph]',
+      'tags: [ai]',
+      'cssclass: wide',
+      '---',
+      'old body'
+    ].join('\n'),
+    'utf8'
+  );
+
+  await service.saveNote({ topicId: topic.id, body: 'new body' });
+  const parsed = parseKnowledgeNoteFile(await readFile(file, 'utf8'), topic.id);
+  expect(parsed.body).toBe('new body');
+  expect(parsed.meta.tags).toEqual(['ai']);
+  expect(parsed.meta.cssclass).toBe('wide');
+});
+
+test('accepts empty and 200000-character notes but rejects 200001', async () => {
+  const { service } = await setup();
+  const topic = await service.create({ name: 'LangGraph' });
+
+  await expect(service.saveNote({ topicId: topic.id, body: '' })).resolves.toMatchObject({
+    body: ''
+  });
+  await expect(
+    service.saveNote({ topicId: topic.id, body: 'x'.repeat(200_000) })
+  ).resolves.toMatchObject({ body: 'x'.repeat(200_000) });
+  await expect(
+    service.saveNote({ topicId: topic.id, body: 'x'.repeat(200_001) })
+  ).rejects.toThrow(/200000/);
+});
+
+test('rejects saving a note to a missing topic', async () => {
+  const { service } = await setup();
+  await expect(service.saveNote({ topicId: 'kt-missing', body: 'x' })).rejects.toThrow(
+    /知识主题不存在/
+  );
+});
+
+test('deleting a topic removes its note file', async () => {
+  const { dir, service } = await setup();
+  const topic = await service.create({ name: 'LangGraph' });
+  await service.saveNote({ topicId: topic.id, body: 'body' });
+
+  await service.delete(topic.id);
+  await expect(readFile(notePath(dir, topic.id), 'utf8')).rejects.toThrow();
+});
+
+test('renaming a topic updates note frontmatter but not its body', async () => {
+  const { dir, service } = await setup();
+  const topic = await service.create({ name: 'LangGraph', aliases: ['LG'] });
+  await service.saveNote({ topicId: topic.id, body: 'body stays' });
+
+  await service.update({ id: topic.id, name: 'LangGraph.js', aliases: ['LG.js'] });
+  const parsed = parseKnowledgeNoteFile(await readFile(notePath(dir, topic.id), 'utf8'), topic.id);
+  expect(parsed.title).toBe('LangGraph.js');
+  expect(parsed.aliases).toEqual(['LG.js']);
+  expect(parsed.body).toBe('body stays');
+});
+
+test('getNote returns an empty body for missing or unsafe ids', async () => {
+  const { service } = await setup();
+  expect(await service.getNote('kt-missing')).toEqual({
+    topicId: 'kt-missing',
+    body: '',
+    updatedAt: ''
+  });
+  expect(await service.getNote('../../etc/passwd')).toMatchObject({ body: '' });
 });
