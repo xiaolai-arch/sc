@@ -1,24 +1,25 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { friendlyErrorMessage } from '../../shared/errors';
 import type {
   CreateKnowledgeTopicInput,
+  KnowledgeBacklink,
+  KnowledgeNote,
   KnowledgeStatus,
   KnowledgeTopic,
+  SaveKnowledgeNoteInput,
   UpdateKnowledgeTopicInput
 } from '../../shared/knowledge';
 import type { Workspace } from '../../shared/workspace';
 import { Dialog } from '../ui/Dialog';
-import { ChevronDownIcon, ChevronRightIcon, PlusIcon } from '../ui/icons';
+import { PlusIcon } from '../ui/icons';
+import { KnowledgeNotePane } from './KnowledgeNotePane';
 import { PageFrame } from './PageFrame';
-
-const STATUS_LABELS: Record<KnowledgeStatus, string> = {
-  planned: '计划中',
-  learning: '在学',
-  mastered: '已掌握',
-  paused: '暂停'
-};
-
-const STATUS_ORDER: KnowledgeStatus[] = ['planned', 'learning', 'mastered', 'paused'];
+import {
+  STATUS_DOT_CLASS,
+  STATUS_LABELS,
+  STATUS_ORDER,
+  workspaceName
+} from './knowledge-ui';
 
 const inputClass =
   'mt-1 h-10 w-full rounded-xl border-0 bg-[#f5f5f7] px-3 text-[14px] text-gray-800 outline-none transition-all duration-200 focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#f5f5f7]';
@@ -32,6 +33,9 @@ type KnowledgePageProps = {
   onCreateTopic: (input: CreateKnowledgeTopicInput) => Promise<KnowledgeTopic>;
   onUpdateTopic: (input: UpdateKnowledgeTopicInput) => Promise<KnowledgeTopic>;
   onDeleteTopic: (topicId: string) => Promise<void>;
+  getKnowledgeNote: (topicId: string) => Promise<KnowledgeNote>;
+  saveKnowledgeNote: (input: SaveKnowledgeNoteInput) => Promise<KnowledgeNote>;
+  getKnowledgeBacklinks: (topicId: string) => Promise<KnowledgeBacklink[]>;
 };
 
 type TopicForm = {
@@ -42,6 +46,16 @@ type TopicForm = {
   level: string;
   summary: string;
 };
+
+type MobilePane = 'list' | 'note';
+
+type DirectoryGroup = {
+  key: string;
+  label: string;
+  topics: KnowledgeTopic[];
+};
+
+const GLOBAL_KEY = '__global';
 
 function emptyForm(defaultWorkspaceId?: string | null): TopicForm {
   return {
@@ -72,17 +86,38 @@ function parseAliases(value: string): string[] {
     .filter(Boolean);
 }
 
-function evidenceDate(date: string): string {
-  const [, month, day] = date.split('-');
-  if (!month || !day) return date;
-  return `${Number(month)}/${Number(day)}`;
+/**
+ * Workspace groups in workspace order, with the global group last. A topic
+ * whose workspace no longer exists falls under its raw id rather than vanishing.
+ */
+function groupTopics(topics: KnowledgeTopic[], workspaces: Workspace[]): DirectoryGroup[] {
+  const groups = new Map<string, KnowledgeTopic[]>();
+  for (const workspace of workspaces) {
+    if (topics.some((topic) => topic.workspaceId === workspace.id)) {
+      groups.set(workspace.id, []);
+    }
+  }
+  for (const topic of topics) {
+    const key = topic.workspaceId ?? GLOBAL_KEY;
+    const existing = groups.get(key);
+    if (existing) existing.push(topic);
+    else groups.set(key, [topic]);
+  }
+  return [...groups.entries()]
+    .filter(([, items]) => items.length > 0)
+    .map(([key, items]) => ({
+      key,
+      label: key === GLOBAL_KEY ? '全局' : workspaceName(workspaces, key),
+      topics: items
+    }))
+    .sort((a, b) => (a.key === GLOBAL_KEY ? 1 : 0) - (b.key === GLOBAL_KEY ? 1 : 0));
 }
 
-function workspaceName(workspaces: Workspace[], workspaceId: string | undefined): string {
-  if (!workspaceId) return '全局';
-  return workspaces.find((workspace) => workspace.id === workspaceId)?.name ?? workspaceId;
-}
-
+/**
+ * A directory of topics beside one open note. Selection survives a search that
+ * hides the selected topic; a wiki-link jump clears the search so the target
+ * is visible in the directory afterwards.
+ */
 export function KnowledgePage({
   topics,
   workspaces,
@@ -90,32 +125,59 @@ export function KnowledgePage({
   onOpenSidebar,
   onCreateTopic,
   onUpdateTopic,
-  onDeleteTopic
+  onDeleteTopic,
+  getKnowledgeNote,
+  saveKnowledgeNote,
+  getKnowledgeBacklinks
 }: KnowledgePageProps) {
-  const [filterId, setFilterId] = useState('');
   const [query, setQuery] = useState('');
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [mobilePane, setMobilePane] = useState<MobilePane>('list');
   const [editing, setEditing] = useState<KnowledgeTopic | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState<TopicForm>(() => emptyForm(defaultWorkspaceId));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const seenIdsRef = useRef(new Set<string>());
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return topics.filter((topic) => {
-      if (filterId && topic.workspaceId !== undefined && topic.workspaceId !== filterId) {
-        return false;
-      }
-      if (!needle) return true;
-      return [topic.name, ...topic.aliases, topic.summary].some((text) =>
+    if (!needle) return topics;
+    return topics.filter((topic) =>
+      [topic.name, ...topic.aliases, topic.summary].some((text) =>
         text.toLowerCase().includes(needle)
-      );
-    });
-  }, [topics, filterId, query]);
+      )
+    );
+  }, [topics, query]);
 
-  const mastered = filtered.filter((topic) => topic.status === 'mastered').length;
-  const learning = filtered.filter((topic) => topic.status === 'learning').length;
+  const groups = useMemo(() => groupTopics(filtered, workspaces), [filtered, workspaces]);
+  const selected = topics.find((topic) => topic.id === selectedId) ?? null;
+  const mastered = topics.filter((topic) => topic.status === 'mastered').length;
+  const learning = topics.filter((topic) => topic.status === 'learning').length;
+
+  useEffect(() => {
+    const ids = new Set(topics.map((topic) => topic.id));
+    const wasSeen = selectedId !== null && seenIdsRef.current.has(selectedId);
+    for (const id of ids) seenIdsRef.current.add(id);
+    if (selectedId === null) {
+      if (topics.length > 0) setSelectedId(topics[0]!.id);
+      return;
+    }
+    // A just-created topic is not in the parent's list yet: wait for it.
+    if (!ids.has(selectedId) && wasSeen) {
+      setSelectedId(topics[0]?.id ?? null);
+    }
+  }, [topics, selectedId]);
+
+  function selectTopic(topicId: string) {
+    setSelectedId(topicId);
+    setMobilePane('note');
+  }
+
+  function openTopic(topicId: string) {
+    setQuery('');
+    selectTopic(topicId);
+  }
 
   function openCreate() {
     setEditing(null);
@@ -139,7 +201,7 @@ export function KnowledgePage({
       return;
     }
     const level = form.level.trim();
-    if (level && (!/^[1-5]$/.test(level))) {
+    if (level && !/^[1-5]$/.test(level)) {
       setError('掌握程度必须是 1 到 5。');
       return;
     }
@@ -158,7 +220,7 @@ export function KnowledgePage({
           summary: form.summary.trim()
         });
       } else {
-        await onCreateTopic({
+        const created = await onCreateTopic({
           name,
           ...(aliases.length > 0 ? { aliases } : {}),
           ...(form.status !== '' ? { status: form.status } : {}),
@@ -166,6 +228,9 @@ export function KnowledgePage({
           ...(form.workspaceId ? { workspaceId: form.workspaceId } : {}),
           ...(form.summary.trim() ? { summary: form.summary.trim() } : {})
         });
+        setSelectedId(created.id);
+        setQuery('');
+        setMobilePane('note');
       }
       setDialogOpen(false);
       setEditing(null);
@@ -181,12 +246,15 @@ export function KnowledgePage({
       return;
     }
     await onDeleteTopic(topic.id);
+    const remaining = topics.filter((entry) => entry.id !== topic.id);
+    setSelectedId((current) => (current === topic.id ? remaining[0]?.id ?? null : current));
   }
 
   return (
     <PageFrame
+      fill
       title="知识库"
-      subtitle="主题 · 证据 · 掌握程度"
+      subtitle="主题 · 笔记 · 证据"
       onOpenSidebar={onOpenSidebar}
       action={
         <button
@@ -199,142 +267,101 @@ export function KnowledgePage({
         </button>
       }
     >
-      <div className="mb-5 flex flex-wrap items-center gap-2">
-        <input
-          type="search"
-          aria-label="搜索知识主题"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="搜索主题或别名…"
-          className="h-9 min-w-[200px] flex-1 rounded-xl border-0 bg-[#f5f5f7] px-3 text-[13px] text-gray-700 outline-none transition-all duration-200 focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#a1a1a6]"
-        />
-        {workspaces.length > 0 ? (
-          <select
-            aria-label="按工作区筛选知识主题"
-            value={filterId}
-            onChange={(event) => setFilterId(event.target.value)}
-            className="h-9 rounded-xl border-0 bg-[#f5f5f7] px-3 text-[13px] text-gray-700 outline-none transition-all duration-200 focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#a1a1a6]"
-          >
-            <option value="">全部工作区</option>
-            {workspaces.map((workspace) => (
-              <option key={workspace.id} value={workspace.id}>
-                {workspace.name}
-              </option>
-            ))}
-          </select>
-        ) : null}
-      </div>
-
-      <p className="mb-4 text-[12px] text-gray-500 dark:text-[#8e8e93]">
-        {topics.length} 个主题 · {mastered} 已掌握 · {learning} 在学
-      </p>
-
-      {filtered.length === 0 ? (
-        <p className="py-16 text-center text-[14px] text-gray-500 dark:text-[#8e8e93]">
-          还没有知识主题。
-        </p>
-      ) : (
-        <ul className="space-y-2">
-          {filtered.map((topic) => {
-            const expanded = expandedId === topic.id;
-            return (
-              <li
-                key={topic.id}
-                className="rounded-2xl border border-gray-200/70 bg-white transition-colors dark:border-white/10 dark:bg-[#1c1c1e]"
-              >
-                <div className="flex items-start gap-3 px-4 py-3">
-                  <button
-                    type="button"
-                    aria-label={`${expanded ? '收起' : '展开'} ${topic.name}`}
-                    aria-expanded={expanded}
-                    onClick={() => setExpandedId(expanded ? null : topic.id)}
-                    className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-black/[0.04] hover:text-gray-700 dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
-                  >
-                    {expanded ? (
-                      <ChevronDownIcon className="h-4 w-4" />
-                    ) : (
-                      <ChevronRightIcon className="h-4 w-4" />
-                    )}
-                  </button>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <span className="text-[14px] font-medium text-black dark:text-[#f5f5f7]">
-                        {topic.name}
-                      </span>
-                      <span className="rounded-full bg-[#f5f5f7] px-2 py-0.5 text-[11px] text-gray-600 dark:bg-white/[0.08] dark:text-[#a1a1a6]">
-                        {STATUS_LABELS[topic.status]}
-                      </span>
-                      {topic.level !== undefined ? (
-                        <span className="text-[11px] text-gray-400 dark:text-[#8e8e93]">
-                          L{topic.level}
-                        </span>
-                      ) : null}
-                      <span className="text-[11px] text-gray-400 dark:text-[#8e8e93]">
-                        {workspaceName(workspaces, topic.workspaceId)}
-                      </span>
-                    </div>
-                    {topic.summary ? (
-                      <p className="mt-1 text-[12px] leading-5 text-gray-500 dark:text-[#a1a1a6]">
-                        {topic.summary}
-                      </p>
-                    ) : null}
-                    {topic.aliases.length > 0 ? (
-                      <p className="mt-0.5 text-[11px] text-gray-400 dark:text-[#8e8e93]">
-                        别名：{topic.aliases.join('、')}
-                      </p>
-                    ) : null}
-                    {expanded ? (
-                      <div className="mt-3 border-t border-gray-200/70 pt-2 dark:border-white/10">
-                        <p className="text-[11px] font-medium text-gray-400 dark:text-[#8e8e93]">
-                          证据 · {topic.evidence.length}
-                        </p>
-                        {topic.evidence.length === 0 ? (
-                          <p className="mt-1 text-[12px] text-gray-400 dark:text-[#8e8e93]">
-                            还没有证据。
-                          </p>
-                        ) : (
-                          <ul className="mt-1 space-y-1">
-                            {[...topic.evidence].reverse().map((entry) => (
-                              <li
-                                key={entry.id}
-                                className="text-[12px] leading-5 text-gray-600 dark:text-[#a1a1a6]"
-                              >
-                                {evidenceDate(entry.date)} · {entry.title}
-                                {entry.note ? ` — ${entry.note}` : ''}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <button
-                      type="button"
-                      aria-label={`编辑 ${topic.name}`}
-                      onClick={() => openEdit(topic)}
-                      className="rounded-lg px-2 py-1 text-[12px] text-gray-500 transition-colors hover:bg-black/[0.04] hover:text-gray-900 dark:text-[#8e8e93] dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
-                    >
-                      编辑
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`删除 ${topic.name}`}
-                      onClick={() => void remove(topic)}
-                      className="rounded-lg px-2 py-1 text-[12px] text-[#ff3b30] transition-colors hover:bg-[#ff3b30]/10"
-                    >
-                      删除
-                    </button>
-                  </div>
+      <div className="mx-auto flex h-full w-full max-w-[1160px] px-4 py-4 md:px-6">
+        <aside
+          aria-label="知识目录"
+          className={`w-full shrink-0 flex-col md:flex md:w-[260px] md:border-r md:border-gray-200/70 md:pr-4 dark:md:border-white/10 ${
+            mobilePane === 'note' ? 'hidden' : 'flex'
+          }`}
+        >
+          <input
+            type="search"
+            aria-label="搜索知识主题"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="搜索主题或别名…"
+            className="h-9 w-full rounded-xl border-0 bg-[#f5f5f7] px-3 text-[13px] text-gray-700 outline-none transition-all duration-200 focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#a1a1a6]"
+          />
+          <p className="mt-3 px-1 text-[11px] text-gray-500 dark:text-[#8e8e93]">
+            {topics.length} 个主题 · {mastered} 已掌握 · {learning} 在学
+          </p>
+          <nav className="mt-2 min-h-0 flex-1 overflow-y-auto pb-4">
+            {topics.length === 0 ? (
+              <p className="px-1 py-6 text-[13px] leading-6 text-gray-500 dark:text-[#8e8e93]">
+                还没有知识主题。完成学习任务、写笔记，或对阿咲说“今天学了 X”。
+              </p>
+            ) : filtered.length === 0 ? (
+              <p className="px-1 py-6 text-[13px] text-gray-500 dark:text-[#8e8e93]">
+                没有匹配的主题。
+              </p>
+            ) : (
+              groups.map((group) => (
+                <div key={group.key} className="mt-3 first:mt-0">
+                  <p className="px-1 text-[11px] font-medium text-gray-400 dark:text-[#8e8e93]">
+                    {group.label}
+                  </p>
+                  <ul className="mt-1 space-y-0.5">
+                    {group.topics.map((topic) => {
+                      const active = topic.id === selectedId;
+                      return (
+                        <li key={topic.id}>
+                          <button
+                            type="button"
+                            aria-current={active ? 'true' : undefined}
+                            onClick={() => selectTopic(topic.id)}
+                            className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 ${
+                              active
+                                ? 'bg-[#0071e3]/10 font-medium text-[#0071e3] dark:bg-[#0071e3]/20 dark:text-[#4da3ff]'
+                                : 'text-gray-700 hover:bg-black/[0.04] dark:text-[#a1a1a6] dark:hover:bg-white/[0.06]'
+                            }`}
+                          >
+                            <span
+                              aria-hidden="true"
+                              className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT_CLASS[topic.status]}`}
+                            />
+                            <span className="truncate">{topic.name}</span>
+                            {topic.level !== undefined ? (
+                              <span className="ml-auto text-[10px] text-gray-400 dark:text-[#8e8e93]">
+                                L{topic.level}
+                              </span>
+                            ) : null}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 </div>
-                <p className="px-4 pb-3 text-[11px] text-gray-400 dark:text-[#8e8e93]">
-                  证据 {topic.evidence.length} 条
-                </p>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+              ))
+            )}
+          </nav>
+        </aside>
+
+        <section
+          aria-label="知识内容"
+          className={`min-w-0 flex-1 flex-col overflow-y-auto pt-3 md:flex md:pl-5 md:pt-0 ${
+            mobilePane === 'note' ? 'flex' : 'hidden'
+          }`}
+        >
+          {selected ? (
+            <KnowledgeNotePane
+              topic={selected}
+              topics={topics}
+              workspaceLabel={workspaceName(workspaces, selected.workspaceId)}
+              getNote={getKnowledgeNote}
+              saveNote={saveKnowledgeNote}
+              getBacklinks={getKnowledgeBacklinks}
+              onOpenTopic={openTopic}
+              onEdit={() => openEdit(selected)}
+              onDelete={() => void remove(selected)}
+              onBack={() => setMobilePane('list')}
+            />
+          ) : (
+            <p className="py-16 text-center text-[13px] text-gray-500 dark:text-[#8e8e93]">
+              {topics.length === 0 ? '还没有知识主题。' : '选择一个主题查看笔记。'}
+            </p>
+          )}
+        </section>
+      </div>
 
       <Dialog
         open={dialogOpen}

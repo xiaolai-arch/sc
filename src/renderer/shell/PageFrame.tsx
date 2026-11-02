@@ -6,6 +6,8 @@ type PageFrameProps = {
   subtitle?: string;
   onOpenSidebar?: () => void;
   action?: ReactNode;
+  /** Let the page own its padding and scrolling (split-view pages). */
+  fill?: boolean;
   children: ReactNode;
 };
 
@@ -15,6 +17,7 @@ export function PageFrame({
   subtitle,
   onOpenSidebar,
   action,
+  fill = false,
   children
 }: PageFrameProps) {
   return (
@@ -45,9 +48,13 @@ export function PageFrame({
         </div>
         {action}
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-10 md:px-8 md:py-12">
-        <div className="mx-auto w-full max-w-[980px]">{children}</div>
-      </div>
+      {fill ? (
+        <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-10 md:px-8 md:py-12">
+          <div className="mx-auto w-full max-w-[980px]">{children}</div>
+        </div>
+      )}
     </div>
   );
 }

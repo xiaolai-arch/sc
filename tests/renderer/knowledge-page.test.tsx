@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
+import { useState } from 'react';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { KnowledgePage } from '../../src/renderer/shell/KnowledgePage';
 import type {
   CreateKnowledgeTopicInput,
+  KnowledgeNote,
   KnowledgeTopic,
   UpdateKnowledgeTopicInput
 } from '../../src/shared/knowledge';
@@ -28,41 +30,58 @@ const workspaces: Workspace[] = [
   }
 ];
 
-const topics: KnowledgeTopic[] = [
-  {
-    id: 'kt-1',
-    name: 'LangChain',
-    aliases: ['LC'],
-    status: 'mastered',
-    level: 4,
-    summary: '会搭 AgentExecutor',
-    evidence: [
-      {
-        id: 'kev-1',
-        kind: 'task',
-        refId: 't1',
-        title: '完成任务',
-        date: '2026-11-01'
-      }
-    ],
-    createdAt: '2026-11-01T00:00:00.000Z',
-    updatedAt: '2026-11-01T00:00:00.000Z'
-  },
-  {
-    id: 'kt-2',
-    name: 'RAG',
-    aliases: [],
-    status: 'learning',
-    workspaceId: 'agent',
-    summary: '',
-    evidence: [],
-    createdAt: '2026-11-01T00:00:00.000Z',
-    updatedAt: '2026-11-01T00:00:00.000Z'
-  }
-];
+const langChain: KnowledgeTopic = {
+  id: 'kt-1',
+  name: 'LangChain',
+  aliases: ['LC'],
+  status: 'mastered',
+  level: 4,
+  summary: '会搭 AgentExecutor',
+  evidence: [
+    { id: 'kev-1', kind: 'task', refId: 't1', title: '完成任务', date: '2026-11-01' }
+  ],
+  createdAt: '2026-11-01T00:00:00.000Z',
+  updatedAt: '2026-11-01T00:00:00.000Z'
+};
 
-function renderPage(options: { topics?: KnowledgeTopic[] } = {}) {
-  const onCreateTopic = vi.fn(async (input: CreateKnowledgeTopicInput) => ({
+const rag: KnowledgeTopic = {
+  id: 'kt-2',
+  name: 'RAG',
+  aliases: [],
+  status: 'learning',
+  workspaceId: 'agent',
+  summary: '',
+  evidence: [],
+  createdAt: '2026-11-01T00:00:00.000Z',
+  updatedAt: '2026-11-01T00:00:00.000Z'
+};
+
+const topics: KnowledgeTopic[] = [langChain, rag];
+
+function note(topicId: string, body: string): KnowledgeNote {
+  return { topicId, body, updatedAt: '' };
+}
+
+type RenderOptions = {
+  topics?: KnowledgeTopic[];
+  body?: (topicId: string) => string;
+};
+
+function renderPage(options: RenderOptions = {}) {
+  const getKnowledgeNote = vi.fn(async (topicId: string) =>
+    note(topicId, options.body ? options.body(topicId) : `note ${topicId}`)
+  );
+  const saveKnowledgeNote = vi.fn(
+    async (input: { topicId: string; body: string }) => note(input.topicId, input.body)
+  );
+  const getKnowledgeBacklinks = vi.fn(async () => []);
+  const onUpdateTopic = vi.fn(
+    async (input: UpdateKnowledgeTopicInput) =>
+      ({ ...langChain, ...input }) as unknown as KnowledgeTopic
+  );
+  const onDeleteTopic = vi.fn(async () => undefined);
+
+  let onCreateTopic = vi.fn(async (input: CreateKnowledgeTopicInput) => ({
     id: 'kt-new',
     name: input.name,
     aliases: input.aliases ?? [],
@@ -72,72 +91,142 @@ function renderPage(options: { topics?: KnowledgeTopic[] } = {}) {
     createdAt: '',
     updatedAt: ''
   }));
-  const onUpdateTopic = vi.fn(
-    async (input: UpdateKnowledgeTopicInput) =>
-      ({ ...topics[0]!, ...input }) as unknown as KnowledgeTopic
-  );
-  const onDeleteTopic = vi.fn(async () => undefined);
-  render(
-    <KnowledgePage
-      topics={options.topics ?? topics}
-      workspaces={workspaces}
-      onOpenSidebar={vi.fn()}
-      onCreateTopic={onCreateTopic}
-      onUpdateTopic={onUpdateTopic}
-      onDeleteTopic={onDeleteTopic}
-    />
-  );
-  return { onCreateTopic, onUpdateTopic, onDeleteTopic };
+
+  const initialTopics = options.topics ?? topics;
+
+  function Harness() {
+    const [list, setList] = useState(initialTopics);
+    onCreateTopic = vi.fn(async (input: CreateKnowledgeTopicInput) => {
+      const created = {
+        id: 'kt-new',
+        name: input.name,
+        aliases: input.aliases ?? [],
+        status: input.status ?? ('learning' as const),
+        summary: input.summary ?? '',
+        evidence: [],
+        createdAt: '',
+        updatedAt: ''
+      };
+      setList((current) => [created, ...current]);
+      return created;
+    });
+    return (
+      <KnowledgePage
+        topics={list}
+        workspaces={workspaces}
+        onOpenSidebar={vi.fn()}
+        onCreateTopic={onCreateTopic}
+        onUpdateTopic={onUpdateTopic}
+        onDeleteTopic={onDeleteTopic}
+        getKnowledgeNote={getKnowledgeNote}
+        saveKnowledgeNote={saveKnowledgeNote}
+        getKnowledgeBacklinks={getKnowledgeBacklinks}
+      />
+    );
+  }
+
+  render(<Harness />);
+  return {
+    onCreateTopic: () => onCreateTopic,
+    onUpdateTopic,
+    onDeleteTopic,
+    getKnowledgeNote,
+    saveKnowledgeNote,
+    getKnowledgeBacklinks
+  };
 }
 
-test('lists topics, filters by workspace and keeps global topics', async () => {
-  renderPage();
-  expect(screen.getByText('LangChain')).toBeInTheDocument();
+function directory() {
+  return within(screen.getByLabelText('知识目录'));
+}
 
-  await userEvent.selectOptions(screen.getByLabelText('按工作区筛选知识主题'), 'english');
-  expect(screen.getByText('LangChain')).toBeInTheDocument();
-  expect(screen.queryByText('RAG')).not.toBeInTheDocument();
+test('groups topics by workspace with the global group last', async () => {
+  renderPage();
+  await screen.findByRole('textbox', { name: '知识笔记' });
+
+  expect(directory().getByText('agent 开发求职')).toBeInTheDocument();
+  const labels = directory()
+    .getAllByText(/^(agent 开发求职|全局)$/)
+    .map((node) => node.textContent);
+  expect(labels).toEqual(['agent 开发求职', '全局']);
 });
 
-test('creates a global topic from the dialog', async () => {
-  const { onCreateTopic } = renderPage();
+test('search filters the directory but keeps the selected topic visible', async () => {
+  renderPage();
+  expect(await screen.findByRole('textbox', { name: '知识笔记' })).toHaveValue('note kt-1');
+
+  await userEvent.type(screen.getByLabelText('搜索知识主题'), 'RAG');
+
+  expect(directory().getByRole('button', { name: 'RAG' })).toBeInTheDocument();
+  expect(directory().queryByRole('button', { name: 'LangChain' })).not.toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'LangChain' })).toBeInTheDocument();
+});
+
+test('selects the first topic and renders its note', async () => {
+  renderPage();
+
+  expect(await screen.findByRole('textbox', { name: '知识笔记' })).toHaveValue('note kt-1');
+  expect(screen.getByRole('heading', { name: 'LangChain' })).toBeInTheDocument();
+});
+
+test('clicking a wiki link clears the search and selects the target', async () => {
+  renderPage({
+    body: (topicId) => (topicId === 'kt-1' ? '[[RAG]]' : 'RAG 笔记')
+  });
+  await screen.findByRole('textbox', { name: '知识笔记' });
+  await userEvent.type(screen.getByLabelText('搜索知识主题'), 'Lang');
+
+  await userEvent.click(screen.getByRole('button', { name: '预览' }));
+  await userEvent.click(screen.getByRole('button', { name: '打开知识主题 RAG' }));
+
+  expect(screen.getByLabelText('搜索知识主题')).toHaveValue('');
+  expect(await screen.findByRole('heading', { name: 'RAG' })).toBeInTheDocument();
+});
+
+test('creates a topic and selects it', async () => {
+  renderPage();
+  await screen.findByRole('textbox', { name: '知识笔记' });
+
   await userEvent.click(screen.getByRole('button', { name: '新增主题' }));
   await userEvent.type(screen.getByLabelText('主题名称'), 'LangGraph');
-  await userEvent.selectOptions(screen.getByLabelText('所属工作区'), '');
   await userEvent.click(screen.getByRole('button', { name: '保存' }));
-  expect(onCreateTopic).toHaveBeenCalledWith({ name: 'LangGraph' });
-});
 
-test('shows the evidence timeline when a topic is expanded', async () => {
-  renderPage();
-  await userEvent.click(screen.getByRole('button', { name: '展开 LangChain' }));
-  expect(screen.getByText(/11\/1 · 完成任务/)).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { name: 'LangGraph' })).toBeInTheDocument();
 });
 
 test('edits a topic through the dialog', async () => {
   const { onUpdateTopic } = renderPage();
+  await screen.findByRole('textbox', { name: '知识笔记' });
+
   await userEvent.click(screen.getByRole('button', { name: '编辑 LangChain' }));
   await userEvent.selectOptions(screen.getByLabelText('状态'), 'learning');
   await userEvent.clear(screen.getByLabelText('掌握程度'));
   await userEvent.type(screen.getByLabelText('掌握程度'), '5');
   await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
   expect(onUpdateTopic).toHaveBeenCalledWith(
     expect.objectContaining({ id: 'kt-1', status: 'learning', level: 5 })
   );
 });
 
-test('deletes a topic after confirmation', async () => {
+test('deletes a topic after confirmation and selects the next one', async () => {
   const { onDeleteTopic } = renderPage();
+  await screen.findByRole('textbox', { name: '知识笔记' });
   const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
-  await userEvent.click(screen.getByRole('button', { name: '删除 RAG' }));
+
+  await userEvent.click(screen.getByRole('button', { name: '删除 LangChain' }));
+
   expect(confirm).toHaveBeenCalled();
-  expect(onDeleteTopic).toHaveBeenCalledWith('kt-2');
+  expect(onDeleteTopic).toHaveBeenCalledWith('kt-1');
+  expect(await screen.findByRole('heading', { name: 'RAG' })).toBeInTheDocument();
   confirm.mockRestore();
 });
 
-test('searches topics by name and alias', async () => {
+test('shows 没有匹配的主题 when the search matches nothing', async () => {
   renderPage();
-  await userEvent.type(screen.getByLabelText('搜索知识主题'), 'LC');
-  expect(screen.getByText('LangChain')).toBeInTheDocument();
-  expect(screen.queryByText('RAG')).not.toBeInTheDocument();
+  await screen.findByRole('textbox', { name: '知识笔记' });
+
+  await userEvent.type(screen.getByLabelText('搜索知识主题'), 'zzz');
+
+  expect(directory().getByText('没有匹配的主题。')).toBeInTheDocument();
 });

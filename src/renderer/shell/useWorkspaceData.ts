@@ -8,7 +8,10 @@ import { friendlyErrorMessage } from '../../shared/errors';
 import type { ReviewRecord, StudyCoachApi } from '../../shared/ipc';
 import type {
   CreateKnowledgeTopicInput,
+  KnowledgeBacklink,
+  KnowledgeNote,
   KnowledgeTopic,
+  SaveKnowledgeNoteInput,
   UpdateKnowledgeTopicInput
 } from '../../shared/knowledge';
 import type {
@@ -107,6 +110,9 @@ export type WorkspaceData = WorkspaceDataState & {
   createKnowledgeTopic: (input: CreateKnowledgeTopicInput) => Promise<KnowledgeTopic>;
   updateKnowledgeTopic: (input: UpdateKnowledgeTopicInput) => Promise<KnowledgeTopic>;
   deleteKnowledgeTopic: (topicId: string) => Promise<void>;
+  getKnowledgeNote: (topicId: string) => Promise<KnowledgeNote>;
+  saveKnowledgeNote: (input: SaveKnowledgeNoteInput) => Promise<KnowledgeNote>;
+  getKnowledgeBacklinks: (topicId: string) => Promise<KnowledgeBacklink[]>;
 };
 
 const EMPTY_PRACTICE: PracticeData = {
@@ -326,6 +332,21 @@ export function useWorkspaceData(): WorkspaceData {
       knowledgeTopics: current.knowledgeTopics.filter((topic) => topic.id !== topicId)
     }));
   }, []);
+
+  const getKnowledgeNote = useCallback(
+    (topicId: string) => apiOrThrow().getKnowledgeNote(topicId),
+    []
+  );
+
+  const saveKnowledgeNote = useCallback(
+    (input: SaveKnowledgeNoteInput) => apiOrThrow().saveKnowledgeNote(input),
+    []
+  );
+
+  const getKnowledgeBacklinks = useCallback(
+    (topicId: string) => apiOrThrow().getKnowledgeBacklinks(topicId),
+    []
+  );
 
   const updateTask = useCallback(
     async (input: UpdateWorkspaceTaskInput) => {
@@ -578,6 +599,9 @@ export function useWorkspaceData(): WorkspaceData {
     deleteLongPlan,
     createKnowledgeTopic,
     updateKnowledgeTopic,
-    deleteKnowledgeTopic
+    deleteKnowledgeTopic,
+    getKnowledgeNote,
+    saveKnowledgeNote,
+    getKnowledgeBacklinks
   };
 }

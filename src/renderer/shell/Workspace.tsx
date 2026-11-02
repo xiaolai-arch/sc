@@ -155,7 +155,10 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     deleteLongPlan,
     createKnowledgeTopic,
     updateKnowledgeTopic,
-    deleteKnowledgeTopic
+    deleteKnowledgeTopic,
+    getKnowledgeNote,
+    saveKnowledgeNote,
+    getKnowledgeBacklinks
   } = useWorkspaceData();
   const conversations = useConversations();
   const [section, setSection] = useState<Section>('chat');
@@ -1228,6 +1231,9 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               onCreateTopic={createKnowledgeTopic}
               onUpdateTopic={updateKnowledgeTopic}
               onDeleteTopic={deleteKnowledgeTopic}
+              getKnowledgeNote={getKnowledgeNote}
+              saveKnowledgeNote={saveKnowledgeNote}
+              getKnowledgeBacklinks={getKnowledgeBacklinks}
             />
           ) : null}
 

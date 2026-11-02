@@ -77,6 +77,9 @@ test('shows knowledge written by a chat tool before the turn finishes', async ()
       (_content, element) => element?.tagName === 'P' && element.textContent === '证据 1 条'
     )
   ).toBeInTheDocument();
+  expect(
+    await screen.findByText(/今天学了 LangGraph 的状态图/)
+  ).toBeInTheDocument();
 
   finishTurn();
   // Let the turn settle in the chat view so teardown has nothing pending.
