@@ -76,3 +76,35 @@ test('parses growing streamed text without duplicate-key warnings', () => {
   expect(errors.filter((entry) => String(entry).includes('same key'))).toEqual([]);
   spy.mockRestore();
 });
+
+test('renders wiki links as buttons when a resolver is provided', async () => {
+  const onWikiLink = vi.fn();
+  render(
+    <MarkdownText
+      text="相关 [[LangChain|LC]] 和 [[Missing]]"
+      resolveWikiLink={(target) => (target === 'LangChain' ? { id: 'kt-1' } : null)}
+      onWikiLink={onWikiLink}
+    />
+  );
+  await userEvent.click(screen.getByRole('button', { name: '打开知识主题 LangChain' }));
+  expect(onWikiLink).toHaveBeenCalledWith('kt-1');
+  expect(screen.getByText('Missing')).toHaveAttribute('title', '没有这个知识点');
+  expect(screen.queryByRole('button', { name: /Missing/ })).not.toBeInTheDocument();
+});
+
+test('keeps wiki syntax literal without a resolver', () => {
+  renderText('相关 [[LangChain]]');
+  expect(screen.getByText('相关 [[LangChain]]')).toBeInTheDocument();
+});
+
+test('does not parse wiki links inside code', () => {
+  render(
+    <MarkdownText
+      text={'`[[A]]`\n\n```\n[[B]]\n```'}
+      resolveWikiLink={() => ({ id: 'x' })}
+      onWikiLink={vi.fn()}
+    />
+  );
+  // The code block's copy button is expected; a wiki-link button is not.
+  expect(screen.queryByRole('button', { name: /打开知识主题/ })).not.toBeInTheDocument();
+});

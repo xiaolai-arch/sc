@@ -1,7 +1,11 @@
 import { useState, type ReactNode } from 'react';
+import { parseWikiLink } from '../../shared/knowledge';
 
 type MarkdownTextProps = {
   text: string;
+  /** Resolves a `[[topic]]` target; absent keeps the wiki syntax literal. */
+  resolveWikiLink?: (target: string) => { id: string } | null;
+  onWikiLink?: (id: string) => void;
 };
 
 type Block =
@@ -10,10 +14,14 @@ type Block =
   | { type: 'list'; ordered: boolean; items: string[] }
   | { type: 'code'; language: string; code: string };
 
-function renderInline(text: string, keyPrefix: string): ReactNode[] {
+function renderInline(
+  text: string,
+  keyPrefix: string,
+  props: Pick<MarkdownTextProps, 'resolveWikiLink' | 'onWikiLink'>
+): ReactNode[] {
   const nodes: ReactNode[] = [];
   const pattern =
-    /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)\s]+\)|\*[^*]+\*)/g;
+    /(\[\[[^\]\n]+\]\]|\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)\s]+\)|\*[^*]+\*)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
   let index = 0;
@@ -25,7 +33,36 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
     const token = match[0];
     const key = `${keyPrefix}-inline-${index}`;
     index += 1;
-    if (token.startsWith('**')) {
+    if (token.startsWith('[[')) {
+      const link = parseWikiLink(token);
+      const resolvedId =
+        link && props.resolveWikiLink ? props.resolveWikiLink(link.target)?.id : undefined;
+      if (link && resolvedId && props.onWikiLink) {
+        nodes.push(
+          <button
+            key={key}
+            type="button"
+            aria-label={`打开知识主题 ${link.target}`}
+            onClick={() => props.onWikiLink?.(resolvedId)}
+            className="rounded-[3px] text-[#0071e3] underline decoration-[#0071e3]/40 underline-offset-2 transition-opacity duration-200 hover:opacity-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:text-[#4da3ff] dark:decoration-[#4da3ff]/40"
+          >
+            {link.label}
+          </button>
+        );
+      } else if (link && props.resolveWikiLink) {
+        nodes.push(
+          <span
+            key={key}
+            title="没有这个知识点"
+            className="border-b border-dashed border-current opacity-60"
+          >
+            {link.label}
+          </span>
+        );
+      } else {
+        nodes.push(token);
+      }
+    } else if (token.startsWith('**')) {
       nodes.push(<strong key={key}>{token.slice(2, -2)}</strong>);
     } else if (token.startsWith('`')) {
       nodes.push(
@@ -174,7 +211,7 @@ function CodeBlock({ language, code, blockKey }: { language: string; code: strin
   );
 }
 
-export function MarkdownText({ text }: MarkdownTextProps) {
+export function MarkdownText({ text, resolveWikiLink, onWikiLink }: MarkdownTextProps) {
   const blocks = parseBlocks(text);
   return (
     <div className="text-[14px] leading-6 text-[#1d1d1f] dark:text-[#f5f5f7]">
@@ -192,7 +229,7 @@ export function MarkdownText({ text }: MarkdownTextProps) {
                 : 'mb-1 mt-2 text-[14px] font-semibold';
           return (
             <p key={key} className={className}>
-              {renderInline(block.text, key)}
+              {renderInline(block.text, key, { resolveWikiLink, onWikiLink })}
             </p>
           );
         }
@@ -205,7 +242,7 @@ export function MarkdownText({ text }: MarkdownTextProps) {
             >
               {block.items.map((item, itemIndex) => (
                 <li key={`${key}-item-${itemIndex}`}>
-                  {renderInline(item, `${key}-item-${itemIndex}`)}
+                  {renderInline(item, `${key}-item-${itemIndex}`, { resolveWikiLink, onWikiLink })}
                 </li>
               ))}
             </Tag>
@@ -213,7 +250,7 @@ export function MarkdownText({ text }: MarkdownTextProps) {
         }
         return (
           <p key={key} className="my-2 whitespace-pre-wrap">
-            {renderInline(block.text, key)}
+            {renderInline(block.text, key, { resolveWikiLink, onWikiLink })}
           </p>
         );
       })}
