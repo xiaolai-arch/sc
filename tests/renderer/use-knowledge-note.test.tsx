@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { act, renderHook } from '@testing-library/react';
 import type { KnowledgeBacklink, KnowledgeNote } from '../../src/shared/knowledge';
-import { useKnowledgeNote } from '../../src/renderer/shell/useKnowledgeNote';
+import {
+  clearKnowledgeNoteDrafts,
+  useKnowledgeNote
+} from '../../src/renderer/shell/useKnowledgeNote';
 
 function note(topicId: string, body: string): KnowledgeNote {
   return { topicId, body, updatedAt: '' };
@@ -51,6 +54,7 @@ function setup(overrides: {
 }
 
 beforeEach(() => {
+  clearKnowledgeNoteDrafts();
   vi.useFakeTimers();
 });
 
@@ -244,4 +248,112 @@ test('unmounting flushes the pending draft', async () => {
   await settle();
 
   expect(saveNote).toHaveBeenCalledWith({ topicId: 'kt-1', body: 'bye' });
+});
+
+test('a second switch never saves one topic draft under another', async () => {
+  const pending = deferred<KnowledgeNote>();
+  const getNote = vi.fn(async (topicId: string) => note(topicId, `disk ${topicId}`));
+  const saveNote = vi.fn(() => pending.promise);
+  const { result, rerender } = renderHook(
+    ({ topicId }: { topicId: string }) =>
+      useKnowledgeNote({ topicId, getNote, saveNote, getBacklinks: async () => [] }),
+    { initialProps: { topicId: 'kt-1' } }
+  );
+  await settle();
+
+  act(() => result.current.setBody('A draft'));
+  rerender({ topicId: 'kt-2' });
+  await settle();
+  // The new topic is not readable or writable until its own body arrives.
+  expect(result.current.status).toBe('loading');
+
+  rerender({ topicId: 'kt-1' });
+  await settle();
+
+  expect(saveNote).toHaveBeenCalledTimes(1);
+  expect(saveNote).toHaveBeenCalledWith({ topicId: 'kt-1', body: 'A draft' });
+
+  await act(async () => {
+    pending.resolve(note('kt-1', 'A draft'));
+    await Promise.resolve();
+  });
+  await settle();
+  expect(result.current.body).toBe('A draft');
+});
+
+test('typing during the outgoing save is not attributed to the new topic', async () => {
+  const pending = deferred<KnowledgeNote>();
+  const getNote = vi.fn(async (topicId: string) => note(topicId, topicId === 'kt-1' ? 'A' : 'B'));
+  const saveNote = vi.fn(() => pending.promise);
+  const { result, rerender } = renderHook(
+    ({ topicId }: { topicId: string }) =>
+      useKnowledgeNote({ topicId, getNote, saveNote, getBacklinks: async () => [] }),
+    { initialProps: { topicId: 'kt-1' } }
+  );
+  await settle();
+
+  act(() => result.current.setBody('A draft'));
+  rerender({ topicId: 'kt-2' });
+  await settle();
+
+  act(() => result.current.setBody('typed over the loading pane'));
+  expect(result.current.body).toBe('');
+
+  await act(async () => {
+    pending.resolve(note('kt-1', 'A draft'));
+    await Promise.resolve();
+  });
+  await settle();
+
+  expect(result.current.body).toBe('B');
+  expect(saveNote).toHaveBeenCalledTimes(1);
+  expect(saveNote).toHaveBeenCalledWith({ topicId: 'kt-1', body: 'A draft' });
+});
+
+test('unmounting during a switch does not save the old draft under the new topic', async () => {
+  const pending = deferred<KnowledgeNote>();
+  const getNote = vi.fn(async (topicId: string) => note(topicId, `disk ${topicId}`));
+  const saveNote = vi.fn(() => pending.promise);
+  const { result, rerender, unmount } = renderHook(
+    ({ topicId }: { topicId: string }) =>
+      useKnowledgeNote({ topicId, getNote, saveNote, getBacklinks: async () => [] }),
+    { initialProps: { topicId: 'kt-1' } }
+  );
+  await settle();
+
+  act(() => result.current.setBody('A draft'));
+  rerender({ topicId: 'kt-2' });
+  unmount();
+  await settle();
+
+  expect(saveNote).toHaveBeenCalledTimes(1);
+  expect(saveNote).toHaveBeenCalledWith({ topicId: 'kt-1', body: 'A draft' });
+});
+
+test('keeps a failed draft across an unmount and remount', async () => {
+  const getNote = vi.fn(async (topicId: string) => note(topicId, 'disk'));
+  const saveNote = vi.fn(async () => {
+    throw new Error('disk full');
+  });
+  const first = renderHook(() =>
+    useKnowledgeNote({ topicId: 'kt-1', getNote, saveNote, getBacklinks: async () => [] })
+  );
+  await settle();
+
+  act(() => first.result.current.setBody('survives'));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(600);
+  });
+  await settle();
+  expect(first.result.current.status).toBe('error');
+  first.unmount();
+  await settle();
+
+  const second = renderHook(() =>
+    useKnowledgeNote({ topicId: 'kt-1', getNote, saveNote, getBacklinks: async () => [] })
+  );
+  await settle();
+
+  expect(second.result.current.body).toBe('survives');
+  expect(second.result.current.status).toBe('error');
 });

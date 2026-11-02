@@ -3,6 +3,11 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { KnowledgeNote, KnowledgeTopic } from '../../src/shared/knowledge';
 import { KnowledgeNotePane } from '../../src/renderer/shell/KnowledgeNotePane';
+import { clearKnowledgeNoteDrafts } from '../../src/renderer/shell/useKnowledgeNote';
+
+beforeEach(() => {
+  clearKnowledgeNoteDrafts();
+});
 
 function topic(overrides: Partial<KnowledgeTopic> & Pick<KnowledgeTopic, 'id' | 'name'>): KnowledgeTopic {
   return {

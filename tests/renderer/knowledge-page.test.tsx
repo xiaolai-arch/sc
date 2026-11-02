@@ -10,6 +10,11 @@ import type {
   UpdateKnowledgeTopicInput
 } from '../../src/shared/knowledge';
 import type { Workspace } from '../../src/shared/workspace';
+import { clearKnowledgeNoteDrafts } from '../../src/renderer/shell/useKnowledgeNote';
+
+beforeEach(() => {
+  clearKnowledgeNoteDrafts();
+});
 
 const workspaces: Workspace[] = [
   {
@@ -79,7 +84,7 @@ function renderPage(options: RenderOptions = {}) {
     async (input: UpdateKnowledgeTopicInput) =>
       ({ ...langChain, ...input }) as unknown as KnowledgeTopic
   );
-  const onDeleteTopic = vi.fn(async () => undefined);
+  const onDeleteTopic = vi.fn(async (_topicId: string) => undefined);
 
   let onCreateTopic = vi.fn(async (input: CreateKnowledgeTopicInput) => ({
     id: 'kt-new',
@@ -110,6 +115,10 @@ function renderPage(options: RenderOptions = {}) {
       setList((current) => [created, ...current]);
       return created;
     });
+    const deleteTopic = async (topicId: string) => {
+      await onDeleteTopic(topicId);
+      setList((current) => current.filter((topic) => topic.id !== topicId));
+    };
     return (
       <KnowledgePage
         topics={list}
@@ -117,7 +126,7 @@ function renderPage(options: RenderOptions = {}) {
         onOpenSidebar={vi.fn()}
         onCreateTopic={onCreateTopic}
         onUpdateTopic={onUpdateTopic}
-        onDeleteTopic={onDeleteTopic}
+        onDeleteTopic={deleteTopic}
         getKnowledgeNote={getKnowledgeNote}
         saveKnowledgeNote={saveKnowledgeNote}
         getKnowledgeBacklinks={getKnowledgeBacklinks}
@@ -229,4 +238,41 @@ test('shows 没有匹配的主题 when the search matches nothing', async () => 
   await userEvent.type(screen.getByLabelText('搜索知识主题'), 'zzz');
 
   expect(directory().getByText('没有匹配的主题。')).toBeInTheDocument();
+});
+
+test('selects the first topic when the selected one disappears externally', async () => {
+  const getKnowledgeNote = vi.fn(async (topicId: string) => note(topicId, `note ${topicId}`));
+  const saveKnowledgeNote = vi.fn(async (input: { topicId: string; body: string }) =>
+    note(input.topicId, input.body)
+  );
+  const getKnowledgeBacklinks = vi.fn(async () => []);
+
+  function ExternalRemoval() {
+    const [list, setList] = useState([langChain, rag]);
+    return (
+      <>
+        <button type="button" onClick={() => setList([rag])}>
+          外部移除
+        </button>
+        <KnowledgePage
+          topics={list}
+          workspaces={workspaces}
+          onOpenSidebar={vi.fn()}
+          onCreateTopic={vi.fn(async () => rag)}
+          onUpdateTopic={vi.fn(async () => rag)}
+          onDeleteTopic={vi.fn(async () => undefined)}
+          getKnowledgeNote={getKnowledgeNote}
+          saveKnowledgeNote={saveKnowledgeNote}
+          getKnowledgeBacklinks={getKnowledgeBacklinks}
+        />
+      </>
+    );
+  }
+
+  render(<ExternalRemoval />);
+  expect(await screen.findByRole('textbox', { name: '知识笔记' })).toHaveValue('note kt-1');
+
+  await userEvent.click(screen.getByRole('button', { name: '外部移除' }));
+
+  expect(await screen.findByRole('heading', { name: 'RAG' })).toBeInTheDocument();
 });
