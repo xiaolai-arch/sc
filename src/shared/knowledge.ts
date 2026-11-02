@@ -69,6 +69,32 @@ export interface RecordKnowledgeInput {
   workspaceId?: string;
 }
 
+/** One user-authored markdown note per topic, stored under `knowledge/notes/`. */
+export interface KnowledgeNote {
+  topicId: string;
+  body: string;
+  /** Empty when the note has never been saved. */
+  updatedAt: string;
+}
+
+export interface SaveKnowledgeNoteInput {
+  topicId: string;
+  body: string;
+}
+
+export interface KnowledgeBacklink {
+  topicId: string;
+  name: string;
+}
+
+export const MAX_KNOWLEDGE_NOTE_LENGTH = 200_000;
+
+/** Parsed `[[target]]` / `[[target|label]]` token. */
+export interface WikiLink {
+  target: string;
+  label: string;
+}
+
 export interface LinkKnowledgeReviewInput {
   /** Absent means a vault-wide review, matched against every topic. */
   workspaceId?: string;
@@ -123,6 +149,66 @@ export function topicMatches(text: string, topic: KnowledgeTopic): boolean {
   const haystack = normalize(text);
   if (!haystack) return false;
   return [topic.name, ...topic.aliases].some((term) => termMatches(haystack, term));
+}
+
+export function normalizeKnowledgeTerm(value: string): string {
+  return normalize(value);
+}
+
+const WIKI_LINK_TOKEN = /^\[\[([^\]\n|]+)(?:\|([^\]\n]*))?\]\]$/;
+
+/** Parses a complete `[[target]]` or `[[target|label]]` token. */
+export function parseWikiLink(token: string): WikiLink | null {
+  const match = WIKI_LINK_TOKEN.exec(token);
+  if (!match) return null;
+  const target = (match[1] ?? '').trim();
+  if (!target) return null;
+  const label = (match[2] ?? target).trim() || target;
+  return { target, label };
+}
+
+/** Removes fenced code blocks and inline code so code can't create backlinks. */
+function withoutCode(text: string): string {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const kept: string[] = [];
+  let inFence = false;
+  for (const line of lines) {
+    if (line.trim().startsWith('```')) {
+      inFence = !inFence;
+      kept.push('');
+      continue;
+    }
+    kept.push(inFence ? '' : line);
+  }
+  return kept.join('\n').replace(/`[^`\n]*`/g, '');
+}
+
+/** Wiki-link targets in source order, excluding code. */
+export function wikiLinkTargets(text: string): string[] {
+  const targets: string[] = [];
+  for (const match of withoutCode(text).matchAll(/\[\[[^\]\n]+\]\]/g)) {
+    const link = parseWikiLink(match[0]);
+    if (link) targets.push(link.target);
+  }
+  return targets;
+}
+
+/**
+ * Resolves a wiki-link target to a topic by exact name or alias. Duplicate
+ * names are ambiguous and resolve to nothing so links never jump at random.
+ */
+export function resolveKnowledgeLink(
+  topics: KnowledgeTopic[],
+  target: string
+): KnowledgeTopic | null {
+  const needle = normalizeKnowledgeTerm(target);
+  if (!needle) return null;
+  const matches = topics.filter((topic) =>
+    [topic.name, ...topic.aliases].some(
+      (term) => normalizeKnowledgeTerm(term) === needle
+    )
+  );
+  return matches.length === 1 ? matches[0]! : null;
 }
 
 /** Planned and paused topics stay out of prompts until the user moves them. */
