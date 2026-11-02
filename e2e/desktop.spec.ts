@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { readdir } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { launchStudyCoach, type LaunchedStudyCoach } from './support/launch';
 
@@ -73,19 +73,36 @@ test.describe('ASAKI desktop', () => {
         expect(planFiles.flat().some((name) => name.endsWith('.md'))).toBe(true);
       });
 
-      await test.step('adds a knowledge topic and persists it', async () => {
+      await test.step('adds a knowledge topic, writes a note and persists both', async () => {
         await page.getByRole('button', { name: '知识库' }).click();
-        await expect(page.getByText('还没有知识主题。')).toBeVisible();
+        await expect(page.getByText('还没有知识主题。', { exact: true })).toBeVisible();
         await page.getByRole('button', { name: '新增主题' }).click();
         await page.getByLabel('主题名称').fill('LangChain');
         await page.getByRole('button', { name: '保存' }).click();
-        await expect(page.getByText('LangChain')).toBeVisible();
-        await expect(page.getByText('在学', { exact: true })).toBeVisible();
+        await expect(
+          page.getByRole('button', { name: 'LangChain', exact: true })
+        ).toBeVisible();
+        await expect(
+          page.locator('[aria-label="知识内容"]').getByText('在学', { exact: true })
+        ).toBeVisible();
 
         const files = await readdir(join(environment.vault, 'knowledge', 'topics')).catch(
           () => [] as string[]
         );
         expect(files.some((name) => name.endsWith('.md'))).toBe(true);
+
+        const editor = page.getByLabel('知识笔记');
+        await expect(editor).toBeVisible();
+        await editor.fill('会搭 AgentExecutor');
+        await editor.blur();
+        await expect(page.getByText('已保存')).toBeVisible();
+
+        const notesDir = join(environment.vault, 'knowledge', 'notes');
+        const noteFiles = await readdir(notesDir).catch(() => [] as string[]);
+        const notes = await Promise.all(
+          noteFiles.map((name) => readFile(join(notesDir, name), 'utf8'))
+        );
+        expect(notes.some((text) => text.includes('会搭 AgentExecutor'))).toBe(true);
       });
 
       await test.step('writes the project to the vault', async () => {
