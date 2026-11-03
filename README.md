@@ -39,6 +39,24 @@
 
 ![全局搜索：对话、任务、长期计划与知识库结果混排](docs/screenshots/global-search.png)
 
+任务、提醒、长期计划都能在页面上直接维护，不用回到对话里改：
+
+![项目页：就地编辑任务标题、科目和时长](docs/screenshots/task-editing.png)
+
+![提醒：编辑时间、内容与每周重复](docs/screenshots/reminder-editing.png)
+
+![长期计划：修改目标与每周投入](docs/screenshots/plan-edit.png)
+
+重复的知识主题可以一键合并，别名、证据和笔记都留在目标主题里：
+
+![知识库：合并重复主题](docs/screenshots/knowledge-merge.png)
+
+漏掉的复盘可以按日期补录，练习集也能自己出题：
+
+![复盘：补录过去日期的完成、卡点与明日安排](docs/screenshots/review-backfill.png)
+
+![学习：自建练习集，带错题本与答题历史](docs/screenshots/practice.png)
+
 ## 功能
 
 - **管家**：每日简报、管家对话、建议提问、连续复盘提醒

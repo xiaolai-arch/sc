@@ -119,6 +119,9 @@ test('rejects malformed handler parameters before they reach services', async ()
   await expect(
     handlers.createTask({ workspaceId: 'ws-1', title: 't', subject: '数学', durationMin: 0, acceptance: '完成' })
   ).rejects.toThrow('任务时长无效。');
+  await expect(
+    handlers.createTask({ workspaceId: 'ws-1', title: 't', subject: '数学', durationMin: 30 })
+  ).rejects.toThrow('任务验收标准无效。');
   await expect(handlers.updateWorkspaceTask({ taskId: 't1', status: 'later' })).rejects.toThrow(
     '任务状态无效。'
   );
@@ -169,6 +172,27 @@ test('rejects malformed handler parameters before they reach services', async ()
 
   expect(workspace.createTask).not.toHaveBeenCalled();
   expect(workspace.updateWorkspaceTask).not.toHaveBeenCalled();
+});
+
+test('lets a task with an empty optional acceptance standard through', async () => {
+  const { context, workspace } = await makeContext();
+  const handlers = createIpcHandlers(context.api);
+
+  await handlers.createTask({
+    workspaceId: 'ws-1',
+    title: 't',
+    subject: '数学',
+    durationMin: 30,
+    acceptance: ''
+  });
+
+  expect(workspace.createTask).toHaveBeenCalledWith({
+    workspaceId: 'ws-1',
+    title: 't',
+    subject: '数学',
+    durationMin: 30,
+    acceptance: ''
+  });
 });
 
 test('serializes service errors and redacts secret-like values', async () => {

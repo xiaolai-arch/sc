@@ -1356,7 +1356,7 @@ export function RemindersSection({
             aria-label="提醒时间"
             value={reminderTime}
             onChange={(event) => setReminderTime(event.target.value)}
-            className={`${inputClass} w-[74px] shrink-0 tabular-nums`}
+            className={`${inputClass} w-[108px] shrink-0 tabular-nums`}
           />
           <input
             aria-label="提醒内容"
@@ -1408,7 +1408,7 @@ export function RemindersSection({
                     aria-label="编辑提醒时间"
                     value={editTime}
                     onChange={(event) => setEditTime(event.target.value)}
-                    className={`${inputClass} w-[74px] shrink-0 tabular-nums`}
+                    className={`${inputClass} w-[108px] shrink-0 tabular-nums`}
                   />
                   <input
                     aria-label="编辑提醒内容"

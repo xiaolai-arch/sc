@@ -243,7 +243,10 @@ function requireCreateTask(value: unknown): CreateTaskInput {
   requireString(input.workspaceId, '工作区 ID');
   requireString(input.title, '任务标题');
   requireString(input.subject, '任务科目');
-  requireString(input.acceptance, '任务验收标准');
+  // 验收标准 is optional in the UI; an empty string means the user skipped it.
+  if (typeof input.acceptance !== 'string') {
+    throw new Error('任务验收标准无效。');
+  }
   if (typeof input.durationMin !== 'number' || !Number.isFinite(input.durationMin) || input.durationMin <= 0) {
     throw new Error('任务时长无效。');
   }
