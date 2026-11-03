@@ -34,6 +34,7 @@ import type {
   KnowledgeBacklink,
   KnowledgeNote,
   KnowledgeTopic,
+  MergeKnowledgeTopicsInput,
   SaveKnowledgeNoteInput,
   UpdateKnowledgeTopicInput
 } from '../src/shared/knowledge';
@@ -1299,6 +1300,54 @@ export function createMockApi(
       if (state.knowledgeTopics.length === before) throw new Error('知识主题不存在。');
       delete state.knowledgeNotes[id];
       persist();
+    },
+
+    async mergeKnowledgeTopics(input: MergeKnowledgeTopicsInput): Promise<KnowledgeTopic> {
+      if (input.sourceId === input.targetId) throw new Error('不能把主题合并到自身。');
+      const source = state.knowledgeTopics.find((topic) => topic.id === input.sourceId);
+      const target = state.knowledgeTopics.find((topic) => topic.id === input.targetId);
+      if (!source) throw new Error('要合并的知识主题不存在。');
+      if (!target) throw new Error('目标知识主题不存在。');
+      const aliases = [...target.aliases];
+      for (const alias of [source.name, ...source.aliases]) {
+        if (
+          alias === target.name ||
+          aliases.some((entry) => entry.toLowerCase() === alias.toLowerCase())
+        ) {
+          continue;
+        }
+        aliases.push(alias);
+      }
+      target.aliases = aliases.slice(0, 8);
+      for (const entry of source.evidence) {
+        const duplicate = entry.refId
+          ? target.evidence.some(
+              (existing) =>
+                existing.kind === entry.kind && existing.refId === entry.refId
+            )
+          : target.evidence.some((existing) => existing.id === entry.id);
+        if (!duplicate) target.evidence.push(entry);
+      }
+      if (!target.summary) target.summary = source.summary;
+      const sourceNote = state.knowledgeNotes[source.id];
+      if (sourceNote?.body.trim()) {
+        const targetNote = state.knowledgeNotes[target.id];
+        const body = targetNote?.body.trim()
+          ? `${targetNote.body.trimEnd()}\n\n## 合并自「${source.name}」\n\n${sourceNote.body.trim()}`
+          : sourceNote.body;
+        state.knowledgeNotes[target.id] = {
+          topicId: target.id,
+          body,
+          updatedAt: new Date().toISOString()
+        };
+      }
+      state.knowledgeTopics = state.knowledgeTopics.filter(
+        (topic) => topic.id !== source.id
+      );
+      delete state.knowledgeNotes[source.id];
+      target.updatedAt = new Date().toISOString();
+      persist();
+      return structuredClone(target);
     },
 
     async getKnowledgeNote(topicId: string): Promise<KnowledgeNote> {

@@ -8,6 +8,7 @@ import type {
   KnowledgeStatus,
   KnowledgeTopic,
   LinkKnowledgeReviewInput,
+  MergeKnowledgeTopicsInput,
   RecordKnowledgeInput,
   SaveKnowledgeNoteInput,
   UpdateKnowledgeTopicInput
@@ -462,6 +463,96 @@ export function createKnowledgeService(options: KnowledgeServiceOptions): Knowle
         } catch {
           // An unremovable note file must not resurrect a deleted topic.
         }
+      });
+    },
+
+    async merge(input: MergeKnowledgeTopicsInput): Promise<KnowledgeTopic> {
+      const sourceId = typeof input?.sourceId === 'string' ? input.sourceId.trim() : '';
+      const targetId = typeof input?.targetId === 'string' ? input.targetId.trim() : '';
+      if (!isSafeTopicId(sourceId) || !isSafeTopicId(targetId)) {
+        throw new Error('知识主题 ID 无效。');
+      }
+      if (sourceId === targetId) throw new Error('不能把主题合并到自身。');
+      return runExclusively(async () => {
+        const source = await readTopic(sourceId);
+        const target = await readTopic(targetId);
+        if (source === null) throw new Error('要合并的知识主题不存在。');
+        if (target === null) throw new Error('目标知识主题不存在。');
+
+        const aliasSet = new Set<string>();
+        for (const alias of [target.name, ...target.aliases, source.name, ...source.aliases]) {
+          const trimmed = alias.trim();
+          if (!trimmed || trimmed.length > MAX_ALIAS_LENGTH) continue;
+          if (normalizeTerm(trimmed) === normalizeTerm(target.name)) continue;
+          aliasSet.add(trimmed);
+        }
+        const aliases = [...aliasSet].slice(0, MAX_ALIASES);
+
+        const evidence = [...target.evidence];
+        for (const entry of source.evidence) {
+          const duplicate = entry.refId
+            ? evidence.some(
+                (existing) =>
+                  existing.kind === entry.kind && existing.refId === entry.refId
+              )
+            : evidence.some((existing) => existing.id === entry.id);
+          if (!duplicate) evidence.push(entry);
+        }
+
+        const status =
+          target.status === 'paused'
+            ? 'paused'
+            : source.status === 'mastered' || target.status === 'mastered'
+              ? 'mastered'
+              : source.status === 'learning' || target.status === 'learning'
+                ? 'learning'
+                : target.status;
+        const levels = [target.level, source.level].filter(
+          (value): value is number => typeof value === 'number'
+        );
+        const next: KnowledgeTopic = {
+          ...target,
+          status,
+          aliases,
+          evidence: evidence.slice(-MAX_EVIDENCE),
+          summary: target.summary || source.summary,
+          updatedAt: now().toISOString(),
+          ...(levels.length ? { level: Math.max(...levels) } : {})
+        };
+
+        const [targetNote, sourceNote] = await Promise.all([
+          readNote(target.id),
+          readNote(source.id)
+        ]);
+        if (sourceNote.body.trim()) {
+          const combined = targetNote.body.trim()
+            ? `${targetNote.body.trimEnd()}\n\n## 合并自「${source.name}」\n\n${sourceNote.body.trim()}`
+            : sourceNote.body;
+          if (combined.length > MAX_KNOWLEDGE_NOTE_LENGTH) {
+            throw new Error('合并后的笔记超过长度上限，请先精简两个主题的笔记。');
+          }
+          await writeFileAtomic(
+            knowledgeNoteFile(vaultRoot, target.id),
+            serializeKnowledgeNoteFile({
+              topicId: target.id,
+              title: next.name,
+              aliases: next.aliases,
+              body: combined,
+              updatedAt: next.updatedAt,
+              meta: { type: 'note' as const, source: 'user' as const }
+            })
+          );
+        }
+
+        const written = await writeTopic(next);
+        try {
+          await fs.rm(knowledgeTopicFile(vaultRoot, source.id), { force: true });
+          await fs.rm(knowledgeNoteFile(vaultRoot, source.id), { force: true });
+        } catch {
+          // The target now carries the source's content; a leftover source
+          // file is recoverable and must not fail the merge.
+        }
+        return written;
       });
     },
 

@@ -59,6 +59,53 @@ test('creates, filters, updates and deletes topics in the vault', async () => {
   expect(await service.get(global.id)).toBeNull();
 });
 
+test('merges aliases, evidence and notes into the target topic', async () => {
+  const { dir, service } = await setup();
+  const target = await service.create({
+    name: 'LangChain',
+    workspaceId: 'agent',
+    status: 'learning',
+    level: 2,
+    summary: '会调用'
+  });
+  const source = await service.create({
+    name: 'LangGraph',
+    aliases: ['图编排'],
+    workspaceId: 'agent',
+    status: 'mastered',
+    level: 4
+  });
+  await service.saveNote({ topicId: target.id, body: '链的基本用法' });
+  await service.saveNote({ topicId: source.id, body: '状态图与中断' });
+  await service.record({ name: 'LangGraph' });
+
+  const merge = service.merge!;
+  const merged = await merge({ sourceId: source.id, targetId: target.id });
+  expect(merged.id).toBe(target.id);
+  expect(merged.name).toBe('LangChain');
+  expect(merged.aliases).toEqual(expect.arrayContaining(['LangGraph', '图编排']));
+  expect(merged.level).toBe(4);
+  expect(merged.status).toBe('mastered');
+  expect(merged.summary).toBe('会调用');
+  expect(merged.evidence.some((entry) => entry.kind === 'chat')).toBe(true);
+
+  expect(await service.get(source.id)).toBeNull();
+  expect((await readdir(join(dir, 'knowledge', 'topics'))).some((file) => file.startsWith(source.id))).toBe(false);
+
+  const note = await service.getNote(target.id);
+  expect(note.body).toContain('链的基本用法');
+  expect(note.body).toContain('合并自「LangGraph」');
+  expect(note.body).toContain('状态图与中断');
+  expect((await service.getNote(source.id)).body).toBe('');
+
+  await expect(
+    merge({ sourceId: target.id, targetId: target.id })
+  ).rejects.toThrow(/自身/);
+  await expect(
+    merge({ sourceId: source.id, targetId: target.id })
+  ).rejects.toThrow(/不存在/);
+});
+
 test('record creates a learning topic and appends later mentions', async () => {
   const { service } = await setup();
   const first = await service.record({ name: 'LangGraph', workspaceId: 'agent', note: '今天学了状态图' });

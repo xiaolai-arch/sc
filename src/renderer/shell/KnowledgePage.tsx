@@ -6,6 +6,7 @@ import type {
   KnowledgeNote,
   KnowledgeStatus,
   KnowledgeTopic,
+  MergeKnowledgeTopicsInput,
   SaveKnowledgeNoteInput,
   UpdateKnowledgeTopicInput
 } from '../../shared/knowledge';
@@ -36,6 +37,7 @@ type KnowledgePageProps = {
   onCreateTopic: (input: CreateKnowledgeTopicInput) => Promise<KnowledgeTopic>;
   onUpdateTopic: (input: UpdateKnowledgeTopicInput) => Promise<KnowledgeTopic>;
   onDeleteTopic: (topicId: string) => Promise<void>;
+  onMergeTopic?: (input: MergeKnowledgeTopicsInput) => Promise<KnowledgeTopic>;
   getKnowledgeNote: (topicId: string) => Promise<KnowledgeNote>;
   saveKnowledgeNote: (input: SaveKnowledgeNoteInput) => Promise<KnowledgeNote>;
   getKnowledgeBacklinks: (topicId: string) => Promise<KnowledgeBacklink[]>;
@@ -139,6 +141,7 @@ export function KnowledgePage({
   onCreateTopic,
   onUpdateTopic,
   onDeleteTopic,
+  onMergeTopic,
   getKnowledgeNote,
   saveKnowledgeNote,
   getKnowledgeBacklinks
@@ -152,6 +155,10 @@ export function KnowledgePage({
   const [form, setForm] = useState<TopicForm>(() => emptyForm(defaultWorkspaceId));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeTargetId, setMergeTargetId] = useState('');
+  const [merging, setMerging] = useState(false);
+  const [mergeError, setMergeError] = useState<string | null>(null);
   const seenIdsRef = useRef(new Set<string>());
 
   const filtered = useMemo(() => {
@@ -275,6 +282,36 @@ export function KnowledgePage({
     await onDeleteTopic(topic.id);
     const remaining = topics.filter((entry) => entry.id !== topic.id);
     setSelectedId((current) => (current === topic.id ? remaining[0]?.id ?? null : current));
+  }
+
+  function openMerge(topic: KnowledgeTopic) {
+    const other = topics.find((entry) => entry.id !== topic.id);
+    if (!other) return;
+    setMergeTargetId(other.id);
+    setMergeError(null);
+    setMergeOpen(true);
+  }
+
+  async function submitMerge() {
+    if (!selected || !onMergeTopic || merging) return;
+    if (!mergeTargetId || mergeTargetId === selected.id) {
+      setMergeError('请选择要合并到的主题。');
+      return;
+    }
+    setMerging(true);
+    setMergeError(null);
+    try {
+      const target = await onMergeTopic({
+        sourceId: selected.id,
+        targetId: mergeTargetId
+      });
+      setSelectedId(target.id);
+      setMergeOpen(false);
+    } catch (cause) {
+      setMergeError(friendlyErrorMessage(cause, '合并失败，请重试。'));
+    } finally {
+      setMerging(false);
+    }
   }
 
   return (
@@ -421,6 +458,9 @@ export function KnowledgePage({
               onOpenTopic={openTopic}
               onEdit={() => openEdit(selected)}
               onDelete={() => void remove(selected)}
+              {...(onMergeTopic && topics.length > 1
+                ? { onMerge: () => openMerge(selected) }
+                : {})}
               onBack={() => setMobilePane('list')}
             />
           ) : (
@@ -524,6 +564,63 @@ export function KnowledgePage({
               className="h-9 rounded-xl bg-[#0071e3] px-4 text-[13px] font-medium text-white transition-all duration-200 hover:opacity-90 disabled:opacity-50"
             >
               保存
+            </button>
+          </div>
+        </form>
+      </Dialog>
+
+      <Dialog
+        open={mergeOpen}
+        onClose={() => {
+          if (!merging) setMergeOpen(false);
+        }}
+        title="合并知识主题"
+      >
+        <form
+          aria-label="合并知识主题"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submitMerge();
+          }}
+          className="space-y-3"
+        >
+          <p className="text-[13px] leading-6 text-gray-500 dark:text-[#8e8e93]">
+            把「{selected?.name}」并入另一个主题：别名、证据和笔记会保留在目标主题里，
+            当前主题随后被移除。
+          </p>
+          <label className={labelClass}>
+            合并到
+            <select
+              aria-label="合并到"
+              value={mergeTargetId}
+              onChange={(event) => setMergeTargetId(event.target.value)}
+              className={inputClass}
+            >
+              {topics
+                .filter((topic) => topic.id !== selected?.id)
+                .map((topic) => (
+                  <option key={topic.id} value={topic.id}>
+                    {topic.name}
+                  </option>
+                ))}
+            </select>
+          </label>
+          {mergeError ? <p className="text-[12px] text-[#ff3b30]">{mergeError}</p> : null}
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setMergeOpen(false)}
+              disabled={merging}
+              className="h-9 rounded-xl px-3.5 text-[13px] text-gray-600 transition-colors hover:bg-black/[0.04] dark:text-[#a1a1a6] dark:hover:bg-white/[0.06]"
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              disabled={merging}
+              className="h-9 rounded-xl bg-[#0071e3] px-4 text-[13px] font-medium text-white transition-all duration-200 hover:opacity-90 disabled:opacity-50"
+            >
+              合并
             </button>
           </div>
         </form>

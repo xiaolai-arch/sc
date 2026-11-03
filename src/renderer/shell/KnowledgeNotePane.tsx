@@ -25,6 +25,8 @@ type KnowledgeNotePaneProps = {
   onOpenTopic(topicId: string): void;
   onEdit(): void;
   onDelete(): void;
+  /** Fold this topic into another one; omitted when there is no target. */
+  onMerge?(): void;
   onBack?(): void;
 };
 
@@ -60,6 +62,7 @@ export function KnowledgeNotePane({
   onOpenTopic,
   onEdit,
   onDelete,
+  onMerge,
   onBack
 }: KnowledgeNotePaneProps) {
   const [mode, setMode] = useState<Mode>('edit');
@@ -142,6 +145,16 @@ export function KnowledgeNotePane({
             >
               编辑
             </button>
+            {onMerge ? (
+              <button
+                type="button"
+                aria-label={`合并 ${topic.name}`}
+                onClick={onMerge}
+                className="rounded-lg px-2 py-1 text-[12px] text-gray-500 transition-colors hover:bg-black/[0.04] hover:text-gray-900 dark:text-[#8e8e93] dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
+              >
+                合并
+              </button>
+            ) : null}
             <button
               type="button"
               aria-label={`删除 ${topic.name}`}

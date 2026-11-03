@@ -31,6 +31,7 @@ import type { CreatePracticeSetInput, SubmitAnswerInput } from '../shared/practi
 import type {
   CreateKnowledgeTopicInput,
   KnowledgeStatus,
+  MergeKnowledgeTopicsInput,
   SaveKnowledgeNoteInput,
   UpdateKnowledgeTopicInput
 } from '../shared/knowledge';
@@ -118,7 +119,8 @@ export const IPC_CHANNELS = {
   deleteReminder: 'study-coach:reminders:delete',
   createMemory: 'study-coach:memory:create',
   deleteWorkspace: 'study-coach:workspaces:delete',
-  updateLongPlan: 'study-coach:plans:update'
+  updateLongPlan: 'study-coach:plans:update',
+  mergeKnowledgeTopics: 'study-coach:knowledge:merge'
 } as const;
 
 /** Streaming uses a separate request/event pair so the request map stays stable. */
@@ -654,6 +656,13 @@ function requireKnowledgeName(value: unknown): string {
   return name;
 }
 
+function requireMergeKnowledgeTopics(value: unknown): MergeKnowledgeTopicsInput {
+  const input = requireObject(value, '合并知识主题');
+  const sourceId = requireString(input.sourceId, '知识主题 ID').trim();
+  const targetId = requireString(input.targetId, '知识主题 ID').trim();
+  return { sourceId, targetId };
+}
+
 function requireCreateKnowledgeTopic(value: unknown): CreateKnowledgeTopicInput {
   const input = requireObject(value, '创建知识主题');
   const name = requireKnowledgeName(input.name);
@@ -999,7 +1008,9 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
       return api.deleteWorkspace(workspaceId);
     },
     updateLongPlan: async (input) =>
-      api.updateLongPlan(requireUpdateLongPlan(input))
+      api.updateLongPlan(requireUpdateLongPlan(input)),
+    mergeKnowledgeTopics: async (input) =>
+      api.mergeKnowledgeTopics(requireMergeKnowledgeTopics(input))
   };
 
   // Every path through the bridge gets the same sanitized error envelope,
@@ -1214,6 +1225,7 @@ export function createStudyCoachBridge(
     deleteWorkspace: (workspaceId) =>
       call(IPC_CHANNELS.deleteWorkspace, { workspaceId }),
     updateLongPlan: (input) => call(IPC_CHANNELS.updateLongPlan, input),
+    mergeKnowledgeTopics: (input) => call(IPC_CHANNELS.mergeKnowledgeTopics, input),
     async stream(input, onEvent) {
       const requestId = createRequestId();
       const unsubscribe = subscribe?.(BUTLER_STREAM_CHANNELS.event, (payload) => {

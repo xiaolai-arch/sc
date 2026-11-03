@@ -59,6 +59,13 @@ export interface UpdateKnowledgeTopicInput {
   summary?: string;
 }
 
+export interface MergeKnowledgeTopicsInput {
+  /** Topic that will be folded into the target and removed. */
+  sourceId: string;
+  /** Topic that stays, absorbing the source's aliases, evidence and note. */
+  targetId: string;
+}
+
 export interface RecordKnowledgeInput {
   name: string;
   /** New topics default to `learning`. */
@@ -125,6 +132,7 @@ export interface KnowledgeService {
   create(input: CreateKnowledgeTopicInput): Promise<KnowledgeTopic>;
   update(input: UpdateKnowledgeTopicInput): Promise<KnowledgeTopic>;
   delete(id: string): Promise<void>;
+  merge?(input: MergeKnowledgeTopicsInput): Promise<KnowledgeTopic>;
   record(input: RecordKnowledgeInput): Promise<KnowledgeTopic>;
   linkTask(task: WorkspaceTask): Promise<void>;
   linkNote(note: WorkspaceNote): Promise<void>;
@@ -140,6 +148,7 @@ export interface KnowledgeApi {
   createKnowledgeTopic(input: CreateKnowledgeTopicInput): Promise<KnowledgeTopic>;
   updateKnowledgeTopic(input: UpdateKnowledgeTopicInput): Promise<KnowledgeTopic>;
   deleteKnowledgeTopic(id: string): Promise<void>;
+  mergeKnowledgeTopics(input: MergeKnowledgeTopicsInput): Promise<KnowledgeTopic>;
   getKnowledgeNote(topicId: string): Promise<KnowledgeNote>;
   saveKnowledgeNote(input: SaveKnowledgeNoteInput): Promise<KnowledgeNote>;
   getKnowledgeBacklinks(topicId: string): Promise<KnowledgeBacklink[]>;

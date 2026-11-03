@@ -7,6 +7,7 @@ import type {
   CreateKnowledgeTopicInput,
   KnowledgeNote,
   KnowledgeTopic,
+  MergeKnowledgeTopicsInput,
   UpdateKnowledgeTopicInput
 } from '../../src/shared/knowledge';
 import type { Workspace } from '../../src/shared/workspace';
@@ -85,6 +86,10 @@ function renderPage(options: RenderOptions = {}) {
       ({ ...langChain, ...input }) as unknown as KnowledgeTopic
   );
   const onDeleteTopic = vi.fn(async (_topicId: string) => undefined);
+  const onMergeTopic = vi.fn(async (input: MergeKnowledgeTopicsInput) => {
+    const target = (options.topics ?? topics).find((topic) => topic.id === input.targetId)!;
+    return target;
+  });
 
   let onCreateTopic = vi.fn(async (input: CreateKnowledgeTopicInput) => ({
     id: 'kt-new',
@@ -127,6 +132,7 @@ function renderPage(options: RenderOptions = {}) {
         onCreateTopic={onCreateTopic}
         onUpdateTopic={onUpdateTopic}
         onDeleteTopic={deleteTopic}
+        onMergeTopic={onMergeTopic}
         getKnowledgeNote={getKnowledgeNote}
         saveKnowledgeNote={saveKnowledgeNote}
         getKnowledgeBacklinks={getKnowledgeBacklinks}
@@ -139,6 +145,7 @@ function renderPage(options: RenderOptions = {}) {
     onCreateTopic: () => onCreateTopic,
     onUpdateTopic,
     onDeleteTopic,
+    onMergeTopic,
     getKnowledgeNote,
     saveKnowledgeNote,
     getKnowledgeBacklinks
@@ -229,6 +236,19 @@ test('deletes a topic after confirmation and selects the next one', async () => 
   expect(onDeleteTopic).toHaveBeenCalledWith('kt-1');
   expect(await screen.findByRole('heading', { name: 'RAG' })).toBeInTheDocument();
   confirm.mockRestore();
+});
+
+test('merges the selected topic into another one', async () => {
+  const { onMergeTopic } = renderPage();
+  await screen.findByRole('textbox', { name: '知识笔记' });
+
+  await userEvent.click(screen.getByRole('button', { name: '合并 LangChain' }));
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
+  await userEvent.selectOptions(screen.getByLabelText('合并到'), 'kt-2');
+  await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '合并' }));
+
+  expect(onMergeTopic).toHaveBeenCalledWith({ sourceId: 'kt-1', targetId: 'kt-2' });
+  expect(await screen.findByRole('heading', { name: 'RAG' })).toBeInTheDocument();
 });
 
 test('shows 没有匹配的主题 when the search matches nothing', async () => {

@@ -11,6 +11,7 @@ import type {
   KnowledgeBacklink,
   KnowledgeNote,
   KnowledgeTopic,
+  MergeKnowledgeTopicsInput,
   SaveKnowledgeNoteInput,
   UpdateKnowledgeTopicInput
 } from '../../shared/knowledge';
@@ -121,6 +122,7 @@ export type WorkspaceData = WorkspaceDataState & {
   deleteLongPlan: (planId: string) => Promise<void>;
   createKnowledgeTopic: (input: CreateKnowledgeTopicInput) => Promise<KnowledgeTopic>;
   updateKnowledgeTopic: (input: UpdateKnowledgeTopicInput) => Promise<KnowledgeTopic>;
+  mergeKnowledgeTopics: (input: MergeKnowledgeTopicsInput) => Promise<KnowledgeTopic>;
   deleteKnowledgeTopic: (topicId: string) => Promise<void>;
   getKnowledgeNote: (topicId: string) => Promise<KnowledgeNote>;
   saveKnowledgeNote: (input: SaveKnowledgeNoteInput) => Promise<KnowledgeNote>;
@@ -371,6 +373,17 @@ export function useWorkspaceData(): WorkspaceData {
       ...current,
       knowledgeTopics: current.knowledgeTopics.filter((topic) => topic.id !== topicId)
     }));
+  }, []);
+
+  const mergeKnowledgeTopics = useCallback(async (input: MergeKnowledgeTopicsInput) => {
+    const topic = await apiOrThrow().mergeKnowledgeTopics(input);
+    setState((current) => ({
+      ...current,
+      knowledgeTopics: current.knowledgeTopics
+        .filter((entry) => entry.id !== input.sourceId)
+        .map((entry) => (entry.id === topic.id ? topic : entry))
+    }));
+    return topic;
   }, []);
 
   const getKnowledgeNote = useCallback(
@@ -692,6 +705,7 @@ export function useWorkspaceData(): WorkspaceData {
     createKnowledgeTopic,
     updateKnowledgeTopic,
     deleteKnowledgeTopic,
+    mergeKnowledgeTopics,
     getKnowledgeNote,
     saveKnowledgeNote,
     getKnowledgeBacklinks

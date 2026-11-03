@@ -696,6 +696,11 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     async deleteKnowledgeTopic(id) {
       await (await getServices()).knowledge.delete(id);
     },
+    async mergeKnowledgeTopics(input) {
+      const knowledge = (await getServices()).knowledge;
+      if (!knowledge.merge) throw new Error('当前存储不支持合并知识主题。');
+      return knowledge.merge(input);
+    },
     async getKnowledgeNote(topicId) {
       return (await getServices()).knowledge.getNote(topicId);
     },

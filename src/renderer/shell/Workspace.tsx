@@ -166,6 +166,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     createKnowledgeTopic,
     updateKnowledgeTopic,
     deleteKnowledgeTopic,
+    mergeKnowledgeTopics,
     getKnowledgeNote,
     saveKnowledgeNote,
     getKnowledgeBacklinks,
@@ -1334,6 +1335,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               onCreateTopic={createKnowledgeTopic}
               onUpdateTopic={updateKnowledgeTopic}
               onDeleteTopic={deleteKnowledgeTopic}
+              onMergeTopic={mergeKnowledgeTopics}
               getKnowledgeNote={getKnowledgeNote}
               saveKnowledgeNote={saveKnowledgeNote}
               getKnowledgeBacklinks={getKnowledgeBacklinks}
