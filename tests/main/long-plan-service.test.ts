@@ -440,6 +440,42 @@ function planWeeks(plan: LongPlan): number[] {
   return plan.phases.flatMap((phase) => phase.weeks).map((week) => week.number);
 }
 
+test('updates plan goal and weekly hours without rewriting weeks', async () => {
+  const client = new FakeModelClient([modelReply(2)]);
+  const { dir, workspaceId, service } = await setup(client);
+  try {
+    const plan = await service.create({
+      workspaceId,
+      goal: '学会 AI Agent',
+      startDate: '2026-11-02',
+      weeks: 2,
+      weeklyHours: 12
+    });
+
+    const updated = await service.update({
+      planId: plan.id,
+      goal: '学会 LangGraph',
+      weeklyHours: 8
+    });
+    expect(updated).toMatchObject({
+      id: plan.id,
+      goal: '学会 LangGraph',
+      weeklyHours: 8
+    });
+    expect(updated.phases).toEqual(plan.phases);
+    expect((await service.get(plan.id))?.goal).toBe('学会 LangGraph');
+
+    await expect(service.update({ planId: plan.id })).rejects.toThrow(/字段/);
+    await expect(service.update({ planId: plan.id, goal: '   ' })).rejects.toThrow(/目标/);
+    await expect(service.update({ planId: plan.id, weeklyHours: 0 })).rejects.toThrow(
+      /每周投入/
+    );
+    await expect(service.update({ planId: 'missing', goal: 'x' })).rejects.toThrow(/不存在/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('recalibrates the untouched remaining weeks from actual progress', async () => {
   const client = new FakeModelClient([modelReply(4), modelReply(3)]);
   const { dir, workspaceId, service, setNow } = await setup(client);

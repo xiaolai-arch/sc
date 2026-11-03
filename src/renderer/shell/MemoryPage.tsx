@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type {
+  CreateMemoryInput,
   DeleteMemoryInput,
   LearnerProfile,
   MemoryRecord,
@@ -14,6 +15,7 @@ type MemoryPageProps = {
   memoryRecords: MemoryRecord[];
   profile: LearnerProfile | null;
   onOpenSidebar: () => void;
+  onCreateMemory?: (input: CreateMemoryInput) => Promise<MemoryRecord>;
   onUpdateMemory: (input: UpdateMemoryInput) => Promise<MemoryRecord>;
   onDeleteMemory: (input: DeleteMemoryInput) => Promise<void>;
 };
@@ -23,6 +25,7 @@ export function MemoryPage({
   memoryRecords,
   profile,
   onOpenSidebar,
+  onCreateMemory,
   onUpdateMemory,
   onDeleteMemory
 }: MemoryPageProps) {
@@ -55,7 +58,9 @@ export function MemoryPage({
       <MemoryProfileSummary profile={profile} />
       <MemorySection
         workspace={filteredWorkspace}
+        workspaces={workspaces}
         memoryRecords={memoryRecords}
+        onCreateMemory={onCreateMemory}
         onUpdateMemory={onUpdateMemory}
         onDeleteMemory={onDeleteMemory}
       />

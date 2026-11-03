@@ -25,6 +25,7 @@ type ProjectsPageProps = {
   onOpenChat: () => void;
   onSelectWorkspace: (id: string | null) => void;
   onUpdateWorkspace: (input: UpdateWorkspaceInput) => Promise<Workspace>;
+  onDeleteWorkspace?: (workspaceId: string) => Promise<void>;
   onOpenPractice: () => void;
   onPrompt: (prompt: string) => void;
   onPreviewNote: (note: WorkspaceNote) => void;
@@ -53,6 +54,7 @@ export function ProjectsPage({
   onOpenChat,
   onSelectWorkspace,
   onUpdateWorkspace,
+  onDeleteWorkspace,
   onOpenPractice,
   onPrompt,
   onPreviewNote,
@@ -71,6 +73,66 @@ export function ProjectsPage({
   onResetFocus
 }: ProjectsPageProps) {
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [editingWorkspace, setEditingWorkspace] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [goalDraft, setGoalDraft] = useState('');
+  const [descriptionDraft, setDescriptionDraft] = useState('');
+  const [savingWorkspace, setSavingWorkspace] = useState(false);
+  const [deletingWorkspace, setDeletingWorkspace] = useState(false);
+  const [confirmDeleteWorkspace, setConfirmDeleteWorkspace] = useState(false);
+
+  function startWorkspaceEdit() {
+    if (!workspace) return;
+    setNameDraft(workspace.name);
+    setGoalDraft(workspace.goal ?? '');
+    setDescriptionDraft(workspace.description ?? '');
+    setConfirmDeleteWorkspace(false);
+    setWorkspaceError(null);
+    setEditingWorkspace(true);
+  }
+
+  async function removeWorkspace() {
+    if (!workspace || !onDeleteWorkspace || deletingWorkspace) return;
+    if (!confirmDeleteWorkspace) {
+      setConfirmDeleteWorkspace(true);
+      return;
+    }
+    setDeletingWorkspace(true);
+    setWorkspaceError(null);
+    try {
+      await onDeleteWorkspace(workspace.id);
+      setConfirmDeleteWorkspace(false);
+      setEditingWorkspace(false);
+    } catch (cause) {
+      setWorkspaceError(friendlyErrorMessage(cause, '删除失败，请重试。'));
+    } finally {
+      setDeletingWorkspace(false);
+    }
+  }
+
+  async function saveWorkspace() {
+    if (!workspace || savingWorkspace) return;
+    const name = nameDraft.trim();
+    if (!name) {
+      setWorkspaceError('项目名称不能为空。');
+      return;
+    }
+    setSavingWorkspace(true);
+    setWorkspaceError(null);
+    try {
+      await onUpdateWorkspace({
+        workspaceId: workspace.id,
+        name,
+        goal: goalDraft.trim(),
+        description: descriptionDraft.trim()
+      });
+      setEditingWorkspace(false);
+    } catch (cause) {
+      setWorkspaceError(friendlyErrorMessage(cause, '保存失败，请重试。'));
+    } finally {
+      setSavingWorkspace(false);
+    }
+  }
 
   async function updateCheckIn(checkIn: 'daily' | 'off') {
     if (!workspace) return;
@@ -124,6 +186,17 @@ export function ProjectsPage({
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
+                {workspace ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      editingWorkspace ? setEditingWorkspace(false) : startWorkspaceEdit()
+                    }
+                    className="rounded-full px-4 py-2 text-[13px] font-medium text-[#0071e3] transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:bg-[#0071e3]/10 hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#4da3ff] dark:hover:bg-[#0a84ff]/20"
+                  >
+                    {editingWorkspace ? '收起' : '编辑项目'}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={onOpenPractice}
@@ -148,6 +221,76 @@ export function ProjectsPage({
                 </select>
               </div>
             </div>
+            {editingWorkspace && workspace ? (
+              <form
+                aria-label="编辑项目"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void saveWorkspace();
+                }}
+                className="mt-4 space-y-2 border-t border-gray-100 pt-3 dark:border-white/[0.08]"
+              >
+                <input
+                  aria-label="项目名称"
+                  value={nameDraft}
+                  onChange={(event) => setNameDraft(event.target.value)}
+                  className="w-full rounded-xl border-0 bg-[#f5f5f7] px-3 py-2 text-[13px] text-[#1d1d1f] outline-none transition-all duration-200 focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#f5f5f7]"
+                />
+                <input
+                  aria-label="项目目标"
+                  placeholder="目标（可选）"
+                  value={goalDraft}
+                  onChange={(event) => setGoalDraft(event.target.value)}
+                  className="w-full rounded-xl border-0 bg-[#f5f5f7] px-3 py-2 text-[13px] text-[#1d1d1f] outline-none transition-all duration-200 focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#f5f5f7]"
+                />
+                <textarea
+                  aria-label="项目描述"
+                  placeholder="描述（可选）"
+                  rows={2}
+                  value={descriptionDraft}
+                  onChange={(event) => setDescriptionDraft(event.target.value)}
+                  className="w-full resize-none rounded-xl border-0 bg-[#f5f5f7] px-3 py-2 text-[13px] leading-6 text-[#1d1d1f] outline-none transition-all duration-200 focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#f5f5f7]"
+                />
+                <div className="flex items-center justify-between gap-2">
+                  {onDeleteWorkspace ? (
+                    <button
+                      type="button"
+                      disabled={deletingWorkspace}
+                      onClick={() => void removeWorkspace()}
+                      className={`rounded-full px-3 py-1.5 text-[13px] font-medium transition-all duration-300 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 ${
+                        confirmDeleteWorkspace
+                          ? 'text-[#d70015] dark:text-[#ff7b72]'
+                          : 'text-gray-500 dark:text-[#8e8e93]'
+                      }`}
+                    >
+                      {confirmDeleteWorkspace ? '确认删除项目' : '删除项目'}
+                    </button>
+                  ) : (
+                    <span />
+                  )}
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingWorkspace(false);
+                        setConfirmDeleteWorkspace(false);
+                        setWorkspaceError(null);
+                      }}
+                      className="rounded-full px-3 py-1.5 text-[13px] font-medium text-gray-500 transition-all duration-300 hover:bg-black/[0.04] hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:text-[#8e8e93] dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={savingWorkspace}
+                      className="rounded-full bg-[#0071e3] px-4 py-1.5 text-[13px] font-medium text-white transition-all duration-300 hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100"
+                    >
+                      保存项目
+                    </button>
+                  </div>
+                </div>
+              </form>
+            ) : null}
             {workspace ? (
               <div className="mt-4 flex items-center justify-between gap-2 border-t border-gray-100 pt-3 dark:border-white/[0.08]">
                 <label

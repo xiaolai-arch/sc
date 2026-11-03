@@ -7,6 +7,7 @@ import type {
   LongPlanPhase,
   LongPlanWeek,
   RecalibrateLongPlanInput,
+  UpdateLongPlanInput,
   UpdateLongPlanItemInput
 } from '../../shared/plans';
 import {
@@ -39,6 +40,7 @@ type LongPlanPageProps = {
   today: string;
   onOpenSidebar: () => void;
   onCreatePlan: (input: CreateLongPlanInput) => Promise<LongPlan>;
+  onUpdatePlan?: (input: UpdateLongPlanInput) => Promise<LongPlan>;
   onRecalibrate?: (input: RecalibrateLongPlanInput) => Promise<LongPlan>;
   onSetItemDone: (input: UpdateLongPlanItemInput) => Promise<LongPlan>;
   onDeletePlan?: (planId: string) => Promise<void>;
@@ -385,6 +387,7 @@ export function LongPlanPage({
   today,
   onOpenSidebar,
   onCreatePlan,
+  onUpdatePlan,
   onRecalibrate,
   onSetItemDone,
   onDeletePlan,
@@ -403,6 +406,11 @@ export function LongPlanPage({
   const [recalibrateNotice, setRecalibrateNotice] = useState<string | null>(null);
   const [recalibrateHours, setRecalibrateHours] = useState('10');
   const [recalibrateNotes, setRecalibrateNotes] = useState('');
+  const [editOpen, setEditOpen] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editGoal, setEditGoal] = useState('');
+  const [editHours, setEditHours] = useState('10');
+  const [editError, setEditError] = useState<string | null>(null);
   const [busySeconds, setBusySeconds] = useState(0);
   const [form, setForm] = useState<PlanForm>({
     workspaceId: defaultWorkspaceId ?? workspaces[0]?.id ?? '',
@@ -572,6 +580,39 @@ export function LongPlanPage({
     }
   }
 
+  function openPlanEdit() {
+    if (!selectedPlan || !onUpdatePlan) return;
+    setEditGoal(selectedPlan.goal);
+    setEditHours(String(selectedPlan.weeklyHours));
+    setEditError(null);
+    setEditOpen(true);
+  }
+
+  async function submitPlanEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedPlan || !onUpdatePlan || savingEdit) return;
+    const goal = editGoal.trim();
+    const hours = Number(editHours);
+    if (!goal) {
+      setEditError('计划目标不能为空。');
+      return;
+    }
+    if (!Number.isFinite(hours) || hours < 1 || hours > 80) {
+      setEditError('每周投入必须在 1 到 80 小时之间。');
+      return;
+    }
+    setSavingEdit(true);
+    setEditError(null);
+    try {
+      await onUpdatePlan({ planId: selectedPlan.id, goal, weeklyHours: hours });
+      setEditOpen(false);
+    } catch (cause) {
+      setEditError(errorText(cause));
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
   async function deleteSelectedPlan() {
     if (!selectedPlan || !onDeletePlan || deleting) return;
     if (typeof window !== 'undefined' && !window.confirm(`删除计划「${selectedPlan.goal}」？`)) {
@@ -724,6 +765,16 @@ export function LongPlanPage({
                 ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
+                {onUpdatePlan ? (
+                  <button
+                    type="button"
+                    onClick={openPlanEdit}
+                    disabled={savingEdit}
+                    className={secondaryButton}
+                  >
+                    编辑计划
+                  </button>
+                ) : null}
                 {onRecalibrate ? (
                   <button
                     type="button"
@@ -749,6 +800,54 @@ export function LongPlanPage({
                 </span>
               </div>
             </div>
+
+            {editOpen ? (
+              <form
+                aria-label="编辑计划信息"
+                onSubmit={(event) => void submitPlanEdit(event)}
+                className="mt-4 space-y-2 rounded-xl bg-[#f5f5f7] p-3 dark:bg-white/[0.06]"
+              >
+                <textarea
+                  aria-label="编辑计划目标"
+                  rows={2}
+                  maxLength={300}
+                  value={editGoal}
+                  onChange={(event) => setEditGoal(event.target.value)}
+                  className="w-full resize-none rounded-xl border-0 bg-white px-3 py-2 text-[13px] leading-6 text-[#1d1d1f] outline-none focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#f5f5f7]"
+                />
+                <label className="flex items-center gap-2 text-[12px] text-gray-500 dark:text-[#8e8e93]">
+                  每周投入
+                  <input
+                    aria-label="编辑计划每周投入"
+                    inputMode="numeric"
+                    value={editHours}
+                    onChange={(event) => setEditHours(event.target.value)}
+                    className="h-8 w-20 rounded-xl border-0 bg-white px-2 text-[13px] tabular-nums text-[#1d1d1f] outline-none focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#f5f5f7]"
+                  />
+                  小时
+                </label>
+                {editError ? (
+                  <p role="alert" className="text-[12px] text-[#d70015] dark:text-[#ff7b72]">
+                    {editError}
+                  </p>
+                ) : null}
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditOpen(false);
+                      setEditError(null);
+                    }}
+                    className={secondaryButton}
+                  >
+                    取消
+                  </button>
+                  <button type="submit" disabled={savingEdit} className={primaryButton}>
+                    保存计划信息
+                  </button>
+                </div>
+              </form>
+            ) : null}
 
             <div className="mt-4">
               <div className="mb-1.5 flex items-center justify-between text-[12px] text-gray-500 dark:text-[#a1a1a6]">

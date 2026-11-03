@@ -21,7 +21,7 @@ import type {
   WorkspaceSnapshot,
   WorkspaceTask
 } from '../../shared/workspace';
-import { createMutex, listDirectories, listMarkdownFiles, readFileOrNull, writeFileAtomic } from './fs-utils';
+import { createMutex, listDirectories, listMarkdownFiles, pathExists, readFileOrNull, writeFileAtomic } from './fs-utils';
 import { newId, slugify, uniqueFileName } from './ids';
 import {
   assertIsoDate,
@@ -33,6 +33,7 @@ import {
   reviewFile,
   taskFile,
   tasksDir,
+  workspaceDir,
   workspaceFile,
   workspacesDir
 } from './paths';
@@ -330,6 +331,23 @@ export function createWorkspaceService(
           serializeWorkspaceFile(next)
         );
         return next;
+      });
+    },
+
+    async deleteWorkspace(workspaceId: string): Promise<void> {
+      await ensureVault();
+      const id = requireString(workspaceId, 'Workspace id');
+      assertSafeSegment(id, 'workspace id');
+      await runExclusively(async () => {
+        await readWorkspaceOrThrow(id);
+        const trashDir = posix.join(workspacesDir(vaultRoot), '.trash');
+        await fs.mkdir(trashDir, { recursive: true });
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        let target = posix.join(trashDir, `${id}-${stamp}`);
+        for (let index = 2; await pathExists(target); index += 1) {
+          target = posix.join(trashDir, `${id}-${stamp}-${index}`);
+        }
+        await fs.rename(workspaceDir(vaultRoot, id), target);
       });
     },
 

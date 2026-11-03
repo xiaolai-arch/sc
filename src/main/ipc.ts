@@ -46,6 +46,7 @@ import type { PlanWorkspaceInput } from '../shared/planning';
 import type {
   CreateLongPlanInput,
   RecalibrateLongPlanInput,
+  UpdateLongPlanInput,
   UpdateLongPlanItemInput
 } from '../shared/plans';
 
@@ -115,7 +116,9 @@ export const IPC_CHANNELS = {
   searchAll: 'study-coach:search:all',
   deleteTask: 'study-coach:workspaces:delete-task',
   deleteReminder: 'study-coach:reminders:delete',
-  createMemory: 'study-coach:memory:create'
+  createMemory: 'study-coach:memory:create',
+  deleteWorkspace: 'study-coach:workspaces:delete',
+  updateLongPlan: 'study-coach:plans:update'
 } as const;
 
 /** Streaming uses a separate request/event pair so the request map stays stable. */
@@ -226,6 +229,11 @@ function requireUpdateWorkspace(value: unknown): UpdateWorkspaceInput {
     ...(input.description !== undefined ? { description: description ?? '' } : {}),
     ...(checkIn !== undefined ? { checkIn: checkIn as 'daily' | 'off' } : {})
   };
+}
+
+function requireDeleteWorkspace(value: unknown): string {
+  const input = requireObject(value, '删除项目');
+  return requireString(input.workspaceId, '工作区 ID');
 }
 
 function requireCreateTask(value: unknown): CreateTaskInput {
@@ -738,6 +746,25 @@ function requireRecalibrateLongPlan(value: unknown): RecalibrateLongPlanInput {
   };
 }
 
+function requireUpdateLongPlan(value: unknown): UpdateLongPlanInput {
+  const input = requireObject(value, '更新长期计划');
+  const planId = requireString(input.planId, '计划 ID').trim();
+  if (input.goal !== undefined && typeof input.goal !== 'string') {
+    throw new Error('计划目标无效。');
+  }
+  if (
+    input.weeklyHours !== undefined &&
+    (typeof input.weeklyHours !== 'number' || !Number.isFinite(input.weeklyHours))
+  ) {
+    throw new Error('每周投入参数无效。');
+  }
+  return {
+    planId,
+    ...(input.goal !== undefined ? { goal: input.goal as string } : {}),
+    ...(input.weeklyHours !== undefined ? { weeklyHours: input.weeklyHours } : {})
+  };
+}
+
 function requireCreateLongPlan(value: unknown): CreateLongPlanInput {
   const input = requireObject(value, '生成长期计划');
   const workspaceId = requireString(input.workspaceId, '工作区 ID');
@@ -965,7 +992,14 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
       const parsed = requireDeleteReminder(input);
       if (!api.deleteReminder) throw new Error('当前存储不支持删除提醒。');
       return api.deleteReminder(parsed);
-    }
+    },
+    deleteWorkspace: async (input) => {
+      const workspaceId = requireDeleteWorkspace(input);
+      if (!api.deleteWorkspace) throw new Error('当前存储不支持删除项目。');
+      return api.deleteWorkspace(workspaceId);
+    },
+    updateLongPlan: async (input) =>
+      api.updateLongPlan(requireUpdateLongPlan(input))
   };
 
   // Every path through the bridge gets the same sanitized error envelope,
@@ -1177,6 +1211,9 @@ export function createStudyCoachBridge(
     deleteTask: (input) => call(IPC_CHANNELS.deleteTask, input),
     deleteReminder: (input) => call(IPC_CHANNELS.deleteReminder, input),
     createMemory: (input) => call(IPC_CHANNELS.createMemory, input),
+    deleteWorkspace: (workspaceId) =>
+      call(IPC_CHANNELS.deleteWorkspace, { workspaceId }),
+    updateLongPlan: (input) => call(IPC_CHANNELS.updateLongPlan, input),
     async stream(input, onEvent) {
       const requestId = createRequestId();
       const unsubscribe = subscribe?.(BUTLER_STREAM_CHANNELS.event, (payload) => {

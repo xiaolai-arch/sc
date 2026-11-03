@@ -118,6 +118,14 @@ export interface UpdateLongPlanItemInput {
   done: boolean;
 }
 
+export interface UpdateLongPlanInput {
+  planId: string;
+  /** New plan goal; weeks keep their generated content. */
+  goal?: string;
+  /** New hours-per-week baseline for future recalibrations. */
+  weeklyHours?: number;
+}
+
 export interface RecalibrateLongPlanInput {
   planId: string;
   /** Hours per week for the remaining weeks; defaults to the plan's setting. */
@@ -136,6 +144,7 @@ export interface LongPlanService {
   list(workspaceId?: string): Promise<LongPlan[]>;
   get(planId: string): Promise<LongPlan | null>;
   create(input: CreateLongPlanInput): Promise<LongPlan>;
+  update(input: UpdateLongPlanInput): Promise<LongPlan>;
   recalibrate(input: RecalibrateLongPlanInput): Promise<LongPlan>;
   setItemDone(input: UpdateLongPlanItemInput): Promise<LongPlan>;
   delete(planId: string): Promise<void>;
@@ -146,6 +155,7 @@ export interface LongPlanApi {
   listLongPlans(workspaceId?: string): Promise<LongPlan[]>;
   getLongPlan(planId: string): Promise<LongPlan | null>;
   createLongPlan(input: CreateLongPlanInput): Promise<LongPlan>;
+  updateLongPlan(input: UpdateLongPlanInput): Promise<LongPlan>;
   recalibrateLongPlan(input: RecalibrateLongPlanInput): Promise<LongPlan>;
   setLongPlanItemDone(input: UpdateLongPlanItemInput): Promise<LongPlan>;
   deleteLongPlan(planId: string): Promise<void>;

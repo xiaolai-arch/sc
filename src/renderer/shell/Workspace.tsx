@@ -148,6 +148,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     updateTask,
     deleteTask,
     updateWorkspace,
+    deleteWorkspace,
     createNote,
     createReminder,
     updateReminder,
@@ -158,6 +159,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     updateMemory,
     deleteMemory,
     createLongPlan,
+    updateLongPlan,
     recalibrateLongPlan,
     setLongPlanItemDone,
     deleteLongPlan,
@@ -1277,6 +1279,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               today={today}
               onOpenSidebar={openSidebar}
               onCreatePlan={createLongPlan}
+              onUpdatePlan={updateLongPlan}
               onRecalibrate={recalibrateLongPlan}
               onSetItemDone={setLongPlanItemDone}
               onDeletePlan={deleteLongPlan}
@@ -1295,6 +1298,10 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               onOpenChat={() => changeSection('chat')}
               onSelectWorkspace={selectProject}
               onUpdateWorkspace={updateWorkspace}
+              onDeleteWorkspace={async (workspaceId) => {
+                await deleteWorkspace(workspaceId);
+                if (projectId === workspaceId) setProjectId(null);
+              }}
               onOpenPractice={() => {
                 setPracticeSetId(filteredPracticeSets[0]?.id ?? null);
                 setPracticeOpen(true);
@@ -1339,6 +1346,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               memoryRecords={memoryRecords}
               profile={memoryProfile}
               onOpenSidebar={openSidebar}
+              onCreateMemory={createMemory}
               onUpdateMemory={updateMemory}
               onDeleteMemory={deleteMemory}
             />

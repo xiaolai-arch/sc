@@ -198,6 +198,7 @@ export interface WorkspaceService {
   listWorkspaces(): Promise<Workspace[]>;
   createWorkspace(input: CreateWorkspaceInput): Promise<Workspace>;
   updateWorkspace?(input: UpdateWorkspaceInput): Promise<Workspace>;
+  deleteWorkspace?(workspaceId: string): Promise<void>;
   getWorkspaceSnapshot(workspaceId: string): Promise<WorkspaceSnapshot>;
   createTask(input: CreateTaskInput): Promise<WorkspaceTask>;
   updateWorkspaceTask(input: UpdateWorkspaceTaskInput): Promise<WorkspaceTask>;

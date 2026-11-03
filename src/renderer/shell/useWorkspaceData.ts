@@ -33,6 +33,7 @@ import type {
   CreateLongPlanInput,
   LongPlan,
   RecalibrateLongPlanInput,
+  UpdateLongPlanInput,
   UpdateLongPlanItemInput
 } from '../../shared/plans';
 import type { WorkspacePlan } from '../../shared/planning';
@@ -112,7 +113,9 @@ export type WorkspaceData = WorkspaceDataState & {
   updateMemory: (input: UpdateMemoryInput) => Promise<MemoryRecord>;
   deleteMemory: (input: DeleteMemoryInput) => Promise<void>;
   updateWorkspace: (input: UpdateWorkspaceInput) => Promise<Workspace>;
+  deleteWorkspace: (workspaceId: string) => Promise<void>;
   createLongPlan: (input: CreateLongPlanInput) => Promise<LongPlan>;
+  updateLongPlan: (input: UpdateLongPlanInput) => Promise<LongPlan>;
   recalibrateLongPlan: (input: RecalibrateLongPlanInput) => Promise<LongPlan>;
   setLongPlanItemDone: (input: UpdateLongPlanItemInput) => Promise<LongPlan>;
   deleteLongPlan: (planId: string) => Promise<void>;
@@ -291,9 +294,28 @@ export function useWorkspaceData(): WorkspaceData {
     return workspace;
   }, []);
 
+  const deleteWorkspace = useCallback(
+    async (workspaceId: string) => {
+      const api = apiOrThrow();
+      if (!api.deleteWorkspace) throw new Error('当前存储不支持删除项目。');
+      await api.deleteWorkspace(workspaceId);
+      await reload();
+    },
+    [reload]
+  );
+
   const createLongPlan = useCallback(async (input: CreateLongPlanInput) => {
     const plan = await apiOrThrow().createLongPlan(input);
     setState((current) => ({ ...current, longPlans: [plan, ...current.longPlans] }));
+    return plan;
+  }, []);
+
+  const updateLongPlan = useCallback(async (input: UpdateLongPlanInput) => {
+    const plan = await apiOrThrow().updateLongPlan(input);
+    setState((current) => ({
+      ...current,
+      longPlans: current.longPlans.map((entry) => (entry.id === plan.id ? plan : entry))
+    }));
     return plan;
   }, []);
 
@@ -644,6 +666,7 @@ export function useWorkspaceData(): WorkspaceData {
     updateTask,
     deleteTask,
     updateWorkspace,
+    deleteWorkspace,
     createNote,
     updateNote,
     createPracticeSet,
@@ -662,6 +685,7 @@ export function useWorkspaceData(): WorkspaceData {
     updateMemory,
     deleteMemory,
     createLongPlan,
+    updateLongPlan,
     recalibrateLongPlan,
     setLongPlanItemDone,
     deleteLongPlan,

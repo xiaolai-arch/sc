@@ -77,6 +77,7 @@ import type {
   CreateLongPlanInput,
   LongPlan,
   RecalibrateLongPlanInput,
+  UpdateLongPlanInput,
   UpdateLongPlanItemInput
 } from '../src/shared/plans';
 import { buildTemplatePlan } from '../src/shared/plan-template';
@@ -882,6 +883,29 @@ export function createMockApi(
       return structuredClone(plan);
     },
 
+    async updateLongPlan(input: UpdateLongPlanInput): Promise<LongPlan> {
+      const plan = state.plans.find((entry) => entry.id === input.planId);
+      if (!plan) throw new Error('计划不存在。');
+      if (input.goal !== undefined) {
+        const goal = input.goal.trim();
+        if (!goal) throw new Error('计划目标不能为空。');
+        plan.goal = goal;
+      }
+      if (input.weeklyHours !== undefined) {
+        if (
+          !Number.isFinite(input.weeklyHours) ||
+          input.weeklyHours < 1 ||
+          input.weeklyHours > 80
+        ) {
+          throw new Error('每周投入必须在 1 到 80 小时之间。');
+        }
+        plan.weeklyHours = input.weeklyHours;
+      }
+      plan.updatedAt = new Date().toISOString();
+      persist();
+      return structuredClone(plan);
+    },
+
     async recalibrateLongPlan(
       input: RecalibrateLongPlanInput
     ): Promise<LongPlan> {
@@ -1398,6 +1422,29 @@ export function createMockApi(
       workspace.updatedAt = new Date().toISOString();
       persist();
       return structuredClone(workspace);
+    },
+
+    async deleteWorkspace(workspaceId: string): Promise<void> {
+      const index = state.workspaces.findIndex((entry) => entry.id === workspaceId);
+      if (index < 0) throw new Error('项目不存在');
+      state.workspaces.splice(index, 1);
+      state.tasks = state.tasks.filter((entry) => entry.workspaceId !== workspaceId);
+      state.notes = state.notes.filter((entry) => entry.workspaceId !== workspaceId);
+      state.memory = state.memory.filter((entry) => entry.workspaceId !== workspaceId);
+      state.practiceSets = state.practiceSets.filter(
+        (entry) => entry.workspaceId !== workspaceId
+      );
+      state.practiceAttempts = state.practiceAttempts.filter(
+        (entry) => entry.workspaceId !== workspaceId
+      );
+      state.practiceMistakes = state.practiceMistakes.filter(
+        (entry) => entry.workspaceId !== workspaceId
+      );
+      state.plans = state.plans.filter((entry) => entry.workspaceId !== workspaceId);
+      state.knowledgeTopics = state.knowledgeTopics.filter(
+        (entry) => entry.workspaceId !== workspaceId
+      );
+      persist();
     },
 
     async getWorkspaceSnapshot(workspaceId: string): Promise<WorkspaceSnapshot> {

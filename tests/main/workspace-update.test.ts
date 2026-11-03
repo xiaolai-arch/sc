@@ -1,7 +1,8 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createWorkspaceService } from '../../src/main/workspace/create-workspace-service';
+import { workspacesDir } from '../../src/main/workspace/paths';
 
 test('updates workspace name, goal and description', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'study-coach-workspace-update-'));
@@ -35,6 +36,37 @@ test('updates workspace name, goal and description', async () => {
     await expect(
       service.updateWorkspace?.({ workspaceId: 'missing', goal: 'x' })
     ).rejects.toThrow(/not found/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('moves a deleted workspace into a recoverable trash folder', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'study-coach-workspace-delete-'));
+  try {
+    const service = createWorkspaceService(dir, { seed: false });
+    const kept = await service.createWorkspace({
+      name: '英语',
+      kind: 'study',
+      goal: '',
+      description: ''
+    });
+    const removed = await service.createWorkspace({
+      name: '数学',
+      kind: 'study',
+      goal: '',
+      description: ''
+    });
+
+    await service.deleteWorkspace?.(removed.id);
+    expect((await service.listWorkspaces()).map((entry) => entry.id)).toEqual([kept.id]);
+
+    const root = workspacesDir(dir);
+    expect(await readdir(root)).not.toContain(removed.id);
+    const trashed = await readdir(join(root, '.trash'));
+    expect(trashed.some((entry) => entry.startsWith(`${removed.id}-`))).toBe(true);
+
+    await expect(service.deleteWorkspace?.(removed.id)).rejects.toThrow(/not found/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

@@ -4,6 +4,7 @@ import { cn } from '../ui/cn';
 import { CheckIcon } from '../ui/icons';
 import type { ReviewRecord } from '../../shared/ipc';
 import type {
+  CreateMemoryInput,
   DeleteMemoryInput,
   LearnerProfile,
   MemoryKind,
@@ -781,14 +782,18 @@ export function RecordsSection({
 
 type MemorySectionProps = {
   workspace: Workspace | null;
+  workspaces?: Workspace[];
   memoryRecords: MemoryRecord[];
+  onCreateMemory?: (input: CreateMemoryInput) => Promise<MemoryRecord>;
   onUpdateMemory: (input: UpdateMemoryInput) => Promise<MemoryRecord>;
   onDeleteMemory: (input: DeleteMemoryInput) => Promise<void>;
 };
 
 export function MemorySection({
   workspace,
+  workspaces = [],
   memoryRecords,
+  onCreateMemory,
   onUpdateMemory,
   onDeleteMemory
 }: MemorySectionProps) {
@@ -799,7 +804,43 @@ export function MemorySection({
   const [savingMemory, setSavingMemory] = useState(false);
   const [confirmMemoryId, setConfirmMemoryId] = useState<string | null>(null);
   const [pendingMemoryId, setPendingMemoryId] = useState<string | null>(null);
+  const [creatingMemory, setCreatingMemory] = useState(false);
+  const [newMemoryText, setNewMemoryText] = useState('');
+  const [newMemoryKind, setNewMemoryKind] = useState<MemoryKind>('preference');
+  const [newMemoryWorkspaceId, setNewMemoryWorkspaceId] = useState('');
+  const [creatingMemoryPending, setCreatingMemoryPending] = useState(false);
   const filteredMemories = filterMemories(memoryRecords, workspace);
+  const targetWorkspaceId =
+    workspace?.id ?? (newMemoryWorkspaceId || workspaces[0]?.id || '');
+
+  async function createMemory() {
+    if (!onCreateMemory || creatingMemoryPending) return;
+    const text = newMemoryText.trim();
+    if (!targetWorkspaceId) {
+      setMemoryError({ id: 'new', message: '请选择一个工作区。' });
+      return;
+    }
+    if (!text) {
+      setMemoryError({ id: 'new', message: '记忆内容不能为空。' });
+      return;
+    }
+    setCreatingMemoryPending(true);
+    setMemoryError(null);
+    try {
+      await onCreateMemory({
+        workspaceId: targetWorkspaceId,
+        text,
+        kind: newMemoryKind
+      });
+      setNewMemoryText('');
+      setNewMemoryKind('preference');
+      setCreatingMemory(false);
+    } catch (cause) {
+      setMemoryError({ id: 'new', message: messageOf(cause) });
+    } finally {
+      setCreatingMemoryPending(false);
+    }
+  }
 
   function startMemoryEdit(record: MemoryRecord) {
     setEditingMemoryId(record.id);
@@ -857,18 +898,109 @@ export function MemorySection({
     }
   }
 
+  const createForm = onCreateMemory ? (
+    <div className="mb-3">
+      <div className="mb-2 flex justify-end">
+        <button
+          type="button"
+          onClick={() => {
+            setCreatingMemory((current) => !current);
+            setMemoryError(null);
+          }}
+          className={actionClass}
+        >
+          {creatingMemory ? '收起' : '新增记忆'}
+        </button>
+      </div>
+      {creatingMemory ? (
+        <form
+          aria-label="新增记忆"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void createMemory();
+          }}
+          className="rounded-2xl bg-[#f5f5f7] p-3 dark:bg-white/[0.06]"
+        >
+          {!workspace && workspaces.length > 0 ? (
+            <select
+              aria-label="新记忆工作区"
+              value={targetWorkspaceId}
+              onChange={(event) => setNewMemoryWorkspaceId(event.target.value)}
+              className={`${inputClass} mb-2 w-full`}
+            >
+              {workspaces.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.name}
+                </option>
+              ))}
+            </select>
+          ) : null}
+          <textarea
+            aria-label="新记忆内容"
+            placeholder="记一条你希望阿咲记住的事实或偏好"
+            rows={3}
+            value={newMemoryText}
+            onChange={(event) => setNewMemoryText(event.target.value)}
+            className={`${inputClass} w-full resize-none leading-6`}
+          />
+          <select
+            aria-label="新记忆类型"
+            value={newMemoryKind}
+            onChange={(event) => setNewMemoryKind(event.target.value as MemoryKind)}
+            className={`${inputClass} mt-1 w-full`}
+          >
+            {MEMORY_KIND_ORDER.map((kind) => (
+              <option key={kind} value={kind}>
+                {MEMORY_KIND_LABELS[kind]}
+              </option>
+            ))}
+          </select>
+          {memoryError?.id === 'new' ? (
+            <p role="alert" className="mt-1 text-[12px] text-[#d70015] dark:text-[#ff7b72]">
+              {memoryError.message}
+            </p>
+          ) : null}
+          <div className="mt-2 flex justify-end gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                setCreatingMemory(false);
+                setMemoryError(null);
+              }}
+              className={actionClass}
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              disabled={!newMemoryText.trim() || creatingMemoryPending}
+              className={primaryButtonClass}
+            >
+              保存新记忆
+            </button>
+          </div>
+        </form>
+      ) : null}
+    </div>
+  ) : null;
+
   if (filteredMemories.length === 0) {
     return (
-      <div className="rounded-2xl border border-dashed border-gray-300/80 px-4 py-6 text-center dark:border-white/10">
-        <p className="text-[13px] leading-6 text-gray-500 dark:text-[#8e8e93]">
-          还没有记忆。完成一次复盘后，阿咲会记住你的卡点和偏好。
-        </p>
+      <div>
+        {createForm}
+        <div className="rounded-2xl border border-dashed border-gray-300/80 px-4 py-6 text-center dark:border-white/10">
+          <p className="text-[13px] leading-6 text-gray-500 dark:text-[#8e8e93]">
+            还没有记忆。完成一次复盘后，阿咲会记住你的卡点和偏好。
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-2">
+    <div>
+      {createForm}
+      <div className="space-y-2">
       {filteredMemories.map((memory) => {
         const editing = editingMemoryId === memory.id;
         const confirming = confirmMemoryId === memory.id;
@@ -981,6 +1113,7 @@ export function MemorySection({
           </div>
         );
       })}
+      </div>
     </div>
   );
 }

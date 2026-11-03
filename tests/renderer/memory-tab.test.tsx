@@ -93,6 +93,27 @@ test('keeps the edit input and shows an error when saving fails', async () => {
   spy.mockRestore();
 });
 
+test('adds a memory manually and refreshes the profile', async () => {
+  const api = setup();
+  await screen.findByText('早上好，xiaolai。');
+  await userEvent.click(screen.getByRole('button', { name: '记忆' }));
+  const before = (await api.getMemoryProfile()).memoryCount;
+
+  await userEvent.click(screen.getByRole('button', { name: '新增记忆' }));
+  await userEvent.type(screen.getByLabelText('新记忆内容'), '我更喜欢早上背单词');
+  await userEvent.selectOptions(screen.getByLabelText('新记忆类型'), 'preference');
+  await userEvent.click(screen.getByRole('button', { name: '保存新记忆' }));
+
+  expect(await screen.findByText('我更喜欢早上背单词')).toBeInTheDocument();
+  expect((await api.listMemory()).find((record) => record.text === '我更喜欢早上背单词')).toMatchObject({
+    kind: 'preference',
+    source: 'manual'
+  });
+  await waitFor(async () =>
+    expect((await api.getMemoryProfile()).memoryCount).toBeGreaterThan(before)
+  );
+});
+
 test('shows the empty state when there are no memories', async () => {
   localStorage.clear();
   const api = createMockApi(localStorage, { streamPace: 0.05 });

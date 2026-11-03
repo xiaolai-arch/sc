@@ -7,6 +7,7 @@ import type {
   LongPlan,
   LongPlanDay,
   RecalibrateLongPlanInput,
+  UpdateLongPlanInput,
   UpdateLongPlanItemInput
 } from '../../src/shared/plans';
 import type { Workspace } from '../../src/shared/workspace';
@@ -84,6 +85,7 @@ const plan: LongPlan = {
 function renderPage(options: {
   plans?: LongPlan[];
   onCreatePlan?: (input: CreateLongPlanInput) => Promise<LongPlan>;
+  onUpdatePlan?: (input: UpdateLongPlanInput) => Promise<LongPlan>;
   onRecalibrate?: (input: RecalibrateLongPlanInput) => Promise<LongPlan>;
   onSetItemDone?: (input: UpdateLongPlanItemInput) => Promise<LongPlan>;
   onAddDayToSchedule?: (plan: LongPlan, day: LongPlanDay) => Promise<void>;
@@ -106,6 +108,7 @@ function renderPage(options: {
       today="2026-11-03"
       onOpenSidebar={vi.fn()}
       onCreatePlan={onCreatePlan}
+      {...(options.onUpdatePlan ? { onUpdatePlan: options.onUpdatePlan } : {})}
       {...(options.onRecalibrate ? { onRecalibrate: options.onRecalibrate } : {})}
       onSetItemDone={onSetItemDone}
       onAddDayToSchedule={options.onAddDayToSchedule}
@@ -271,6 +274,33 @@ test('shows an empty state and explains the generic framework', async () => {
 test('marks template-generated plans so users know to refine them', () => {
   renderPage({ plans: [{ ...plan, generatedBy: 'template' }] });
   expect(screen.getByText(/通用框架/)).toBeInTheDocument();
+});
+
+test('edits the plan goal and weekly hours', async () => {
+  const onUpdatePlan = vi.fn(async (input: UpdateLongPlanInput) => ({
+    ...plan,
+    goal: input.goal ?? plan.goal,
+    weeklyHours: input.weeklyHours ?? plan.weeklyHours
+  }));
+  renderPage({ onUpdatePlan });
+
+  await userEvent.click(screen.getByRole('button', { name: '编辑计划' }));
+  const goal = screen.getByLabelText('编辑计划目标');
+  await userEvent.clear(goal);
+  await userEvent.type(goal, '学会 LangGraph');
+  const hours = screen.getByLabelText('编辑计划每周投入');
+  await userEvent.clear(hours);
+  await userEvent.type(hours, '8');
+  await userEvent.click(screen.getByRole('button', { name: '保存计划信息' }));
+
+  expect(onUpdatePlan).toHaveBeenCalledWith({
+    planId: 'lp-1',
+    goal: '学会 LangGraph',
+    weeklyHours: 8
+  });
+  await waitFor(() =>
+    expect(screen.queryByRole('form', { name: '编辑计划信息' })).not.toBeInTheDocument()
+  );
 });
 
 test('recalibrates the remaining weeks with the current hours and notes', async () => {

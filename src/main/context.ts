@@ -516,6 +516,11 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       if (!workspace.updateWorkspace) throw new Error('当前存储不支持更新项目。');
       return workspace.updateWorkspace(input);
     },
+    async deleteWorkspace(workspaceId) {
+      const workspace = (await getServices()).workspace;
+      if (!workspace.deleteWorkspace) throw new Error('当前存储不支持删除项目。');
+      return workspace.deleteWorkspace(workspaceId);
+    },
     async getWorkspaceSnapshot(workspaceId) {
       return (await getServices()).workspace.getWorkspaceSnapshot(workspaceId);
     },
@@ -621,6 +626,9 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     },
     async createLongPlan(input) {
       return (await getServices()).longPlans.create(input);
+    },
+    async updateLongPlan(input) {
+      return (await getServices()).longPlans.update(input);
     },
     async recalibrateLongPlan(input) {
       return (await getServices()).longPlans.recalibrate(input);

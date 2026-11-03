@@ -66,6 +66,48 @@ test('creates, edits and deletes a task from the plan section', async () => {
   expect(snapshot.tasks.some((task) => task.title === '线性代数复盘')).toBe(false);
 });
 
+test('edits the project name, goal and description', async () => {
+  const api = setup();
+  await openProjectTasks();
+
+  await userEvent.click(screen.getByRole('button', { name: '编辑项目' }));
+  const nameInput = screen.getByLabelText('项目名称');
+  await userEvent.clear(nameInput);
+  await userEvent.type(nameInput, '数学强化');
+  const goalInput = screen.getByLabelText('项目目标');
+  await userEvent.clear(goalInput);
+  await userEvent.type(goalInput, '数学一 130+');
+  const descriptionInput = screen.getByLabelText('项目描述');
+  await userEvent.clear(descriptionInput);
+  await userEvent.type(descriptionInput, '每天两小时');
+  await userEvent.click(screen.getByRole('button', { name: '保存项目' }));
+
+  expect(await screen.findByRole('heading', { name: '数学强化' })).toBeInTheDocument();
+  const workspace = (await api.listWorkspaces()).find((entry) => entry.id === 'kaoyan');
+  expect(workspace).toMatchObject({
+    name: '数学强化',
+    goal: '数学一 130+',
+    description: '每天两小时'
+  });
+});
+
+test('deletes a project after confirmation', async () => {
+  const api = setup();
+  await openProjectTasks();
+
+  await userEvent.click(screen.getByRole('button', { name: '编辑项目' }));
+  await userEvent.click(screen.getByRole('button', { name: '删除项目' }));
+  await userEvent.click(screen.getByRole('button', { name: '确认删除项目' }));
+
+  await waitFor(async () =>
+    expect((await api.listWorkspaces()).some((entry) => entry.id === 'kaoyan')).toBe(false)
+  );
+  expect(await screen.findByRole('heading', { name: '全部项目' })).toBeInTheDocument();
+  await waitFor(() =>
+    expect(screen.queryByRole('option', { name: '考研' })).not.toBeInTheDocument()
+  );
+});
+
 test('creates a repeating reminder, edits it and deletes it', async () => {
   const api = setup();
   await screen.findByText('早上好，xiaolai。');

@@ -11,6 +11,7 @@ import type {
   LongPlanService,
   LongPlanWeek,
   RecalibrateLongPlanInput,
+  UpdateLongPlanInput,
   UpdateLongPlanItemInput
 } from '../../shared/plans';
 import { planProgress, weekHasProgress, weekProgress } from '../../shared/plans';
@@ -354,6 +355,39 @@ export function createLongPlanService(options: LongPlanServiceOptions): LongPlan
         serializeLongPlanFile(plan)
       );
       return plan;
+    },
+
+    async update(input: UpdateLongPlanInput): Promise<LongPlan> {
+      const planId = typeof input?.planId === 'string' ? input.planId.trim() : '';
+      if (!isSafePlanId(planId)) throw new Error('计划 ID 无效。');
+      const goal =
+        input.goal === undefined
+          ? undefined
+          : typeof input.goal === 'string'
+            ? input.goal.trim()
+            : '';
+      if (goal !== undefined && (goal === '' || goal.length > MAX_GOAL_LENGTH)) {
+        throw new Error('计划目标无效。');
+      }
+      const weeklyHours =
+        input.weeklyHours === undefined
+          ? undefined
+          : normalizeWeeklyHours(input.weeklyHours);
+      if (goal === undefined && weeklyHours === undefined) {
+        throw new Error('没有需要更新的计划字段。');
+      }
+      return runExclusively(async () => {
+        const found = await findPlanFile(planId);
+        if (found === null) throw new Error('计划不存在。');
+        const next: LongPlan = {
+          ...found.plan,
+          ...(goal !== undefined ? { goal } : {}),
+          ...(weeklyHours !== undefined ? { weeklyHours } : {}),
+          updatedAt: now().toISOString()
+        };
+        await writeFileAtomic(found.path, serializeLongPlanFile(next));
+        return next;
+      });
     },
 
     async recalibrate(input: RecalibrateLongPlanInput): Promise<LongPlan> {
