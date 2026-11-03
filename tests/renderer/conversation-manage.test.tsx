@@ -128,35 +128,35 @@ test('deletes a conversation only after confirmation and returns to the draft', 
   expect(await api.listConversations()).toEqual([]);
 });
 
-test('searches conversations by message body with a debounced input', async () => {
+test('searches conversations from global search', async () => {
   setup();
   await screen.findByText('早上好，xiaolai。');
   await userEvent.type(screen.getByLabelText('向阿咲提问'), '记一下：今天数学卡在极限');
   await userEvent.click(screen.getByRole('button', { name: '发送' }));
   await screen.findAllByText(/记下了/);
 
-  const search = screen.getByLabelText('搜索对话');
+  fireEvent.keyDown(window, { key: 'k', metaKey: true });
+  const search = await screen.findByLabelText('搜索全部内容');
   await userEvent.type(search, '极限');
-  const sidebar = screen.getAllByRole('complementary')[0]!;
-  expect(
-    await within(sidebar).findByRole('button', { name: /记一下：今天数学卡在极限/ })
-  ).toBeInTheDocument();
+  const options = await screen.findAllByRole('option', {
+    name: /记一下：今天数学卡在极限/
+  });
+  expect(options[0]).toBeInTheDocument();
 
   await userEvent.clear(search);
-  await userEvent.type(search, '不存在');
-  expect(await screen.findByText('没有找到对话。')).toBeInTheDocument();
+  await userEvent.type(search, 'zzzz-not-found-zzzz');
+  expect(await screen.findByText('没有找到相关内容。')).toBeInTheDocument();
 });
 
-test('focuses the conversation search with Cmd+K', async () => {
+test('opens global search with Cmd+K', async () => {
   setup();
   await screen.findByText('早上好，xiaolai。');
-  const search = screen.getByLabelText('搜索对话');
 
   // The window listener is installed by a mount effect that can land after the
-  // welcome text; retry the keydown until the focus change proves it is ready.
+  // welcome text; retry the keydown until the search input proves it is ready.
   await waitFor(() => {
     fireEvent.keyDown(window, { key: 'k', metaKey: true });
-    expect(search).toHaveFocus();
+    expect(screen.getByLabelText('搜索全部内容')).toHaveFocus();
   });
 });
 

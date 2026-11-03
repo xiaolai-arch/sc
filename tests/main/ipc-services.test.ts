@@ -74,6 +74,7 @@ function fakeMemory(overrides: Partial<MemoryService> = {}): MemoryService {
 function fakeSearch(overrides: Partial<SearchService> = {}): SearchService {
   return {
     search: vi.fn().mockResolvedValue([]),
+    searchAll: vi.fn().mockResolvedValue([]),
     rebuild: vi.fn().mockResolvedValue(undefined),
     dispose: vi.fn().mockResolvedValue(undefined),
     ...overrides
@@ -169,6 +170,8 @@ test('routes planning, practice, memory and search channels to the services', as
     await handlers.searchWorkspace({ workspaceId: 'ws-1', query: '极限', limit: 3 })
   ).toEqual([{ docId: 'n-1' }]);
   expect(search.search).toHaveBeenCalledWith('ws-1', '极限', 3);
+  expect(await handlers.searchAll({ query: '极限', limit: 3 })).toEqual([]);
+  expect(search.searchAll).toHaveBeenCalledWith('极限', 3);
   await handlers.rebuildSearchIndex();
   expect(search.rebuild).toHaveBeenCalled();
 });
@@ -205,6 +208,8 @@ test('rejects malformed planning, practice, memory and search inputs', async () 
   await expect(handlers.searchWorkspace({ workspaceId: 'ws-1' })).rejects.toThrow(
     '搜索关键词不能为空。'
   );
+  await expect(handlers.searchAll({ query: '  ' })).rejects.toThrow('搜索关键词不能为空。');
+  await expect(handlers.searchAll({})).rejects.toThrow('搜索关键词不能为空。');
 });
 
 test('submitting a review synthesizes memory for the workspace', async () => {

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Workspace } from '../../src/renderer/shell/Workspace';
 import { createMockApi } from '../../web/mock-api';
@@ -24,6 +24,20 @@ function nav() {
 function sidebar() {
   return screen.getAllByRole('complementary')[0]!;
 }
+
+test('opens a knowledge topic from global search', async () => {
+  const { api } = setup();
+  await api.createKnowledgeTopic({ name: 'LangChain', workspaceId: 'project' });
+  await mount(api);
+
+  fireEvent.keyDown(window, { key: 'k', metaKey: true });
+  const input = await screen.findByLabelText('搜索全部内容');
+  await userEvent.type(input, 'LangChain');
+  await userEvent.click(await screen.findByRole('option', { name: /LangChain/ }));
+
+  expect(await screen.findByLabelText('知识笔记')).toBeInTheDocument();
+  expect(screen.queryByLabelText('搜索全部内容')).not.toBeInTheDocument();
+});
 
 test('switches across the top sections and marks the active one', async () => {
   const { api } = setup();

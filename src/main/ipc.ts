@@ -108,7 +108,8 @@ export const IPC_CHANNELS = {
   clearUsage: 'study-coach:usage:clear',
   send: 'study-coach:butler:send',
   scanLocalClis: 'study-coach:local-cli:scan',
-  recalibrateLongPlan: 'study-coach:plans:recalibrate'
+  recalibrateLongPlan: 'study-coach:plans:recalibrate',
+  searchAll: 'study-coach:search:all'
 } as const;
 
 /** Streaming uses a separate request/event pair so the request map stays stable. */
@@ -747,6 +748,16 @@ function requireSearchWorkspace(value: unknown): {
   };
 }
 
+function requireSearchAll(value: unknown): { query: string; limit?: number } {
+  const input = requireObject(value, '搜索');
+  requireString(input.query, '搜索关键词');
+  const limit = optionalPositiveNumber(input.limit, '结果数量');
+  return {
+    query: input.query as string,
+    ...(limit !== undefined ? { limit } : {})
+  };
+}
+
 function requireListReviews(value: unknown): { workspaceId?: string; limit?: number } {
   if (value === undefined || value === null) return {};
   const input = requireObject(value, '读取复盘');
@@ -868,7 +879,8 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
     },
     getUsageSummary: async (input) => api.getUsageSummary(requireUsageDays(input)),
     clearUsage: async () => api.clearUsage(),
-    send: async (input) => api.send(requireSend(input))
+    send: async (input) => api.send(requireSend(input)),
+    searchAll: async (input) => api.searchAll(requireSearchAll(input))
   };
 
   // Every path through the bridge gets the same sanitized error envelope,
@@ -1076,6 +1088,7 @@ export function createStudyCoachBridge(
     restoreBackup: () => call<RestoreResult | null>(APP_IPC_CHANNELS.restoreBackup),
     restartApp: () => call<void>(APP_IPC_CHANNELS.restartApp),
     send: (input) => call(IPC_CHANNELS.send, input),
+    searchAll: (input) => call(IPC_CHANNELS.searchAll, input),
     async stream(input, onEvent) {
       const requestId = createRequestId();
       const unsubscribe = subscribe?.(BUTLER_STREAM_CHANNELS.event, (payload) => {

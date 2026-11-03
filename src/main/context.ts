@@ -685,6 +685,9 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     async searchWorkspace(input) {
       return (await getServices()).search.search(input.workspaceId, input.query, input.limit);
     },
+    async searchAll(input) {
+      return (await getServices()).search.searchAll(input.query, input.limit);
+    },
     async rebuildSearchIndex() {
       await (await getServices()).search.rebuild();
     },

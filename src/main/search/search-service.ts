@@ -8,9 +8,23 @@ import {
   type SearchService
 } from '../../shared/search';
 import type { WorkspaceService } from '../../shared/workspace';
+import { parseKnowledgeNoteFile } from '../knowledge/notes';
 import { createMutex } from '../workspace/fs-utils';
-import { assertSafeSegment, workspaceDir } from '../workspace/paths';
-import { parseFileDocs, parseWorkspaceRelPath, type IndexedDoc } from './documents';
+import {
+  assertSafeSegment,
+  knowledgeNoteFile,
+  knowledgeTopicFile,
+  knowledgeTopicsDir,
+  workspaceDir
+} from '../workspace/paths';
+import {
+  parseFileDocs,
+  parseKnowledgeNoteRelPath,
+  parseKnowledgeTopicDoc,
+  parseKnowledgeTopicRelPath,
+  parseWorkspaceRelPath,
+  type IndexedDoc
+} from './documents';
 import { buildSnippet, tokenize } from './tokenize';
 import {
   createChokidarWatcher,
@@ -32,15 +46,18 @@ export interface SearchServiceOptions {
 
 type MiniDoc = { id: string; title: string; content: string };
 
-type WorkspaceIndex = {
+type SearchIndex = {
   mini: MiniSearch<MiniDoc>;
   docs: Map<string, IndexedDoc>;
 };
 
 /** Which documents were produced from one vault file (for incremental removal). */
-type PathDocs = { workspaceId: string; docIds: string[] };
+type PathDocs = { scopeId: string; docIds: string[] };
 
-function newWorkspaceIndex(): WorkspaceIndex {
+/** Vault-global records (knowledge topics) share one index. */
+const GLOBAL_SCOPE = '';
+
+function newSearchIndex(): SearchIndex {
   return {
     mini: new MiniSearch<MiniDoc>({
       fields: ['title', 'content'],
@@ -64,7 +81,7 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
   const debounceMs = options.debounceMs ?? 100;
   const watcherFactory = options.watcherFactory ?? createChokidarWatcher;
 
-  const indexes = new Map<string, WorkspaceIndex>();
+  const indexes = new Map<string, SearchIndex>();
   const docsByPath = new Map<string, PathDocs>();
   const runExclusively = createMutex();
   let dirtyPaths = new Set<string>();
@@ -79,8 +96,8 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
     return rel.split(sep).join('/');
   }
 
-  function discardDoc(workspaceId: string, docId: string): void {
-    const index = indexes.get(workspaceId);
+  function discardDoc(scopeId: string, docId: string): void {
+    const index = indexes.get(scopeId);
     if (index === undefined) return;
     if (!index.docs.has(docId)) return;
     index.mini.discard(docId);
@@ -90,7 +107,7 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
   function removeDocsForPath(absPath: string): void {
     const entry = docsByPath.get(absPath);
     if (entry === undefined) return;
-    for (const docId of entry.docIds) discardDoc(entry.workspaceId, docId);
+    for (const docId of entry.docIds) discardDoc(entry.scopeId, docId);
     docsByPath.delete(absPath);
   }
 
@@ -98,7 +115,7 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
     const prefix = absDir.endsWith(sep) ? absDir : `${absDir}${sep}`;
     for (const [path, entry] of [...docsByPath]) {
       if (path === absDir || path.startsWith(prefix)) {
-        for (const docId of entry.docIds) discardDoc(entry.workspaceId, docId);
+        for (const docId of entry.docIds) discardDoc(entry.scopeId, docId);
         docsByPath.delete(path);
       }
     }
@@ -136,12 +153,53 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
     }
   }
 
+  /** Adds one file's documents, replacing any previous version of the same ids. */
+  function addDocs(abs: string, docs: IndexedDoc[]): void {
+    if (docs.length === 0) return;
+    const scopeId = docs[0]!.workspaceId ?? GLOBAL_SCOPE;
+    const index = indexes.get(scopeId) ?? newSearchIndex();
+    indexes.set(scopeId, index);
+    for (const doc of docs) {
+      // A duplicate record id in the same scope would otherwise corrupt the
+      // MiniSearch id set; discard the previous version first (last writer wins).
+      if (index.docs.has(doc.docId)) index.mini.discard(doc.docId);
+      index.mini.add({ id: doc.docId, title: doc.title, content: doc.content });
+      index.docs.set(doc.docId, doc);
+    }
+    docsByPath.set(abs, { scopeId, docIds: docs.map((doc) => doc.docId) });
+  }
+
   async function indexFile(absPath: string): Promise<void> {
     const abs = resolve(absPath);
     removeDocsForPath(abs);
     const rel = relUnderRoot(abs);
     if (rel === null || hasHiddenSegment(rel) || !abs.endsWith('.md')) return;
+
+    const knowledge = parseKnowledgeTopicRelPath(rel);
+    if (knowledge !== null) {
+      let stat;
+      try {
+        stat = await fs.lstat(abs);
+      } catch {
+        return; // vanished between event and read
+      }
+      if (!stat.isFile()) return;
+      const raw = await fs.readFile(abs, 'utf8').catch(() => null);
+      if (raw === null) return;
+      const noteRaw = await fs
+        .readFile(knowledgeNoteFile(vaultRoot, knowledge.topicId), 'utf8')
+        .catch(() => null);
+      const noteBody =
+        noteRaw === null ? '' : parseKnowledgeNoteFile(noteRaw, knowledge.topicId).body;
+      const doc = parseKnowledgeTopicDoc(rel, raw, noteBody);
+      if (doc !== null) addDocs(abs, [doc]);
+      return;
+    }
+
+    // Notes are indexed through their topic, which owns the search result.
+    if (parseKnowledgeNoteRelPath(rel) !== null) return;
     if (parseWorkspaceRelPath(rel) === null) return;
+
     let stat;
     try {
       stat = await fs.lstat(abs);
@@ -151,25 +209,27 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
     if (!stat.isFile()) return;
     const raw = await fs.readFile(abs, 'utf8').catch(() => null);
     if (raw === null) return;
-    const docs = parseFileDocs(rel, raw);
-    if (docs.length === 0) return;
-    const { workspaceId } = parseWorkspaceRelPath(rel) as { workspaceId: string };
-    const index = indexes.get(workspaceId) ?? newWorkspaceIndex();
-    indexes.set(workspaceId, index);
-    for (const doc of docs) {
-      // A duplicate record id in the same workspace would otherwise corrupt the
-      // MiniSearch id set; discard the previous version first (last writer wins).
-      if (index.docs.has(doc.docId)) index.mini.discard(doc.docId);
-      index.mini.add({ id: doc.docId, title: doc.title, content: doc.content });
-      index.docs.set(doc.docId, doc);
-    }
-    docsByPath.set(abs, { workspaceId, docIds: docs.map((doc) => doc.docId) });
+    addDocs(abs, parseFileDocs(rel, raw));
   }
 
   /** Applies one watcher event: index the file, or drop docs for removals/dirs. */
   async function applyEventPath(absPath: string): Promise<void> {
     const abs = resolve(absPath);
-    if (relUnderRoot(abs) === null) return;
+    const rel = relUnderRoot(abs);
+    if (rel === null) return;
+
+    // A note change (including deletion) re-indexes its topic, which owns the
+    // search result. Directory-wide note events rescan every topic.
+    const note = parseKnowledgeNoteRelPath(rel);
+    if (note !== null) {
+      await indexFile(knowledgeTopicFile(vaultRoot, note.topicId));
+      return;
+    }
+    if (rel === 'knowledge/notes') {
+      await rescanDirectory(knowledgeTopicsDir(vaultRoot));
+      return;
+    }
+
     let stat = null;
     try {
       stat = await fs.lstat(abs);
@@ -232,6 +292,7 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
       for (const workspace of workspaces) {
         await rescanDirectory(workspaceDir(vaultRoot, workspace.id));
       }
+      await rescanDirectory(knowledgeTopicsDir(vaultRoot));
     });
   }
 
@@ -273,6 +334,32 @@ export function createSearchService(options: SearchServiceOptions): SearchServic
         if (results.length >= max) break;
       }
       return results;
+    },
+
+    async searchAll(query: string, limit?: number): Promise<SearchResult[]> {
+      await ready;
+      const trimmed = typeof query === 'string' ? query.trim() : '';
+      if (trimmed.length === 0) return [];
+      const max = limit ?? DEFAULT_SEARCH_LIMIT;
+      if (!Number.isFinite(max) || max <= 0) return [];
+      const results: SearchResult[] = [];
+      for (const index of indexes.values()) {
+        for (const hit of index.mini.search(trimmed)) {
+          const doc = index.docs.get(hit.id);
+          if (doc === undefined) continue;
+          results.push({
+            workspaceId: doc.workspaceId,
+            docId: doc.docId,
+            kind: doc.kind,
+            title: doc.title,
+            snippet: buildSnippet(`${doc.title} ${doc.content}`, trimmed, SEARCH_SNIPPET_LENGTH),
+            score: hit.score,
+            path: doc.path
+          });
+        }
+      }
+      results.sort((a, b) => b.score - a.score);
+      return results.slice(0, max);
     },
 
     rebuild,

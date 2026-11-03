@@ -66,6 +66,12 @@ export interface SearchWorkspaceInput {
   limit?: number;
 }
 
+export interface SearchAllInput {
+  query: string;
+  /** Defaults to the main-process search limit. */
+  limit?: number;
+}
+
 /**
  * Renderer-facing practice contract. The main process delegates straight to
  * `PracticeService`, so the result shapes are the shared vault records.
@@ -92,6 +98,7 @@ export interface MemoryApi {
 /** Renderer-facing vault search. `rebuild` is exposed; `dispose` stays main-only. */
 export interface SearchApi {
   searchWorkspace(input: SearchWorkspaceInput): Promise<SearchResult[]>;
+  searchAll(input: SearchAllInput): Promise<SearchResult[]>;
   rebuildSearchIndex(): Promise<void>;
 }
 

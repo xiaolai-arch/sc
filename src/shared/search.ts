@@ -15,11 +15,17 @@ export type SearchResultKind =
   | 'review'
   | 'practice-set'
   | 'practice-question'
-  | 'practice-mistake';
+  | 'practice-mistake'
+  | 'plan'
+  | 'knowledge-topic';
 
 export interface SearchResult {
-  workspaceId: string;
-  /** Record id within the workspace (task id, note id, question id, …). */
+  /** Owning workspace; null for vault-global knowledge topics. */
+  workspaceId: string | null;
+  /**
+   * Record id within the workspace (task id, note id, question id, …).
+   * Knowledge results use the topic id.
+   */
   docId: string;
   kind: SearchResultKind;
   title: string;
@@ -33,6 +39,8 @@ export interface SearchResult {
 
 export interface SearchService {
   search(workspaceId: string, query: string, limit?: number): Promise<SearchResult[]>;
+  /** Searches every workspace plus vault-global knowledge, ranked together. */
+  searchAll(query: string, limit?: number): Promise<SearchResult[]>;
   /** Re-scans the whole vault (cold start, or after suspected missed events). */
   rebuild(): Promise<void>;
   /** Stops the watcher and drops the index. */

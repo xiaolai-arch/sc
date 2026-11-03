@@ -15,6 +15,10 @@ import { createPracticeService } from '../../src/main/practice';
 import { writeFileAtomic } from '../../src/main/workspace/fs-utils';
 import { serializeNoteFile, type NoteRecord } from '../../src/main/workspace/records/notes';
 import { serializeTaskFile, type TaskRecord } from '../../src/main/workspace/records/tasks';
+import { serializeLongPlanFile } from '../../src/main/plans/records';
+import { serializeKnowledgeTopicFile } from '../../src/main/knowledge/records';
+import type { LongPlan } from '../../src/shared/plans';
+import type { KnowledgeTopic } from '../../src/shared/knowledge';
 
 /** Test double: records the registered handlers so tests push events synchronously. */
 function createFakeWatcher() {
@@ -383,4 +387,150 @@ test('dispose closes the watcher once and stops applying updates', async () => {
   fake.emit('add', join(root, 'workspaces', 'kaoyan', 'notes', 'late.md'));
   await sleep(50);
   expect(await service.search('kaoyan', '极限')).toEqual([]);
+});
+
+const PLAN: LongPlan = {
+  id: 'lp-search',
+  workspaceId: 'kaoyan',
+  goal: '独门计划词：三个月转 Agent 开发',
+  startDate: '2026-11-02',
+  weeks: 1,
+  weeklyHours: 10,
+  generatedBy: 'agent',
+  references: '岗位 JD 参考',
+  createdAt: '2026-11-01T00:00:00.000Z',
+  updatedAt: '2026-11-01T00:00:00.000Z',
+  phases: [
+    {
+      id: 'ph-1',
+      title: '工程底座',
+      subtitle: '先跑通最小闭环',
+      goal: '搭好本地环境',
+      weeks: [
+        {
+          id: 'w1',
+          number: 1,
+          title: '第 1 周',
+          goal: '完成第一次调用',
+          startDate: '2026-11-02',
+          endDate: '2026-11-08',
+          days: [
+            {
+              id: 'w1d1',
+              date: '2026-11-02',
+              weekday: '周一',
+              tasks: ['跑通 LLM API 调用'],
+              output: '可运行的调用脚本',
+              done: false
+            }
+          ],
+          checks: [{ id: 'w1c1', text: '完成最小闭环', done: false }]
+        }
+      ]
+    }
+  ]
+};
+
+const TOPIC: KnowledgeTopic = {
+  id: 'kt-search',
+  name: '检索主题',
+  aliases: ['检索别名'],
+  status: 'learning',
+  summary: '独门知识摘要',
+  evidence: [
+    {
+      id: 'e1',
+      kind: 'note',
+      title: '学习笔记',
+      date: '2026-11-01',
+      note: 'AgentExecutor 用法'
+    }
+  ],
+  createdAt: '2026-11-01T00:00:00.000Z',
+  updatedAt: '2026-11-01T00:00:00.000Z'
+};
+
+async function writeKnowledge(topic: KnowledgeTopic, noteBody: string): Promise<string> {
+  await writeFileAtomic(
+    join(root, 'knowledge', 'topics', `${topic.id}.md`),
+    serializeKnowledgeTopicFile(topic)
+  );
+  const notePath = join(root, 'knowledge', 'notes', `${topic.id}.md`);
+  await writeFileAtomic(notePath, noteBody);
+  return notePath;
+}
+
+test('searchAll includes long plans and keeps workspace scoping', async () => {
+  await seedVault();
+  await writeFileAtomic(
+    join(root, 'workspaces', 'kaoyan', 'plans', 'lp-search.md'),
+    serializeLongPlanFile(PLAN)
+  );
+  const { service } = startService();
+
+  const hits = await service.searchAll('独门计划词');
+  expect(hits.some((hit) => hit.kind === 'plan' && hit.docId === 'lp-search')).toBe(true);
+  expect(hits.find((hit) => hit.docId === 'lp-search')).toMatchObject({
+    workspaceId: 'kaoyan',
+    title: PLAN.goal,
+    path: 'workspaces/kaoyan/plans/lp-search.md'
+  });
+  expect((await service.search('kaoyan', '独门计划词')).some((hit) => hit.kind === 'plan')).toBe(true);
+  expect(await service.search('english', '独门计划词')).toEqual([]);
+});
+
+test('searchAll indexes knowledge topics with their note bodies', async () => {
+  await seedVault();
+  await writeKnowledge(TOPIC, '笔记正文独门词');
+  const { service } = startService();
+
+  const bySummary = await service.searchAll('独门知识摘要');
+  expect(bySummary).toHaveLength(1);
+  expect(bySummary[0]).toMatchObject({
+    workspaceId: null,
+    docId: 'kt-search',
+    kind: 'knowledge-topic',
+    title: '检索主题',
+    path: 'knowledge/topics/kt-search.md'
+  });
+
+  const byNote = await service.searchAll('笔记正文独门词');
+  expect(byNote.some((hit) => hit.docId === 'kt-search')).toBe(true);
+  expect(await service.search('kaoyan', '笔记正文独门词')).toEqual([]);
+});
+
+test('re-indexes a knowledge topic when its note changes or disappears', async () => {
+  await seedVault();
+  const notePath = await writeKnowledge(TOPIC, '苹果香蕉');
+  const { service, fake } = startService();
+  expect((await service.searchAll('苹果香蕉')).some((hit) => hit.docId === 'kt-search')).toBe(true);
+
+  await writeFileAtomic(notePath, '橘子葡萄');
+  fake.emit('change', notePath);
+  await vi.waitFor(
+    async () => {
+      expect((await service.searchAll('橘子葡萄')).some((hit) => hit.docId === 'kt-search')).toBe(true);
+      expect(await service.searchAll('苹果香蕉')).toEqual([]);
+    },
+    { timeout: 2000, interval: 10 }
+  );
+
+  await fs.rm(notePath);
+  fake.emit('unlink', notePath);
+  await vi.waitFor(
+    async () => {
+      expect(await service.searchAll('橘子葡萄')).toEqual([]);
+      expect((await service.searchAll('独门知识摘要')).some((hit) => hit.docId === 'kt-search')).toBe(true);
+    },
+    { timeout: 2000, interval: 10 }
+  );
+});
+
+test('searchAll handles empty queries and limits', async () => {
+  await seedVault();
+  const { service } = startService();
+  expect(await service.searchAll('')).toEqual([]);
+  expect(await service.searchAll('   ')).toEqual([]);
+  expect((await service.searchAll('极限', 2)).length).toBeLessThanOrEqual(2);
+  expect(await service.searchAll('极限', 0)).toEqual([]);
 });

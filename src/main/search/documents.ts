@@ -8,6 +8,9 @@ import {
   parseMistakesFile,
   parsePracticeSetFile
 } from '../practice/records';
+import { parseLongPlanFile } from '../plans/records';
+import { parseKnowledgeTopicFile } from '../knowledge/records';
+import type { LongPlan } from '../../shared/plans';
 import type { SearchResultKind } from '../../shared/search';
 
 /** One searchable record extracted from a vault file. */
@@ -19,6 +22,8 @@ export type IndexedDoc = {
   content: string;
   /** Vault-relative posix path of the source file. */
   path: string;
+  /** Owning workspace; null for vault-global knowledge topics. */
+  workspaceId: string | null;
 };
 
 /**
@@ -49,6 +54,82 @@ function dateFromFileName(fileName: string): string {
   return fileName.replace(/\.md$/, '');
 }
 
+function planSearchText(plan: LongPlan): string {
+  const parts: string[] = [plan.goal, plan.references ?? ''];
+  for (const source of plan.sources ?? []) parts.push(source.title);
+  for (const topic of plan.knowledge ?? []) parts.push(topic.name);
+  for (const phase of plan.phases) {
+    parts.push(phase.title, phase.subtitle, phase.goal);
+    for (const week of phase.weeks) {
+      parts.push(week.title, week.goal);
+      for (const check of week.checks) parts.push(check.text);
+      for (const day of week.days) parts.push(...day.tasks, day.output);
+    }
+  }
+  return parts.join(' ');
+}
+
+/**
+ * Validates a vault-global knowledge path. Topic and note files are keyed by
+ * their filename id, so a hand-edited frontmatter id can never redirect a read.
+ */
+function parseKnowledgeRelPath(
+  relPath: string,
+  dir: 'topics' | 'notes'
+): { topicId: string } | null {
+  const segments = relPath.split('/');
+  if (segments.length !== 3 || segments[0] !== 'knowledge' || segments[1] !== dir) {
+    return null;
+  }
+  const fileName = segments[2] as string;
+  if (!fileName.endsWith('.md')) return null;
+  const topicId = fileName.slice(0, -3);
+  try {
+    assertSafeSegment(topicId, 'knowledge topic id');
+  } catch {
+    return null;
+  }
+  return { topicId };
+}
+
+export function parseKnowledgeTopicRelPath(relPath: string): { topicId: string } | null {
+  return parseKnowledgeRelPath(relPath, 'topics');
+}
+
+export function parseKnowledgeNoteRelPath(relPath: string): { topicId: string } | null {
+  return parseKnowledgeRelPath(relPath, 'notes');
+}
+
+/**
+ * A knowledge topic and its note are one search result: the note body belongs
+ * to the topic, so searching either one opens the same note.
+ */
+export function parseKnowledgeTopicDoc(
+  relPath: string,
+  raw: string,
+  noteBody: string
+): IndexedDoc | null {
+  const parsed = parseKnowledgeTopicRelPath(relPath);
+  if (parsed === null) return null;
+  const topic = parseKnowledgeTopicFile(raw, parsed.topicId);
+  if (topic === null) return null;
+  const content = [
+    topic.name,
+    topic.aliases.join(' '),
+    topic.summary,
+    ...topic.evidence.map((entry) => `${entry.title} ${entry.note ?? ''}`),
+    noteBody
+  ].join(' ');
+  return {
+    docId: parsed.topicId,
+    kind: 'knowledge-topic',
+    title: topic.name,
+    content,
+    path: relPath,
+    workspaceId: topic.workspaceId ?? null
+  };
+}
+
 /**
  * Parses one vault markdown file into its searchable documents. Files that are
  * not workspace records (or that fail to parse) produce no documents. Practice
@@ -62,7 +143,7 @@ export function parseFileDocs(relPath: string, raw: string): IndexedDoc[] {
   const [head, second] = sub;
   const docs: IndexedDoc[] = [];
   const push = (docId: string, kind: SearchResultKind, title: string, content: string): void => {
-    docs.push({ docId, kind, title, content, path: relPath });
+    docs.push({ docId, kind, title, content, path: relPath, workspaceId });
   };
 
   // `workspaces/<id>/workspace.md` — the workspace profile itself.
@@ -98,6 +179,13 @@ export function parseFileDocs(relPath: string, raw: string): IndexedDoc[] {
       record.summary,
       record.body
     ].join(' '));
+    return docs;
+  }
+
+  if (head === 'plans' && second !== undefined && second.endsWith('.md')) {
+    const plan = parseLongPlanFile(raw, dateFromFileName(second));
+    if (plan === null) return [];
+    push(plan.id, 'plan', plan.goal, planSearchText(plan));
     return docs;
   }
 

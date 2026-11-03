@@ -1,8 +1,13 @@
 import { buildSnippet, tokenize } from '../../src/main/search/tokenize';
 import {
   parseFileDocs,
+  parseKnowledgeTopicDoc,
   parseWorkspaceRelPath
 } from '../../src/main/search/documents';
+import { serializeLongPlanFile } from '../../src/main/plans/records';
+import { serializeKnowledgeTopicFile } from '../../src/main/knowledge/records';
+import type { LongPlan } from '../../src/shared/plans';
+import type { KnowledgeTopic } from '../../src/shared/knowledge';
 import { serializeWorkspaceFile } from '../../src/main/workspace/records/workspace';
 import { serializeNoteFile, type NoteRecord } from '../../src/main/workspace/records/notes';
 import { serializeTaskFile, type TaskRecord } from '../../src/main/workspace/records/tasks';
@@ -202,4 +207,113 @@ test('parseFileDocs skips non-records and foreign paths', () => {
   expect(parseFileDocs('workspaces/kaoyan/practice/attempts/2026-11-01.md', '日志')).toEqual([]);
   // Unknown subpaths are ignored.
   expect(parseFileDocs('workspaces/kaoyan/unknown/x.md', '内容')).toEqual([]);
+});
+
+const PLAN: LongPlan = {
+  id: 'lp-1',
+  workspaceId: 'kaoyan',
+  goal: '三个月转 Agent 开发',
+  startDate: '2026-11-02',
+  weeks: 1,
+  weeklyHours: 10,
+  generatedBy: 'agent',
+  references: '岗位 JD 参考',
+  knowledge: [{ name: 'LangChain', status: 'learning' }],
+  createdAt: '2026-11-01T00:00:00.000Z',
+  updatedAt: '2026-11-01T00:00:00.000Z',
+  phases: [
+    {
+      id: 'ph-1',
+      title: '工程底座',
+      subtitle: '先跑通最小闭环',
+      goal: '搭好本地环境',
+      weeks: [
+        {
+          id: 'w1',
+          number: 1,
+          title: '第 1 周',
+          goal: '完成第一次调用',
+          startDate: '2026-11-02',
+          endDate: '2026-11-08',
+          days: [
+            {
+              id: 'w1d1',
+              date: '2026-11-02',
+              weekday: '周一',
+              tasks: ['跑通 LLM API 调用'],
+              output: '可运行的调用脚本',
+              done: false
+            }
+          ],
+          checks: [{ id: 'w1c1', text: '完成最小闭环', done: false }]
+        }
+      ]
+    }
+  ]
+};
+
+const TOPIC: KnowledgeTopic = {
+  id: 'kt-1',
+  name: 'LangChain',
+  aliases: ['LC'],
+  status: 'learning',
+  summary: '编排框架',
+  evidence: [
+    {
+      id: 'e1',
+      kind: 'note',
+      title: '学习笔记',
+      date: '2026-11-01',
+      note: 'AgentExecutor 用法'
+    }
+  ],
+  createdAt: '2026-11-01T00:00:00.000Z',
+  updatedAt: '2026-11-01T00:00:00.000Z'
+};
+
+test('parseFileDocs indexes long plans with their weeks and days', () => {
+  const docs = parseFileDocs(
+    'workspaces/kaoyan/plans/lp-1.md',
+    serializeLongPlanFile(PLAN)
+  );
+  expect(docs).toHaveLength(1);
+  expect(docs[0]).toMatchObject({
+    docId: 'lp-1',
+    kind: 'plan',
+    title: '三个月转 Agent 开发',
+    workspaceId: 'kaoyan',
+    path: 'workspaces/kaoyan/plans/lp-1.md'
+  });
+  expect(docs[0]?.content).toContain('跑通 LLM API 调用');
+  expect(docs[0]?.content).toContain('完成最小闭环');
+  expect(docs[0]?.content).toContain('岗位 JD 参考');
+});
+
+test('parseKnowledgeTopicDoc includes the topic fields and note body', () => {
+  const doc = parseKnowledgeTopicDoc(
+    'knowledge/topics/kt-1.md',
+    serializeKnowledgeTopicFile(TOPIC),
+    '笔记正文里的独特检索词'
+  );
+  expect(doc).toMatchObject({
+    docId: 'kt-1',
+    kind: 'knowledge-topic',
+    title: 'LangChain',
+    workspaceId: null,
+    path: 'knowledge/topics/kt-1.md'
+  });
+  expect(doc?.content).toContain('编排框架');
+  expect(doc?.content).toContain('AgentExecutor');
+  expect(doc?.content).toContain('笔记正文里的独特检索词');
+});
+
+test('parseKnowledgeTopicDoc keeps a topic workspace and rejects unsafe paths', () => {
+  const scoped = parseKnowledgeTopicDoc(
+    'knowledge/topics/kt-1.md',
+    serializeKnowledgeTopicFile({ ...TOPIC, workspaceId: 'kaoyan' }),
+    ''
+  );
+  expect(scoped?.workspaceId).toBe('kaoyan');
+  expect(parseKnowledgeTopicDoc('knowledge/topics/../evil.md', serializeKnowledgeTopicFile(TOPIC), '')).toBeNull();
+  expect(parseKnowledgeTopicDoc('knowledge/notes/kt-1.md', serializeKnowledgeTopicFile(TOPIC), '')).toBeNull();
 });

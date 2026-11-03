@@ -2,6 +2,7 @@ import type {
   Bootstrap,
   ListReviewsInput,
   ReviewRecord,
+  SearchAllInput,
   SearchWorkspaceInput,
   SettingsPatch,
   StudyCoachApi
@@ -562,6 +563,25 @@ export function createMockApi(
         path: `workspaces/${workspaceId}/reviews/${review.date}.md`
       });
     }
+    for (const plan of state.plans.filter((entry) => entry.workspaceId === workspaceId)) {
+      const parts = [plan.goal, plan.references ?? ''];
+      for (const topic of plan.knowledge ?? []) parts.push(topic.name);
+      for (const phase of plan.phases) {
+        parts.push(phase.title, phase.subtitle, phase.goal);
+        for (const week of phase.weeks) {
+          parts.push(week.title, week.goal);
+          for (const check of week.checks) parts.push(check.text);
+          for (const day of week.days) parts.push(...day.tasks, day.output);
+        }
+      }
+      docs.push({
+        docId: plan.id,
+        kind: 'plan',
+        title: plan.goal,
+        content: parts.join('\n'),
+        path: `workspaces/${workspaceId}/plans/${plan.id}.md`
+      });
+    }
     for (const set of state.practiceSets.filter((entry) => entry.workspaceId === workspaceId)) {
       docs.push({
         docId: set.id,
@@ -581,6 +601,50 @@ export function createMockApi(
       }
     }
     return docs;
+  }
+
+  /** Each knowledge topic and its note are one search result. */
+  function knowledgeSearchDocs() {
+    return state.knowledgeTopics.map((topic) => {
+      const note = state.knowledgeNotes[topic.id];
+      return {
+        docId: topic.id,
+        kind: 'knowledge-topic' as const,
+        title: topic.name,
+        content: [
+          topic.name,
+          topic.aliases.join(' '),
+          topic.summary,
+          ...topic.evidence.map((entry) => `${entry.title} ${entry.note ?? ''}`),
+          note?.body ?? ''
+        ].join('\n'),
+        path: `knowledge/topics/${topic.id}.md`,
+        workspaceId: topic.workspaceId ?? null
+      };
+    });
+  }
+
+  function searchResultFromDoc(
+    doc: {
+      docId: string;
+      kind: SearchResultKind;
+      title: string;
+      content: string;
+      path: string;
+    },
+    workspaceId: string | null,
+    query: string,
+    needle: string
+  ): SearchResult {
+    return {
+      workspaceId,
+      docId: doc.docId,
+      kind: doc.kind,
+      title: doc.title,
+      snippet: snippetOf(`${doc.title} ${doc.content}`, query),
+      score: doc.title.toLowerCase().includes(needle) ? 3 : 1,
+      path: doc.path
+    };
   }
 
   function snippetOf(text: string, query: string): string {
@@ -1250,6 +1314,32 @@ export function createMockApi(
             path: doc.path
           })
         );
+    },
+
+    async searchAll(input: SearchAllInput): Promise<SearchResult[]> {
+      const query = input.query.trim();
+      if (query.length === 0) return [];
+      const limit = input.limit ?? 20;
+      const needle = query.toLowerCase();
+      const docs = [
+        ...state.workspaces.flatMap((workspace) =>
+          searchDocs(workspace.id).map((doc) => ({
+            doc,
+            workspaceId: workspace.id as string | null
+          }))
+        ),
+        ...knowledgeSearchDocs().map((doc) => ({
+          doc,
+          workspaceId: doc.workspaceId
+        }))
+      ];
+      return docs
+        .filter(({ doc }) => `${doc.title}\n${doc.content}`.toLowerCase().includes(needle))
+        .map(({ doc, workspaceId }) =>
+          searchResultFromDoc(doc, workspaceId, query, needle)
+        )
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit);
     },
 
     async rebuildSearchIndex(): Promise<void> {

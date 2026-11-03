@@ -110,6 +110,19 @@ test.describe('ASAKI desktop', () => {
         expect(notes.some((text) => text.includes('会搭 AgentExecutor'))).toBe(true);
       });
 
+      await test.step('finds a knowledge note through global search', async () => {
+        await page.getByRole('button', { name: '今日安排' }).click();
+        await page.waitForTimeout(400);
+        await page.keyboard.press('Meta+K');
+        const search = page.getByLabel('搜索全部内容');
+        await expect(search).toBeVisible();
+        await search.fill('LangChain');
+        const result = page.getByRole('option', { name: /LangChain/ }).first();
+        await expect(result).toBeVisible({ timeout: 10_000 });
+        await result.click();
+        await expect(page.getByLabel('知识笔记')).toBeVisible();
+      });
+
       await test.step('writes the project to the vault', async () => {
         const workspaces = await readdir(join(environment.vault, 'workspaces'));
         expect(workspaces.length).toBeGreaterThan(0);

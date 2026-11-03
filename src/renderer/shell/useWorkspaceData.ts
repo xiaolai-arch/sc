@@ -93,6 +93,7 @@ export type WorkspaceData = WorkspaceDataState & {
   submitPracticeAnswer: (input: SubmitAnswerInput) => Promise<SubmitAnswerResult>;
   generatePlan: (workspaceId: string) => Promise<WorkspacePlan>;
   searchWorkspace: (workspaceId: string, query: string, limit?: number) => Promise<SearchResult[]>;
+  searchAll: (query: string, limit?: number) => Promise<SearchResult[]>;
   send: (input: SendMessageInput) => Promise<SendMessageResult>;
   stream: (
     input: SendMessageInput,
@@ -456,6 +457,12 @@ export function useWorkspaceData(): WorkspaceData {
     []
   );
 
+  const searchAll = useCallback(
+    async (query: string, limit?: number) =>
+      apiOrThrow().searchAll({ query, ...(limit !== undefined ? { limit } : {}) }),
+    []
+  );
+
   const send = useCallback(
     async (input: SendMessageInput) => {
       const result = await apiOrThrow().send(input);
@@ -597,6 +604,7 @@ export function useWorkspaceData(): WorkspaceData {
     submitPracticeAnswer,
     generatePlan,
     searchWorkspace,
+    searchAll,
     send,
     stream,
     cancelStream,

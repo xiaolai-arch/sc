@@ -398,6 +398,36 @@ test('saves knowledge notes and derives backlinks in the prototype', async () =>
   ).rejects.toThrow(/200000/);
 });
 
+test('searches plans and knowledge notes across the prototype vault', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage);
+  const topic = await api.createKnowledgeTopic({ name: '检索主题', workspaceId: 'project' });
+  await api.saveKnowledgeNote({ topicId: topic.id, body: '葡萄柚独门笔记' });
+  const plan = await api.createLongPlan({
+    workspaceId: 'project',
+    goal: '蓝莓导轨计划',
+    weeks: 1,
+    weeklyHours: 6
+  });
+
+  const noteHits = await api.searchAll({ query: '葡萄柚', limit: 5 });
+  expect(noteHits[0]).toMatchObject({
+    workspaceId: 'project',
+    docId: topic.id,
+    kind: 'knowledge-topic',
+    title: '检索主题'
+  });
+  const planHits = await api.searchAll({ query: '蓝莓导轨', limit: 5 });
+  expect(planHits[0]).toMatchObject({
+    workspaceId: 'project',
+    docId: plan.id,
+    kind: 'plan',
+    title: '蓝莓导轨计划'
+  });
+  expect(await api.searchAll({ query: '   ' })).toEqual([]);
+  expect((await api.searchAll({ query: '葡萄柚', limit: 1 })).length).toBeLessThanOrEqual(1);
+});
+
 test('streams reasoning, a tool step and the final reply', async () => {
   localStorage.clear();
   const api = createMockApi(localStorage);

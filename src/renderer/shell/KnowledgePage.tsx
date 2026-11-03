@@ -29,6 +29,8 @@ type KnowledgePageProps = {
   topics: KnowledgeTopic[];
   workspaces: Workspace[];
   defaultWorkspaceId?: string | null;
+  /** Opens this topic when the page mounts (global-search deep link). */
+  focusTopicId?: string | null;
   onOpenSidebar: () => void;
   onCreateTopic: (input: CreateKnowledgeTopicInput) => Promise<KnowledgeTopic>;
   onUpdateTopic: (input: UpdateKnowledgeTopicInput) => Promise<KnowledgeTopic>;
@@ -122,6 +124,7 @@ export function KnowledgePage({
   topics,
   workspaces,
   defaultWorkspaceId,
+  focusTopicId,
   onOpenSidebar,
   onCreateTopic,
   onUpdateTopic,
@@ -168,6 +171,13 @@ export function KnowledgePage({
       setSelectedId(topics[0]?.id ?? null);
     }
   }, [topics, selectedId]);
+
+  useEffect(() => {
+    if (!focusTopicId) return;
+    setQuery('');
+    setSelectedId(focusTopicId);
+    setMobilePane('note');
+  }, [focusTopicId]);
 
   function selectTopic(topicId: string) {
     setSelectedId(topicId);

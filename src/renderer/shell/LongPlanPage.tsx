@@ -34,6 +34,8 @@ type LongPlanPageProps = {
   plans: LongPlan[];
   workspaces: Workspace[];
   defaultWorkspaceId?: string | null;
+  /** Opens this plan when the page mounts (global-search deep link). */
+  focusPlanId?: string | null;
   today: string;
   onOpenSidebar: () => void;
   onCreatePlan: (input: CreateLongPlanInput) => Promise<LongPlan>;
@@ -379,6 +381,7 @@ export function LongPlanPage({
   plans,
   workspaces,
   defaultWorkspaceId,
+  focusPlanId,
   today,
   onOpenSidebar,
   onCreatePlan,
@@ -422,6 +425,11 @@ export function LongPlanPage({
   }, [workspaces]);
   const progress = selectedPlan ? planProgress(selectedPlan) : null;
   const basis = selectedPlan ? planBasis(selectedPlan) : 'model';
+
+  useEffect(() => {
+    if (!focusPlanId) return;
+    setSelectedId(focusPlanId);
+  }, [focusPlanId]);
 
   useEffect(() => {
     if (!selectedPlan) {

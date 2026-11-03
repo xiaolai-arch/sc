@@ -7,6 +7,7 @@ import {
 } from '../../shared/conversations';
 import type { LongPlan, LongPlanDay } from '../../shared/plans';
 import type { SendMessageInput, WorkspaceNote } from '../../shared/workspace';
+import type { SearchResult } from '../../shared/search';
 import { SettingsPage } from '../settings/SettingsPage';
 import { Dialog } from '../ui/Dialog';
 import { ChatPane } from './ChatPane';
@@ -23,6 +24,7 @@ import {
   type FocusSession
 } from './focus-timer';
 import { KnowledgePage } from './KnowledgePage';
+import { GlobalSearchDialog } from './GlobalSearchDialog';
 import { LearningPane } from './LearningPane';
 import { LongPlanPage } from './LongPlanPage';
 import { MemoryPage } from './MemoryPage';
@@ -159,7 +161,8 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     deleteKnowledgeTopic,
     getKnowledgeNote,
     saveKnowledgeNote,
-    getKnowledgeBacklinks
+    getKnowledgeBacklinks,
+    searchAll
   } = useWorkspaceData();
   const conversations = useConversations();
   const [section, setSection] = useState<Section>('chat');
@@ -178,6 +181,9 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   const [focusNotice, setFocusNotice] = useState<string | null>(null);
   const [snoozedUntil, setSnoozedUntil] = useState<string | null>(null);
   const [quickCaptureOpen, setQuickCaptureOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [knowledgeFocusTopicId, setKnowledgeFocusTopicId] = useState<string | null>(null);
+  const [planFocusId, setPlanFocusId] = useState<string | null>(null);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [modelSaving, setModelSaving] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
@@ -192,6 +198,16 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   const streamGenerationRef = useRef(0);
   const activeConversationIdRef = useRef<string | null>(null);
   activeConversationIdRef.current = conversations.active?.id ?? null;
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (!((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k')) return;
+      event.preventDefault();
+      setSearchOpen(true);
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   const currentWorkspace = workspaces.find((workspace) => workspace.id === projectId) ?? null;
   const chatWorkspaceId =
@@ -1023,6 +1039,51 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     void conversations.select(id);
   }
 
+  async function openNotePreview(workspaceId: string, noteId: string): Promise<void> {
+    try {
+      const snapshot = await window.studyCoach?.getWorkspaceSnapshot(workspaceId);
+      const note = snapshot?.notes.find((entry) => entry.id === noteId);
+      if (note) setPreviewNote(note);
+    } catch {
+      // The workspace page is still open; the note simply has no preview.
+    }
+  }
+
+  /** Deep-links a global-search result to the page that owns it. */
+  function openSearchResult(result: SearchResult) {
+    setSearchOpen(false);
+    if (result.kind === 'knowledge-topic') {
+      setKnowledgeFocusTopicId(result.docId);
+      changeNavigation('knowledge');
+      return;
+    }
+    if (result.kind === 'plan') {
+      setPlanFocusId(result.docId);
+      changeSection('plan');
+      return;
+    }
+    if (result.kind === 'memory') {
+      changeNavigation('memory');
+      return;
+    }
+    if (result.kind === 'review') {
+      changeNavigation('review');
+      return;
+    }
+    if (result.kind === 'note' && result.workspaceId) {
+      setProjectId(result.workspaceId);
+      setChatScope('workspace');
+      changeSection('projects');
+      void openNotePreview(result.workspaceId, result.docId);
+      return;
+    }
+    if (result.workspaceId) {
+      setProjectId(result.workspaceId);
+      setChatScope('workspace');
+    }
+    changeSection('projects');
+  }
+
   /** Turn one long-plan day into ordinary tasks, so 今日安排 can schedule them. */
   async function addPlanDayToSchedule(plan: LongPlan, day: LongPlanDay) {
     const workspace = workspaces.find((entry) => entry.id === plan.workspaceId);
@@ -1129,7 +1190,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
           onRenameConversation={(id, title) => void renameConversation(id, title)}
           onTogglePinned={(id, pinned) => void togglePinnedConversation(id, pinned)}
           onDeleteConversation={(id) => void deleteConversation(id)}
-          onSearchConversations={conversations.search}
+          onOpenSearch={() => setSearchOpen(true)}
           mobileOpen={sidebarOpen}
           onCloseMobile={() => setSidebarOpen(false)}
         />
@@ -1183,6 +1244,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               plans={longPlans}
               workspaces={workspaces}
               defaultWorkspaceId={projectId}
+              focusPlanId={planFocusId}
               today={today}
               onOpenSidebar={() => setSidebarOpen(true)}
               onCreatePlan={createLongPlan}
@@ -1229,6 +1291,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               topics={knowledgeTopics}
               workspaces={workspaces}
               defaultWorkspaceId={projectId}
+              focusTopicId={knowledgeFocusTopicId}
               onOpenSidebar={() => setSidebarOpen(true)}
               onCreateTopic={createKnowledgeTopic}
               onUpdateTopic={updateKnowledgeTopic}
@@ -1378,6 +1441,19 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
           </div>
         </div>
       ) : null}
+
+      <GlobalSearchDialog
+        open={searchOpen}
+        workspaces={workspaces}
+        onClose={() => setSearchOpen(false)}
+        onSearchConversations={conversations.search}
+        onSearchAll={searchAll}
+        onSelectConversation={(id) => {
+          setSearchOpen(false);
+          selectConversation(id);
+        }}
+        onSelectResult={openSearchResult}
+      />
 
       <QuickCaptureDialog
         open={quickCaptureOpen}
