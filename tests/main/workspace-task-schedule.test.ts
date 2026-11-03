@@ -110,3 +110,66 @@ test('rejects invalid start times and empty updates', async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('edits task fields and clears the due date', async () => {
+  const { dir, service, workspace } = await setup();
+  try {
+    const created = await service.createTask({
+      ...taskInput(workspace.id),
+      due: '2026-11-05'
+    });
+
+    const updated = await service.updateWorkspaceTask({
+      taskId: created.id,
+      title: '真题第二套',
+      subject: '英语',
+      durationMin: 90,
+      acceptance: '阅读全对',
+      due: '2026-11-08'
+    });
+    expect(updated).toMatchObject({
+      id: created.id,
+      title: '真题第二套',
+      subject: '英语',
+      durationMin: 90,
+      acceptance: '阅读全对',
+      due: '2026-11-08'
+    });
+
+    const cleared = await service.updateWorkspaceTask({ taskId: created.id, due: null });
+    expect(cleared.due).toBeUndefined();
+
+    const snapshot = await service.getWorkspaceSnapshot(workspace.id);
+    expect(snapshot.tasks[0]).toMatchObject({ title: '真题第二套', durationMin: 90 });
+
+    await expect(
+      service.updateWorkspaceTask({ taskId: created.id, title: '   ' })
+    ).rejects.toThrow(/title/i);
+    await expect(
+      service.updateWorkspaceTask({ taskId: created.id, durationMin: -5 })
+    ).rejects.toThrow(/duration/i);
+    await expect(
+      service.updateWorkspaceTask({ taskId: created.id, due: '2026-13-40' })
+    ).rejects.toThrow(/due date/i);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('deletes a task and removes the task file when it becomes empty', async () => {
+  const { dir, service, workspace } = await setup();
+  try {
+    const first = await service.createTask(taskInput(workspace.id));
+    const second = await service.createTask(taskInput(workspace.id));
+
+    await service.deleteTask?.({ taskId: first.id });
+    const snapshot = await service.getWorkspaceSnapshot(workspace.id);
+    expect(snapshot.tasks.map((task) => task.id)).toEqual([second.id]);
+
+    await service.deleteTask?.({ taskId: second.id });
+    expect((await service.getWorkspaceSnapshot(workspace.id)).tasks).toEqual([]);
+    await expect(service.deleteTask?.({ taskId: second.id })).rejects.toThrow(/not found/i);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

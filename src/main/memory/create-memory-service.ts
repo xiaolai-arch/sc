@@ -1,4 +1,5 @@
 import type {
+  CreateMemoryInput,
   DeleteMemoryInput,
   MemoryKind,
   MemoryRecord,
@@ -191,6 +192,37 @@ export function createMemoryService(options: MemoryServiceOptions): MemoryServic
 
     async getProfile(workspaceId?: string) {
       return buildProfile(await collectRecords(workspaceId), now(), workspaceId);
+    },
+
+    async createRecord(input: CreateMemoryInput): Promise<MemoryRecord> {
+      const workspaceId = requireWorkspaceId(input?.workspaceId);
+      const text = requireMemoryText(input?.text);
+      const kind = requireMemoryKind(input?.kind);
+      await readWorkspaceOrThrow(workspaceId);
+
+      return runExclusively(async () => {
+        const raw = await readFileOrNull(memoryFile(vaultRoot, workspaceId));
+        const records = raw === null ? [] : parseMemoryRecords(raw, workspaceId);
+        if (raw !== null && raw.trim() !== '' && records.length === 0) {
+          const { meta } = parseNote(raw);
+          if (!Array.isArray(meta.items) || meta.items.length > 0) {
+            throw new Error('记忆文件格式无法识别，已停止写入以保护现有记录。');
+          }
+        }
+        const record: MemoryRecord = {
+          id: newId('m'),
+          workspaceId,
+          text,
+          kind,
+          source: 'manual',
+          createdAt: now().toISOString()
+        };
+        await writeFileAtomic(
+          memoryFile(vaultRoot, workspaceId),
+          serializeMemoryRecords([...records, record])
+        );
+        return record;
+      });
     },
 
     async updateRecord(input: UpdateMemoryInput): Promise<MemoryRecord> {

@@ -144,7 +144,10 @@ test('locks the public channel names', () => {
     send: 'study-coach:butler:send',
     scanLocalClis: 'study-coach:local-cli:scan',
     recalibrateLongPlan: 'study-coach:plans:recalibrate',
-    searchAll: 'study-coach:search:all'
+    searchAll: 'study-coach:search:all',
+    deleteTask: 'study-coach:workspaces:delete-task',
+    deleteReminder: 'study-coach:reminders:delete',
+    createMemory: 'study-coach:memory:create'
   });
 });
 
@@ -257,6 +260,13 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
     notes: '这周加班'
   });
   await bridge.searchAll({ query: '极限', limit: 5 });
+  await bridge.deleteTask?.({ taskId: 't1' });
+  await bridge.deleteReminder?.({ id: 'r1' });
+  await bridge.createMemory?.({
+    workspaceId: 'ws-1',
+    text: '更喜欢早上学习',
+    kind: 'preference'
+  });
 
   expect(calls.map((entry) => entry.channel)).toEqual(Object.values(IPC_CHANNELS));
   expect(calls[0]).toEqual({ channel: IPC_CHANNELS.getBootstrap, args: [] });
@@ -294,13 +304,21 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
     args: [{ planId: 'lp-1', weekId: 'w1', itemId: 'w1d1', kind: 'day', done: true }]
   });
   expect(calls[24]).toEqual({ channel: IPC_CHANNELS.deleteLongPlan, args: ['lp-1'] });
-  expect(calls.at(-2)).toEqual({
-    channel: IPC_CHANNELS.recalibrateLongPlan,
-    args: [{ planId: 'lp-1', weeklyHours: 8, notes: '这周加班' }]
-  });
-  expect(calls.at(-1)).toEqual({
+  expect(calls.at(-4)).toEqual({
     channel: IPC_CHANNELS.searchAll,
     args: [{ query: '极限', limit: 5 }]
+  });
+  expect(calls.at(-3)).toEqual({
+    channel: IPC_CHANNELS.deleteTask,
+    args: [{ taskId: 't1' }]
+  });
+  expect(calls.at(-2)).toEqual({
+    channel: IPC_CHANNELS.deleteReminder,
+    args: [{ id: 'r1' }]
+  });
+  expect(calls.at(-1)).toEqual({
+    channel: IPC_CHANNELS.createMemory,
+    args: [{ workspaceId: 'ws-1', text: '更喜欢早上学习', kind: 'preference' }]
   });
   expect(calls[35]).toEqual({
     channel: IPC_CHANNELS.updateMemory,

@@ -12,6 +12,8 @@ import type {
   CreateReminderInput,
   CreateTaskInput,
   CreateWorkspaceInput,
+  DeleteReminderInput,
+  DeleteTaskInput,
   MemoryItem,
   Reminder,
   SendMessageInput,
@@ -61,6 +63,7 @@ import type {
 } from '../src/shared/practice';
 import { PRACTICE_INTERVALS } from '../src/shared/practice';
 import type {
+  CreateMemoryInput,
   LearnerProfile,
   DeleteMemoryInput,
   MemoryKind,
@@ -318,6 +321,18 @@ const MOCK_REMINDER_TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 function normalizeMockReminderTime(time: string): string {
   if (!MOCK_REMINDER_TIME.test(time)) throw new Error('提醒时间格式必须是 HH:MM。');
   return time;
+}
+
+function normalizeMockDays(days: number[] | null | undefined): number[] | undefined {
+  if (days === undefined || days === null) return undefined;
+  if (!Array.isArray(days)) throw new Error('提醒重复日期无效。');
+  const normalized = [...new Set(days)].sort((a, b) => a - b);
+  for (const day of normalized) {
+    if (!Number.isInteger(day) || day < 0 || day > 6) {
+      throw new Error('提醒重复日期必须是 0–6。');
+    }
+  }
+  return normalized.length > 0 ? normalized : undefined;
 }
 
 function conversationTitleFromText(text: string): string {
@@ -1145,6 +1160,25 @@ export function createMockApi(
       return structuredClone(profileFor(workspaceId));
     },
 
+    async createMemory(input: CreateMemoryInput): Promise<MemoryRecord> {
+      const workspace = state.workspaces.find((entry) => entry.id === input.workspaceId);
+      if (!workspace) throw new Error('工作区不存在');
+      const text = input.text.trim();
+      if (!text) throw new Error('记忆内容不能为空。');
+      if (!MOCK_MEMORY_KINDS.has(input.kind)) throw new Error('记忆类型无效。');
+      const record: MemoryRecord = {
+        id: nextId('mem'),
+        workspaceId: input.workspaceId,
+        text,
+        kind: input.kind,
+        source: 'manual',
+        createdAt: new Date().toISOString()
+      };
+      state.memory = [record, ...state.memory];
+      persist();
+      return structuredClone(record);
+    },
+
     async updateMemory(input: UpdateMemoryInput): Promise<MemoryRecord> {
       const record = state.memory.find(
         (entry) => entry.workspaceId === input.workspaceId && entry.id === input.id
@@ -1400,6 +1434,21 @@ export function createMockApi(
     async updateWorkspaceTask(input: UpdateWorkspaceTaskInput): Promise<WorkspaceTask> {
       const task = state.tasks.find((entry) => entry.id === input.taskId);
       if (!task) throw new Error('任务不存在');
+      if (input.title !== undefined) {
+        const title = input.title.trim();
+        if (!title) throw new Error('任务标题不能为空');
+        task.title = title;
+      }
+      if (input.subject !== undefined) task.subject = input.subject;
+      if (input.acceptance !== undefined) task.acceptance = input.acceptance;
+      if (input.durationMin !== undefined) {
+        if (!Number.isFinite(input.durationMin) || input.durationMin < 0) {
+          throw new Error('任务时长无效');
+        }
+        task.durationMin = Math.round(input.durationMin);
+      }
+      if (input.due === null) delete task.due;
+      else if (input.due !== undefined) task.due = input.due;
       if (input.status !== undefined) task.status = input.status;
       if (input.startAt === null) delete task.startAt;
       else if (input.startAt !== undefined) task.startAt = input.startAt;
@@ -1407,6 +1456,13 @@ export function createMockApi(
       task.updatedAt = new Date().toISOString();
       persist();
       return structuredClone(task);
+    },
+
+    async deleteTask(input: DeleteTaskInput): Promise<void> {
+      const index = state.tasks.findIndex((entry) => entry.id === input.taskId);
+      if (index < 0) throw new Error('任务不存在');
+      state.tasks.splice(index, 1);
+      persist();
     },
 
     async createNote(input: CreateNoteInput): Promise<WorkspaceNote> {
@@ -1443,11 +1499,13 @@ export function createMockApi(
       const time = normalizeMockReminderTime(input.time);
       const label = input.label.trim();
       if (!label) throw new Error('提醒内容不能为空。');
+      const days = normalizeMockDays(input.days);
       const reminder: Reminder = {
         id: nextId('rem'),
         time,
         label,
-        enabled: input.enabled ?? true
+        enabled: input.enabled ?? true,
+        ...(days ? { days } : {})
       };
       state.reminders.push(reminder);
       persist();
@@ -1464,8 +1522,20 @@ export function createMockApi(
         reminder.label = label;
       }
       if (input.enabled !== undefined) reminder.enabled = input.enabled;
+      if (input.days !== undefined) {
+        const days = normalizeMockDays(input.days);
+        if (days) reminder.days = days;
+        else delete reminder.days;
+      }
       persist();
       return structuredClone(reminder);
+    },
+
+    async deleteReminder(input: DeleteReminderInput): Promise<void> {
+      const index = state.reminders.findIndex((entry) => entry.id === input.id);
+      if (index < 0) throw new Error('提醒不存在');
+      state.reminders.splice(index, 1);
+      persist();
     },
 
     async listConversations(): Promise<ConversationSummary[]> {

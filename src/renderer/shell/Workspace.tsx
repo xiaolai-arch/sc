@@ -131,6 +131,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     reviews,
     practiceSets,
     practiceMistakes,
+    practiceAttempts,
     memoryProfile,
     reminders,
     longPlans,
@@ -145,10 +146,14 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     submitPracticeAnswer,
     createTask,
     updateTask,
+    deleteTask,
     updateWorkspace,
     createNote,
     createReminder,
     updateReminder,
+    deleteReminder,
+    createMemory,
+    createPracticeSet,
     memoryRecords,
     updateMemory,
     deleteMemory,
@@ -169,6 +174,9 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   const [chatScope, setChatScope] = useState<ChatScope>('daily');
   const [projectId, setProjectId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Remember who opened the mobile drawer so focus can return there on close.
+  const sidebarOpenerRef = useRef<HTMLElement | null>(null);
+  const sidebarWasOpenRef = useRef(false);
   const [previewNote, setPreviewNote] = useState<WorkspaceNote | null>(null);
   const [practiceOpen, setPracticeOpen] = useState(false);
   const [practiceSetId, setPracticeSetId] = useState<string | null>(null);
@@ -208,6 +216,20 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+
+  // Restore focus to the opener once the drawer really closes. If that control
+  // unmounted (e.g. navigating to another section), leave focus alone.
+  useEffect(() => {
+    if (sidebarOpen) {
+      sidebarWasOpenRef.current = true;
+      return;
+    }
+    if (!sidebarWasOpenRef.current) return;
+    sidebarWasOpenRef.current = false;
+    const opener = sidebarOpenerRef.current;
+    sidebarOpenerRef.current = null;
+    if (opener?.isConnected) opener.focus();
+  }, [sidebarOpen]);
 
   const currentWorkspace = workspaces.find((workspace) => workspace.id === projectId) ?? null;
   const chatWorkspaceId =
@@ -851,6 +873,13 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     }
   }
 
+  /** Opens the narrow-screen drawer, remembering the control that invoked it. */
+  function openSidebar() {
+    const active = document.activeElement;
+    sidebarOpenerRef.current = active instanceof HTMLElement ? active : null;
+    setSidebarOpen(true);
+  }
+
   function changeSection(next: Section) {
     setSection(next);
     setSidebarOpen(false);
@@ -1219,7 +1248,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               onCancelEdit={cancelEdit}
               onRegenerate={(id) => void regenerateMessage(id)}
               onEditMessage={editLastUserMessage}
-              onOpenSidebar={() => setSidebarOpen(true)}
+              onOpenSidebar={openSidebar}
               sidebarOpen={sidebarOpen}
               typingStatus={streamStatus}
               {...(conversations.active ? { onOpenModelPicker: openModelPicker } : {})}
@@ -1232,7 +1261,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               dateLabel={dateLabel}
               tasks={tasks}
               workspaces={workspaces}
-              onOpenSidebar={() => setSidebarOpen(true)}
+              onOpenSidebar={openSidebar}
               onOpenWorkspace={selectWorkspace}
               onPrompt={promptDaily}
               onUpdateTask={updateTask}
@@ -1246,7 +1275,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               defaultWorkspaceId={projectId}
               focusPlanId={planFocusId}
               today={today}
-              onOpenSidebar={() => setSidebarOpen(true)}
+              onOpenSidebar={openSidebar}
               onCreatePlan={createLongPlan}
               onRecalibrate={recalibrateLongPlan}
               onSetItemDone={setLongPlanItemDone}
@@ -1262,7 +1291,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               tasks={tasks}
               notes={notes}
               profile={memoryProfile}
-              onOpenSidebar={() => setSidebarOpen(true)}
+              onOpenSidebar={openSidebar}
               onOpenChat={() => changeSection('chat')}
               onSelectWorkspace={selectProject}
               onUpdateWorkspace={updateWorkspace}
@@ -1275,6 +1304,8 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               onCreateNote={createNote}
               busy={typing}
               onUpdateTask={updateTask}
+              onCreateTask={createTask}
+              onDeleteTask={deleteTask}
               focus={focus}
               focusNotice={focusNotice}
               canStartFocus={firstFocusableTask(tasks) !== undefined}
@@ -1292,7 +1323,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               workspaces={workspaces}
               defaultWorkspaceId={projectId}
               focusTopicId={knowledgeFocusTopicId}
-              onOpenSidebar={() => setSidebarOpen(true)}
+              onOpenSidebar={openSidebar}
               onCreateTopic={createKnowledgeTopic}
               onUpdateTopic={updateKnowledgeTopic}
               onDeleteTopic={deleteKnowledgeTopic}
@@ -1307,7 +1338,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               workspaces={workspaces}
               memoryRecords={memoryRecords}
               profile={memoryProfile}
-              onOpenSidebar={() => setSidebarOpen(true)}
+              onOpenSidebar={openSidebar}
               onUpdateMemory={updateMemory}
               onDeleteMemory={deleteMemory}
             />
@@ -1317,8 +1348,14 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
             <ReviewPage
               workspaces={workspaces}
               reviews={reviews}
-              onOpenSidebar={() => setSidebarOpen(true)}
+              onOpenSidebar={openSidebar}
               onPrompt={promptButler}
+              onSubmitReview={async (input) => {
+                const api = window.studyCoach;
+                if (!api) throw new Error('数据服务不可用，请重启应用后重试。');
+                await api.submitReview(input);
+              }}
+              onSubmitted={() => void reload()}
             />
           ) : null}
 
@@ -1327,9 +1364,10 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               reminders={reminders}
               onCreateReminder={createReminder}
               onUpdateReminder={updateReminder}
+              onDeleteReminder={deleteReminder}
               snoozedToday={snoozedUntil === today}
               onSnoozeCheckIns={() => void snoozeCheckIns()}
-              onOpenSidebar={() => setSidebarOpen(true)}
+              onOpenSidebar={openSidebar}
               onPrompt={promptButler}
             />
           ) : null}
@@ -1338,7 +1376,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
             <PageFrame
               title="设置"
               subtitle="模型、预算与提醒"
-              onOpenSidebar={() => setSidebarOpen(true)}
+              onOpenSidebar={openSidebar}
               action={
                 <button
                   type="button"
@@ -1424,6 +1462,11 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
                       !projectId || mistake.workspaceId === projectId
                   )}
                   onSubmitAnswer={submitPracticeAnswer}
+                  attempts={practiceAttempts.filter(
+                    (attempt) =>
+                      !projectId || attempt.workspaceId === projectId
+                  )}
+                  onCreateSet={createPracticeSet}
                   onOpenChat={() => {
                     setPracticeOpen(false);
                     changeSection('chat');

@@ -16,6 +16,7 @@ import type {
 } from '../../shared/knowledge';
 import type {
   DeleteMemoryInput,
+  CreateMemoryInput,
   LearnerProfile,
   MemoryRecord,
   UpdateMemoryInput
@@ -41,6 +42,8 @@ import type {
   CreateNoteInput,
   CreateReminderInput,
   CreateTaskInput,
+  DeleteReminderInput,
+  DeleteTaskInput,
   MemoryItem,
   Reminder,
   SendMessageInput,
@@ -87,6 +90,7 @@ export type WorkspaceData = WorkspaceDataState & {
   retry: () => Promise<void>;
   createTask: (input: CreateTaskInput) => Promise<WorkspaceTask>;
   updateTask: (input: UpdateWorkspaceTaskInput) => Promise<WorkspaceTask>;
+  deleteTask: (input: DeleteTaskInput) => Promise<void>;
   createNote: (input: CreateNoteInput) => Promise<WorkspaceNote>;
   updateNote: (input: UpdateWorkspaceNoteInput) => Promise<WorkspaceNote>;
   createPracticeSet: (input: CreatePracticeSetInput) => Promise<PracticeSet>;
@@ -103,6 +107,8 @@ export type WorkspaceData = WorkspaceDataState & {
   submitReview: (date: string, answers: ReviewAnswers, workspaceId?: string) => Promise<void>;
   createReminder: (input: CreateReminderInput) => Promise<Reminder>;
   updateReminder: (input: UpdateReminderInput) => Promise<Reminder>;
+  deleteReminder: (input: DeleteReminderInput) => Promise<void>;
+  createMemory: (input: CreateMemoryInput) => Promise<MemoryRecord>;
   updateMemory: (input: UpdateMemoryInput) => Promise<MemoryRecord>;
   deleteMemory: (input: DeleteMemoryInput) => Promise<void>;
   updateWorkspace: (input: UpdateWorkspaceInput) => Promise<Workspace>;
@@ -374,6 +380,16 @@ export function useWorkspaceData(): WorkspaceData {
     [refreshKnowledge]
   );
 
+  const deleteTask = useCallback(async (input: DeleteTaskInput) => {
+    const api = apiOrThrow();
+    if (!api.deleteTask) throw new Error('当前存储不支持删除任务。');
+    await api.deleteTask(input);
+    setState((current) => ({
+      ...current,
+      tasks: current.tasks.filter((task) => task.id !== input.taskId)
+    }));
+  }, []);
+
   const createNote = useCallback(
     async (input: CreateNoteInput) => {
       const note = await apiOrThrow().createNote(input);
@@ -562,16 +578,20 @@ export function useWorkspaceData(): WorkspaceData {
       // Optimistic flip keeps the switch responsive; reload restores truth on failure.
       setState((current) => ({
         ...current,
-        reminders: current.reminders.map((reminder) =>
-          reminder.id === input.id
-            ? {
-                ...reminder,
-                ...(input.time !== undefined ? { time: input.time } : {}),
-                ...(input.label !== undefined ? { label: input.label } : {}),
-                ...(input.enabled !== undefined ? { enabled: input.enabled } : {})
-              }
-            : reminder
-        )
+        reminders: current.reminders.map((reminder) => {
+          if (reminder.id !== input.id) return reminder;
+          const next: Reminder = {
+            ...reminder,
+            ...(input.time !== undefined ? { time: input.time } : {}),
+            ...(input.label !== undefined ? { label: input.label } : {}),
+            ...(input.enabled !== undefined ? { enabled: input.enabled } : {})
+          };
+          if (input.days !== undefined) {
+            if (input.days === null || input.days.length === 0) delete next.days;
+            else next.days = input.days;
+          }
+          return next;
+        })
       }));
       try {
         const reminder = await api.updateReminder(input);
@@ -590,6 +610,31 @@ export function useWorkspaceData(): WorkspaceData {
     [reload]
   );
 
+  const deleteReminder = useCallback(async (input: DeleteReminderInput) => {
+    const api = apiOrThrow();
+    if (!api.deleteReminder) throw new Error('当前存储不支持删除提醒。');
+    await api.deleteReminder(input);
+    setState((current) => ({
+      ...current,
+      reminders: current.reminders.filter((reminder) => reminder.id !== input.id)
+    }));
+  }, []);
+
+  const createMemory = useCallback(
+    async (input: CreateMemoryInput) => {
+      const api = apiOrThrow();
+      if (!api.createMemory) throw new Error('当前存储不支持新增记忆。');
+      const record = await api.createMemory(input);
+      setState((current) => ({
+        ...current,
+        memoryRecords: [record, ...current.memoryRecords]
+      }));
+      await refreshMemoryProfile();
+      return record;
+    },
+    [refreshMemoryProfile]
+  );
+
   return {
     ...state,
     reload,
@@ -597,6 +642,7 @@ export function useWorkspaceData(): WorkspaceData {
     retry: reload,
     createTask,
     updateTask,
+    deleteTask,
     updateWorkspace,
     createNote,
     updateNote,
@@ -611,6 +657,8 @@ export function useWorkspaceData(): WorkspaceData {
     submitReview,
     createReminder,
     updateReminder,
+    deleteReminder,
+    createMemory,
     updateMemory,
     deleteMemory,
     createLongPlan,

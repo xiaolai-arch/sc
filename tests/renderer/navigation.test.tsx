@@ -261,3 +261,93 @@ test('expands and collapses the daily conversation list with repeated clicks', a
   expect(daily).toHaveAttribute('aria-expanded', 'true');
   expect(screen.getByText('还没有对话。')).toBeInTheDocument();
 });
+
+// jsdom has no matchMedia; the sidebar treats that as desktop so the existing
+// tests keep the column interactive. These tests opt into a layout explicitly.
+const originalMatchMedia = window.matchMedia;
+
+function stubLayout(layout: 'narrow' | 'desktop') {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: (query: string) => ({
+      matches: layout === 'desktop' ? query === '(min-width: 768px)' : false,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn()
+    })
+  });
+}
+
+afterEach(() => {
+  if (originalMatchMedia) {
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: originalMatchMedia
+    });
+  } else {
+    delete (window as { matchMedia?: unknown }).matchMedia;
+  }
+});
+
+function navAside(): HTMLElement {
+  const aside = document.querySelector<HTMLElement>('aside[aria-label="导航"]');
+  if (!aside) throw new Error('导航侧栏不存在');
+  return aside;
+}
+
+test('marks the closed narrow drawer inert and hidden from screen readers', async () => {
+  stubLayout('narrow');
+  const { api } = setup();
+  await mount(api);
+
+  const aside = navAside();
+  expect(aside).toHaveAttribute('inert');
+  expect(aside).toHaveAttribute('aria-hidden', 'true');
+
+  await userEvent.click(screen.getByRole('button', { name: '打开导航' }));
+
+  await waitFor(() => {
+    expect(aside).not.toHaveAttribute('inert');
+    expect(aside).not.toHaveAttribute('aria-hidden');
+  });
+});
+
+test('Escape closes the narrow drawer and returns focus to the opener', async () => {
+  stubLayout('narrow');
+  const { api } = setup();
+  await mount(api);
+
+  const opener = screen.getByRole('button', { name: '打开导航' });
+  await userEvent.click(opener);
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: '关闭导航' })).toHaveFocus()
+  );
+
+  await userEvent.keyboard('{Escape}');
+
+  await waitFor(() => expect(navAside()).toHaveAttribute('aria-hidden', 'true'));
+  expect(navAside()).toHaveAttribute('inert');
+  expect(opener).toHaveFocus();
+});
+
+test('keeps the drawer interactive on desktop screens', async () => {
+  stubLayout('desktop');
+  const { api } = setup();
+  await mount(api);
+
+  const aside = navAside();
+  expect(aside).not.toHaveAttribute('inert');
+  expect(aside).not.toHaveAttribute('aria-hidden');
+
+  // mobileOpen is false, but the md+ column must remain usable.
+  await userEvent.click(nav().getByRole('button', { name: '记忆' }));
+  expect(
+    await screen.findByText('极限定义还不稳，建议先复习再做新题。')
+  ).toBeInTheDocument();
+});

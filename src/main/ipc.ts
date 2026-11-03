@@ -16,6 +16,8 @@ import type {
   CreateReminderInput,
   CreateTaskInput,
   CreateWorkspaceInput,
+  DeleteReminderInput,
+  DeleteTaskInput,
   SendMessageInput,
   SendMessageResult,
   SubmitReviewInput,
@@ -34,6 +36,7 @@ import type {
 } from '../shared/knowledge';
 import { MAX_KNOWLEDGE_NOTE_LENGTH } from '../shared/knowledge';
 import type {
+  CreateMemoryInput,
   DeleteMemoryInput,
   MemoryKind,
   SynthesizeMemoryInput,
@@ -109,7 +112,10 @@ export const IPC_CHANNELS = {
   send: 'study-coach:butler:send',
   scanLocalClis: 'study-coach:local-cli:scan',
   recalibrateLongPlan: 'study-coach:plans:recalibrate',
-  searchAll: 'study-coach:search:all'
+  searchAll: 'study-coach:search:all',
+  deleteTask: 'study-coach:workspaces:delete-task',
+  deleteReminder: 'study-coach:reminders:delete',
+  createMemory: 'study-coach:memory:create'
 } as const;
 
 /** Streaming uses a separate request/event pair so the request map stays stable. */
@@ -237,10 +243,20 @@ function requireCreateTask(value: unknown): CreateTaskInput {
   return input as unknown as CreateTaskInput;
 }
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 function requireUpdateWorkspaceTask(value: unknown): UpdateWorkspaceTaskInput {
   const input = requireObject(value, '更新任务');
   requireString(input.taskId, '任务 ID');
-  if (input.status === undefined && input.startAt === undefined) {
+  if (
+    input.status === undefined &&
+    input.startAt === undefined &&
+    input.title === undefined &&
+    input.subject === undefined &&
+    input.durationMin === undefined &&
+    input.acceptance === undefined &&
+    input.due === undefined
+  ) {
     throw new Error('没有要更新的任务字段。');
   }
   if (input.status !== undefined) requireTaskStatus(input.status);
@@ -250,7 +266,32 @@ function requireUpdateWorkspaceTask(value: unknown): UpdateWorkspaceTaskInput {
   if (input.actualMin !== undefined && (typeof input.actualMin !== 'number' || input.actualMin < 0)) {
     throw new Error('实际用时无效。');
   }
+  if (input.title !== undefined) requireString(input.title, '任务标题');
+  if (input.subject !== undefined && typeof input.subject !== 'string') {
+    throw new Error('任务科目无效。');
+  }
+  if (input.acceptance !== undefined && typeof input.acceptance !== 'string') {
+    throw new Error('任务验收标准无效。');
+  }
+  if (
+    input.durationMin !== undefined &&
+    (typeof input.durationMin !== 'number' || !Number.isFinite(input.durationMin) || input.durationMin < 0)
+  ) {
+    throw new Error('任务时长无效。');
+  }
+  if (
+    input.due !== undefined &&
+    input.due !== null &&
+    (typeof input.due !== 'string' || !ISO_DATE.test(input.due) || Number.isNaN(Date.parse(input.due)))
+  ) {
+    throw new Error('任务截止日期无效。');
+  }
   return input as unknown as UpdateWorkspaceTaskInput;
+}
+
+function requireDeleteTask(value: unknown): DeleteTaskInput {
+  const input = requireObject(value, '删除任务');
+  return { taskId: requireString(input.taskId, '任务 ID') };
 }
 
 function requireCreateNote(value: unknown): CreateNoteInput {
@@ -280,12 +321,24 @@ function requireReminderEnabled(value: unknown): boolean {
   return value;
 }
 
+function requireReminderDays(value: unknown): number[] {
+  if (!Array.isArray(value)) throw new Error('提醒重复日期无效。');
+  const days = [...new Set(value)].sort((a, b) => a - b);
+  for (const day of days) {
+    if (!Number.isInteger(day) || typeof day !== 'number' || day < 0 || day > 6) {
+      throw new Error('提醒重复日期必须是 0–6。');
+    }
+  }
+  return days as number[];
+}
+
 function requireCreateReminder(value: unknown): CreateReminderInput {
   const input = requireObject(value, '创建提醒');
   return {
     time: requireReminderTime(input.time),
     label: requireString(input.label, '提醒内容'),
-    ...(input.enabled !== undefined ? { enabled: requireReminderEnabled(input.enabled) } : {})
+    ...(input.enabled !== undefined ? { enabled: requireReminderEnabled(input.enabled) } : {}),
+    ...(input.days !== undefined ? { days: requireReminderDays(input.days) } : {})
   };
 }
 
@@ -295,8 +348,16 @@ function requireUpdateReminder(value: unknown): UpdateReminderInput {
     id: requireString(input.id, '提醒 ID'),
     ...(input.time !== undefined ? { time: requireReminderTime(input.time) } : {}),
     ...(input.label !== undefined ? { label: requireString(input.label, '提醒内容') } : {}),
-    ...(input.enabled !== undefined ? { enabled: requireReminderEnabled(input.enabled) } : {})
+    ...(input.enabled !== undefined ? { enabled: requireReminderEnabled(input.enabled) } : {}),
+    ...(input.days !== undefined
+      ? { days: input.days === null ? null : requireReminderDays(input.days) }
+      : {})
   };
+}
+
+function requireDeleteReminder(value: unknown): DeleteReminderInput {
+  const input = requireObject(value, '删除提醒');
+  return { id: requireString(input.id, '提醒 ID') };
 }
 
 function requireReview(value: unknown): SubmitReviewInput {
@@ -503,6 +564,15 @@ function requireUpdateMemory(value: unknown): UpdateMemoryInput {
     id: requireString(input.id, '记忆 ID'),
     ...(input.text !== undefined ? { text: requireString(input.text, '记忆内容') } : {}),
     ...(input.kind !== undefined ? { kind: requireMemoryKind(input.kind) } : {})
+  };
+}
+
+function requireCreateMemory(value: unknown): CreateMemoryInput {
+  const input = requireObject(value, '新增记忆');
+  return {
+    workspaceId: requireString(input.workspaceId, '工作区 ID'),
+    text: requireString(input.text, '记忆内容'),
+    kind: requireMemoryKind(input.kind)
   };
 }
 
@@ -832,6 +902,11 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
     listMemory: async (input) => api.listMemory(optionalString(input, '工作区 ID')),
     synthesizeMemory: async (input) => api.synthesizeMemory(requireSynthesizeMemory(input)),
     getMemoryProfile: async (input) => api.getMemoryProfile(optionalString(input, '工作区 ID')),
+    createMemory: async (input) => {
+      const parsed = requireCreateMemory(input);
+      if (!api.createMemory) throw new Error('当前存储不支持新增记忆。');
+      return api.createMemory(parsed);
+    },
     updateMemory: async (input) => api.updateMemory(requireUpdateMemory(input)),
     deleteMemory: async (input) => api.deleteMemory(requireDeleteMemory(input)),
     listKnowledgeTopics: async (input) => api.listKnowledgeTopics(optionalString(input, '工作区 ID')),
@@ -880,7 +955,17 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
     getUsageSummary: async (input) => api.getUsageSummary(requireUsageDays(input)),
     clearUsage: async () => api.clearUsage(),
     send: async (input) => api.send(requireSend(input)),
-    searchAll: async (input) => api.searchAll(requireSearchAll(input))
+    searchAll: async (input) => api.searchAll(requireSearchAll(input)),
+    deleteTask: async (input) => {
+      const parsed = requireDeleteTask(input);
+      if (!api.deleteTask) throw new Error('当前存储不支持删除任务。');
+      return api.deleteTask(parsed);
+    },
+    deleteReminder: async (input) => {
+      const parsed = requireDeleteReminder(input);
+      if (!api.deleteReminder) throw new Error('当前存储不支持删除提醒。');
+      return api.deleteReminder(parsed);
+    }
   };
 
   // Every path through the bridge gets the same sanitized error envelope,
@@ -1089,6 +1174,9 @@ export function createStudyCoachBridge(
     restartApp: () => call<void>(APP_IPC_CHANNELS.restartApp),
     send: (input) => call(IPC_CHANNELS.send, input),
     searchAll: (input) => call(IPC_CHANNELS.searchAll, input),
+    deleteTask: (input) => call(IPC_CHANNELS.deleteTask, input),
+    deleteReminder: (input) => call(IPC_CHANNELS.deleteReminder, input),
+    createMemory: (input) => call(IPC_CHANNELS.createMemory, input),
     async stream(input, onEvent) {
       const requestId = createRequestId();
       const unsubscribe = subscribe?.(BUTLER_STREAM_CHANNELS.event, (payload) => {

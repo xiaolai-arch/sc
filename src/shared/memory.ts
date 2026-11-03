@@ -18,6 +18,13 @@ export interface SynthesizeMemoryInput {
   signal?: AbortSignal;
 }
 
+/** A memory the user adds by hand (not synthesized from a review). */
+export interface CreateMemoryInput {
+  workspaceId: string;
+  text: string;
+  kind: MemoryKind;
+}
+
 export interface UpdateMemoryInput {
   workspaceId: string;
   id: string;
@@ -59,6 +66,8 @@ export interface MemoryService {
   list(workspaceId?: string): Promise<MemoryRecord[]>;
   synthesizeFromReview(input: SynthesizeMemoryInput): Promise<MemorySynthesisResult>;
   getProfile(workspaceId?: string): Promise<LearnerProfile>;
+  /** Adds a memory the user wrote by hand. */
+  createRecord?(input: CreateMemoryInput): Promise<MemoryRecord>;
   updateRecord?(input: UpdateMemoryInput): Promise<MemoryRecord>;
   deleteRecord?(input: DeleteMemoryInput): Promise<void>;
 }

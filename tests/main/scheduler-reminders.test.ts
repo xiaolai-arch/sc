@@ -191,3 +191,25 @@ describe('Scheduler reminders', () => {
     ]);
     expect(result.delivered.some((entry) => entry.reminderId === 'user-1')).toBe(true);
   });
+
+test('only fires a weekday-scoped reminder on its selected days', async () => {
+  // 2026-10-31 is a Saturday (getDay() === 6).
+  const now = at(12, 0);
+  const scheduler = new Scheduler({
+    now: () => now,
+    getSettings: async () => settings(),
+    getReminders: async () => [
+      { id: 'weekday', time: '12:00', label: '工作日', enabled: true, days: [1, 2, 3, 4, 5] },
+      { id: 'weekend', time: '12:00', label: '周末', enabled: true, days: [0, 6] },
+      { id: 'daily', time: '12:00', label: '每天', enabled: true }
+    ],
+    notify: () => undefined
+  });
+
+  const result = await scheduler.tick();
+  const ids = result.delivered
+    .filter((entry) => entry.kind === 'reminder')
+    .map((entry) => entry.reminderId)
+    .sort();
+  expect(ids).toEqual(['daily', 'weekend']);
+});

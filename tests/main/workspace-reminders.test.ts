@@ -60,3 +60,39 @@ test('refuses to overwrite an unreadable reminders file', async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('repeats reminders on selected weekdays and deletes them', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'study-coach-reminders-'));
+  try {
+    const service = createWorkspaceService(dir);
+    const created = await service.createReminder?.({
+      time: '18:30',
+      label: '跑步',
+      days: [5, 1, 3, 3]
+    });
+    expect(created?.days).toEqual([1, 3, 5]);
+
+    const updated = await service.updateReminder?.({
+      id: created!.id,
+      days: [0, 6]
+    });
+    expect(updated?.days).toEqual([0, 6]);
+
+    const raw = await readFile(remindersFile(dir), 'utf8');
+    expect(raw).toContain('周六');
+    expect(raw).toContain('周日');
+
+    const cleared = await service.updateReminder?.({ id: created!.id, days: null });
+    expect(cleared?.days).toBeUndefined();
+
+    await expect(
+      service.createReminder?.({ time: '19:00', label: '无效', days: [7] })
+    ).rejects.toThrow(/0 to 6/i);
+
+    await service.deleteReminder?.({ id: created!.id });
+    expect((await service.getReminders()).some((item) => item.id === created!.id)).toBe(false);
+    await expect(service.deleteReminder?.({ id: created!.id })).rejects.toThrow(/not found/i);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

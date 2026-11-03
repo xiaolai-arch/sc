@@ -475,3 +475,34 @@ test('refuses to overwrite a memory.md whose entries cannot be parsed', async ()
 
   expect(await fs.readFile(file, 'utf8')).toBe(original);
 });
+
+test('adds a hand-written memory and persists it to the vault', async () => {
+  const service = createMemoryService({ root });
+  const created = await service.createRecord?.({
+    workspaceId,
+    text: '  更喜欢早上学数学  ',
+    kind: 'preference'
+  });
+  expect(created).toMatchObject({
+    workspaceId,
+    text: '更喜欢早上学数学',
+    kind: 'preference',
+    source: 'manual'
+  });
+  expect(created?.createdAt).toBeTruthy();
+
+  const listed = await service.list(workspaceId);
+  expect(listed.some((record) => record.id === created?.id)).toBe(true);
+
+  const fresh = createMemoryService({ root });
+  expect((await fresh.list(workspaceId)).map((record) => record.text)).toContain(
+    '更喜欢早上学数学'
+  );
+
+  await expect(
+    service.createRecord?.({ workspaceId, text: '   ', kind: 'fact' })
+  ).rejects.toThrow(/text/i);
+  await expect(
+    service.createRecord?.({ workspaceId: 'missing', text: 'x', kind: 'fact' })
+  ).rejects.toThrow(/not found/i);
+});

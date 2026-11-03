@@ -1,5 +1,6 @@
 import type {
   CreateReminderInput,
+  DeleteReminderInput,
   Reminder,
   UpdateReminderInput
 } from '../../shared/workspace';
@@ -10,6 +11,7 @@ type RemindersPageProps = {
   reminders: Reminder[];
   onCreateReminder: (input: CreateReminderInput) => Promise<Reminder>;
   onUpdateReminder: (input: UpdateReminderInput) => Promise<Reminder>;
+  onDeleteReminder?: (input: DeleteReminderInput) => Promise<void>;
   snoozedToday: boolean;
   onSnoozeCheckIns: () => void;
   onOpenSidebar: () => void;
@@ -20,6 +22,7 @@ export function RemindersPage({
   reminders,
   onCreateReminder,
   onUpdateReminder,
+  onDeleteReminder,
   snoozedToday,
   onSnoozeCheckIns,
   onOpenSidebar,
@@ -32,6 +35,7 @@ export function RemindersPage({
           reminders={reminders}
           onCreateReminder={onCreateReminder}
           onUpdateReminder={onUpdateReminder}
+          onDeleteReminder={onDeleteReminder}
           snoozedToday={snoozedToday}
           onSnoozeCheckIns={onSnoozeCheckIns}
           onPrompt={onPrompt}

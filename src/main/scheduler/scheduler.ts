@@ -69,6 +69,8 @@ interface Trigger {
   time: string;
   /** 0 = Sunday; omitted means every day. */
   dayOfWeek?: number;
+  /** Local weekdays this trigger repeats on; omitted means every day. */
+  daysOfWeek?: number[];
   title: string;
   body: string;
   reminderId?: string;
@@ -130,6 +132,7 @@ function buildTriggers(
       kind: 'reminder',
       id: reminder.id,
       time: reminder.time,
+      ...(reminder.days && reminder.days.length > 0 ? { daysOfWeek: reminder.days } : {}),
       title: `提醒：${reminder.label}`,
       body: reminder.label,
       reminderId: reminder.id
@@ -229,6 +232,12 @@ export class Scheduler {
 
     for (const trigger of buildTriggers(settings, reminders, scheduledTasks, date)) {
       if (trigger.dayOfWeek !== undefined && at.getDay() !== trigger.dayOfWeek) continue;
+      if (
+        trigger.daysOfWeek !== undefined &&
+        !trigger.daysOfWeek.includes(at.getDay())
+      ) {
+        continue;
+      }
       if (
         trigger.kind === 'reminder' &&
         settings.notifications.weeklyEnabled &&

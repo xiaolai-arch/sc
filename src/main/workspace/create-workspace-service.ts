@@ -6,6 +6,8 @@ import type {
   CreateReminderInput,
   CreateTaskInput,
   CreateWorkspaceInput,
+  DeleteReminderInput,
+  DeleteTaskInput,
   MemoryItem,
   Reminder,
   SubmitReviewInput,
@@ -89,6 +91,22 @@ function normalizeReminderTime(value: unknown): string {
     throw new Error('Reminder time must be HH:MM');
   }
   return time;
+}
+
+/**
+ * Normalizes a weekly repeat. `undefined`/`null`/`[]` mean every day; otherwise
+ * de-duplicates and sorts local weekdays (0 = Sunday … 6 = Saturday).
+ */
+function normalizeReminderDays(value: unknown): number[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new Error('Reminder days must be an array');
+  const days = [...new Set(value)].sort((a, b) => a - b);
+  for (const day of days) {
+    if (!Number.isInteger(day) || day < 0 || day > 6) {
+      throw new Error('Reminder days must be integers from 0 to 6');
+    }
+  }
+  return days.length > 0 ? days : undefined;
 }
 
 function optionalString(value: unknown): string | undefined {
@@ -374,7 +392,22 @@ export function createWorkspaceService(
       assertSafeSegment(taskId, 'task id');
       const hasStatus = input?.status !== undefined;
       const hasStartAt = input?.startAt !== undefined;
-      if (!hasStatus && !hasStartAt) throw new Error('No task fields to update');
+      const hasTitle = input?.title !== undefined;
+      const hasSubject = input?.subject !== undefined;
+      const hasDuration = input?.durationMin !== undefined;
+      const hasAcceptance = input?.acceptance !== undefined;
+      const hasDue = input?.due !== undefined;
+      if (
+        !hasStatus &&
+        !hasStartAt &&
+        !hasTitle &&
+        !hasSubject &&
+        !hasDuration &&
+        !hasAcceptance &&
+        !hasDue
+      ) {
+        throw new Error('No task fields to update');
+      }
       const status = input?.status;
       if (hasStatus && !isTaskStatus(status)) throw new Error('Invalid task status');
       const startAt =
@@ -387,6 +420,24 @@ export function createWorkspaceService(
           : typeof input.actualMin === 'number' && Number.isFinite(input.actualMin) && input.actualMin >= 0
             ? Math.round(input.actualMin)
             : undefined;
+      const title = hasTitle ? requireString(input.title, 'Task title') : undefined;
+      const subject = hasSubject ? optionalString(input.subject) ?? '' : undefined;
+      const acceptance = hasAcceptance ? optionalString(input.acceptance) ?? '' : undefined;
+      const durationMin =
+        input?.durationMin === undefined
+          ? undefined
+          : typeof input.durationMin === 'number' &&
+              Number.isFinite(input.durationMin) &&
+              input.durationMin >= 0
+            ? Math.round(input.durationMin)
+            : undefined;
+      if (hasDuration && durationMin === undefined) {
+        throw new Error('Task duration must be a non-negative number');
+      }
+      const due =
+        input?.due === undefined || input.due === null
+          ? input?.due
+          : assertIsoDate(input.due, 'task due date');
       return runExclusively(async () => {
         const found = await findTaskFile(taskId);
         if (found === null) throw new Error(`Task not found: ${taskId}`);
@@ -395,10 +446,32 @@ export function createWorkspaceService(
         if (hasStatus) record.status = status as TaskRecord['status'];
         if (startAt === null) delete record.startAt;
         else if (startAt !== undefined) record.startAt = startAt;
+        if (title !== undefined) record.title = title;
+        if (subject !== undefined) record.subject = subject;
+        if (acceptance !== undefined) record.acceptance = acceptance;
+        if (durationMin !== undefined) record.durationMin = durationMin;
+        if (due === null) delete record.due;
+        else if (due !== undefined) record.due = due;
         record.actualMin = actualMin ?? record.actualMin;
         record.updated = new Date().toISOString();
         await writeFileAtomic(found.path, serializeTaskFile(found.date, found.records));
         return toWorkspaceTask(record, found.workspaceId);
+      });
+    },
+
+    async deleteTask(input: DeleteTaskInput): Promise<void> {
+      await ensureVault();
+      const taskId = requireString(input?.taskId, 'Task id');
+      assertSafeSegment(taskId, 'task id');
+      await runExclusively(async () => {
+        const found = await findTaskFile(taskId);
+        if (found === null) throw new Error(`Task not found: ${taskId}`);
+        const remaining = found.records.filter((record) => record.id !== taskId);
+        if (remaining.length === 0) {
+          await fs.unlink(found.path).catch(() => undefined);
+          return;
+        }
+        await writeFileAtomic(found.path, serializeTaskFile(found.date, remaining));
       });
     },
 
@@ -499,6 +572,7 @@ export function createWorkspaceService(
       await ensureVault();
       const time = normalizeReminderTime(input?.time);
       const label = requireString(input?.label, 'Reminder label');
+      const days = normalizeReminderDays(input?.days);
       return runExclusively(async () => {
         const raw = await readFileOrNull(remindersFile(vaultRoot));
         const reminders = raw === null ? [] : parseRemindersFile(raw);
@@ -509,7 +583,8 @@ export function createWorkspaceService(
           id: newId('rem'),
           time,
           label,
-          enabled: input?.enabled ?? true
+          enabled: input?.enabled ?? true,
+          ...(days ? { days } : {})
         };
         await writeFileAtomic(
           remindersFile(vaultRoot),
@@ -527,6 +602,8 @@ export function createWorkspaceService(
         const index = reminders.findIndex((reminder) => reminder.id === id);
         if (index < 0) throw new Error('Reminder not found');
         const current = reminders[index]!;
+        const days =
+          input.days !== undefined ? normalizeReminderDays(input.days) : current.days;
         const next: Reminder = {
           ...current,
           ...(input.time !== undefined ? { time: normalizeReminderTime(input.time) } : {}),
@@ -535,10 +612,23 @@ export function createWorkspaceService(
             : {}),
           ...(input.enabled !== undefined ? { enabled: input.enabled } : {})
         };
+        if (days === undefined) delete next.days;
+        else next.days = days;
         const updated = [...reminders];
         updated[index] = next;
         await writeFileAtomic(remindersFile(vaultRoot), serializeRemindersFile(updated));
         return next;
+      });
+    },
+
+    async deleteReminder(input: DeleteReminderInput): Promise<void> {
+      await ensureVault();
+      const id = requireString(input?.id, 'Reminder id');
+      await runExclusively(async () => {
+        const reminders = await readReminders();
+        const remaining = reminders.filter((reminder) => reminder.id !== id);
+        if (remaining.length === reminders.length) throw new Error('Reminder not found');
+        await writeFileAtomic(remindersFile(vaultRoot), serializeRemindersFile(remaining));
       });
     },
 

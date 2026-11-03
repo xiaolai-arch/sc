@@ -3,6 +3,8 @@ import { friendlyErrorMessage } from '../../shared/errors';
 import type { LearnerProfile } from '../../shared/memory';
 import type {
   CreateNoteInput,
+  CreateTaskInput,
+  DeleteTaskInput,
   UpdateWorkspaceInput,
   UpdateWorkspaceTaskInput,
   Workspace,
@@ -29,6 +31,8 @@ type ProjectsPageProps = {
   onCreateNote: (input: CreateNoteInput) => Promise<WorkspaceNote>;
   busy?: boolean;
   onUpdateTask: (input: UpdateWorkspaceTaskInput) => Promise<WorkspaceTask>;
+  onCreateTask?: (input: CreateTaskInput) => Promise<WorkspaceTask>;
+  onDeleteTask?: (input: DeleteTaskInput) => Promise<void>;
   focus: FocusSession | null;
   focusNotice: string | null;
   canStartFocus: boolean;
@@ -55,6 +59,8 @@ export function ProjectsPage({
   onCreateNote,
   busy = false,
   onUpdateTask,
+  onCreateTask,
+  onDeleteTask,
   focus,
   focusNotice,
   canStartFocus,
@@ -177,6 +183,8 @@ export function ProjectsPage({
               tasks={tasks}
               busy={busy}
               onUpdateTask={onUpdateTask}
+              onCreateTask={onCreateTask}
+              onDeleteTask={onDeleteTask}
               onPrompt={onPrompt}
               focus={focus}
               focusNotice={focusNotice}

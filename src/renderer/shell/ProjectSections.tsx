@@ -13,6 +13,9 @@ import type {
 import type {
   CreateNoteInput,
   CreateReminderInput,
+  CreateTaskInput,
+  DeleteReminderInput,
+  DeleteTaskInput,
   Reminder,
   UpdateReminderInput,
   UpdateWorkspaceTaskInput,
@@ -102,6 +105,32 @@ export function nextReminderTime(now: Date = new Date()): string {
   return `${String(cursor.getHours()).padStart(2, '0')}:00`;
 }
 
+type ReminderRepeat = 'daily' | 'weekdays' | 'weekend' | 'custom';
+const WEEKDAY_DAYS = [1, 2, 3, 4, 5];
+const WEEKEND_DAYS = [0, 6];
+const WEEKDAY_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
+
+function repeatOf(days: number[] | undefined): ReminderRepeat {
+  if (!days || days.length === 0) return 'daily';
+  if (days.length === 5 && WEEKDAY_DAYS.every((day) => days.includes(day))) return 'weekdays';
+  if (days.length === 2 && WEEKEND_DAYS.every((day) => days.includes(day))) return 'weekend';
+  return 'custom';
+}
+
+function daysOfRepeat(repeat: ReminderRepeat): number[] | undefined {
+  if (repeat === 'weekdays') return [...WEEKDAY_DAYS];
+  if (repeat === 'weekend') return [...WEEKEND_DAYS];
+  return undefined;
+}
+
+function repeatLabel(days: number[] | undefined): string {
+  const repeat = repeatOf(days);
+  if (repeat === 'daily') return '每天';
+  if (repeat === 'weekdays') return '工作日';
+  if (repeat === 'weekend') return '周末';
+  return (days ?? []).map((day) => `周${WEEKDAY_NAMES[day] ?? ''}`).join('、');
+}
+
 function statusDot(status: WorkspaceTask['status']) {
   if (status === 'done') return 'bg-[#34c759]';
   if (status === 'in-progress') return 'bg-[#0071e3]';
@@ -157,7 +186,9 @@ type PlanSectionProps = {
   workspace: Workspace | null;
   tasks: WorkspaceTask[];
   busy?: boolean;
+  onCreateTask?: (input: CreateTaskInput) => Promise<WorkspaceTask>;
   onUpdateTask: (input: UpdateWorkspaceTaskInput) => Promise<WorkspaceTask>;
+  onDeleteTask?: (input: DeleteTaskInput) => Promise<void>;
   onPrompt: (prompt: string) => void;
   focus: FocusSession | null;
   focusNotice: string | null;
@@ -169,11 +200,29 @@ type PlanSectionProps = {
   onResetFocus: () => void;
 };
 
+type TaskDraft = {
+  title: string;
+  subject: string;
+  duration: string;
+  acceptance: string;
+};
+
+function draftFrom(task: WorkspaceTask): TaskDraft {
+  return {
+    title: task.title,
+    subject: task.subject,
+    duration: String(task.durationMin),
+    acceptance: task.acceptance
+  };
+}
+
 export function PlanSection({
   workspace,
   tasks,
   busy = false,
+  onCreateTask,
   onUpdateTask,
+  onDeleteTask,
   onPrompt,
   focus,
   focusNotice,
@@ -186,8 +235,111 @@ export function PlanSection({
 }: PlanSectionProps) {
   const [pendingTaskId, setPendingTaskId] = useState<string | null>(null);
   const [taskError, setTaskError] = useState<{ id: string; message: string } | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [creatingPending, setCreatingPending] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [newDraft, setNewDraft] = useState<TaskDraft>({
+    title: '',
+    subject: '',
+    duration: '30',
+    acceptance: ''
+  });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<TaskDraft | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const filteredTasks = filterTasks(tasks, workspace);
   const done = filteredTasks.filter((task) => task.status === 'done').length;
+  const canCreate = workspace !== null && onCreateTask !== undefined;
+
+  function parseDuration(value: string): number | null {
+    const minutes = Number(value);
+    if (!Number.isFinite(minutes) || minutes <= 0) return null;
+    return Math.round(minutes);
+  }
+
+  async function createTask() {
+    if (!workspace || !onCreateTask || creatingPending) return;
+    const title = newDraft.title.trim();
+    const durationMin = parseDuration(newDraft.duration);
+    if (!title) {
+      setCreateError('请填写任务标题。');
+      return;
+    }
+    if (durationMin === null) {
+      setCreateError('任务时长需要大于 0 分钟。');
+      return;
+    }
+    setCreatingPending(true);
+    setCreateError(null);
+    try {
+      await onCreateTask({
+        workspaceId: workspace.id,
+        title,
+        subject: newDraft.subject.trim() || workspace.name,
+        durationMin,
+        acceptance: newDraft.acceptance.trim()
+      });
+      setNewDraft({ title: '', subject: '', duration: '30', acceptance: '' });
+      setCreating(false);
+    } catch (cause) {
+      setCreateError(messageOf(cause));
+    } finally {
+      setCreatingPending(false);
+    }
+  }
+
+  async function saveEdit(task: WorkspaceTask) {
+    if (editDraft === null) return;
+    const title = editDraft.title.trim();
+    const durationMin = parseDuration(editDraft.duration);
+    if (!title) {
+      setTaskError({ id: task.id, message: '请填写任务标题。' });
+      return;
+    }
+    if (durationMin === null) {
+      setTaskError({ id: task.id, message: '任务时长需要大于 0 分钟。' });
+      return;
+    }
+    setPendingTaskId(task.id);
+    setTaskError(null);
+    try {
+      await onUpdateTask({
+        taskId: task.id,
+        title,
+        subject: editDraft.subject,
+        durationMin,
+        acceptance: editDraft.acceptance
+      });
+      setEditingId(null);
+      setEditDraft(null);
+    } catch (cause) {
+      setTaskError({ id: task.id, message: messageOf(cause) });
+    } finally {
+      setPendingTaskId(null);
+    }
+  }
+
+  async function deleteTask(task: WorkspaceTask) {
+    if (!onDeleteTask) return;
+    if (confirmDeleteId !== task.id) {
+      setConfirmDeleteId(task.id);
+      return;
+    }
+    setPendingTaskId(task.id);
+    setTaskError(null);
+    try {
+      await onDeleteTask({ taskId: task.id });
+      setConfirmDeleteId(null);
+      if (editingId === task.id) {
+        setEditingId(null);
+        setEditDraft(null);
+      }
+    } catch (cause) {
+      setTaskError({ id: task.id, message: messageOf(cause) });
+    } finally {
+      setPendingTaskId(null);
+    }
+  }
 
   async function updateTaskStatus(taskId: string, status: WorkspaceTaskStatus) {
     setPendingTaskId(taskId);
@@ -220,9 +372,63 @@ export function PlanSection({
     );
   }
 
+  function draftFields(
+    draft: TaskDraft,
+    onChange: (next: TaskDraft) => void,
+    keyPrefix: string
+  ) {
+    return (
+      <div className="grid gap-2 sm:grid-cols-2">
+        <input
+          aria-label={`${keyPrefix}标题`}
+          placeholder="任务标题"
+          value={draft.title}
+          onChange={(event) => onChange({ ...draft, title: event.target.value })}
+          className={`${inputClass} sm:col-span-2`}
+        />
+        <input
+          aria-label={`${keyPrefix}科目`}
+          placeholder="科目（可选）"
+          value={draft.subject}
+          onChange={(event) => onChange({ ...draft, subject: event.target.value })}
+          className={inputClass}
+        />
+        <input
+          aria-label={`${keyPrefix}时长`}
+          placeholder="时长（分钟）"
+          inputMode="numeric"
+          value={draft.duration}
+          onChange={(event) => onChange({ ...draft, duration: event.target.value })}
+          className={inputClass}
+        />
+        <input
+          aria-label={`${keyPrefix}验收标准`}
+          placeholder="验收标准（可选）"
+          value={draft.acceptance}
+          onChange={(event) => onChange({ ...draft, acceptance: event.target.value })}
+          className={`${inputClass} sm:col-span-2`}
+        />
+      </div>
+    );
+  }
+
   return (
     <section aria-label="计划">
-      <SectionHeading title="计划" />
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <SectionHeading title="计划" />
+        {canCreate ? (
+          <button
+            type="button"
+            onClick={() => {
+              setCreating((current) => !current);
+              setCreateError(null);
+            }}
+            className={actionClass}
+          >
+            {creating ? '收起' : '新增任务'}
+          </button>
+        ) : null}
+      </div>
       <FocusTimer
         session={focus}
         notice={focusNotice}
@@ -232,6 +438,43 @@ export function PlanSection({
         onResume={onResumeFocus}
         onReset={onResetFocus}
       />
+
+      {creating && canCreate ? (
+        <form
+          aria-label="新增任务"
+          className="mb-4 rounded-2xl bg-[#f5f5f7] p-3 dark:bg-white/[0.06]"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void createTask();
+          }}
+        >
+          {draftFields(newDraft, setNewDraft, '新任务')}
+          {createError ? (
+            <p role="alert" className="mt-2 text-[12px] text-[#d70015] dark:text-[#ff7b72]">
+              {createError}
+            </p>
+          ) : null}
+          <div className="mt-3 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setCreating(false);
+                setCreateError(null);
+              }}
+              className={actionClass}
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              disabled={creatingPending}
+              className={primaryButtonClass}
+            >
+              保存任务
+            </button>
+          </div>
+        </form>
+      ) : null}
 
       <div className="mb-2 flex items-baseline justify-between">
         <span className="text-[13px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">今天</span>
@@ -257,52 +500,118 @@ export function PlanSection({
         <div className="divide-y divide-gray-100 dark:divide-white/[0.08]">
           {filteredTasks.map((task) => (
             <div key={task.id} className="py-2">
-              <div className="flex items-start gap-2">
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    'mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full',
-                    statusDot(task.status)
-                  )}
-                />
-                <div className="min-w-0 flex-1">
-                  <p
-                    className={cn(
-                      'text-[14px] leading-6',
-                      task.status === 'done'
-                        ? 'text-gray-400 line-through dark:text-[#8e8e93]'
-                        : 'text-[#1d1d1f] dark:text-[#f5f5f7]'
-                    )}
-                  >
-                    {task.title}
-                  </p>
-                  <p className="mt-0.5 truncate text-[12px] text-gray-500 dark:text-[#8e8e93]">
-                    {task.subject} · {task.durationMin} 分钟
-                    {typeof task.actualMin === 'number' ? ` · 已练 ${task.actualMin} 分钟` : ''}
-                  </p>
-                </div>
-                {task.status === 'done' ? (
-                  <CheckIcon className="mt-1 h-3 w-3 text-[#34c759]" />
-                ) : null}
-              </div>
-              <div className="mt-1 flex flex-wrap items-center gap-1 pl-3.5">
-                {task.status === 'pending' ? taskAction(task, '开始', 'in-progress') : null}
-                {task.status === 'in-progress' ? taskAction(task, '完成', 'done') : null}
-                {task.status === 'pending' || task.status === 'in-progress'
-                  ? taskAction(task, '跳过', 'skipped')
-                  : null}
-                {task.status === 'done' ? taskAction(task, '撤销', 'pending') : null}
-                {task.status === 'skipped' ? taskAction(task, '恢复', 'pending') : null}
-                <button
-                  type="button"
-                  aria-label={`专注：${task.title}`}
-                  disabled={busy}
-                  onClick={() => onStartFocus(task.id)}
-                  className={actionClass}
+              {editingId === task.id && editDraft !== null ? (
+                <form
+                  aria-label={`编辑任务：${task.title}`}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void saveEdit(task);
+                  }}
                 >
-                  专注
-                </button>
-              </div>
+                  {draftFields(editDraft, setEditDraft, '编辑任务')}
+                  <div className="mt-2 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingId(null);
+                        setEditDraft(null);
+                      }}
+                      className={actionClass}
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={pendingTaskId === task.id}
+                      className={primaryButtonClass}
+                    >
+                      保存修改
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <>
+                  <div className="flex items-start gap-2">
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        'mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full',
+                        statusDot(task.status)
+                      )}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p
+                        className={cn(
+                          'text-[14px] leading-6',
+                          task.status === 'done'
+                            ? 'text-gray-400 line-through dark:text-[#8e8e93]'
+                            : 'text-[#1d1d1f] dark:text-[#f5f5f7]'
+                        )}
+                      >
+                        {task.title}
+                      </p>
+                      <p className="mt-0.5 truncate text-[12px] text-gray-500 dark:text-[#8e8e93]">
+                        {task.subject} · {task.durationMin} 分钟
+                        {typeof task.actualMin === 'number' ? ` · 已练 ${task.actualMin} 分钟` : ''}
+                      </p>
+                    </div>
+                    {task.status === 'done' ? (
+                      <CheckIcon className="mt-1 h-3 w-3 text-[#34c759]" />
+                    ) : null}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-1 pl-3.5">
+                    {task.status === 'pending' ? taskAction(task, '开始', 'in-progress') : null}
+                    {task.status === 'in-progress' ? taskAction(task, '完成', 'done') : null}
+                    {task.status === 'pending' || task.status === 'in-progress'
+                      ? taskAction(task, '跳过', 'skipped')
+                      : null}
+                    {task.status === 'done' ? taskAction(task, '撤销', 'pending') : null}
+                    {task.status === 'skipped' ? taskAction(task, '恢复', 'pending') : null}
+                    <button
+                      type="button"
+                      aria-label={`专注：${task.title}`}
+                      disabled={busy}
+                      onClick={() => onStartFocus(task.id)}
+                      className={actionClass}
+                    >
+                      专注
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`编辑任务：${task.title}`}
+                      disabled={busy || pendingTaskId === task.id}
+                      onClick={() => {
+                        setEditingId(task.id);
+                        setEditDraft(draftFrom(task));
+                        setTaskError(null);
+                      }}
+                      className={actionClass}
+                    >
+                      编辑
+                    </button>
+                    {onDeleteTask ? (
+                      <button
+                        type="button"
+                        aria-label={
+                          confirmDeleteId === task.id
+                            ? `确认删除任务：${task.title}`
+                            : `删除任务：${task.title}`
+                        }
+                        disabled={busy || pendingTaskId === task.id}
+                        onClick={() => void deleteTask(task)}
+                        className={cn(
+                          actionClass,
+                          confirmDeleteId === task.id
+                            ? 'text-[#d70015] dark:text-[#ff7b72]'
+                            : ''
+                        )}
+                      >
+                        {confirmDeleteId === task.id ? '确认删除' : '删除'}
+                      </button>
+                    ) : null}
+                  </div>
+                </>
+              )}
               {taskError?.id === task.id ? (
                 <p role="alert" className="mt-1 pl-3.5 text-[12px] text-[#d70015] dark:text-[#ff7b72]">
                   {taskError.message}
@@ -771,6 +1080,7 @@ type RemindersSectionProps = {
   reminders: Reminder[];
   onCreateReminder: (input: CreateReminderInput) => Promise<Reminder>;
   onUpdateReminder: (input: UpdateReminderInput) => Promise<Reminder>;
+  onDeleteReminder?: (input: DeleteReminderInput) => Promise<void>;
   snoozedToday: boolean;
   onSnoozeCheckIns: () => void;
   onPrompt: (prompt: string) => void;
@@ -780,15 +1090,22 @@ export function RemindersSection({
   reminders,
   onCreateReminder,
   onUpdateReminder,
+  onDeleteReminder,
   snoozedToday,
   onSnoozeCheckIns,
   onPrompt
 }: RemindersSectionProps) {
   const [reminderTime, setReminderTime] = useState(() => nextReminderTime());
   const [reminderLabel, setReminderLabel] = useState('');
+  const [reminderRepeat, setReminderRepeat] = useState<ReminderRepeat>('daily');
   const [reminderError, setReminderError] = useState<string | null>(null);
   const [creatingReminder, setCreatingReminder] = useState(false);
   const [pendingReminderId, setPendingReminderId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTime, setEditTime] = useState('');
+  const [editLabel, setEditLabel] = useState('');
+  const [editRepeat, setEditRepeat] = useState<ReminderRepeat>('daily');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   async function addReminder() {
     const label = reminderLabel.trim();
@@ -796,9 +1113,11 @@ export function RemindersSection({
     setCreatingReminder(true);
     setReminderError(null);
     try {
-      await onCreateReminder({ time: reminderTime, label });
+      const days = daysOfRepeat(reminderRepeat);
+      await onCreateReminder({ time: reminderTime, label, ...(days ? { days } : {}) });
       setReminderLabel('');
       setReminderTime(nextReminderTime());
+      setReminderRepeat('daily');
     } catch (cause) {
       setReminderError(messageOf(cause));
     } finally {
@@ -816,6 +1135,77 @@ export function RemindersSection({
     } finally {
       setPendingReminderId(null);
     }
+  }
+
+  function startReminderEdit(reminder: Reminder) {
+    setEditingId(reminder.id);
+    setEditTime(reminder.time);
+    setEditLabel(reminder.label);
+    setEditRepeat(repeatOf(reminder.days));
+    setReminderError(null);
+  }
+
+  async function saveReminderEdit(reminder: Reminder) {
+    const label = editLabel.trim();
+    if (!label) {
+      setReminderError('请填写提醒内容。');
+      return;
+    }
+    setPendingReminderId(reminder.id);
+    setReminderError(null);
+    try {
+      const days = daysOfRepeat(editRepeat);
+      await onUpdateReminder({
+        id: reminder.id,
+        time: editTime,
+        label,
+        days: days ?? null
+      });
+      setEditingId(null);
+    } catch (cause) {
+      setReminderError(messageOf(cause));
+    } finally {
+      setPendingReminderId(null);
+    }
+  }
+
+  async function deleteReminder(reminder: Reminder) {
+    if (!onDeleteReminder) return;
+    if (confirmDeleteId !== reminder.id) {
+      setConfirmDeleteId(reminder.id);
+      return;
+    }
+    setPendingReminderId(reminder.id);
+    setReminderError(null);
+    try {
+      await onDeleteReminder({ id: reminder.id });
+      setConfirmDeleteId(null);
+      if (editingId === reminder.id) setEditingId(null);
+    } catch (cause) {
+      setReminderError(messageOf(cause));
+    } finally {
+      setPendingReminderId(null);
+    }
+  }
+
+  function repeatSelect(
+    label: string,
+    value: ReminderRepeat,
+    onChange: (next: ReminderRepeat) => void
+  ) {
+    return (
+      <select
+        aria-label={label}
+        value={value}
+        onChange={(event) => onChange(event.target.value as ReminderRepeat)}
+        className={`${inputClass} w-[96px] shrink-0`}
+      >
+        <option value="daily">每天</option>
+        <option value="weekdays">工作日</option>
+        <option value="weekend">周末</option>
+        {value === 'custom' ? <option value="custom">自定义</option> : null}
+      </select>
+    );
   }
 
   return (
@@ -842,6 +1232,7 @@ export function RemindersSection({
             onChange={(event) => setReminderLabel(event.target.value)}
             className={`${inputClass} flex-1`}
           />
+          {repeatSelect('提醒重复', reminderRepeat, setReminderRepeat)}
         </div>
         {reminderError ? (
           <p role="alert" className="mt-1 text-[12px] text-[#d70015] dark:text-[#ff7b72]">
@@ -869,40 +1260,114 @@ export function RemindersSection({
       ) : (
         <div className="divide-y divide-gray-100 dark:divide-white/[0.08]">
           {reminders.map((reminder) => (
-            <div key={reminder.id} className="flex items-center gap-2 py-2">
-              <span
-                aria-hidden="true"
-                className={cn(
-                  'h-1.5 w-1.5 shrink-0 rounded-full',
-                  reminder.enabled ? 'bg-[#34c759]' : 'bg-gray-300'
-                )}
-              />
-              <span className="w-10 shrink-0 text-[12px] tabular-nums text-gray-500 dark:text-[#a1a1a6]">
-                {reminder.time}
-              </span>
-              <span className="min-w-0 flex-1 truncate text-[13px] text-[#1d1d1f] dark:text-[#f5f5f7]">
-                {reminder.label}
-              </span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={reminder.enabled}
-                aria-label={`${reminder.label} 提醒开关`}
-                disabled={pendingReminderId === reminder.id}
-                onClick={() => void toggleReminder(reminder)}
-                className={cn(
-                  'relative h-5 w-9 shrink-0 rounded-full transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100',
-                  reminder.enabled ? 'bg-[#0071e3]' : 'bg-gray-300 dark:bg-white/20'
-                )}
-              >
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    'absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform duration-300 motion-reduce:transition-none',
-                    reminder.enabled ? 'translate-x-[18px]' : 'translate-x-0.5'
-                  )}
-                />
-              </button>
+            <div key={reminder.id} className="py-2">
+              {editingId === reminder.id ? (
+                <form
+                  aria-label={`编辑提醒：${reminder.label}`}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void saveReminderEdit(reminder);
+                  }}
+                  className="flex flex-wrap items-center gap-2"
+                >
+                  <input
+                    type="time"
+                    aria-label="编辑提醒时间"
+                    value={editTime}
+                    onChange={(event) => setEditTime(event.target.value)}
+                    className={`${inputClass} w-[74px] shrink-0 tabular-nums`}
+                  />
+                  <input
+                    aria-label="编辑提醒内容"
+                    value={editLabel}
+                    onChange={(event) => setEditLabel(event.target.value)}
+                    className={`${inputClass} min-w-[120px] flex-1`}
+                  />
+                  {repeatSelect('编辑提醒重复', editRepeat, setEditRepeat)}
+                  <button
+                    type="button"
+                    onClick={() => setEditingId(null)}
+                    className={actionClass}
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={pendingReminderId === reminder.id}
+                    className={primaryButtonClass}
+                  >
+                    保存
+                  </button>
+                </form>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      'h-1.5 w-1.5 shrink-0 rounded-full',
+                      reminder.enabled ? 'bg-[#34c759]' : 'bg-gray-300'
+                    )}
+                  />
+                  <span className="w-10 shrink-0 text-[12px] tabular-nums text-gray-500 dark:text-[#a1a1a6]">
+                    {reminder.time}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[13px] text-[#1d1d1f] dark:text-[#f5f5f7]">
+                    {reminder.label}
+                    <span className="ml-1.5 text-[11px] text-gray-400 dark:text-[#8e8e93]">
+                      {repeatLabel(reminder.days)}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`编辑提醒：${reminder.label}`}
+                    disabled={pendingReminderId === reminder.id}
+                    onClick={() => startReminderEdit(reminder)}
+                    className={actionClass}
+                  >
+                    编辑
+                  </button>
+                  {onDeleteReminder ? (
+                    <button
+                      type="button"
+                      aria-label={
+                        confirmDeleteId === reminder.id
+                          ? `确认删除提醒：${reminder.label}`
+                          : `删除提醒：${reminder.label}`
+                      }
+                      disabled={pendingReminderId === reminder.id}
+                      onClick={() => void deleteReminder(reminder)}
+                      className={cn(
+                        actionClass,
+                        confirmDeleteId === reminder.id
+                          ? 'text-[#d70015] dark:text-[#ff7b72]'
+                          : ''
+                      )}
+                    >
+                      {confirmDeleteId === reminder.id ? '确认删除' : '删除'}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={reminder.enabled}
+                    aria-label={`${reminder.label} 提醒开关`}
+                    disabled={pendingReminderId === reminder.id}
+                    onClick={() => void toggleReminder(reminder)}
+                    className={cn(
+                      'relative h-5 w-9 shrink-0 rounded-full transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100',
+                      reminder.enabled ? 'bg-[#0071e3]' : 'bg-gray-300 dark:bg-white/20'
+                    )}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        'absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform duration-300 motion-reduce:transition-none',
+                        reminder.enabled ? 'translate-x-[18px]' : 'translate-x-0.5'
+                      )}
+                    />
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>

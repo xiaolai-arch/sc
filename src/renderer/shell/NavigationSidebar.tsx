@@ -72,6 +72,41 @@ const NAV_ITEMS: Array<{ id: NavSection; label: string; Icon: typeof SunIcon }> 
   { id: 'reminders', label: '提醒', Icon: ClockIcon }
 ];
 
+/** Tailwind's `md` breakpoint: from here the sidebar is a permanent column. */
+const DESKTOP_MEDIA_QUERY = '(min-width: 768px)';
+
+/**
+ * Tracks a CSS media query with a change listener. Environments without
+ * `matchMedia` (older webviews, bare jsdom) are treated as desktop so the
+ * sidebar stays usable instead of being marked inert.
+ */
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return true;
+    }
+    return window.matchMedia(query).matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return undefined;
+    }
+    const mediaQuery = window.matchMedia(query);
+    setMatches(mediaQuery.matches);
+    const onChange = (event: MediaQueryListEvent) => setMatches(event.matches);
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', onChange);
+      return () => mediaQuery.removeEventListener('change', onChange);
+    }
+    // Safari < 14 only implements the deprecated listener API.
+    mediaQuery.addListener(onChange);
+    return () => mediaQuery.removeListener(onChange);
+  }, [query]);
+
+  return matches;
+}
+
 /** Same range as the dsh sidebar: 264px minimum, 420px maximum. */
 const SIDEBAR_MIN_WIDTH = 264;
 const SIDEBAR_MAX_WIDTH = 420;
@@ -157,6 +192,29 @@ export function NavigationSidebar({
   const pendingWidthRef = useRef<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  // `inert` is applied at every width, so it must only be set while the
+  // narrow-screen drawer is closed; the desktop column is always interactive.
+  const isDesktop = useMediaQuery(DESKTOP_MEDIA_QUERY);
+  const drawerHidden = !isDesktop && !mobileOpen;
+
+  useEffect(() => {
+    if (isDesktop || !mobileOpen) return;
+    closeButtonRef.current?.focus();
+  }, [isDesktop, mobileOpen]);
+
+  useEffect(() => {
+    if (isDesktop || !mobileOpen) return undefined;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return;
+      // Let an open row menu or rename field consume Escape first.
+      if (menuOpenId !== null || renamingId !== null) return;
+      event.preventDefault();
+      onCloseMobile?.();
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isDesktop, mobileOpen, menuOpenId, renamingId, onCloseMobile]);
 
   useEffect(() => {
     try {
@@ -643,6 +701,7 @@ export function NavigationSidebar({
   return (
     <aside
       aria-label="导航"
+      {...(drawerHidden ? { inert: true, 'aria-hidden': true } : {})}
       style={{ '--sidebar-width': `${sidebarWidth}px` } as CSSProperties}
       className={cn(
         'fixed inset-y-0 left-0 z-40 flex w-[260px] max-w-[85vw] shrink-0 flex-col border-r border-gray-200/70 bg-[#f5f5f7] transition-transform duration-200 motion-reduce:transition-none dark:border-white/10 dark:bg-[#0f0f10]',
@@ -655,6 +714,7 @@ export function NavigationSidebar({
         <span className="text-[13px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">导航</span>
         <button
           type="button"
+          ref={closeButtonRef}
           aria-label="关闭导航"
           onClick={onCloseMobile}
           className="flex h-8 items-center justify-center rounded-full px-3 text-[12px] font-medium text-gray-500 transition-all duration-300 hover:bg-black/[0.04] hover:opacity-80 hover:text-black active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#8e8e93] dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"

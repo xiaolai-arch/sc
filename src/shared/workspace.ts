@@ -60,6 +60,11 @@ export interface Reminder {
   time: string;
   label: string;
   enabled: boolean;
+  /**
+   * Local weekdays the reminder repeats on (0 = Sunday … 6 = Saturday).
+   * Omitted or empty means every day.
+   */
+  days?: number[];
 }
 
 export interface WorkspaceSnapshot {
@@ -107,10 +112,20 @@ export interface CreateTaskInput {
 
 export interface UpdateWorkspaceTaskInput {
   taskId: string;
+  title?: string;
+  subject?: string;
+  durationMin?: number;
+  acceptance?: string;
+  /** Local ISO date (YYYY-MM-DD); null clears the due date. */
+  due?: string | null;
   status?: WorkspaceTaskStatus;
   actualMin?: number;
   /** Local start time to pin; null clears the pin. */
   startAt?: string | null;
+}
+
+export interface DeleteTaskInput {
+  taskId: string;
 }
 
 export interface CreateNoteInput {
@@ -142,6 +157,8 @@ export interface CreateReminderInput {
   time: string;
   label: string;
   enabled?: boolean;
+  /** 0 = Sunday … 6 = Saturday; omitted means every day. */
+  days?: number[];
 }
 
 export interface UpdateReminderInput {
@@ -149,6 +166,12 @@ export interface UpdateReminderInput {
   time?: string;
   label?: string;
   enabled?: boolean;
+  /** null clears the repeat and returns the reminder to every day. */
+  days?: number[] | null;
+}
+
+export interface DeleteReminderInput {
+  id: string;
 }
 
 export interface SendMessageInput {
@@ -178,6 +201,7 @@ export interface WorkspaceService {
   getWorkspaceSnapshot(workspaceId: string): Promise<WorkspaceSnapshot>;
   createTask(input: CreateTaskInput): Promise<WorkspaceTask>;
   updateWorkspaceTask(input: UpdateWorkspaceTaskInput): Promise<WorkspaceTask>;
+  deleteTask?(input: DeleteTaskInput): Promise<void>;
   createNote(input: CreateNoteInput): Promise<WorkspaceNote>;
   updateNote(input: UpdateWorkspaceNoteInput): Promise<WorkspaceNote>;
   getMemory(workspaceId?: string): Promise<MemoryItem[]>;
@@ -186,6 +210,7 @@ export interface WorkspaceService {
   getScheduledTasks?(): Promise<WorkspaceTask[]>;
   createReminder?(input: CreateReminderInput): Promise<Reminder>;
   updateReminder?(input: UpdateReminderInput): Promise<Reminder>;
+  deleteReminder?(input: DeleteReminderInput): Promise<void>;
   submitReview(input: SubmitReviewInput): Promise<void>;
 }
 

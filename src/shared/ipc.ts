@@ -6,6 +6,7 @@ import type {
 } from './conversations';
 import type { KnowledgeApi } from './knowledge';
 import type {
+  CreateMemoryInput,
   DeleteMemoryInput,
   LearnerProfile,
   MemoryRecord,
@@ -91,6 +92,8 @@ export interface MemoryApi {
   listMemory(workspaceId?: string): Promise<MemoryRecord[]>;
   synthesizeMemory(input: SynthesizeMemoryInput): Promise<MemorySynthesisResult>;
   getMemoryProfile(workspaceId?: string): Promise<LearnerProfile>;
+  /** Adds a memory the user wrote by hand. */
+  createMemory?(input: CreateMemoryInput): Promise<MemoryRecord>;
   updateMemory(input: UpdateMemoryInput): Promise<MemoryRecord>;
   deleteMemory(input: DeleteMemoryInput): Promise<void>;
 }

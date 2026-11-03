@@ -535,6 +535,11 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       }
       return task;
     },
+    async deleteTask(input) {
+      const workspace = (await getServices()).workspace;
+      if (!workspace.deleteTask) throw new Error('当前存储不支持删除任务。');
+      return workspace.deleteTask(input);
+    },
     async createNote(input) {
       const services = await getServices();
       const note = await services.workspace.createNote(input);
@@ -570,6 +575,11 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       const workspace = (await getServices()).workspace;
       if (!workspace.updateReminder) throw new Error('当前存储不支持提醒。');
       return workspace.updateReminder(input);
+    },
+    async deleteReminder(input) {
+      const workspace = (await getServices()).workspace;
+      if (!workspace.deleteReminder) throw new Error('当前存储不支持提醒。');
+      return workspace.deleteReminder(input);
     },
     async submitReview(input) {
       const services = await getServices();
@@ -655,6 +665,11 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       const memory = (await getServices()).memory;
       if (!memory.updateRecord) throw new Error('当前存储不支持编辑记忆。');
       return memory.updateRecord(input);
+    },
+    async createMemory(input) {
+      const memory = (await getServices()).memory;
+      if (!memory.createRecord) throw new Error('当前存储不支持新增记忆。');
+      return memory.createRecord(input);
     },
     async deleteMemory(input) {
       const memory = (await getServices()).memory;
