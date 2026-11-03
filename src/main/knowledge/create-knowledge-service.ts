@@ -531,6 +531,11 @@ export function createKnowledgeService(options: KnowledgeServiceOptions): Knowle
           if (combined.length > MAX_KNOWLEDGE_NOTE_LENGTH) {
             throw new Error('合并后的笔记超过长度上限，请先精简两个主题的笔记。');
           }
+          const targetRaw = await readFileOrNull(knowledgeNoteFile(vaultRoot, target.id));
+          const targetMeta =
+            targetRaw === null
+              ? { type: 'note' as const, source: 'user' as const }
+              : parseKnowledgeNoteFile(targetRaw, target.id).meta;
           await writeFileAtomic(
             knowledgeNoteFile(vaultRoot, target.id),
             serializeKnowledgeNoteFile({
@@ -539,7 +544,7 @@ export function createKnowledgeService(options: KnowledgeServiceOptions): Knowle
               aliases: next.aliases,
               body: combined,
               updatedAt: next.updatedAt,
-              meta: { type: 'note' as const, source: 'user' as const }
+              meta: targetMeta
             })
           );
         }

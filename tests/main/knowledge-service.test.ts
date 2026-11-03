@@ -76,6 +76,11 @@ test('merges aliases, evidence and notes into the target topic', async () => {
     level: 4
   });
   await service.saveNote({ topicId: target.id, body: '链的基本用法' });
+  await writeFile(
+    join(dir, 'knowledge', 'notes', `${target.id}.md`),
+    '---\ntype: note\nsource: user\ntags: [agent]\n---\n链的基本用法\n',
+    'utf8'
+  );
   await service.saveNote({ topicId: source.id, body: '状态图与中断' });
   await service.record({ name: 'LangGraph' });
 
@@ -97,6 +102,12 @@ test('merges aliases, evidence and notes into the target topic', async () => {
   expect(note.body).toContain('合并自「LangGraph」');
   expect(note.body).toContain('状态图与中断');
   expect((await service.getNote(source.id)).body).toBe('');
+  const mergedNoteFile = await readFile(
+    join(dir, 'knowledge', 'notes', `${target.id}.md`),
+    'utf8'
+  );
+  expect(mergedNoteFile).toContain('tags:');
+  expect(mergedNoteFile).toContain('agent');
 
   await expect(
     merge({ sourceId: target.id, targetId: target.id })
