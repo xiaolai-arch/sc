@@ -67,6 +67,39 @@ test('renders one accessible node per topic and no edges when unlinked', () => {
   expect(container.querySelectorAll('[data-edge]')).toHaveLength(0);
 });
 
+test('explains how to create links when the graph has none', () => {
+  render(
+    <KnowledgeGraph
+      topics={[rag, langChain]}
+      backlinks={emptyBacklinks}
+      selectedId={null}
+      onSelect={vi.fn()}
+    />
+  );
+
+  expect(
+    screen.getByText(
+      '还没有连线：在主题笔记里用 [[另一个主题名]] 引用其他主题，就会在这里连起来。'
+    )
+  ).toBeInTheDocument();
+});
+
+test('hides the link hint once the graph has an edge', () => {
+  const backlinks = new Map<string, KnowledgeBacklink[]>([
+    ['kt-b', [{ topicId: 'kt-a', name: 'LangChain' }]]
+  ]);
+  render(
+    <KnowledgeGraph
+      topics={[langChain, rag]}
+      backlinks={backlinks}
+      selectedId={null}
+      onSelect={vi.fn()}
+    />
+  );
+
+  expect(screen.queryByText(/还没有连线/)).not.toBeInTheDocument();
+});
+
 test('marks the selected node and shows name plus level', () => {
   render(
     <KnowledgeGraph

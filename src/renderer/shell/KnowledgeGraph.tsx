@@ -186,12 +186,21 @@ export function KnowledgeGraph({
       : loadState === 'error'
         ? '图谱连线加载失败，仅显示主题。'
         : null;
+  // With a loader, wait for it before claiming there are no links; otherwise
+  // the hint would flash on every open.
+  const linksReady = getBacklinks ? loadState === 'ready' : true;
+  const showLinkHint = linksReady && topics.length > 1 && edges.length === 0;
 
   return (
     <section aria-label="知识图谱" className="flex w-full flex-col">
       {statusMessage ? (
         <p role="status" className="pb-2 text-[11px] text-gray-400 dark:text-[#8e8e93]">
           {statusMessage}
+        </p>
+      ) : null}
+      {showLinkHint ? (
+        <p className="pb-2 text-[11px] text-gray-400 dark:text-[#8e8e93]">
+          还没有连线：在主题笔记里用 [[另一个主题名]] 引用其他主题，就会在这里连起来。
         </p>
       ) : null}
 

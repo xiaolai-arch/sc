@@ -66,7 +66,7 @@
 - **记录**：Obsidian 风格笔记、标签、关联笔记
 - **学习**：自建练习题、答题反馈、完整错题本与答题历史
 - **复盘**：复盘问题、画像与记忆、督促提醒；可补录过去日期的复盘
-- **知识库**：目录 + 可编辑笔记（`knowledge/notes/`），证据自动从任务/笔记/复盘积累，`[[主题名]]` 跳转与反向链接，长期规划据此跳过已学内容；另有无障碍的关系图谱视图；笔记自动保存并检测 Obsidian 等应用的外部修改，冲突时由你选择保留哪一版；重复主题可一键合并（别名、证据与笔记都会保留）
+- **知识库**：目录 + 可编辑笔记（`knowledge/notes/`），证据自动从任务/笔记/复盘积累，`[[主题名]]` 跳转与反向链接，长期规划据此跳过已学内容；另有无障碍的关系图谱视图（无连线时提示如何在笔记里建立 `[[链接]]`）；笔记自动保存并检测 Obsidian 等应用的外部修改，冲突时由你选择保留哪一版；重复主题可一键合并（别名、证据与笔记都会保留）
 - **记忆与提醒**：手动新增记忆并即时更新个人画像；提醒支持工作日/周末重复、编辑、删除与单独开关
 - **项目管理**：编辑项目名称、目标与描述；删除项目会移入 `workspaces/.trash/` 以便找回
 - **设置**：模型、预算、通知、启动
@@ -114,6 +114,24 @@ npm run test:e2e      # 构建 Electron 产物并运行 Playwright e2e
 npm run build
 npx playwright test --config e2e/playwright.config.ts
 ```
+
+真机验收（可选，不进入 CI）：需要本机已有一份真实 vault。脚本会把它复制到临时目录、使用临时 `userData`，跑完任务/提醒/记忆/项目/长期计划/知识合并/复盘补录/自建练习集，并在成功退出时清理临时数据。
+
+```bash
+npm run test:acceptance
+```
+
+默认读取 `~/Documents/StudyCoachVault`，并选择 `workspaces/` 下排序第一的工作区；可以用环境变量覆盖：
+
+```bash
+ASAKI_ACCEPTANCE_VAULT=/path/to/vault \
+ASAKI_ACCEPTANCE_WORKSPACE=kaoyan \
+ASAKI_ACCEPTANCE_MERGE_TARGET=LangChain \
+ASAKI_ACCEPTANCE_SHOTS=/tmp/asaki-shots \
+npm run test:acceptance
+```
+
+验收失败时会保留临时 vault 并打印路径，方便排查；成功时也会打印截图目录。
 
 ## 打包
 

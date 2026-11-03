@@ -188,8 +188,32 @@ export function PracticeSetDialog({
     }
   }
 
+  const footer = (
+    <div className="space-y-3">
+      {error ? (
+        <p role="alert" className="text-[13px] text-[#d70015] dark:text-[#ff7b72]">
+          {error}
+        </p>
+      ) : null}
+      <div className="flex justify-end gap-2">
+        <Button size="sm" variant="secondary" onClick={onClose}>
+          取消
+        </Button>
+        <Button size="sm" disabled={submitting} onClick={() => void submit()}>
+          {submitting ? '正在创建…' : '创建练习集'}
+        </Button>
+      </div>
+    </div>
+  );
+
   return (
-    <Dialog open={open} onClose={onClose} title="新建练习集">
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="新建练习集"
+      widthClassName="max-w-2xl"
+      footer={footer}
+    >
       <div className="space-y-4">
         <div>
           <Label htmlFor={`${formId}-title`}>标题</Label>
@@ -258,10 +282,12 @@ export function PracticeSetDialog({
                           updateOption(question.key, optionIndex, event.target.value)
                         }
                         placeholder={`选项 ${String.fromCharCode(65 + optionIndex)}`}
+                        className="min-w-0 flex-1"
                       />
                       <Button
                         size="sm"
                         variant="secondary"
+                        className="shrink-0"
                         disabled={question.options.length <= MIN_OPTIONS}
                         aria-label={`删除第 ${questionNumber} 题第 ${optionIndex + 1} 个选项`}
                         onClick={() => removeOption(question.key, optionIndex)}
@@ -317,21 +343,6 @@ export function PracticeSetDialog({
         <Button size="sm" variant="secondary" onClick={addQuestion}>
           添加题目
         </Button>
-
-        {error ? (
-          <p role="alert" className="text-[13px] text-[#d70015] dark:text-[#ff7b72]">
-            {error}
-          </p>
-        ) : null}
-
-        <div className="flex justify-end gap-2">
-          <Button size="sm" variant="secondary" onClick={onClose}>
-            取消
-          </Button>
-          <Button size="sm" disabled={submitting} onClick={() => void submit()}>
-            {submitting ? '正在创建…' : '创建练习集'}
-          </Button>
-        </div>
       </div>
     </Dialog>
   );

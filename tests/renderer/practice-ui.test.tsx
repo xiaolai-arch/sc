@@ -131,6 +131,21 @@ describe('LearningPane practice UI', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 
+  it('keeps the create actions outside the scrollable dialog body', async () => {
+    const user = userEvent.setup();
+    renderPane({ onCreateSet: vi.fn(async () => practiceSet) });
+
+    await user.click(screen.getByRole('button', { name: '新建练习集' }));
+
+    const dialog = screen.getByRole('dialog');
+    const body = dialog.querySelector('[data-dialog-body]');
+    const footer = dialog.querySelector('[data-dialog-footer]');
+    expect(body).not.toBeNull();
+    expect(footer).not.toBeNull();
+    expect(body).not.toContainElement(screen.getByRole('button', { name: '创建练习集' }));
+    expect(footer).toContainElement(screen.getByRole('button', { name: '创建练习集' }));
+  });
+
   it('adds and removes question rows', async () => {
     const user = userEvent.setup();
     renderPane({ onCreateSet: vi.fn(async () => practiceSet) });
