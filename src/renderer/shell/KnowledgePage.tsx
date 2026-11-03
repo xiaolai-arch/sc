@@ -12,6 +12,7 @@ import type {
 import type { Workspace } from '../../shared/workspace';
 import { Dialog } from '../ui/Dialog';
 import { PlusIcon } from '../ui/icons';
+import { KnowledgeGraph } from './KnowledgeGraph';
 import { KnowledgeNotePane } from './KnowledgeNotePane';
 import { PageFrame } from './PageFrame';
 import {
@@ -50,6 +51,15 @@ type TopicForm = {
 };
 
 type MobilePane = 'list' | 'note';
+
+type ContentView = 'note' | 'graph';
+
+const viewToggleClass = (active: boolean) =>
+  `rounded-[7px] px-2.5 py-1 text-[12px] font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 ${
+    active
+      ? 'bg-white text-gray-900 shadow-sm dark:bg-white/[0.14] dark:text-[#f5f5f7]'
+      : 'text-gray-500 hover:text-gray-800 dark:text-[#8e8e93] dark:hover:text-[#f5f5f7]'
+  }`;
 
 type DirectoryGroup = {
   key: string;
@@ -136,6 +146,7 @@ export function KnowledgePage({
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mobilePane, setMobilePane] = useState<MobilePane>('list');
+  const [contentView, setContentView] = useState<ContentView>('note');
   const [editing, setEditing] = useState<KnowledgeTopic | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState<TopicForm>(() => emptyForm(defaultWorkspaceId));
@@ -181,6 +192,12 @@ export function KnowledgePage({
 
   function selectTopic(topicId: string) {
     setSelectedId(topicId);
+    setMobilePane('note');
+  }
+
+  function showView(view: ContentView) {
+    setContentView(view);
+    // The graph is a content-pane view; on mobile it must leave the directory.
     setMobilePane('note');
   }
 
@@ -267,14 +284,38 @@ export function KnowledgePage({
       subtitle="主题 · 笔记 · 证据"
       onOpenSidebar={onOpenSidebar}
       action={
-        <button
-          type="button"
-          onClick={openCreate}
-          className="flex h-9 items-center gap-1.5 rounded-xl bg-[#0071e3] px-3.5 text-[13px] font-medium text-white transition-all duration-200 hover:opacity-90 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:active:scale-100"
-        >
-          <PlusIcon className="h-4 w-4" />
-          新增主题
-        </button>
+        <div className="flex items-center gap-2">
+          <div
+            role="group"
+            aria-label="知识内容视图"
+            className="flex rounded-[9px] bg-[#f5f5f7] p-0.5 dark:bg-white/[0.08]"
+          >
+            <button
+              type="button"
+              aria-pressed={contentView === 'note'}
+              onClick={() => showView('note')}
+              className={viewToggleClass(contentView === 'note')}
+            >
+              笔记
+            </button>
+            <button
+              type="button"
+              aria-pressed={contentView === 'graph'}
+              onClick={() => showView('graph')}
+              className={viewToggleClass(contentView === 'graph')}
+            >
+              图谱
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={openCreate}
+            className="flex h-9 items-center gap-1.5 rounded-xl bg-[#0071e3] px-3.5 text-[13px] font-medium text-white transition-all duration-200 hover:opacity-90 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:active:scale-100"
+          >
+            <PlusIcon className="h-4 w-4" />
+            新增主题
+          </button>
+        </div>
       }
     >
       <div className="mx-auto flex h-full w-full max-w-[1160px] px-4 py-4 md:px-6">
@@ -352,7 +393,24 @@ export function KnowledgePage({
             mobilePane === 'note' ? 'flex' : 'hidden'
           }`}
         >
-          {selected ? (
+          {contentView === 'graph' ? (
+            <>
+              <button
+                type="button"
+                aria-label="返回目录"
+                onClick={() => setMobilePane('list')}
+                className="mb-2 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-black/[0.04] hover:text-gray-700 md:hidden dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
+              >
+                ←
+              </button>
+              <KnowledgeGraph
+                topics={topics}
+                getBacklinks={getKnowledgeBacklinks}
+                selectedId={selectedId}
+                onSelect={selectTopic}
+              />
+            </>
+          ) : selected ? (
             <KnowledgeNotePane
               topic={selected}
               topics={topics}
