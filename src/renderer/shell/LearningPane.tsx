@@ -6,18 +6,24 @@ import { Progress } from '../ui/Progress';
 import { cn } from '../ui/cn';
 import type { Workspace, WorkspaceNote } from '../../shared/workspace';
 import type {
+  CreatePracticeSetInput,
+  PracticeAttempt,
   PracticeMistake,
   PracticeSet,
   SubmitAnswerInput,
   SubmitAnswerResult
 } from '../../shared/practice';
+import { AttemptHistory, MistakeBook } from './PracticePanels';
+import { PracticeSetDialog } from './PracticeSetDialog';
 
 type LearningPaneProps = {
   set: PracticeSet | null;
   workspace: Workspace | null;
   notes: WorkspaceNote[];
   mistakes: PracticeMistake[];
+  attempts?: PracticeAttempt[];
   onSubmitAnswer: (input: SubmitAnswerInput) => Promise<SubmitAnswerResult>;
+  onCreateSet?: (input: CreatePracticeSetInput) => Promise<PracticeSet>;
   onOpenChat: () => void;
   onOpenNote: (id: string) => void;
 };
@@ -27,7 +33,9 @@ export function LearningPane({
   workspace,
   notes,
   mistakes,
+  attempts,
   onSubmitAnswer,
+  onCreateSet,
   onOpenChat,
   onOpenNote
 }: LearningPaneProps) {
@@ -38,6 +46,7 @@ export function LearningPane({
   const [score, setScore] = useState(0);
   const [finished, setFinished] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   useEffect(() => {
     setIndex(0);
@@ -49,11 +58,27 @@ export function LearningPane({
     setError(null);
   }, [set?.id]);
 
+  const createButton = onCreateSet ? (
+    <Button size="sm" variant="secondary" onClick={() => setCreateOpen(true)}>
+      新建练习集
+    </Button>
+  ) : null;
+
+  const createDialog = onCreateSet ? (
+    <PracticeSetDialog
+      open={createOpen}
+      workspaceId={workspace?.id ?? set?.workspaceId ?? ''}
+      onClose={() => setCreateOpen(false)}
+      onCreate={onCreateSet}
+    />
+  ) : null;
+
   if (!set) {
     return (
       <div className="flex h-full min-w-0 flex-1 flex-col bg-white dark:bg-[#0f0f10]">
-        <header className="flex h-14 shrink-0 items-center border-b border-gray-200/70 px-4 dark:border-white/10 md:px-6">
+        <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-gray-200/70 px-4 dark:border-white/10 md:px-6">
           <span className="text-[14px] font-medium text-black dark:text-[#f5f5f7]">学习</span>
+          {createButton}
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-6">
           <div className="mx-auto w-full max-w-[720px]">
@@ -66,19 +91,8 @@ export function LearningPane({
                 去问阿咲
               </Button>
             </div>
-            {mistakes.length > 0 ? (
-              <div className="mt-6 rounded-2xl bg-[#f5f5f7] p-5 dark:bg-white/[0.06]">
-                <p className="text-[12px] font-medium text-gray-500 dark:text-[#8e8e93]">错题本 · {mistakes.length} 道待复习</p>
-                <ul className="mt-2 space-y-1.5">
-                  {mistakes.slice(0, 4).map((mistake) => (
-                    <li key={mistake.id} className="text-[13px] leading-6 text-gray-500 dark:text-[#a1a1a6]">
-                      {mistake.prompt}
-                      <span className="ml-1 text-[11px] text-gray-400 dark:text-[#8e8e93]">（{mistake.due} 复习）</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
+            <MistakeBook mistakes={mistakes} />
+            <AttemptHistory attempts={attempts} set={set} mistakes={mistakes} />
             {notes.length > 0 ? (
               <div className="mt-6">
                 <p className="text-[12px] font-medium text-gray-500 dark:text-[#8e8e93]">相关记录</p>
@@ -99,6 +113,7 @@ export function LearningPane({
             ) : null}
           </div>
         </div>
+        {createDialog}
       </div>
     );
   }
@@ -152,9 +167,12 @@ export function LearningPane({
           <span className="text-[11px] text-gray-400 dark:text-[#8e8e93]">/</span>
           <span className="truncate text-[12px] text-gray-500 dark:text-[#8e8e93]">{set.title}</span>
         </div>
-        <Button size="sm" variant="secondary" onClick={onOpenChat}>
-          问阿咲
-        </Button>
+        <div className="flex items-center gap-2">
+          {createButton}
+          <Button size="sm" variant="secondary" onClick={onOpenChat}>
+            问阿咲
+          </Button>
+        </div>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-6">
@@ -269,8 +287,10 @@ export function LearningPane({
               </div>
             </>
           )}
+          <AttemptHistory attempts={attempts} set={set} mistakes={mistakes} />
         </div>
       </div>
+      {createDialog}
     </div>
   );
 }
