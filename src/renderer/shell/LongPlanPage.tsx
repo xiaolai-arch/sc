@@ -702,7 +702,7 @@ export function LongPlanPage({
             className="rounded-2xl bg-white p-5 shadow-sm dark:bg-[#1c1c1e] md:p-6"
           >
             <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0 flex-1">
+              <div className="min-w-[320px] flex-1">
                 <h2 className="text-[20px] font-semibold tracking-tight text-[#1d1d1f] dark:text-[#f5f5f7] md:text-[22px]">
                   {selectedPlan.goal}
                 </h2>
