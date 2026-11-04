@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, screen } from 'electron';
 import { join } from 'node:path';
 import { handleExportBackup, handleRestoreBackup } from './backup';
 import { createAppContext } from './context';
@@ -13,6 +13,13 @@ import { registerAppShortcuts } from './shortcuts';
 import { createContextScheduler, planFirstEmptyWorkspace } from './scheduler';
 import { DEFAULT_VAULT_DIRECTORY } from './settings/defaults';
 import { createElectronNotificationSink, createElectronTray } from './tray';
+import {
+  DEFAULT_WINDOW_STATE,
+  readWindowState,
+  writeWindowState,
+  writeWindowStateSync,
+  type WindowState
+} from './window-state';
 
 // Local development/e2e isolation hook. Normal launches keep a stable data
 // folder across product renames so conversations, settings and credentials
@@ -25,16 +32,67 @@ if (userDataOverride) {
 }
 
 let mainWindow: BrowserWindow | null = null;
+// Restored once at startup; later windows (e.g. after the last one closes)
+// start from the same placement instead of resetting to the default size.
+let initialWindowState: WindowState = { ...DEFAULT_WINDOW_STATE };
+
+function windowStateFile(): string {
+  return join(app.getPath('userData'), 'window-state.json');
+}
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
-    width: 900,
-    height: 680,
+    width: initialWindowState.width,
+    height: initialWindowState.height,
+    ...(initialWindowState.x !== undefined && initialWindowState.y !== undefined
+      ? { x: initialWindowState.x, y: initialWindowState.y }
+      : {}),
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js')
     }
+  });
+  if (initialWindowState.maximized) window.maximize();
+
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  const snapshot = (): WindowState => {
+    const bounds = window.getNormalBounds();
+    return {
+      width: bounds.width,
+      height: bounds.height,
+      x: bounds.x,
+      y: bounds.y,
+      maximized: window.isMaximized()
+    };
+  };
+  const saveNow = () => {
+    try {
+      writeWindowStateSync(windowStateFile(), snapshot());
+    } catch (error) {
+      console.warn('ASAKI window state save failed:', serializeError(error).message);
+    }
+  };
+  const scheduleSave = () => {
+    if (saveTimer !== null) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      initialWindowState = snapshot();
+      void writeWindowState(windowStateFile(), initialWindowState).catch((error: unknown) => {
+        console.warn('ASAKI window state save failed:', serializeError(error).message);
+      });
+    }, 400);
+  };
+  window.on('resize', scheduleSave);
+  window.on('move', scheduleSave);
+  window.on('close', () => {
+    if (saveTimer !== null) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    if (window.isDestroyed()) return;
+    initialWindowState = snapshot();
+    saveNow();
   });
 
   window.on('ready-to-show', () => {
@@ -103,6 +161,10 @@ app.whenReady().then(async () => {
     defaultVaultPath: join(app.getPath('documents'), DEFAULT_VAULT_DIRECTORY)
   });
   registerIpcHandlers(context.api, ipcMain);
+  initialWindowState = await readWindowState(
+    windowStateFile(),
+    screen.getAllDisplays().map((display) => display.workArea)
+  );
   createWindow();
 
   ipcMain.handle(APP_IPC_CHANNELS.exportBackup, async () => {
