@@ -68,7 +68,8 @@ import type {
   UpdatePracticeSetInput
 } from '../src/shared/practice';
 import { PRACTICE_INTERVALS } from '../src/shared/practice';
-import type {
+import { formatLocalDate } from '../src/shared/date';
+import { isTaskRepeat, nextRepeatDate } from '../src/shared/recurrence';import type {
   CreateMemoryInput,
   LearnerProfile,
   DeleteMemoryInput,
@@ -88,7 +89,7 @@ import type {
 } from '../src/shared/plans';
 import { buildTemplatePlan } from '../src/shared/plan-template';
 import type { SearchResult, SearchResultKind } from '../src/shared/search';
-import { formatLocalDate, parseLocalDate } from '../src/shared/date';
+import { parseLocalDate } from '../src/shared/date';
 import type { AppSettings } from '../src/shared/types';
 import {
   demoMemory,
@@ -1662,6 +1663,7 @@ export function createMockApi(
         status: 'pending',
         due: input.due,
         ...(input.startAt ? { startAt: input.startAt } : {}),
+        ...(input.repeat ? { repeat: input.repeat } : {}),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -1673,6 +1675,7 @@ export function createMockApi(
     async updateWorkspaceTask(input: UpdateWorkspaceTaskInput): Promise<WorkspaceTask> {
       const task = state.tasks.find((entry) => entry.id === input.taskId);
       if (!task) throw new Error('任务不存在');
+      const wasDone = task.status === 'done';
       if (input.title !== undefined) {
         const title = input.title.trim();
         if (!title) throw new Error('任务标题不能为空');
@@ -1692,7 +1695,33 @@ export function createMockApi(
       if (input.startAt === null) delete task.startAt;
       else if (input.startAt !== undefined) task.startAt = input.startAt;
       if (input.actualMin !== undefined) task.actualMin = input.actualMin;
+      if (input.repeat === null) delete task.repeat;
+      else if (input.repeat !== undefined && isTaskRepeat(input.repeat)) {
+        task.repeat = input.repeat;
+      }
       task.updatedAt = new Date().toISOString();
+
+      if (!wasDone && task.status === 'done' && task.repeat) {
+        const base = task.due ?? formatLocalDate(new Date());
+        const nextDue = nextRepeatDate(base, task.repeat);
+        // Re-completing after an undo must not create duplicates.
+        if (!state.tasks.some((entry) => entry.recurredFrom === task.id)) {
+          const now = new Date().toISOString();
+          const next: WorkspaceTask = {
+            ...structuredClone(task),
+            id: nextId('task'),
+            status: 'pending',
+            due: nextDue,
+            recurredFrom: task.id,
+            createdAt: now,
+            updatedAt: now
+          };
+          delete next.actualMin;
+          delete next.startAt;
+          state.tasks = [next, ...state.tasks];
+        }
+      }
+
       persist();
       return structuredClone(task);
     },

@@ -19,6 +19,39 @@ test('starts in onboarding and completes it with a workspace', async () => {
   expect(workspaces.some((workspace) => workspace.name === '我的学习')).toBe(true);
 });
 
+test('completing a repeating task creates the next occurrence once', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage);
+  await api.completeWorkspaceOnboarding({
+    name: '我的学习',
+    kind: 'study',
+    goal: 'g',
+    description: ''
+  });
+  const workspace = (await api.listWorkspaces())[0]!;
+  const task = await api.createTask({
+    workspaceId: workspace.id,
+    title: '每日背单词',
+    subject: '英语',
+    durationMin: 20,
+    acceptance: '',
+    due: '2026-11-06',
+    repeat: 'weekdays'
+  });
+
+  await api.updateWorkspaceTask({ taskId: task.id, status: 'done' });
+
+  let tasks = (await api.getWorkspaceSnapshot(workspace.id)).tasks;
+  const next = tasks.find((entry) => entry.title === '每日背单词' && entry.id !== task.id);
+  expect(next).toMatchObject({ title: '每日背单词', due: '2026-11-09', repeat: 'weekdays' });
+  expect(next?.status).toBe('pending');
+
+  await api.updateWorkspaceTask({ taskId: task.id, status: 'pending' });
+  await api.updateWorkspaceTask({ taskId: task.id, status: 'done' });
+  tasks = (await api.getWorkspaceSnapshot(workspace.id)).tasks;
+  expect(tasks.filter((entry) => entry.title === '每日背单词')).toHaveLength(2);
+});
+
 test('updates a workspace task and keeps settings', async () => {
   localStorage.clear();
   const api = createMockApi(localStorage);

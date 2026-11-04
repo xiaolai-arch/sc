@@ -3,6 +3,11 @@ import { friendlyErrorMessage } from '../../shared/errors';
 import { cn } from '../ui/cn';
 import { CheckIcon } from '../ui/icons';
 import type { ReviewRecord } from '../../shared/ipc';
+import {
+  TASK_REPEAT_LABELS,
+  TASK_REPEATS,
+  type TaskRepeat
+} from '../../shared/recurrence';
 import type {
   CreateMemoryInput,
   DeleteMemoryInput,
@@ -218,6 +223,7 @@ type TaskDraft = {
   subject: string;
   duration: string;
   acceptance: string;
+  repeat: TaskRepeat | '';
 };
 
 function draftFrom(task: WorkspaceTask): TaskDraft {
@@ -225,7 +231,8 @@ function draftFrom(task: WorkspaceTask): TaskDraft {
     title: task.title,
     subject: task.subject,
     duration: String(task.durationMin),
-    acceptance: task.acceptance
+    acceptance: task.acceptance,
+    repeat: task.repeat ?? ''
   };
 }
 
@@ -255,7 +262,8 @@ export function PlanSection({
     title: '',
     subject: '',
     duration: '30',
-    acceptance: ''
+    acceptance: '',
+    repeat: ''
   });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<TaskDraft | null>(null);
@@ -290,9 +298,10 @@ export function PlanSection({
         title,
         subject: newDraft.subject.trim() || workspace.name,
         durationMin,
-        acceptance: newDraft.acceptance.trim()
+        acceptance: newDraft.acceptance.trim(),
+        ...(newDraft.repeat ? { repeat: newDraft.repeat } : {})
       });
-      setNewDraft({ title: '', subject: '', duration: '30', acceptance: '' });
+      setNewDraft({ title: '', subject: '', duration: '30', acceptance: '', repeat: '' });
       setCreating(false);
     } catch (cause) {
       setCreateError(messageOf(cause));
@@ -321,7 +330,8 @@ export function PlanSection({
         title,
         subject: editDraft.subject,
         durationMin,
-        acceptance: editDraft.acceptance
+        acceptance: editDraft.acceptance,
+        repeat: editDraft.repeat || null
       });
       setEditingId(null);
       setEditDraft(null);
@@ -421,6 +431,21 @@ export function PlanSection({
           onChange={(event) => onChange({ ...draft, acceptance: event.target.value })}
           className={`${inputClass} sm:col-span-2`}
         />
+        <select
+          aria-label={`${keyPrefix}重复`}
+          value={draft.repeat}
+          onChange={(event) =>
+            onChange({ ...draft, repeat: event.target.value as TaskRepeat | '' })
+          }
+          className={`${inputClass} sm:col-span-2`}
+        >
+          <option value="">不重复</option>
+          {TASK_REPEATS.map((repeat) => (
+            <option key={repeat} value={repeat}>
+              {TASK_REPEAT_LABELS[repeat]}
+            </option>
+          ))}
+        </select>
       </div>
     );
   }
@@ -565,6 +590,7 @@ export function PlanSection({
                       </p>
                       <p className="mt-0.5 truncate text-[12px] text-gray-500 dark:text-[#8e8e93]">
                         {task.subject} · {task.durationMin} 分钟
+                        {task.repeat ? ` · ${TASK_REPEAT_LABELS[task.repeat]}` : ''}
                         {typeof task.actualMin === 'number' ? ` · 已练 ${task.actualMin} 分钟` : ''}
                       </p>
                     </div>

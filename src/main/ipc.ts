@@ -1,4 +1,5 @@
 import { isLocalDateTime } from '../shared/date';
+import { isTaskRepeat } from '../shared/recurrence';
 import type { AppSettings } from '../shared/types';
 import type {
   BackupResult,
@@ -267,6 +268,9 @@ function requireCreateTask(value: unknown): CreateTaskInput {
   if (input.startAt !== undefined && !isLocalDateTime(input.startAt)) {
     throw new Error('任务开始时间无效。');
   }
+  if (input.repeat !== undefined && !isTaskRepeat(input.repeat)) {
+    throw new Error('任务重复规则无效。');
+  }
   return input as unknown as CreateTaskInput;
 }
 
@@ -282,11 +286,19 @@ function requireUpdateWorkspaceTask(value: unknown): UpdateWorkspaceTaskInput {
     input.subject === undefined &&
     input.durationMin === undefined &&
     input.acceptance === undefined &&
-    input.due === undefined
+    input.due === undefined &&
+    input.repeat === undefined
   ) {
     throw new Error('没有要更新的任务字段。');
   }
   if (input.status !== undefined) requireTaskStatus(input.status);
+  if (
+    input.repeat !== undefined &&
+    input.repeat !== null &&
+    !isTaskRepeat(input.repeat)
+  ) {
+    throw new Error('任务重复规则无效。');
+  }
   if (input.startAt !== undefined && input.startAt !== null && !isLocalDateTime(input.startAt)) {
     throw new Error('任务开始时间无效。');
   }

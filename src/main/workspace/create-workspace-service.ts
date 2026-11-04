@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import { posix, resolve } from 'node:path';
 import { formatLocalDate } from '../../shared/date';
+import { isTaskRepeat, nextRepeatDate } from '../../shared/recurrence';
 import type {
   CreateNoteInput,
   CreateReminderInput,
@@ -374,6 +375,9 @@ export function createWorkspaceService(
         input?.startAt === undefined
           ? undefined
           : assertLocalDateTime(input.startAt, 'task start time');
+      if (input?.repeat !== undefined && !isTaskRepeat(input.repeat)) {
+        throw new Error('Invalid task repeat rule');
+      }
       const record: TaskRecord = {
         id: newId('t'),
         title,
@@ -387,6 +391,7 @@ export function createWorkspaceService(
         status: 'pending',
         due,
         ...(startAt ? { startAt } : {}),
+        ...(input?.repeat ? { repeat: input.repeat } : {}),
         created: new Date().toISOString(),
         updated: new Date().toISOString()
       };
@@ -416,6 +421,7 @@ export function createWorkspaceService(
       const hasDuration = input?.durationMin !== undefined;
       const hasAcceptance = input?.acceptance !== undefined;
       const hasDue = input?.due !== undefined;
+      const hasRepeat = input?.repeat !== undefined;
       if (
         !hasStatus &&
         !hasStartAt &&
@@ -423,9 +429,13 @@ export function createWorkspaceService(
         !hasSubject &&
         !hasDuration &&
         !hasAcceptance &&
-        !hasDue
+        !hasDue &&
+        !hasRepeat
       ) {
         throw new Error('No task fields to update');
+      }
+      if (hasRepeat && input.repeat !== null && !isTaskRepeat(input.repeat)) {
+        throw new Error('Invalid task repeat rule');
       }
       const status = input?.status;
       if (hasStatus && !isTaskStatus(status)) throw new Error('Invalid task status');
@@ -462,6 +472,7 @@ export function createWorkspaceService(
         if (found === null) throw new Error(`Task not found: ${taskId}`);
         const record = found.records[found.index];
         if (record === undefined) throw new Error(`Task not found: ${taskId}`);
+        const wasDone = record.status === 'done';
         if (hasStatus) record.status = status as TaskRecord['status'];
         if (startAt === null) delete record.startAt;
         else if (startAt !== undefined) record.startAt = startAt;
@@ -471,8 +482,40 @@ export function createWorkspaceService(
         if (durationMin !== undefined) record.durationMin = durationMin;
         if (due === null) delete record.due;
         else if (due !== undefined) record.due = due;
+        if (input?.repeat === null) delete record.repeat;
+        else if (input?.repeat !== undefined && isTaskRepeat(input.repeat)) {
+          record.repeat = input.repeat;
+        }
         record.actualMin = actualMin ?? record.actualMin;
         record.updated = new Date().toISOString();
+
+        const repeatRule = record.repeat;
+        if (!wasDone && record.status === 'done' && repeatRule) {
+          const base = record.due ?? formatLocalDate(new Date());
+          const nextDue = nextRepeatDate(base, repeatRule);
+          const nextPath = taskFile(vaultRoot, found.workspaceId, nextDue);
+          const nextRaw = await readFileOrNull(nextPath);
+          const nextRecords = nextRaw === null ? [] : parseTaskFile(nextRaw);
+          if (nextRaw !== null && nextRecords.length === 0) {
+            assertAppendable(nextRaw, 'tasks', '任务文件');
+          }
+          // Re-completing after an undo must not create duplicates.
+          if (!nextRecords.some((entry) => entry.recurredFrom === record.id)) {
+            const next: TaskRecord = {
+              ...record,
+              id: newId('t'),
+              status: 'pending',
+              due: nextDue,
+              recurredFrom: record.id,
+              created: new Date().toISOString(),
+              updated: new Date().toISOString()
+            };
+            delete next.actualMin;
+            delete next.startAt;
+            await writeFileAtomic(nextPath, serializeTaskFile(nextDue, [...nextRecords, next]));
+          }
+        }
+
         await writeFileAtomic(found.path, serializeTaskFile(found.date, found.records));
         return toWorkspaceTask(record, found.workspaceId);
       });

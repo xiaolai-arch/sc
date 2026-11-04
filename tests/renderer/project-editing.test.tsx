@@ -67,6 +67,33 @@ test('creates, edits and deletes a task from the plan section', async () => {
   expect(snapshot.tasks.some((task) => task.title === '线性代数复盘')).toBe(false);
 });
 
+test('creates a daily task whose next occurrence appears after completion', async () => {
+  const api = setup();
+  await openProjectTasks();
+
+  await userEvent.click(screen.getByRole('button', { name: '新增任务' }));
+  await userEvent.type(screen.getByLabelText('新任务标题'), '每日背单词');
+  await userEvent.selectOptions(screen.getByLabelText('新任务重复'), 'daily');
+  await userEvent.click(screen.getByRole('button', { name: '保存任务' }));
+
+  expect(await screen.findByText('每日背单词')).toBeInTheDocument();
+  let snapshot = await api.getWorkspaceSnapshot('kaoyan');
+  const created = snapshot.tasks.find((task) => task.title === '每日背单词');
+  expect(created).toMatchObject({ repeat: 'daily', status: 'pending' });
+
+  await userEvent.click(screen.getByRole('button', { name: '开始：每日背单词' }));
+  await userEvent.click(await screen.findByRole('button', { name: '完成：每日背单词' }));
+
+  expect(await screen.findAllByText('每日背单词')).toHaveLength(2);
+  snapshot = await api.getWorkspaceSnapshot('kaoyan');
+  const occurrences = snapshot.tasks.filter((task) => task.title === '每日背单词');
+  expect(occurrences.map((task) => task.status).sort()).toEqual(['done', 'pending']);
+  expect(occurrences.find((task) => task.status === 'pending')).toMatchObject({
+    repeat: 'daily',
+    recurredFrom: created?.id
+  });
+});
+
 test('edits the project name, goal and description', async () => {
   const api = setup();
   await openProjectTasks();

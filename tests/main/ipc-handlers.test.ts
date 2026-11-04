@@ -163,6 +163,19 @@ test('rejects malformed handler parameters before they reach services', async ()
   await expect(
     handlers.createTask({ workspaceId: 'ws-1', title: 't', subject: '数学', durationMin: 30 })
   ).rejects.toThrow('任务验收标准无效。');
+  await expect(
+    handlers.createTask({
+      workspaceId: 'ws-1',
+      title: 't',
+      subject: '数学',
+      durationMin: 30,
+      acceptance: '',
+      repeat: 'monthly'
+    })
+  ).rejects.toThrow('任务重复规则无效。');
+  await expect(
+    handlers.updateWorkspaceTask({ taskId: 't1', repeat: 'monthly' })
+  ).rejects.toThrow('任务重复规则无效。');
   await expect(handlers.updateWorkspaceTask({ taskId: 't1', status: 'later' })).rejects.toThrow(
     '任务状态无效。'
   );

@@ -26,6 +26,82 @@ function taskInput(workspaceId: string, startAt?: string) {
   };
 }
 
+test('completing a repeating task creates the next occurrence', async () => {
+  const { dir, service, workspace } = await setup();
+  try {
+    const created = await service.createTask({
+      ...taskInput(workspace.id),
+      due: '2026-11-04',
+      repeat: 'daily'
+    });
+    expect(created).toMatchObject({ repeat: 'daily', due: '2026-11-04' });
+
+    await service.updateWorkspaceTask({ taskId: created.id, status: 'done' });
+
+    const snapshot = await service.getWorkspaceSnapshot(workspace.id);
+    const next = snapshot.tasks.find((task) => task.id !== created.id);
+    expect(next).toMatchObject({
+      title: '真题',
+      status: 'pending',
+      due: '2026-11-05',
+      repeat: 'daily'
+    });
+    expect(next?.actualMin).toBeUndefined();
+
+    // Undoing and re-completing must not spawn another copy.
+    await service.updateWorkspaceTask({ taskId: created.id, status: 'pending' });
+    await service.updateWorkspaceTask({ taskId: created.id, status: 'done' });
+    const again = await service.getWorkspaceSnapshot(workspace.id);
+    expect(again.tasks.filter((task) => task.title === '真题')).toHaveLength(2);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('weekday repeats skip the weekend', async () => {
+  const { dir, service, workspace } = await setup();
+  try {
+    const created = await service.createTask({
+      ...taskInput(workspace.id),
+      due: '2026-11-06',
+      repeat: 'weekdays'
+    });
+    await service.updateWorkspaceTask({ taskId: created.id, status: 'done' });
+
+    const snapshot = await service.getWorkspaceSnapshot(workspace.id);
+    expect(snapshot.tasks.find((task) => task.id !== created.id)?.due).toBe('2026-11-09');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('does not repeat a plain task and can clear a repeat rule', async () => {
+  const { dir, service, workspace } = await setup();
+  try {
+    const plain = await service.createTask({ ...taskInput(workspace.id), due: '2026-11-04' });
+    await service.updateWorkspaceTask({ taskId: plain.id, status: 'done' });
+    let snapshot = await service.getWorkspaceSnapshot(workspace.id);
+    expect(snapshot.tasks).toHaveLength(1);
+
+    const repeating = await service.createTask({
+      ...taskInput(workspace.id),
+      title: '背单词',
+      due: '2026-11-04',
+      repeat: 'weekly'
+    });
+    const cleared = await service.updateWorkspaceTask({
+      taskId: repeating.id,
+      repeat: null
+    });
+    expect(cleared.repeat).toBeUndefined();
+    await service.updateWorkspaceTask({ taskId: repeating.id, status: 'done' });
+    snapshot = await service.getWorkspaceSnapshot(workspace.id);
+    expect(snapshot.tasks.filter((task) => task.title === '背单词')).toHaveLength(1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('persists a pinned start time and reads it back from the vault', async () => {
   const { dir, service, workspace } = await setup();
   try {

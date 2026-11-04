@@ -1,4 +1,5 @@
 import { isLocalDateTime } from '../../../shared/date';
+import { isTaskRepeat, type TaskRepeat } from '../../../shared/recurrence';
 import type { NoteMeta, StudyTask, TaskStatus } from '../../../shared/types';
 import type { WorkspaceTask } from '../../../shared/workspace';
 import { parseNote, serializeNote } from '../../vault/note';
@@ -12,6 +13,9 @@ import { asFiniteNumber, asRecord, asString, asStringArray } from './coerce';
 export type TaskRecord = StudyTask & {
   due?: string;
   startAt?: string;
+  repeat?: TaskRepeat;
+  /** Set on copies that a completed occurrence spawned. */
+  recurredFrom?: string;
   created?: string;
   updated?: string;
 };
@@ -40,6 +44,8 @@ function coerceTask(value: unknown): TaskRecord | null {
     status,
     actualMin: asFiniteNumber(record.actualMin),
     due: asString(record.due),
+    ...(isTaskRepeat(record.repeat) ? { repeat: record.repeat } : {}),
+    ...(asString(record.recurredFrom) ? { recurredFrom: asString(record.recurredFrom) } : {}),
     ...(isLocalDateTime(startAt) ? { startAt } : {}),
     created: asString(record.created),
     updated: asString(record.updated)
@@ -86,6 +92,8 @@ export function toWorkspaceTask(record: TaskRecord, workspaceId: string): Worksp
     status: record.status,
     actualMin: record.actualMin,
     due: record.due,
+    ...(record.repeat ? { repeat: record.repeat } : {}),
+    ...(record.recurredFrom ? { recurredFrom: record.recurredFrom } : {}),
     ...(record.startAt ? { startAt: record.startAt } : {}),
     createdAt: record.created,
     updatedAt: record.updated

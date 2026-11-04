@@ -402,11 +402,25 @@ export function useWorkspaceData(): WorkspaceData {
 
   const updateTask = useCallback(
     async (input: UpdateWorkspaceTaskInput) => {
-      const task = await apiOrThrow().updateWorkspaceTask(input);
-      setState((current) => ({
-        ...current,
-        tasks: current.tasks.map((item) => (item.id === task.id ? task : item))
-      }));
+      const api = apiOrThrow();
+      const task = await api.updateWorkspaceTask(input);
+      if (task.status === 'done' && task.repeat) {
+        // Completing a repeating task spawns its next occurrence, which the
+        // single-task response cannot carry. Reload that workspace's tasks.
+        const snapshot = await api.getWorkspaceSnapshot(task.workspaceId);
+        setState((current) => ({
+          ...current,
+          tasks: [
+            ...current.tasks.filter((item) => item.workspaceId !== task.workspaceId),
+            ...snapshot.tasks
+          ]
+        }));
+      } else {
+        setState((current) => ({
+          ...current,
+          tasks: current.tasks.map((item) => (item.id === task.id ? task : item))
+        }));
+      }
       // Completing a task appends knowledge evidence in the main process.
       if (task.status === 'done') await refreshKnowledge();
       return task;

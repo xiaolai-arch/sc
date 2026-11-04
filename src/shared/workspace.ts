@@ -1,5 +1,6 @@
 import type { ReviewAnswers, TaskStatus } from './types';
 import type { ButlerStreamEvent } from './butler-stream';
+import type { TaskRepeat } from './recurrence';
 
 export type WorkspaceKind = 'exam' | 'study' | 'project' | 'life';
 export type WorkspaceTaskStatus = TaskStatus;
@@ -28,6 +29,10 @@ export interface WorkspaceTask {
   status: WorkspaceTaskStatus;
   actualMin?: number;
   due?: string;
+  /** Completing the task schedules its next occurrence from the due date. */
+  repeat?: TaskRepeat;
+  /** Id of the completed occurrence that spawned this copy; internal. */
+  recurredFrom?: string;
   /** Local start time (YYYY-MM-DDTHH:mm) pinned on the daily schedule. */
   startAt?: string;
   createdAt?: string;
@@ -108,6 +113,7 @@ export interface CreateTaskInput {
   due?: string;
   /** Local start time (YYYY-MM-DDTHH:mm) to pin on the daily schedule. */
   startAt?: string;
+  repeat?: TaskRepeat;
 }
 
 export interface UpdateWorkspaceTaskInput {
@@ -122,6 +128,8 @@ export interface UpdateWorkspaceTaskInput {
   actualMin?: number;
   /** Local start time to pin; null clears the pin. */
   startAt?: string | null;
+  /** Repeat rule; null turns repetition off. */
+  repeat?: TaskRepeat | null;
 }
 
 export interface DeleteTaskInput {
