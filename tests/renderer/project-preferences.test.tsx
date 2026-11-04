@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { homeGreeting } from '../../src/shared/greeting';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Workspace } from '../../src/renderer/shell/Workspace';
@@ -16,7 +17,7 @@ function setup() {
 
 test('updates the project check-in preference and keeps it', async () => {
   const api = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
   await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'kaoyan');
 
@@ -41,7 +42,7 @@ test('updates the project check-in preference and keeps it', async () => {
 
 test('snoozes proactive check-ins for today', async () => {
   const api = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await userEvent.click(screen.getByRole('button', { name: '提醒' }));
 
   expect(screen.getByText('仅暂停主动检查，不影响你设的提醒。')).toBeInTheDocument();
@@ -61,7 +62,7 @@ test('shows the muted state when today is already snoozed', async () => {
   window.studyCoach = api;
   window.studyCoachPrototype = { reset: vi.fn() };
   render(<Workspace hasApiKey={false} onRefresh={vi.fn()} />);
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await userEvent.click(screen.getByRole('button', { name: '提醒' }));
 
   expect(screen.getByText('今天已静音，明天恢复')).toBeInTheDocument();

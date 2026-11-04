@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { homeGreeting } from '../../src/shared/greeting';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Workspace } from '../../src/renderer/shell/Workspace';
@@ -19,7 +20,7 @@ function nav() {
 
 test('creates a plan from the sidebar and turns today’s row into schedule tasks', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
 
   await userEvent.click(nav().getByRole('button', { name: '长期计划' }));
   expect(await screen.findByText('还没有长期计划。')).toBeInTheDocument();

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { homeGreeting } from '../../src/shared/greeting';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
@@ -20,7 +21,7 @@ function setup() {
 
 test('renders memory cards with kind, source and why', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await userEvent.click(screen.getByRole('button', { name: '记忆' }));
 
   expect(screen.getByText('极限定义还不稳，建议先复习再做新题。')).toBeInTheDocument();
@@ -31,7 +32,7 @@ test('renders memory cards with kind, source and why', async () => {
 
 test('edits text and kind, then keeps the change after reload', async () => {
   const api = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await userEvent.click(screen.getByRole('button', { name: '记忆' }));
   expect(screen.getByText('2 个薄弱点')).toBeInTheDocument();
 
@@ -59,7 +60,7 @@ test('edits text and kind, then keeps the change after reload', async () => {
 
 test('deletes a memory after confirmation and refreshes the profile', async () => {
   const api = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await userEvent.click(screen.getByRole('button', { name: '记忆' }));
   const text = '极限定义还不稳，建议先复习再做新题。';
   const before = (await api.getMemoryProfile()).memoryCount;
@@ -77,7 +78,7 @@ test('deletes a memory after confirmation and refreshes the profile', async () =
 
 test('keeps the edit input and shows an error when saving fails', async () => {
   const api = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await userEvent.click(screen.getByRole('button', { name: '记忆' }));
   const spy = vi.spyOn(api, 'updateMemory').mockRejectedValueOnce(new Error('保存失败'));
 
@@ -95,7 +96,7 @@ test('keeps the edit input and shows an error when saving fails', async () => {
 
 test('adds a memory manually and refreshes the profile', async () => {
   const api = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await userEvent.click(screen.getByRole('button', { name: '记忆' }));
   const before = (await api.getMemoryProfile()).memoryCount;
 
@@ -124,7 +125,7 @@ test('shows the empty state when there are no memories', async () => {
   window.studyCoach = api;
   window.studyCoachPrototype = { reset: vi.fn() };
   render(<Workspace hasApiKey={false} onRefresh={vi.fn()} />);
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await userEvent.click(screen.getByRole('button', { name: '记忆' }));
 
   expect(

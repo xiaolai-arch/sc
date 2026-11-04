@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { homeGreeting } from '../../src/shared/greeting';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ButlerStreamEvent } from '../../src/shared/butler-stream';
@@ -60,7 +61,7 @@ test('shows knowledge written by a chat tool before the turn finishes', async ()
   } as never;
 
   render(<Workspace hasApiKey={false} onRefresh={vi.fn()} />);
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
 
   await sendPrompt('我今天中午学习了 LangGraph 的状态图');
   expect(await screen.findByText('记录知识')).toBeInTheDocument();

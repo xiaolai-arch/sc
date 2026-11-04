@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { homeGreeting } from '../../src/shared/greeting';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { sendPrompt } from './send-prompt';
@@ -21,7 +22,7 @@ async function waitForIdle() {
 
 test('shows live reasoning and collapses after the answer starts', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await sendPrompt('帮我排一下今天的优先级');
 
   const header = await screen.findByRole('button', { name: /思考/ });
@@ -38,7 +39,7 @@ test('shows live reasoning and collapses after the answer starts', async () => {
 
 test('shows tool steps and keeps narration out of the final answer', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await sendPrompt('记一下：今天数学卡在极限');
 
   expect(await screen.findByText('写入笔记', {}, { timeout: 3000 })).toBeInTheDocument();

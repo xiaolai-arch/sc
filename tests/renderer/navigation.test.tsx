@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { homeGreeting } from '../../src/shared/greeting';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Workspace } from '../../src/renderer/shell/Workspace';
@@ -14,7 +15,7 @@ function setup() {
 
 async function mount(api: ReturnType<typeof createMockApi>) {
   render(<Workspace hasApiKey={false} onRefresh={vi.fn()} />);
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
 }
 
 function nav() {
@@ -96,7 +97,7 @@ test('switches across the top sections and marks the active one', async () => {
     'page'
   );
   expect(await screen.findByRole('heading', { name: '日常' })).toBeInTheDocument();
-  expect(await screen.findByText('早上好，xiaolai。')).toBeInTheDocument();
+  expect(await screen.findByText(homeGreeting('xiaolai', new Date()))).toBeInTheDocument();
   expect(screen.getAllByRole('complementary')).toHaveLength(1);
 });
 

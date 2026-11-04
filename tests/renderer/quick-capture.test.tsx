@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { homeGreeting } from '../../src/shared/greeting';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { sendPrompt } from './send-prompt';
@@ -28,7 +29,7 @@ function setup() {
 
 test('opens the quick capture dialog from the app event', async () => {
   const { openCapture } = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
 
   act(() => openCapture());
 
@@ -39,7 +40,7 @@ test('opens the quick capture dialog from the app event', async () => {
 
 test('sends the captured text through the butler conversation', async () => {
   const { openCapture } = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
 
   act(() => openCapture());
   await userEvent.type(screen.getByLabelText('快速记录内容'), '记一下：今天背了 50 个单词');
@@ -51,7 +52,7 @@ test('sends the captured text through the butler conversation', async () => {
 
 test('disables sending empty captures', async () => {
   const { openCapture } = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
 
   act(() => openCapture());
 
@@ -62,7 +63,7 @@ test('disables sending empty captures', async () => {
 
 test('cancels without sending', async () => {
   const { openCapture } = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
 
   act(() => openCapture());
   await userEvent.type(screen.getByLabelText('快速记录内容'), '不要发送这条');
@@ -74,18 +75,18 @@ test('cancels without sending', async () => {
 
 test('starts a new draft with Cmd+N', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText(/我先按截止时间和精力排/);
 
   fireEvent.keyDown(window, { key: 'n', metaKey: true });
 
-  expect(await screen.findByText('早上好，xiaolai。')).toBeInTheDocument();
+  expect(await screen.findByText(homeGreeting('xiaolai', new Date()))).toBeInTheDocument();
 });
 
 test('does not start a draft from Cmd+N inside the composer', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText(/我先按截止时间和精力排/);
 
@@ -93,13 +94,13 @@ test('does not start a draft from Cmd+N inside the composer', async () => {
   composer.focus();
   fireEvent.keyDown(composer, { key: 'n', metaKey: true });
 
-  expect(screen.queryByText('早上好，xiaolai。')).not.toBeInTheDocument();
+  expect(screen.queryByText(homeGreeting('xiaolai', new Date()))).not.toBeInTheDocument();
   expect(screen.getAllByText(/我先按截止时间和精力排/).length).toBeGreaterThan(0);
 });
 
 test('ignores Cmd+N while the quick capture dialog is open', async () => {
   const { openCapture } = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText(/我先按截止时间和精力排/);
 
@@ -107,5 +108,5 @@ test('ignores Cmd+N while the quick capture dialog is open', async () => {
   fireEvent.keyDown(window, { key: 'n', metaKey: true });
 
   expect(screen.getByRole('dialog')).toBeInTheDocument();
-  expect(screen.queryByText('早上好，xiaolai。')).not.toBeInTheDocument();
+  expect(screen.queryByText(homeGreeting('xiaolai', new Date()))).not.toBeInTheDocument();
 });

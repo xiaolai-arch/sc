@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { homeGreeting } from '../../src/shared/greeting';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { sendPrompt } from './send-prompt';
@@ -27,7 +28,7 @@ function sidebar(): HTMLElement {
 
 test('opens and closes the navigation drawer on narrow screens', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
 
   expect(sidebar().className).toContain('-translate-x-full');
   const open = screen.getByRole('button', { name: '打开导航' });
@@ -48,7 +49,7 @@ test('opens and closes the navigation drawer on narrow screens', async () => {
 
 test('closes the navigation drawer from its close button', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
 
   await userEvent.click(screen.getByRole('button', { name: '打开导航' }));
   const closers = screen.getAllByRole('button', { name: '关闭导航' });
@@ -59,7 +60,7 @@ test('closes the navigation drawer from its close button', async () => {
 
 test('closes the navigation drawer after selecting a conversation', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText(/我先按截止时间和精力排/);
 
@@ -73,7 +74,7 @@ test('closes the navigation drawer after selecting a conversation', async () => 
 
 test('closes the drawer when switching sections', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
 
   await userEvent.click(screen.getByRole('button', { name: '打开导航' }));
   await userEvent.click(within(sidebar()).getByRole('button', { name: '记忆' }));
@@ -91,7 +92,7 @@ test('closes the drawer when switching sections', async () => {
 
 test('opens the navigation drawer with the keyboard', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
 
   const open = screen.getByRole('button', { name: '打开导航' });
   open.focus();
@@ -102,7 +103,7 @@ test('opens the navigation drawer with the keyboard', async () => {
 
 test('keeps the desktop single-column layout classes', async () => {
   setup(1024);
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
 
   const aside = sidebar();
   expect(aside.className).toContain('md:w-[var(--sidebar-width)]');
@@ -120,7 +121,10 @@ test('keeps the desktop single-column layout classes', async () => {
   }
   expect(within(aside).getByRole('button', { name: '打开设置' })).toBeInTheDocument();
   await waitFor(() =>
-    expect(screen.getByText(/早上好，xiaolai。/).closest('[class*="max-w-"]')?.className).toContain(
+    expect(
+      screen.getByText(homeGreeting('xiaolai', new Date())).closest('[class*="max-w-"]')
+        ?.className
+    ).toContain(
       'max-w-[680px]'
     )
   );
@@ -128,7 +132,7 @@ test('keeps the desktop single-column layout classes', async () => {
 
 test('resizes the sidebar with keyboard and clamps to the dsh range', async () => {
   setup(1024);
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   const aside = sidebar();
   const handle = screen.getByRole('separator', { name: '调整导航栏宽度' });
 

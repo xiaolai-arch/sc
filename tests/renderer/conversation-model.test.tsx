@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { homeGreeting } from '../../src/shared/greeting';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { sendPrompt } from './send-prompt';
@@ -15,14 +16,14 @@ function setup() {
 }
 
 async function sendFirstMessage() {
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText(/我先按截止时间和精力排/);
 }
 
 test('has no model picker without an active conversation', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
 
   expect(
     screen.queryByRole('button', { name: '设置本对话模型' })

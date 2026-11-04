@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
-import { MenuIcon, MoreHorizontalIcon } from '../ui/icons';
+import { homeGreeting } from '../../shared/greeting';
+import { MenuIcon } from '../ui/icons';
 import { Composer } from './Composer';
 import { MarkdownText } from './MarkdownText';
 import { MessageActions } from './MessageActions';
@@ -138,15 +139,6 @@ export function ChatPane({
             · {dateLabel}
           </span>
         </div>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            aria-label="更多"
-            className="flex h-8 w-8 items-center justify-center rounded-full text-gray-500 transition-all duration-300 hover:bg-black/[0.04] hover:opacity-80 hover:text-black active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#8e8e93] dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
-          >
-            <MoreHorizontalIcon className="h-4 w-4" />
-          </button>
-        </div>
       </header>
 
       {showWelcome ? (
@@ -160,7 +152,7 @@ export function ChatPane({
             <div className="w-full max-w-[680px] -translate-y-[3vh]">
               <div className="flex flex-col items-center text-center">
                 <p className="text-[12px] text-gray-400 dark:text-[#8e8e93]">
-                  早上好，xiaolai。
+                  {homeGreeting('xiaolai', new Date())}
                 </p>
                 <h1 className="mt-1 text-[22px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
                   {homeTitle}

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { homeGreeting } from '../../src/shared/greeting';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Workspace } from '../../src/renderer/shell/Workspace';
@@ -14,7 +15,7 @@ function setup() {
 }
 
 async function openProjectTasks() {
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
   await userEvent.selectOptions(await screen.findByLabelText('切换项目'), 'kaoyan');
 }
@@ -110,7 +111,7 @@ test('deletes a project after confirmation', async () => {
 
 test('creates a repeating reminder, edits it and deletes it', async () => {
   const api = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await userEvent.click(navButton('提醒'));
 
   await userEvent.type(screen.getByLabelText('提醒内容'), '跑步');

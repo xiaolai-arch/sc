@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { homeGreeting } from '../../src/shared/greeting';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { sendPrompt } from './send-prompt';
@@ -40,7 +41,7 @@ test('shows the retry status until new output arrives', async () => {
     };
   });
 
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await sendPrompt('帮我排一下今天的优先级');
 
   expect(await screen.findByText('模型连接失败，正在重试…')).toBeInTheDocument();
@@ -61,7 +62,7 @@ test('shows the classified error and clears the retry status', async () => {
     return { text: '（模型暂时不可用，我先根据本地记录给你一个简要回复。）' };
   });
 
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await sendPrompt('帮我排一下今天的优先级');
 
   expect(await screen.findByRole('alert')).toHaveTextContent('模型认证失败');

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { homeGreeting } from '../../src/shared/greeting';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { sendPrompt } from './send-prompt';
@@ -61,7 +62,7 @@ test('orders reasoning and tool rows from the stream and keeps them in memory', 
     )
   );
 
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText('最终回答');
 
@@ -116,7 +117,7 @@ test('reloads the conversation when it is reopened mid-turn', async () => {
     };
   });
 
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await sendPrompt('帮我排一下今天的优先级');
 
   const sidebar = screen.getAllByRole('complementary')[0]!;

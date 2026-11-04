@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { homeGreeting } from '../../src/shared/greeting';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { sendPrompt } from './send-prompt';
@@ -16,7 +17,7 @@ function setup(streamPace = 0.05) {
 
 test('shows the welcome draft and sends a message', async () => {
   setup();
-  expect(await screen.findByText('早上好，xiaolai。')).toBeInTheDocument();
+  expect(await screen.findByText(homeGreeting('xiaolai', new Date()))).toBeInTheDocument();
   expect(screen.getByText('还没有对话。')).toBeInTheDocument();
 
   await sendPrompt('帮我排一下今天的优先级');
@@ -27,12 +28,12 @@ test('shows the welcome draft and sends a message', async () => {
 
 test('starts a new draft and reopens a previous conversation', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText(/我先按截止时间和精力排/);
 
   await userEvent.click(screen.getByRole('button', { name: '新对话' }));
-  expect(await screen.findByText('早上好，xiaolai。')).toBeInTheDocument();
+  expect(await screen.findByText(homeGreeting('xiaolai', new Date()))).toBeInTheDocument();
 
   const sidebar = screen.getAllByRole('complementary')[0]!;
   const conversation = within(sidebar).getByRole('button', {
@@ -44,7 +45,7 @@ test('starts a new draft and reopens a previous conversation', async () => {
 
 test('opens the projects page and filters by project', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
   expect(await screen.findByText('外刊精读')).toBeInTheDocument();
 
@@ -57,7 +58,7 @@ test('opens the projects page and filters by project', async () => {
 
 test('records a note and previews it from the records tab', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await sendPrompt('记一下：今天数学卡在极限');
   expect((await screen.findAllByText(/记下了/, {}, { timeout: 3000 })).length).toBeGreaterThan(0);
 
@@ -76,7 +77,7 @@ test('records a note and previews it from the records tab', async () => {
 
 test('shows the review and reminder tabs', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
 
   await userEvent.click(screen.getByRole('button', { name: '复盘' }));
   expect(await screen.findByText('还没有复盘记录。')).toBeInTheDocument();
@@ -87,19 +88,19 @@ test('shows the review and reminder tabs', async () => {
 
 test('opens the settings page and returns to chat', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
 
   await userEvent.click(screen.getByRole('button', { name: '打开设置' }));
   expect(await screen.findByLabelText('模型名称')).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole('button', { name: '返回对话' }));
   await waitFor(() => expect(screen.queryByLabelText('模型名称')).not.toBeInTheDocument());
-  expect(await screen.findByText('早上好，xiaolai。')).toBeInTheDocument();
+  expect(await screen.findByText(homeGreeting('xiaolai', new Date()))).toBeInTheDocument();
 });
 
 test('creates a project through the conversation', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
 
   await userEvent.type(screen.getByLabelText('向阿咲提问'), '我想考研');
   await userEvent.click(screen.getByRole('button', { name: '发送' }));
@@ -116,7 +117,7 @@ test('creates a project through the conversation', async () => {
 
 test('opens practice from the projects page', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
 
   await userEvent.click(screen.getByRole('button', { name: '练习' }));
@@ -127,7 +128,7 @@ test('opens practice from the projects page', async () => {
 
 test('edits and deletes a practice set from the practice sidebar', async () => {
   const api = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
   await userEvent.click(screen.getByRole('button', { name: '练习' }));
 
@@ -164,7 +165,7 @@ test('edits and deletes a practice set from the practice sidebar', async () => {
 
 test('stops an in-flight generation', async () => {
   setup(1);
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
 
   await sendPrompt('帮我排一下今天的优先级');
   const stop = await screen.findByRole('button', { name: '停止生成' });

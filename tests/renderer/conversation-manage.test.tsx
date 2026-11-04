@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { homeGreeting } from '../../src/shared/greeting';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { sendPrompt } from './send-prompt';
@@ -33,7 +34,7 @@ beforeEach(() => {
 
 test('copies an assistant message and regenerates it without duplicating the user message', async () => {
   const api = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText(/我先按截止时间和精力排/);
   await waitFor(() =>
@@ -59,7 +60,7 @@ test('copies an assistant message and regenerates it without duplicating the use
 
 test('edits the last user message before resending it', async () => {
   const api = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await userEvent.type(screen.getByLabelText('向阿咲提问'), '记一下：今天数学卡在极限');
   await userEvent.click(screen.getByRole('button', { name: '发送' }));
   await screen.findAllByText(/记下了/);
@@ -87,7 +88,7 @@ test('edits the last user message before resending it', async () => {
 
 test('renames and pins a conversation from the sidebar menu', async () => {
   const api = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText(/我先按截止时间和精力排/);
 
@@ -114,7 +115,7 @@ test('renames and pins a conversation from the sidebar menu', async () => {
 
 test('deletes a conversation only after confirmation and returns to the draft', async () => {
   const api = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText(/我先按截止时间和精力排/);
 
@@ -124,13 +125,13 @@ test('deletes a conversation only after confirmation and returns to the draft', 
   expect((await api.listConversations())).toHaveLength(1);
 
   await userEvent.click(screen.getByRole('menuitem', { name: '确认删除' }));
-  expect(await screen.findByText('早上好，xiaolai。')).toBeInTheDocument();
+  expect(await screen.findByText(homeGreeting('xiaolai', new Date()))).toBeInTheDocument();
   expect(await api.listConversations()).toEqual([]);
 });
 
 test('searches conversations from global search', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await userEvent.type(screen.getByLabelText('向阿咲提问'), '记一下：今天数学卡在极限');
   await userEvent.click(screen.getByRole('button', { name: '发送' }));
   await screen.findAllByText(/记下了/);
@@ -150,7 +151,7 @@ test('searches conversations from global search', async () => {
 
 test('opens global search with Cmd+K', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
 
   // The window listener is installed by a mount effect that can land after the
   // welcome text; retry the keydown until the search input proves it is ready.
@@ -162,7 +163,7 @@ test('opens global search with Cmd+K', async () => {
 
 test('closes the conversation menu when clicking outside', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText(/我先按截止时间和精力排/);
 
@@ -175,7 +176,7 @@ test('closes the conversation menu when clicking outside', async () => {
 
 test('closes the conversation menu with Escape', async () => {
   setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText(/我先按截止时间和精力排/);
 
@@ -188,7 +189,7 @@ test('closes the conversation menu with Escape', async () => {
 
 test('does not offer regenerate when an unanswered user message trails the answer', async () => {
   const api = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText(/我先按截止时间和精力排/);
   await waitFor(() =>
