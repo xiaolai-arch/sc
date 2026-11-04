@@ -99,6 +99,27 @@ test('round-trips bounds through the state file', async () => {
   }
 });
 
+test('concurrent saves do not step on each other', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'asaki-window-state-'));
+  try {
+    const file = join(dir, 'window-state.json');
+    const saves = Array.from({ length: 12 }, (_, index) =>
+      writeWindowState(file, {
+        width: 800 + index,
+        height: 600,
+        maximized: index % 2 === 0
+      })
+    );
+    await Promise.all(saves);
+
+    const state = await readWindowState(file, [display]);
+    expect(state.width).toBeGreaterThanOrEqual(800);
+    expect(state.width).toBeLessThanOrEqual(811);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('writes synchronously so a quit cannot lose the last bounds', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'asaki-window-state-'));
   try {

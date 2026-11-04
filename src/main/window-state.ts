@@ -102,6 +102,15 @@ export async function readWindowState(
   }
 }
 
+// Every write gets its own temp file: a debounced save can still be in flight
+// when the window closes and the synchronous writer runs.
+let tempCounter = 0;
+
+function nextTempPath(directory: string): string {
+  tempCounter += 1;
+  return join(directory, `.window-state-${process.pid}-${tempCounter}.tmp`);
+}
+
 /** Persists the window state atomically; failures are left to the caller. */
 export async function writeWindowState(
   filePath: string,
@@ -109,7 +118,7 @@ export async function writeWindowState(
 ): Promise<void> {
   const directory = dirname(filePath);
   await mkdir(directory, { recursive: true });
-  const tempPath = join(directory, `.window-state-${process.pid}.tmp`);
+  const tempPath = nextTempPath(directory);
   try {
     await writeFile(tempPath, `${JSON.stringify(state, null, 2)}\n`, {
       encoding: 'utf8',
@@ -129,7 +138,7 @@ export async function writeWindowState(
 export function writeWindowStateSync(filePath: string, state: WindowState): void {
   const directory = dirname(filePath);
   mkdirSync(directory, { recursive: true });
-  const tempPath = join(directory, `.window-state-${process.pid}.tmp`);
+  const tempPath = nextTempPath(directory);
   try {
     writeFileSync(tempPath, `${JSON.stringify(state, null, 2)}\n`, {
       encoding: 'utf8',
