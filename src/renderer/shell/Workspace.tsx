@@ -1405,6 +1405,10 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
             <ReviewPage
               workspaces={workspaces}
               reviews={reviews}
+              tasks={tasks}
+              attempts={practiceAttempts}
+              dueMistakes={practiceDue}
+              knowledgeTopics={knowledgeTopics}
               onOpenSidebar={openSidebar}
               onPrompt={promptButler}
               onSubmitReview={async (input) => {

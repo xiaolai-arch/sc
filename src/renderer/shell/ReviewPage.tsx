@@ -1,9 +1,16 @@
 import { useState, type FormEvent } from 'react';
 import { formatLocalDate } from '../../shared/date';
-import { reviewedDaysThisWeek, reviewStreak } from '../../shared/review-stats';
+import { reviewStreak } from '../../shared/review-stats';
+import { weeklyOverview } from '../../shared/weekly-stats';
 import { friendlyErrorMessage } from '../../shared/errors';
 import type { ReviewRecord } from '../../shared/ipc';
-import type { SubmitReviewInput, Workspace } from '../../shared/workspace';
+import type { KnowledgeTopic } from '../../shared/knowledge';
+import type { PracticeAttempt, PracticeMistake } from '../../shared/practice';
+import type {
+  SubmitReviewInput,
+  Workspace,
+  WorkspaceTask
+} from '../../shared/workspace';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
 import { Input } from '../ui/Input';
@@ -12,10 +19,16 @@ import { Select } from '../ui/Select';
 import { Textarea } from '../ui/Textarea';
 import { PageFrame } from './PageFrame';
 import { ReviewRecords } from './ReviewRecords';
+import { WeeklyOverview } from './WeeklyOverview';
 
 type ReviewPageProps = {
   workspaces: Workspace[];
   reviews: ReviewRecord[];
+  /** Backing data for the weekly overview; omitted by lightweight callers. */
+  tasks?: WorkspaceTask[];
+  attempts?: PracticeAttempt[];
+  dueMistakes?: PracticeMistake[];
+  knowledgeTopics?: KnowledgeTopic[];
   onOpenSidebar: () => void;
   onPrompt: (prompt: string, workspaceId?: string) => void;
   /** Persists a manual backfill; when omitted the backfill button is hidden. */
@@ -30,6 +43,10 @@ const filterClass =
 export function ReviewPage({
   workspaces,
   reviews,
+  tasks = [],
+  attempts = [],
+  dueMistakes = [],
+  knowledgeTopics = [],
   onOpenSidebar,
   onPrompt,
   onSubmitReview,
@@ -59,7 +76,30 @@ export function ReviewPage({
   const streak = reviewedToday
     ? reviewStreak(reviews, today)
     : reviewStreak(reviews, formatLocalDate(yesterday));
-  const weekDays = reviewedDaysThisWeek(reviews, todayDate);
+
+  const inFilter = (workspaceId?: string) => !filterId || workspaceId === filterId;
+  const filteredTasks = tasks.filter((task) => inFilter(task.workspaceId));
+  const filteredAttempts = attempts.filter((attempt) => inFilter(attempt.workspaceId));
+  const filteredDue = dueMistakes.filter((mistake) => inFilter(mistake.workspaceId));
+  const filteredTopics = knowledgeTopics.filter(
+    (topic) => !filterId || !topic.workspaceId || topic.workspaceId === filterId
+  );
+  const filteredReviews = reviews.filter((review) => inFilter(review.workspaceId));
+  const overview = weeklyOverview({
+    tasks: filteredTasks,
+    attempts: filteredAttempts,
+    reviews: filteredReviews,
+    dueMistakes: filteredDue,
+    topics: filteredTopics,
+    today: todayDate
+  });
+  const hasOverviewData =
+    filteredReviews.length +
+      filteredTasks.length +
+      filteredAttempts.length +
+      filteredDue.length +
+      filteredTopics.length >
+    0;
 
   const openBackfill = () => {
     setDate(today);
@@ -152,13 +192,13 @@ export function ReviewPage({
         ) : undefined
       }
     >
+      {hasOverviewData ? <WeeklyOverview overview={overview} /> : null}
+
       {reviews.length > 0 ? (
         <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-gray-500 dark:text-[#a1a1a6]">
           <span className="font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
             连续复盘 {streak} 天
           </span>
-          <span aria-hidden="true">·</span>
-          <span>本周 {weekDays} 天</span>
           {!reviewedToday ? (
             <span className="ml-auto font-medium text-[#0071e3] dark:text-[#4da3ff]">
               今天还没复盘
