@@ -20,6 +20,8 @@ import type {
   PracticeAttempt,
   PracticeMistake,
   PracticeSet,
+  ReviewMistakeInput,
+  SetMistakeResolvedInput,
   SubmitAnswerInput,
   SubmitAnswerResult,
   UpdatePracticeSetInput
@@ -86,6 +88,8 @@ export interface PracticeApi {
   updatePracticeSet?(input: UpdatePracticeSetInput): Promise<PracticeSet>;
   deletePracticeSet?(input: DeletePracticeSetInput): Promise<void>;
   submitPracticeAnswer(input: SubmitAnswerInput): Promise<SubmitAnswerResult>;
+  reviewPracticeMistake?(input: ReviewMistakeInput): Promise<SubmitAnswerResult>;
+  setPracticeMistakeResolved?(input: SetMistakeResolvedInput): Promise<PracticeMistake>;
   getPracticeMistakes(workspaceId: string): Promise<PracticeMistake[]>;
   getPracticeDue(input: { workspaceId: string; date: string }): Promise<PracticeMistake[]>;
   listPracticeAttempts(workspaceId: string): Promise<PracticeAttempt[]>;

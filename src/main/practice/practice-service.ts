@@ -10,6 +10,8 @@ import {
   type PracticeQuestion,
   type PracticeService,
   type PracticeSet,
+  type ReviewMistakeInput,
+  type SetMistakeResolvedInput,
   type SubmitAnswerInput,
   type SubmitAnswerResult,
   type UpdatePracticeSetInput
@@ -109,6 +111,64 @@ function normalizeQuestions(input: unknown): PracticeQuestion[] {
   });
 }
 
+interface MistakeSource {
+  workspaceId: string;
+  setId: string;
+  questionId: string;
+  prompt: string;
+  options: string[];
+  answer: number;
+  explanation: string;
+}
+
+/**
+ * Applies one answer to the spaced-repetition record. A wrong answer creates or
+ * advances a mistake; a correct answer lowers priority and resolves the
+ * mistake after two consecutive correct answers.
+ */
+function applyMistakeAnswer(
+  existing: PracticeMistake | undefined,
+  source: MistakeSource,
+  correct: boolean,
+  answeredAt: string,
+  today: string
+): PracticeMistake | null {
+  if (!correct) {
+    const wrongCount = (existing?.wrongCount ?? 0) + 1;
+    const intervalDays =
+      PRACTICE_INTERVALS[Math.min(wrongCount - 1, PRACTICE_INTERVALS.length - 1)];
+    return {
+      id: existing?.id ?? newId('pm'),
+      workspaceId: source.workspaceId,
+      setId: source.setId,
+      questionId: source.questionId,
+      prompt: source.prompt,
+      options: [...source.options],
+      answer: source.answer,
+      explanation: source.explanation,
+      wrongCount,
+      correctStreak: 0,
+      priority: Math.min(3, (existing?.priority ?? 0) + 1),
+      intervalDays,
+      due: addDays(today, intervalDays),
+      status: 'active',
+      createdAt: existing?.createdAt ?? answeredAt,
+      updatedAt: answeredAt,
+      lastAnsweredAt: answeredAt
+    };
+  }
+  if (existing === undefined) return null;
+  const correctStreak = existing.correctStreak + 1;
+  return {
+    ...existing,
+    priority: Math.max(0, existing.priority - 1),
+    correctStreak,
+    status: correctStreak >= 2 ? 'resolved' : 'active',
+    updatedAt: answeredAt,
+    lastAnsweredAt: answeredAt
+  };
+}
+
 /**
  * Vault-backed practice service. Every public call re-reads the vault, so edits
  * made in Obsidian (or by another process) are picked up immediately. Writes
@@ -171,6 +231,22 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
   async function readMistakes(workspaceId: string): Promise<PracticeMistake[]> {
     const raw = await readFileOrNull(mistakesFile(vaultRoot, workspaceId));
     return raw === null ? [] : parseMistakesFile(raw);
+  }
+
+  async function findMistake(
+    mistakeId: string
+  ): Promise<{ workspaceId: string; mistake: PracticeMistake } | null> {
+    for (const directory of await listDirectories(workspacesDir(vaultRoot))) {
+      let workspaceId: string;
+      try {
+        workspaceId = assertWorkspaceId(directory);
+      } catch {
+        continue;
+      }
+      const mistake = (await readMistakes(workspaceId)).find((entry) => entry.id === mistakeId);
+      if (mistake !== undefined) return { workspaceId, mistake };
+    }
+    return null;
   }
 
   async function findSet(
@@ -350,54 +426,25 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
         const mistakes = await readMistakes(workspaceId);
         const index = mistakes.findIndex((entry) => entry.questionId === questionId);
         const existing = index >= 0 ? mistakes[index] : undefined;
-        let changed = false;
-        let mistake: PracticeMistake | null = existing ?? null;
-
-        if (!correct) {
-          const wrongCount = (existing?.wrongCount ?? 0) + 1;
-          const intervalDays = PRACTICE_INTERVALS[Math.min(wrongCount - 1, PRACTICE_INTERVALS.length - 1)];
-          const updated: PracticeMistake = {
-            id: existing?.id ?? newId('pm'),
+        const mistake = applyMistakeAnswer(
+          existing,
+          {
             workspaceId,
             setId: set.id,
             questionId,
             prompt: question.prompt,
-            options: [...question.options],
+            options: question.options,
             answer: question.answer,
-            explanation: question.explanation,
-            wrongCount,
-            correctStreak: 0,
-            priority: Math.min(3, (existing?.priority ?? 0) + 1),
-            intervalDays,
-            due: addDays(today, intervalDays),
-            status: 'active',
-            createdAt: existing?.createdAt ?? answeredAt,
-            updatedAt: answeredAt,
-            lastAnsweredAt: answeredAt
-          };
-          if (index >= 0) mistakes[index] = updated;
-          else mistakes.push(updated);
-          mistake = updated;
-          changed = true;
-        } else if (existing !== undefined) {
-          // A correct answer lowers the priority (and eventually resolves the
-          // mistake) without deleting the history.
-          const correctStreak = existing.correctStreak + 1;
-          const priority = Math.max(0, existing.priority - 1);
-          const updated: PracticeMistake = {
-            ...existing,
-            priority,
-            correctStreak,
-            status: correctStreak >= 2 ? 'resolved' : 'active',
-            updatedAt: answeredAt,
-            lastAnsweredAt: answeredAt
-          };
-          mistakes[index] = updated;
-          mistake = updated;
-          changed = true;
-        }
+            explanation: question.explanation
+          },
+          correct,
+          answeredAt,
+          today
+        );
 
-        if (changed) {
+        if (mistake !== null) {
+          if (index >= 0) mistakes[index] = mistake;
+          else mistakes.push(mistake);
           await writeFileAtomic(
             mistakesFile(vaultRoot, workspaceId),
             serializeMistakesFile(workspaceId, mistakes, answeredAt)
@@ -416,6 +463,116 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
           mistake,
           due: mistake?.status === 'active' ? mistake.due : undefined
         };
+      });
+    },
+
+    async reviewMistake(input: ReviewMistakeInput): Promise<SubmitAnswerResult> {
+      if (typeof input !== 'object' || input === null) throw new Error('Review is required');
+      const mistakeId = assertSafeSegment(
+        requireString(input.mistakeId, 'mistake id'),
+        'mistake id'
+      );
+      const choice = input.choice;
+      if (typeof choice !== 'number' || !Number.isInteger(choice) || choice < 0) {
+        throw new Error('Invalid answer choice');
+      }
+      await ensureSeeded();
+      const found = await findMistake(mistakeId);
+      if (found === null) throw new Error(`Mistake not found: ${mistakeId}`);
+      if (found.mistake.status === 'resolved') throw new Error('Mistake is already resolved');
+      if (choice >= found.mistake.options.length) throw new Error('Invalid answer choice');
+
+      const answeredAtDate = now();
+      const answeredAt = answeredAtDate.toISOString();
+      const today = formatLocalDate(answeredAtDate);
+      const { workspaceId, mistake: snapshot } = found;
+      const correct = choice === snapshot.answer;
+
+      return runExclusively(async () => {
+        const attempt: PracticeAttempt = {
+          id: newId('pa'),
+          workspaceId,
+          setId: snapshot.setId,
+          questionId: snapshot.questionId,
+          choice,
+          correct,
+          answeredAt
+        };
+        const dayFile = attemptFile(vaultRoot, workspaceId, today);
+        const existingAttemptsRaw = await readFileOrNull(dayFile);
+        const attempts =
+          existingAttemptsRaw === null ? [] : parseAttemptFile(existingAttemptsRaw);
+        await writeFileAtomic(dayFile, serializeAttemptFile(today, [...attempts, attempt]));
+
+        const mistakes = await readMistakes(workspaceId);
+        const index = mistakes.findIndex((entry) => entry.id === mistakeId);
+        if (index < 0) throw new Error(`Mistake not found: ${mistakeId}`);
+        const current = mistakes[index];
+        const updated = applyMistakeAnswer(
+          current,
+          {
+            workspaceId,
+            setId: current.setId,
+            questionId: current.questionId,
+            prompt: current.prompt,
+            options: current.options,
+            answer: current.answer,
+            explanation: current.explanation
+          },
+          correct,
+          answeredAt,
+          today
+        );
+        if (updated === null) throw new Error(`Mistake not found: ${mistakeId}`);
+        mistakes[index] = updated;
+        await writeFileAtomic(
+          mistakesFile(vaultRoot, workspaceId),
+          serializeMistakesFile(workspaceId, mistakes, answeredAt)
+        );
+
+        return {
+          questionId: current.questionId,
+          setId: current.setId,
+          workspaceId,
+          choice,
+          correct,
+          answer: current.answer,
+          explanation: current.explanation,
+          attempt,
+          mistake: updated,
+          ...(updated.status === 'active' ? { due: updated.due } : {})
+        };
+      });
+    },
+
+    async setMistakeResolved(input: SetMistakeResolvedInput): Promise<PracticeMistake> {
+      if (typeof input !== 'object' || input === null) {
+        throw new Error('Mistake update is required');
+      }
+      const mistakeId = assertSafeSegment(
+        requireString(input.mistakeId, 'mistake id'),
+        'mistake id'
+      );
+      if (typeof input.resolved !== 'boolean') throw new Error('resolved is required');
+      await ensureSeeded();
+      return runExclusively(async () => {
+        const found = await findMistake(mistakeId);
+        if (found === null) throw new Error(`Mistake not found: ${mistakeId}`);
+        const mistakes = await readMistakes(found.workspaceId);
+        const index = mistakes.findIndex((entry) => entry.id === mistakeId);
+        if (index < 0) throw new Error(`Mistake not found: ${mistakeId}`);
+        const updatedAt = now().toISOString();
+        const updated: PracticeMistake = {
+          ...mistakes[index],
+          status: input.resolved ? 'resolved' : 'active',
+          updatedAt
+        };
+        mistakes[index] = updated;
+        await writeFileAtomic(
+          mistakesFile(vaultRoot, found.workspaceId),
+          serializeMistakesFile(found.workspaceId, mistakes, updatedAt)
+        );
+        return updated;
       });
     },
 

@@ -7,7 +7,7 @@ import {
 } from '../../shared/conversations';
 import type { LongPlan, LongPlanDay } from '../../shared/plans';
 import type { SendMessageInput, WorkspaceNote } from '../../shared/workspace';
-import type { PracticeSet } from '../../shared/practice';
+import type { PracticeMistake, PracticeSet } from '../../shared/practice';
 import type { SearchResult } from '../../shared/search';
 import { SettingsPage } from '../settings/SettingsPage';
 import { Dialog } from '../ui/Dialog';
@@ -27,6 +27,7 @@ import {
 import { KnowledgePage } from './KnowledgePage';
 import { GlobalSearchDialog } from './GlobalSearchDialog';
 import { LearningPane } from './LearningPane';
+import { MistakeReviewDialog } from './MistakeReviewDialog';
 import { LongPlanPage } from './LongPlanPage';
 import { MemoryPage } from './MemoryPage';
 import { ModelPickerDialog } from './ModelPickerDialog';
@@ -133,6 +134,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     reviews,
     practiceSets,
     practiceMistakes,
+    practiceDue,
     practiceAttempts,
     memoryProfile,
     reminders,
@@ -146,6 +148,8 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     stream,
     cancelStream,
     submitPracticeAnswer,
+    reviewPracticeMistake,
+    resolvePracticeMistake,
     createTask,
     updateTask,
     deleteTask,
@@ -188,6 +192,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   const sidebarWasOpenRef = useRef(false);
   const [previewNote, setPreviewNote] = useState<WorkspaceNote | null>(null);
   const [practiceOpen, setPracticeOpen] = useState(false);
+  const [reviewQueue, setReviewQueue] = useState<PracticeMistake[] | null>(null);
   const [practiceSetId, setPracticeSetId] = useState<string | null>(null);
   const [renameSetId, setRenameSetId] = useState<string | null>(null);
   const [confirmDeleteSetId, setConfirmDeleteSetId] = useState<string | null>(null);
@@ -1546,6 +1551,32 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
                     (mistake) =>
                       !projectId || mistake.workspaceId === projectId
                   )}
+                  dueMistakes={practiceDue.filter(
+                    (mistake) => !projectId || mistake.workspaceId === projectId
+                  )}
+                  onReviewMistake={(mistake) => {
+                    const due = practiceDue.filter(
+                      (entry) =>
+                        entry.id !== mistake.id &&
+                        (!projectId || entry.workspaceId === projectId)
+                    );
+                    setReviewQueue([mistake, ...due]);
+                  }}
+                  onReviewAllMistakes={() =>
+                    setReviewQueue(
+                      practiceDue.filter(
+                        (mistake) => !projectId || mistake.workspaceId === projectId
+                      )
+                    )
+                  }
+                  onResolveMistake={(mistake) => {
+                    void resolvePracticeMistake({
+                      mistakeId: mistake.id,
+                      resolved: true
+                    }).catch((cause: unknown) => {
+                      setPracticeError(messageOf(cause));
+                    });
+                  }}
                   onSubmitAnswer={submitPracticeAnswer}
                   attempts={practiceAttempts.filter(
                     (attempt) =>
@@ -1659,6 +1690,16 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
         set={filteredPracticeSets.find((set) => set.id === renameSetId) ?? null}
         onClose={() => setRenameSetId(null)}
         onUpdate={updatePracticeSet}
+      />
+
+      <MistakeReviewDialog
+        open={reviewQueue !== null}
+        queue={reviewQueue ?? []}
+        onReview={reviewPracticeMistake}
+        onResolve={async (input) => {
+          await resolvePracticeMistake(input);
+        }}
+        onClose={() => setReviewQueue(null)}
       />
     </div>
   );

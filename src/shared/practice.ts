@@ -119,6 +119,17 @@ export interface DeletePracticeSetInput {
   setId: string;
 }
 
+export interface ReviewMistakeInput {
+  mistakeId: string;
+  /** Index into the mistake's stored options. */
+  choice: number;
+}
+
+export interface SetMistakeResolvedInput {
+  mistakeId: string;
+  resolved: boolean;
+}
+
 /** Main-process contract: vault-backed or test implementation. */
 export interface PracticeService {
   listSets(workspaceId: string): Promise<PracticeSet[]>;
@@ -127,6 +138,13 @@ export interface PracticeService {
   updateSet?(input: UpdatePracticeSetInput): Promise<PracticeSet>;
   deleteSet?(input: DeletePracticeSetInput): Promise<void>;
   submitAnswer(input: SubmitAnswerInput): Promise<SubmitAnswerResult>;
+  /**
+   * Reviews a mistake using its stored question snapshot, so a review still
+   * works after the source practice set was renamed or deleted.
+   */
+  reviewMistake?(input: ReviewMistakeInput): Promise<SubmitAnswerResult>;
+  /** Marks a mistake resolved (mastered) or active again without answering. */
+  setMistakeResolved?(input: SetMistakeResolvedInput): Promise<PracticeMistake>;
   getMistakes(workspaceId: string): Promise<PracticeMistake[]>;
   getDue(workspaceId: string, date: string): Promise<PracticeMistake[]>;
   /** Attempt history, oldest first. Useful for review/analytics. */

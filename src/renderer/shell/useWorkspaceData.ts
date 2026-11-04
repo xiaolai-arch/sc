@@ -29,6 +29,8 @@ import type {
   PracticeAttempt,
   PracticeMistake,
   PracticeSet,
+  ReviewMistakeInput,
+  SetMistakeResolvedInput,
   SubmitAnswerInput,
   SubmitAnswerResult,
   UpdatePracticeSetInput
@@ -104,6 +106,8 @@ export type WorkspaceData = WorkspaceDataState & {
   updatePracticeSet: (input: UpdatePracticeSetInput) => Promise<PracticeSet>;
   deletePracticeSet: (input: DeletePracticeSetInput) => Promise<void>;
   submitPracticeAnswer: (input: SubmitAnswerInput) => Promise<SubmitAnswerResult>;
+  reviewPracticeMistake: (input: ReviewMistakeInput) => Promise<SubmitAnswerResult>;
+  resolvePracticeMistake: (input: SetMistakeResolvedInput) => Promise<PracticeMistake>;
   generatePlan: (workspaceId: string) => Promise<WorkspacePlan>;
   searchWorkspace: (workspaceId: string, query: string, limit?: number) => Promise<SearchResult[]>;
   searchAll: (query: string, limit?: number) => Promise<SearchResult[]>;
@@ -505,6 +509,50 @@ export function useWorkspaceData(): WorkspaceData {
     return result;
   }, []);
 
+  const reviewPracticeMistake = useCallback(async (input: ReviewMistakeInput) => {
+    const api = apiOrThrow();
+    if (!api.reviewPracticeMistake) throw new Error('当前存储不支持复习错题。');
+    const result = await api.reviewPracticeMistake(input);
+    const fresh = await loadPractice(api, [result.workspaceId]);
+    setState((current) => ({
+      ...current,
+      practiceSets: replaceWorkspaceSlice(current.practiceSets, fresh.practiceSets, result.workspaceId),
+      practiceMistakes: replaceWorkspaceSlice(
+        current.practiceMistakes,
+        fresh.practiceMistakes,
+        result.workspaceId
+      ),
+      practiceDue: replaceWorkspaceSlice(current.practiceDue, fresh.practiceDue, result.workspaceId),
+      practiceAttempts: replaceWorkspaceSlice(
+        current.practiceAttempts,
+        fresh.practiceAttempts,
+        result.workspaceId
+      )
+    }));
+    return result;
+  }, []);
+
+  const resolvePracticeMistake = useCallback(async (input: SetMistakeResolvedInput) => {
+    const api = apiOrThrow();
+    if (!api.setPracticeMistakeResolved) throw new Error('当前存储不支持更新错题。');
+    const mistake = await api.setPracticeMistakeResolved(input);
+    const fresh = await loadPractice(api, [mistake.workspaceId]);
+    setState((current) => ({
+      ...current,
+      practiceMistakes: replaceWorkspaceSlice(
+        current.practiceMistakes,
+        fresh.practiceMistakes,
+        mistake.workspaceId
+      ),
+      practiceDue: replaceWorkspaceSlice(
+        current.practiceDue,
+        fresh.practiceDue,
+        mistake.workspaceId
+      )
+    }));
+    return mistake;
+  }, []);
+
   const generatePlan = useCallback(async (workspaceId: string) => {
     const api = apiOrThrow();
     const plan = await api.planWorkspace({ workspaceId });
@@ -713,6 +761,8 @@ export function useWorkspaceData(): WorkspaceData {
     updatePracticeSet,
     deletePracticeSet,
     submitPracticeAnswer,
+    reviewPracticeMistake,
+    resolvePracticeMistake,
     generatePlan,
     searchWorkspace,
     searchAll,

@@ -169,6 +169,83 @@ test('mistakes and attempts survive a fresh service instance', async () => {
   expect(await fresh.getDue('kaoyan', '2026-11-02')).toHaveLength(1);
 });
 
+test('reviews a mistake even after its practice set is gone', async () => {
+  const service = at('2026-11-01');
+  const first = await service.submitAnswer({ questionId: 'q1', choice: 0 });
+  const mistakeId = first.mistake?.id ?? '';
+  expect(mistakeId).toBeTruthy();
+  await service.deleteSet!({ setId: 'ps1' });
+  expect(await service.getSet('ps1')).toBeNull();
+
+  const again = await at('2026-11-02').reviewMistake!({ mistakeId, choice: 0 });
+
+  expect(again).toMatchObject({
+    correct: false,
+    workspaceId: 'kaoyan',
+    setId: 'ps1',
+    questionId: 'q1',
+    answer: 1
+  });
+  expect(again.mistake).toMatchObject({
+    id: mistakeId,
+    wrongCount: 2,
+    intervalDays: 3,
+    due: '2026-11-05',
+    status: 'active'
+  });
+  expect(await at('2026-11-02').getDue('kaoyan', '2026-11-05')).toHaveLength(1);
+  const attempts = await at('2026-11-02').listAttempts('kaoyan');
+  expect(attempts.at(-1)).toMatchObject({ questionId: 'q1', correct: false, setId: 'ps1' });
+});
+
+test('two correct mistake reviews resolve it', async () => {
+  const first = await at('2026-11-01').submitAnswer({ questionId: 'q1', choice: 0 });
+  const mistakeId = first.mistake?.id ?? '';
+
+  const correct = await at('2026-11-02').reviewMistake!({ mistakeId, choice: 1 });
+  expect(correct.correct).toBe(true);
+  expect(correct.mistake).toMatchObject({ status: 'active', correctStreak: 1, priority: 0 });
+
+  const resolved = await at('2026-11-02').reviewMistake!({ mistakeId, choice: 1 });
+  expect(resolved.mistake).toMatchObject({ status: 'resolved', correctStreak: 2 });
+  expect(await at('2026-11-02').getMistakes('kaoyan')).toEqual([]);
+  expect(await at('2026-11-02').getDue('kaoyan', '2026-12-01')).toEqual([]);
+});
+
+test('marks a mistake resolved without answering it', async () => {
+  const first = await at('2026-11-01').submitAnswer({ questionId: 'q1', choice: 0 });
+  const mistakeId = first.mistake?.id ?? '';
+
+  const resolved = await at('2026-11-02').setMistakeResolved!({ mistakeId, resolved: true });
+  expect(resolved).toMatchObject({ id: mistakeId, status: 'resolved' });
+  expect(await at('2026-11-02').getMistakes('kaoyan')).toEqual([]);
+
+  const reopened = await at('2026-11-02').setMistakeResolved!({ mistakeId, resolved: false });
+  expect(reopened.status).toBe('active');
+  expect(await at('2026-11-02').getMistakes('kaoyan')).toHaveLength(1);
+});
+
+test('rejects unknown mistakes and invalid review choices', async () => {
+  const service = at('2026-11-01');
+  await expect(service.reviewMistake!({ mistakeId: 'missing', choice: 0 })).rejects.toThrow(
+    'Mistake not found'
+  );
+
+  const first = await service.submitAnswer({ questionId: 'q1', choice: 0 });
+  const mistakeId = first.mistake?.id ?? '';
+  await expect(service.reviewMistake!({ mistakeId, choice: 9 })).rejects.toThrow(
+    'Invalid answer choice'
+  );
+  await expect(service.reviewMistake!({ mistakeId, choice: -1 })).rejects.toThrow(
+    'Invalid answer choice'
+  );
+
+  await service.setMistakeResolved!({ mistakeId, resolved: true });
+  await expect(service.reviewMistake!({ mistakeId, choice: 1 })).rejects.toThrow(
+    'Mistake is already resolved'
+  );
+});
+
 test('createSet persists a custom set that can be answered', async () => {
   const service = at('2026-11-01');
   const created = await service.createSet({

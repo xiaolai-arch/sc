@@ -32,6 +32,8 @@ import type {
   CreatePracticeQuestionInput,
   CreatePracticeSetInput,
   DeletePracticeSetInput,
+  ReviewMistakeInput,
+  SetMistakeResolvedInput,
   SubmitAnswerInput,
   UpdatePracticeSetInput
 } from '../shared/practice';
@@ -130,7 +132,9 @@ export const IPC_CHANNELS = {
   mergeKnowledgeTopics: 'study-coach:knowledge:merge',
   deleteNote: 'study-coach:workspaces:delete-note',
   updatePracticeSet: 'study-coach:practice:update-set',
-  deletePracticeSet: 'study-coach:practice:delete-set'
+  deletePracticeSet: 'study-coach:practice:delete-set',
+  reviewPracticeMistake: 'study-coach:practice:review-mistake',
+  setPracticeMistakeResolved: 'study-coach:practice:set-mistake-resolved'
 } as const;
 
 /** Streaming uses a separate request/event pair so the request map stays stable. */
@@ -595,6 +599,24 @@ function requireUpdatePracticeSet(value: unknown): UpdatePracticeSetInput {
 function requireDeletePracticeSet(value: unknown): DeletePracticeSetInput {
   const input = requireObject(value, '删除练习');
   return { setId: requireString(input.setId, '练习 ID') };
+}
+
+function requireReviewMistake(value: unknown): ReviewMistakeInput {
+  const input = requireObject(value, '复习错题');
+  const choice = input.choice;
+  if (typeof choice !== 'number' || !Number.isInteger(choice) || choice < 0) {
+    throw new Error('选项无效。');
+  }
+  return { mistakeId: requireString(input.mistakeId, '错题 ID'), choice };
+}
+
+function requireSetMistakeResolved(value: unknown): SetMistakeResolvedInput {
+  const input = requireObject(value, '更新错题');
+  if (typeof input.resolved !== 'boolean') throw new Error('错题状态无效。');
+  return {
+    mistakeId: requireString(input.mistakeId, '错题 ID'),
+    resolved: input.resolved
+  };
 }
 
 function requireSynthesizeMemory(value: unknown): SynthesizeMemoryInput {
@@ -1072,6 +1094,16 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
       const parsed = requireDeletePracticeSet(input);
       if (!api.deletePracticeSet) throw new Error('当前存储不支持删除练习集。');
       return api.deletePracticeSet(parsed);
+    },
+    reviewPracticeMistake: async (input) => {
+      const parsed = requireReviewMistake(input);
+      if (!api.reviewPracticeMistake) throw new Error('当前存储不支持复习错题。');
+      return api.reviewPracticeMistake(parsed);
+    },
+    setPracticeMistakeResolved: async (input) => {
+      const parsed = requireSetMistakeResolved(input);
+      if (!api.setPracticeMistakeResolved) throw new Error('当前存储不支持更新错题。');
+      return api.setPracticeMistakeResolved(parsed);
     }
   };
 
@@ -1291,6 +1323,8 @@ export function createStudyCoachBridge(
     deleteNote: (input) => call(IPC_CHANNELS.deleteNote, input),
     updatePracticeSet: (input) => call(IPC_CHANNELS.updatePracticeSet, input),
     deletePracticeSet: (input) => call(IPC_CHANNELS.deletePracticeSet, input),
+    reviewPracticeMistake: (input) => call(IPC_CHANNELS.reviewPracticeMistake, input),
+    setPracticeMistakeResolved: (input) => call(IPC_CHANNELS.setPracticeMistakeResolved, input),
     async stream(input, onEvent) {
       const requestId = createRequestId();
       const unsubscribe = subscribe?.(BUTLER_STREAM_CHANNELS.event, (payload) => {

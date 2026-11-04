@@ -7,59 +7,118 @@ import type {
 
 type MistakeBookProps = {
   mistakes: PracticeMistake[];
+  /** Mistake ids that are due today. */
+  dueIds?: ReadonlySet<string>;
+  onReview?: (mistake: PracticeMistake) => void;
+  onReviewAll?: () => void;
+  onResolve?: (mistake: PracticeMistake) => void;
 };
 
-/** Compact mistake preview that can expand into the full review list. */
-export function MistakeBook({ mistakes }: MistakeBookProps) {
-  const [expanded, setExpanded] = useState(false);
+type MistakeRowProps = {
+  mistake: PracticeMistake;
+  due: boolean;
+  onReview?: (mistake: PracticeMistake) => void;
+  onResolve?: (mistake: PracticeMistake) => void;
+};
 
-  if (mistakes.length === 0) return null;
+const rowActionClass =
+  'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium text-[#0071e3] transition-colors duration-200 hover:bg-[#0071e3]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:text-[#4da3ff] dark:hover:bg-[#0a84ff]/20';
 
+function MistakeRow({ mistake, due, onReview, onResolve }: MistakeRowProps) {
   return (
-    <div className="mt-6 rounded-2xl bg-[#f5f5f7] p-5 dark:bg-white/[0.06]">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-[12px] font-medium text-gray-500 dark:text-[#8e8e93]">
-          错题本 · {mistakes.length} 道待复习
+    <li className="flex items-start gap-2">
+      <div className="min-w-0 flex-1">
+        <p className="text-[13px] leading-6 text-gray-500 dark:text-[#a1a1a6]">
+          {mistake.prompt}
         </p>
-        {mistakes.length > 4 ? (
+        <p className="text-[11px] text-gray-400 dark:text-[#8e8e93]">
+          {due ? '今天复习 · ' : ''}
+          {mistake.due} 复习 · 错 {mistake.wrongCount} 次 · 优先级 {mistake.priority}
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        {onReview ? (
           <button
             type="button"
-            onClick={() => setExpanded((current) => !current)}
-            className="shrink-0 text-[12px] font-medium text-[#0071e3] transition-colors duration-200 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:text-[#4da3ff]"
+            aria-label={`复习错题：${mistake.prompt}`}
+            onClick={() => onReview(mistake)}
+            className={rowActionClass}
           >
-            {expanded ? '收起' : '查看全部错题'}
+            复习
+          </button>
+        ) : null}
+        {onResolve ? (
+          <button
+            type="button"
+            aria-label={`标记已掌握：${mistake.prompt}`}
+            onClick={() => onResolve(mistake)}
+            className={rowActionClass}
+          >
+            已掌握
           </button>
         ) : null}
       </div>
+    </li>
+  );
+}
 
-      {expanded ? (
-        <ul className="mt-2 space-y-2.5">
-          {mistakes.map((mistake) => (
-            <li key={mistake.id}>
-              <p className="text-[13px] leading-6 text-gray-500 dark:text-[#a1a1a6]">
-                {mistake.prompt}
-              </p>
-              <p className="text-[11px] text-gray-400 dark:text-[#8e8e93]">
-                {mistake.due} 复习 · 错 {mistake.wrongCount} 次 · 优先级 {mistake.priority}
-              </p>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <ul className="mt-2 space-y-1.5">
-          {mistakes.slice(0, 4).map((mistake) => (
-            <li
-              key={mistake.id}
-              className="text-[13px] leading-6 text-gray-500 dark:text-[#a1a1a6]"
+/** Compact mistake preview that can expand into the full review list. */
+export function MistakeBook({
+  mistakes,
+  dueIds,
+  onReview,
+  onReviewAll,
+  onResolve
+}: MistakeBookProps) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (mistakes.length === 0) return null;
+  const dueCount = dueIds ? mistakes.filter((mistake) => dueIds.has(mistake.id)).length : 0;
+
+  return (
+    <div className="mt-6 rounded-2xl bg-[#f5f5f7] p-5 dark:bg-white/[0.06]">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[12px] font-medium text-gray-500 dark:text-[#8e8e93]">
+          错题本 · {mistakes.length} 道待复习
+          {dueCount > 0 ? (
+            <span className="ml-2 rounded-full bg-[#ff9f0a]/15 px-2 py-0.5 text-[11px] text-[#8a5a00] dark:text-[#ffb340]">
+              今天到期 {dueCount} 道
+            </span>
+          ) : null}
+        </p>
+        <div className="flex shrink-0 items-center gap-2">
+          {onReviewAll && dueCount > 0 ? (
+            <button
+              type="button"
+              onClick={onReviewAll}
+              className="rounded-full bg-[#0071e3] px-3 py-1 text-[11px] font-medium text-white transition-opacity duration-200 hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
             >
-              {mistake.prompt}
-              <span className="ml-1 text-[11px] text-gray-400 dark:text-[#8e8e93]">
-                （{mistake.due} 复习）
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
+              复习今天到期的 {dueCount} 道
+            </button>
+          ) : null}
+          {mistakes.length > 4 ? (
+            <button
+              type="button"
+              onClick={() => setExpanded((current) => !current)}
+              className="rounded-full px-1 text-[12px] font-medium text-[#0071e3] transition-colors duration-200 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:text-[#4da3ff]"
+            >
+              {expanded ? '收起' : '查看全部错题'}
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <ul className="mt-2 space-y-2.5">
+        {(expanded ? mistakes : mistakes.slice(0, 4)).map((mistake) => (
+          <MistakeRow
+            key={mistake.id}
+            mistake={mistake}
+            due={dueIds?.has(mistake.id) === true}
+            {...(onReview ? { onReview } : {})}
+            {...(onResolve ? { onResolve } : {})}
+          />
+        ))}
+      </ul>
     </div>
   );
 }

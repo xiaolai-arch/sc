@@ -21,6 +21,11 @@ type LearningPaneProps = {
   workspace: Workspace | null;
   notes: WorkspaceNote[];
   mistakes: PracticeMistake[];
+  /** Active mistakes due today, used to highlight and start a review. */
+  dueMistakes?: PracticeMistake[];
+  onReviewMistake?: (mistake: PracticeMistake) => void;
+  onReviewAllMistakes?: () => void;
+  onResolveMistake?: (mistake: PracticeMistake) => void;
   attempts?: PracticeAttempt[];
   onSubmitAnswer: (input: SubmitAnswerInput) => Promise<SubmitAnswerResult>;
   onCreateSet?: (input: CreatePracticeSetInput) => Promise<PracticeSet>;
@@ -33,6 +38,10 @@ export function LearningPane({
   workspace,
   notes,
   mistakes,
+  dueMistakes,
+  onReviewMistake,
+  onReviewAllMistakes,
+  onResolveMistake,
   attempts,
   onSubmitAnswer,
   onCreateSet,
@@ -73,6 +82,17 @@ export function LearningPane({
     />
   ) : null;
 
+  const dueIds = new Set((dueMistakes ?? []).map((mistake) => mistake.id));
+  const mistakeBook = (
+    <MistakeBook
+      mistakes={mistakes}
+      dueIds={dueIds}
+      {...(onReviewMistake ? { onReview: onReviewMistake } : {})}
+      {...(onReviewAllMistakes ? { onReviewAll: onReviewAllMistakes } : {})}
+      {...(onResolveMistake ? { onResolve: onResolveMistake } : {})}
+    />
+  );
+
   if (!set) {
     return (
       <div className="flex h-full min-w-0 flex-1 flex-col bg-white dark:bg-[#0f0f10]">
@@ -91,7 +111,7 @@ export function LearningPane({
                 去问阿咲
               </Button>
             </div>
-            <MistakeBook mistakes={mistakes} />
+            {mistakeBook}
             <AttemptHistory attempts={attempts} set={set} mistakes={mistakes} />
             {notes.length > 0 ? (
               <div className="mt-6">
@@ -287,6 +307,7 @@ export function LearningPane({
               </div>
             </>
           )}
+          {mistakeBook}
           <AttemptHistory attempts={attempts} set={set} mistakes={mistakes} />
         </div>
       </div>

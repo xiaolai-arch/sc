@@ -663,6 +663,16 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       if (!practice.deleteSet) throw new Error('当前存储不支持删除练习集。');
       return practice.deleteSet(input);
     },
+    async reviewPracticeMistake(input) {
+      const practice = (await getServices()).practice;
+      if (!practice.reviewMistake) throw new Error('当前存储不支持复习错题。');
+      return practice.reviewMistake(input);
+    },
+    async setPracticeMistakeResolved(input) {
+      const practice = (await getServices()).practice;
+      if (!practice.setMistakeResolved) throw new Error('当前存储不支持更新错题。');
+      return practice.setMistakeResolved(input);
+    },
     async submitPracticeAnswer(input) {
       return (await getServices()).practice.submitAnswer(input);
     },

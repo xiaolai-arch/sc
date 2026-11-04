@@ -61,6 +61,8 @@ import type {
   PracticeAttempt,
   PracticeMistake,
   PracticeSet,
+  ReviewMistakeInput,
+  SetMistakeResolvedInput,
   SubmitAnswerInput,
   SubmitAnswerResult,
   UpdatePracticeSetInput
@@ -537,6 +539,57 @@ export function createMockApi(
       if (question !== undefined) return { set, question };
     }
     return null;
+  }
+
+  function scheduleMistake(
+    existing: PracticeMistake | undefined,
+    source: {
+      workspaceId: string;
+      setId: string;
+      questionId: string;
+      prompt: string;
+      options: string[];
+      answer: number;
+      explanation: string;
+    },
+    correct: boolean,
+    answeredAt: string,
+    date: string
+  ): PracticeMistake | null {
+    if (!correct) {
+      const wrongCount = (existing?.wrongCount ?? 0) + 1;
+      const intervalDays =
+        PRACTICE_INTERVALS[Math.min(wrongCount - 1, PRACTICE_INTERVALS.length - 1)];
+      return {
+        id: existing?.id ?? nextId('pm'),
+        workspaceId: source.workspaceId,
+        setId: source.setId,
+        questionId: source.questionId,
+        prompt: source.prompt,
+        options: [...source.options],
+        answer: source.answer,
+        explanation: source.explanation,
+        wrongCount,
+        correctStreak: 0,
+        priority: Math.min(3, (existing?.priority ?? 0) + 1),
+        intervalDays,
+        due: addDays(date, intervalDays),
+        status: 'active',
+        createdAt: existing?.createdAt ?? answeredAt,
+        updatedAt: answeredAt,
+        lastAnsweredAt: answeredAt
+      };
+    }
+    if (existing === undefined) return null;
+    const correctStreak = existing.correctStreak + 1;
+    return {
+      ...existing,
+      correctStreak,
+      priority: Math.max(0, existing.priority - 1),
+      status: correctStreak >= 2 ? 'resolved' : 'active',
+      updatedAt: answeredAt,
+      lastAnsweredAt: answeredAt
+    };
   }
 
   function searchDocs(workspaceId: string) {
@@ -1104,45 +1157,24 @@ export function createMockApi(
       const mistakes = [...state.practiceMistakes];
       const index = mistakes.findIndex((entry) => entry.questionId === question.id);
       const existing = index >= 0 ? mistakes[index] : undefined;
-      let mistake: PracticeMistake | null = existing ?? null;
-      if (!correct) {
-        const wrongCount = (existing?.wrongCount ?? 0) + 1;
-        const intervalDays =
-          PRACTICE_INTERVALS[Math.min(wrongCount - 1, PRACTICE_INTERVALS.length - 1)];
-        const updated: PracticeMistake = {
-          id: existing?.id ?? nextId('pm'),
+      const mistake = scheduleMistake(
+        existing,
+        {
           workspaceId: set.workspaceId,
           setId: set.id,
           questionId: question.id,
           prompt: question.prompt,
-          options: [...question.options],
+          options: question.options,
           answer: question.answer,
-          explanation: question.explanation,
-          wrongCount,
-          correctStreak: 0,
-          priority: Math.min(3, (existing?.priority ?? 0) + 1),
-          intervalDays,
-          due: addDays(date, intervalDays),
-          status: 'active',
-          createdAt: existing?.createdAt ?? answeredAt,
-          updatedAt: answeredAt,
-          lastAnsweredAt: answeredAt
-        };
-        if (index >= 0) mistakes[index] = updated;
-        else mistakes.push(updated);
-        mistake = updated;
-      } else if (existing !== undefined) {
-        const correctStreak = existing.correctStreak + 1;
-        const updated: PracticeMistake = {
-          ...existing,
-          correctStreak,
-          priority: Math.max(0, existing.priority - 1),
-          status: correctStreak >= 2 ? 'resolved' : 'active',
-          updatedAt: answeredAt,
-          lastAnsweredAt: answeredAt
-        };
-        mistakes[index] = updated;
-        mistake = updated;
+          explanation: question.explanation
+        },
+        correct,
+        answeredAt,
+        date
+      );
+      if (mistake !== null) {
+        if (index >= 0) mistakes[index] = mistake;
+        else mistakes.push(mistake);
       }
       state.practiceMistakes = mistakes;
       persist();
@@ -1191,6 +1223,79 @@ export function createMockApi(
               a.due.localeCompare(b.due) || b.priority - a.priority || a.questionId.localeCompare(b.questionId)
           )
       );
+    },
+
+    async reviewPracticeMistake(input: ReviewMistakeInput): Promise<SubmitAnswerResult> {
+      const index = state.practiceMistakes.findIndex((entry) => entry.id === input.mistakeId);
+      if (index < 0) throw new Error('错题不存在');
+      const current = state.practiceMistakes[index];
+      if (current.status === 'resolved') throw new Error('这道错题已经掌握');
+      if (
+        !Number.isInteger(input.choice) ||
+        input.choice < 0 ||
+        input.choice >= current.options.length
+      ) {
+        throw new Error('选项无效');
+      }
+      const answeredAtDate = new Date();
+      const answeredAt = answeredAtDate.toISOString();
+      const date = formatLocalDate(answeredAtDate);
+      const correct = input.choice === current.answer;
+      const attempt: PracticeAttempt = {
+        id: nextId('pa'),
+        workspaceId: current.workspaceId,
+        setId: current.setId,
+        questionId: current.questionId,
+        choice: input.choice,
+        correct,
+        answeredAt
+      };
+      state.practiceAttempts = [...state.practiceAttempts, attempt];
+
+      const updated = scheduleMistake(
+        current,
+        {
+          workspaceId: current.workspaceId,
+          setId: current.setId,
+          questionId: current.questionId,
+          prompt: current.prompt,
+          options: current.options,
+          answer: current.answer,
+          explanation: current.explanation
+        },
+        correct,
+        answeredAt,
+        date
+      );
+      if (updated === null) throw new Error('错题不存在');
+      state.practiceMistakes = state.practiceMistakes.map((entry) =>
+        entry.id === current.id ? updated : entry
+      );
+      persist();
+
+      return {
+        questionId: current.questionId,
+        setId: current.setId,
+        workspaceId: current.workspaceId,
+        choice: input.choice,
+        correct,
+        answer: current.answer,
+        explanation: current.explanation,
+        attempt,
+        mistake: updated,
+        ...(updated.status === 'active' ? { due: updated.due } : {})
+      };
+    },
+
+    async setPracticeMistakeResolved(
+      input: SetMistakeResolvedInput
+    ): Promise<PracticeMistake> {
+      const current = state.practiceMistakes.find((entry) => entry.id === input.mistakeId);
+      if (!current) throw new Error('错题不存在');
+      current.status = input.resolved ? 'resolved' : 'active';
+      current.updatedAt = new Date().toISOString();
+      persist();
+      return structuredClone(current);
     },
 
     async listPracticeAttempts(workspaceId: string): Promise<PracticeAttempt[]> {
