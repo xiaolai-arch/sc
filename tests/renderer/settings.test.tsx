@@ -40,6 +40,24 @@ test('saves provider model and api key without echoing the key', async () => {
   expect(screen.getByLabelText('API Key')).toHaveValue('');
 });
 
+test('saves the display name used by greetings', async () => {
+  const update = vi.fn().mockResolvedValue({ ...settings, displayName: '小林' });
+  window.studyCoach = {
+    getSettings: vi.fn().mockResolvedValue({ ...settings, displayName: 'xiaolai' }),
+    updateSettings: update,
+    setApiKey: vi.fn()
+  } as never;
+
+  render(<SettingsPage onClose={() => {}} />);
+  const input = await screen.findByLabelText('称呼');
+  expect(input).toHaveValue('xiaolai');
+  await userEvent.clear(input);
+  await userEvent.type(input, '小林');
+  await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+
+  expect(update).toHaveBeenCalledWith(expect.objectContaining({ displayName: '小林' }));
+});
+
 test('restores a backup after confirmation and offers a restart', async () => {
   const restoreBackup = vi.fn().mockResolvedValue({
     path: '/tmp/backup',

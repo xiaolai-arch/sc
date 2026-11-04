@@ -8,6 +8,7 @@ export function defaultProvider(): ProviderConfig {
 
 export function createDefaultSettings(vaultPath: string): AppSettings {
   return {
+    displayName: 'xiaolai',
     vaultPath,
     provider: defaultProvider(),
     notifications: {

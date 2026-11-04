@@ -220,6 +220,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   const [traceById, setTraceById] = useState<Record<string, ChatTraceItem[]>>({});
   const [actionError, setActionError] = useState<string | null>(null);
   const [modelLabel, setModelLabel] = useState('模板计划');
+  const [displayName, setDisplayName] = useState('xiaolai');
   const streamGenerationRef = useRef(0);
   const activeConversationIdRef = useRef<string | null>(null);
   activeConversationIdRef.current = conversations.active?.id ?? null;
@@ -305,6 +306,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
           ? settings.provider.model ?? settings.provider.agent
           : settings.provider.model
       );
+      setDisplayName(settings.displayName?.trim() || 'xiaolai');
       setSnoozedUntil(settings.notifications.snoozedUntil ?? null);
     } catch {
       setModelLabel('模板计划');
@@ -1246,6 +1248,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
         <NavigationSidebar
           section={section}
           chatScope={chatScope}
+          displayName={displayName}
           conversations={conversations.summaries}
           projects={workspaces}
           activeConversationId={conversations.active?.id ?? null}
@@ -1269,6 +1272,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
           {section === 'chat' ? (
             <ChatPane
               workspace={currentWorkspace}
+              displayName={displayName}
               contextLabel={contextLabel}
               homeTitle={homeTitle}
               homeGoal={homeGoal}

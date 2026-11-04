@@ -58,6 +58,8 @@ type NavigationSidebarProps = {
   onTogglePinned: (id: string, pinned: boolean) => void;
   onDeleteConversation: (id: string) => void;
   onOpenSearch: () => void;
+  /** How the user is addressed in the footer; defaults to the demo name. */
+  displayName?: string;
   mobileOpen?: boolean;
   onCloseMobile?: () => void;
 };
@@ -169,6 +171,7 @@ export function NavigationSidebar({
   onTogglePinned,
   onDeleteConversation,
   onOpenSearch,
+  displayName = 'xiaolai',
   mobileOpen = false,
   onCloseMobile
 }: NavigationSidebarProps) {
@@ -805,9 +808,9 @@ export function NavigationSidebar({
 
       <div className="flex items-center gap-2 border-t border-gray-200/70 px-3 py-3 dark:border-white/10">
         <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#1d1d1f] text-[11px] text-white">
-          x
+          {displayName.trim().slice(0, 1).toUpperCase() || 'x'}
         </span>
-        <span className="min-w-0 flex-1 truncate text-[13px] text-gray-500 dark:text-[#a1a1a6]">xiaolai</span>
+        <span className="min-w-0 flex-1 truncate text-[13px] text-gray-500 dark:text-[#a1a1a6]">{displayName}</span>
         <button
           type="button"
           aria-label="打开设置"

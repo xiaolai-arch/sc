@@ -36,7 +36,15 @@ function normalizeNotifications(value: NotificationSettings | undefined): Notifi
 }
 
 function normalizeSettings(settings: AppSettings): AppSettings {
-  return { ...settings, notifications: normalizeNotifications(settings.notifications) };
+  const displayName =
+    typeof settings.displayName === 'string' && settings.displayName.trim().length > 0
+      ? settings.displayName.trim()
+      : createDefaultSettings('').displayName;
+  return {
+    ...settings,
+    displayName,
+    notifications: normalizeNotifications(settings.notifications)
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -160,6 +168,10 @@ function validateBudget(value: unknown): AppSettings['budget'] | undefined {
 function mergeSettings(current: AppSettings, patch: unknown): AppSettings {
   if (!isRecord(patch)) throw new Error('设置参数无效。');
   const next: AppSettings = {
+    displayName:
+      patch.displayName === undefined
+        ? current.displayName
+        : nonEmptyString(patch.displayName, '称呼'),
     vaultPath: patch.vaultPath === undefined ? current.vaultPath : nonEmptyString(patch.vaultPath, 'Vault 路径'),
     provider: patch.provider === undefined ? current.provider : validateProvider(patch.provider),
     notifications: {

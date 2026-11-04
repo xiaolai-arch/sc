@@ -132,6 +132,7 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
     dndEnd: '07:30'
   });
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
+  const [displayName, setDisplayName] = useState('xiaolai');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -196,6 +197,7 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
         dndEnd: value.notifications.dndEnd ?? '07:30'
       });
       setLaunchAtLogin(value.launchAtLogin);
+      setDisplayName(value.displayName?.trim() || 'xiaolai');
       setLoaded(true);
     } catch (cause) {
       setLoadError(friendlyErrorMessage(cause, '加载设置失败。'));
@@ -247,11 +249,15 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
     const tokensNumber = Number(tokens);
     const inputPriceNumber = Number(inputPrice);
     const outputPriceNumber = Number(outputPrice);
+    const trimmedDisplayName = displayName.trim();
+    if (!trimmedDisplayName) {
+      setError('请填写称呼。');
+      return;
+    }
     if (kind !== 'local-cli' && !model.trim()) {
       setError('请填写模型名称。');
       return;
-    }
-    if ((kind === 'openai-compatible' || kind === 'ollama') && !baseURL.trim()) {
+    }    if ((kind === 'openai-compatible' || kind === 'ollama') && !baseURL.trim()) {
       setError('请填写 Base URL。');
       return;
     }
@@ -308,6 +314,7 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
         await api.setApiKey('');
       }
       await api.updateSettings({
+        displayName: trimmedDisplayName,
         provider,
         budget: {
           proactiveSessionsPerDay: sessionsNumber,
@@ -508,6 +515,19 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
         <p className="mt-10 text-gray-500 dark:text-[#a1a1a6]">正在加载设置…</p>
       ) : (
         <div className="mt-8 grid gap-8">
+          <Card id="settings-profile-section">
+            <h3 className="text-[17px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">个人</h3>
+            <p className="mt-2 text-gray-500 dark:text-[#a1a1a6]">阿咲在首页和侧边栏怎么称呼你。</p>
+            <div className="mt-6 max-w-sm">
+              <Label htmlFor="settings-display-name">称呼</Label>
+              <Input
+                id="settings-display-name"
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+                maxLength={24}
+              />
+            </div>
+          </Card>
           <Card id="settings-model-section">
             <h3 className="text-[17px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">模型</h3>
             <p className="mt-2 text-gray-500 dark:text-[#a1a1a6]">选择模型提供商并配置访问凭据。</p>

@@ -11,6 +11,8 @@ import type { ChatMessage } from './types';
 
 type ChatPaneProps = {
   workspace: Workspace | null;
+  /** Name the butler uses when greeting the user. */
+  displayName?: string;
   /** Label for the current chat scope: a workspace, 日常 or 未分组. */
   contextLabel: string;
   homeTitle: string;
@@ -40,6 +42,7 @@ type ChatPaneProps = {
 
 export function ChatPane({
   workspace,
+  displayName = 'xiaolai',
   contextLabel,
   homeTitle,
   homeGoal,
@@ -152,7 +155,7 @@ export function ChatPane({
             <div className="w-full max-w-[680px] -translate-y-[3vh]">
               <div className="flex flex-col items-center text-center">
                 <p className="text-[12px] text-gray-400 dark:text-[#8e8e93]">
-                  {homeGreeting('xiaolai', new Date())}
+                  {homeGreeting(displayName, new Date())}
                 </p>
                 <h1 className="mt-1 text-[22px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
                   {homeTitle}

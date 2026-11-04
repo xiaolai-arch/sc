@@ -144,6 +144,7 @@ function addDays(date: string, days: number): string {
 }
 
 const defaultSettings: AppSettings = {
+  displayName: 'xiaolai',
   vaultPath: '浏览器原型（内存）',
   provider: { kind: 'anthropic', model: 'claude-sonnet-5-5' },
   notifications: {

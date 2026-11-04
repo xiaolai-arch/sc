@@ -22,6 +22,7 @@ test('returns documented defaults', async () => {
   const { service } = memorySettings();
   const settings = await service.get();
   expect(settings).toEqual({
+    displayName: 'xiaolai',
     vaultPath: '/tmp/study-vault',
     provider: { kind: 'local-cli', agent: 'codex', command: 'codex' },
     notifications: {
@@ -194,6 +195,28 @@ test('validates and clears the snoozed date', async () => {
     notifications: { snoozedUntil: '' } as never
   });
   expect(cleared.notifications.snoozedUntil).toBe('');
+});
+
+test('saves a trimmed display name and rejects a blank one', async () => {
+  const { service } = memorySettings();
+
+  const updated = await service.update({ displayName: '  小林  ' });
+  expect(updated.displayName).toBe('小林');
+  expect((await service.get()).displayName).toBe('小林');
+
+  await expect(service.update({ displayName: '   ' })).rejects.toThrow('称呼不能为空。');
+});
+
+test('fills a display name for settings written before the feature existed', async () => {
+  const defaults = createDefaultSettings('/tmp/old-vault');
+  const { displayName: _displayName, ...oldSettings } = defaults;
+  const state = new JsonStateStore({
+    filePath: null,
+    createDefault: () => ({ onboarded: true, settings: oldSettings as never })
+  });
+  const service = new SettingsService(state);
+
+  expect((await service.get()).displayName).toBe('xiaolai');
 });
 
 test('fills weekly defaults for settings written before the feature existed', async () => {

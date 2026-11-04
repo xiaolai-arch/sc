@@ -151,6 +151,7 @@ export interface ConversationApi {
 
 /** Partial settings update; nested notifications/budget accept partials. */
 export interface SettingsPatch {
+  displayName?: string;
   vaultPath?: string;
   provider?: ProviderConfig;
   notifications?: Partial<NotificationSettings>;

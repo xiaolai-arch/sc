@@ -26,6 +26,18 @@ test('shows the welcome draft and sends a message', async () => {
   expect(screen.getAllByText('帮我排一下今天的优先级').length).toBeGreaterThan(1);
 });
 
+test('greets and labels the sidebar with the saved display name', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage, { streamPace: 0.05 });
+  window.studyCoach = api;
+  window.studyCoachPrototype = { reset: vi.fn() };
+  await api.updateSettings({ displayName: '小林' });
+
+  render(<Workspace hasApiKey={false} onRefresh={vi.fn()} />);
+  expect(await screen.findByText(homeGreeting('小林', new Date()))).toBeInTheDocument();
+  expect(screen.getAllByText('小林').length).toBeGreaterThan(0);
+});
+
 test('starts a new draft and reopens a previous conversation', async () => {
   setup();
   await screen.findByText(homeGreeting('xiaolai', new Date()));

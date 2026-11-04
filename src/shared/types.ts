@@ -74,6 +74,8 @@ export interface BudgetSettings {
 }
 
 export interface AppSettings {
+  /** How the butler addresses the user in greetings and the sidebar. */
+  displayName?: string;
   vaultPath: string;
   provider: ProviderConfig;
   notifications: NotificationSettings;
