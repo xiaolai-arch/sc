@@ -107,11 +107,23 @@ export interface CreatePracticeSetInput {
   questions: CreatePracticeQuestionInput[];
 }
 
+export interface UpdatePracticeSetInput {
+  setId: string;
+  title?: string;
+  subject?: string;
+}
+
+export interface DeletePracticeSetInput {
+  setId: string;
+}
+
 /** Main-process contract: vault-backed or test implementation. */
 export interface PracticeService {
   listSets(workspaceId: string): Promise<PracticeSet[]>;
   getSet(id: string): Promise<PracticeSet | null>;
   createSet(input: CreatePracticeSetInput): Promise<PracticeSet>;
+  updateSet?(input: UpdatePracticeSetInput): Promise<PracticeSet>;
+  deleteSet?(input: DeletePracticeSetInput): Promise<void>;
   submitAnswer(input: SubmitAnswerInput): Promise<SubmitAnswerResult>;
   getMistakes(workspaceId: string): Promise<PracticeMistake[]>;
   getDue(workspaceId: string, date: string): Promise<PracticeMistake[]>;

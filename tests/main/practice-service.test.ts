@@ -202,6 +202,47 @@ test('createSet persists a custom set that can be answered', async () => {
   expect(result.setId).toBe(created.id);
 });
 
+test('renames a practice set without touching its questions', async () => {
+  const service = at('2026-11-01');
+  const created = await service.createSet({
+    workspaceId: 'kaoyan',
+    title: '线代小测',
+    questions: [{ prompt: '矩阵可逆的条件？', options: ['|A| = 0', '|A| ≠ 0'], answer: 1 }]
+  });
+
+  const updated = await service.updateSet?.({
+    setId: created.id,
+    title: '线代冲刺',
+    subject: '数学一'
+  });
+  expect(updated).toMatchObject({ id: created.id, title: '线代冲刺', subject: '数学一' });
+  expect(updated?.questions).toHaveLength(1);
+
+  const fresh = at('2026-11-02');
+  expect((await fresh.getSet(created.id))?.title).toBe('线代冲刺');
+  await expect(service.updateSet?.({ setId: created.id })).rejects.toThrow('No practice set fields');
+  await expect(service.updateSet?.({ setId: 'missing', title: 'x' })).rejects.toThrow('not found');
+});
+
+test('deletes a practice set but keeps its answer history', async () => {
+  const service = at('2026-11-01');
+  const created = await service.createSet({
+    workspaceId: 'kaoyan',
+    title: '待删除',
+    questions: [{ prompt: '矩阵可逆的条件？', options: ['|A| = 0', '|A| ≠ 0'], answer: 1 }]
+  });
+  await service.submitAnswer({ questionId: created.questions[0]!.id, choice: 1 });
+
+  await service.deleteSet?.({ setId: created.id });
+
+  expect(await service.getSet(created.id)).toBeNull();
+  expect((await service.listSets('kaoyan')).some((set) => set.id === created.id)).toBe(false);
+  expect((await service.listAttempts('kaoyan')).some((attempt) => attempt.setId === created.id)).toBe(
+    true
+  );
+  await expect(service.deleteSet?.({ setId: created.id })).rejects.toThrow('not found');
+});
+
 test('rejects malformed createSet input', async () => {
   const service = at('2026-11-01');
   await expect(

@@ -12,6 +12,7 @@ import type {
   CreateReminderInput,
   CreateTaskInput,
   CreateWorkspaceInput,
+  DeleteNoteInput,
   DeleteReminderInput,
   DeleteTaskInput,
   MemoryItem,
@@ -56,11 +57,13 @@ import type {
 } from '../src/shared/conversations';
 import type {
   CreatePracticeSetInput,
+  DeletePracticeSetInput,
   PracticeAttempt,
   PracticeMistake,
   PracticeSet,
   SubmitAnswerInput,
-  SubmitAnswerResult
+  SubmitAnswerResult,
+  UpdatePracticeSetInput
 } from '../src/shared/practice';
 import { PRACTICE_INTERVALS } from '../src/shared/practice';
 import type {
@@ -1041,6 +1044,27 @@ export function createMockApi(
       return structuredClone(set);
     },
 
+    async updatePracticeSet(input: UpdatePracticeSetInput): Promise<PracticeSet> {
+      const set = state.practiceSets.find((entry) => entry.id === input.setId);
+      if (!set) throw new Error('练习集不存在');
+      if (input.title === undefined && input.subject === undefined) {
+        throw new Error('没有要修改的内容');
+      }
+      if (input.title !== undefined) set.title = input.title;
+      if (input.subject !== undefined) set.subject = input.subject;
+      set.updatedAt = new Date().toISOString();
+      persist();
+      return structuredClone(set);
+    },
+
+    async deletePracticeSet(input: DeletePracticeSetInput): Promise<void> {
+      if (!state.practiceSets.some((entry) => entry.id === input.setId)) {
+        throw new Error('练习集不存在');
+      }
+      state.practiceSets = state.practiceSets.filter((entry) => entry.id !== input.setId);
+      persist();
+    },
+
     async submitPracticeAnswer(input: SubmitAnswerInput): Promise<SubmitAnswerResult> {
       const found = findPracticeQuestion(input.questionId);
       if (found === null) throw new Error('题目不存在');
@@ -1578,6 +1602,13 @@ export function createMockApi(
       note.updated = displayDate();
       persist();
       return structuredClone(note);
+    },
+
+    async deleteNote(input: DeleteNoteInput): Promise<void> {
+      const index = state.notes.findIndex((entry) => entry.id === input.noteId);
+      if (index < 0) throw new Error('记录不存在');
+      state.notes.splice(index, 1);
+      persist();
     },
 
     async getMemory(workspaceId?: string): Promise<MemoryItem[]> {

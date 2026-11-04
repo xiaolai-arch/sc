@@ -6,6 +6,7 @@ import type {
   CreateReminderInput,
   CreateTaskInput,
   CreateWorkspaceInput,
+  DeleteNoteInput,
   DeleteReminderInput,
   DeleteTaskInput,
   MemoryItem,
@@ -548,8 +549,18 @@ export function createWorkspaceService(
       });
     },
 
-    async getMemory(workspaceId?: string): Promise<MemoryItem[]> {
+    async deleteNote(input: DeleteNoteInput): Promise<void> {
       await ensureVault();
+      const noteId = requireString(input?.noteId, 'Note id');
+      assertSafeSegment(noteId, 'note id');
+      await runExclusively(async () => {
+        const found = await findNoteFile(noteId);
+        if (found === null) throw new Error(`Note not found: ${noteId}`);
+        await fs.rm(found.path, { force: true });
+      });
+    },
+
+    async getMemory(workspaceId?: string): Promise<MemoryItem[]> {      await ensureVault();
       if (workspaceId === undefined) {
         const items: MemoryItem[] = [];
         for (const workspace of await listWorkspaceRecords()) {

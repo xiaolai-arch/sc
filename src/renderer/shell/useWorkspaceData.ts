@@ -24,11 +24,13 @@ import type {
 } from '../../shared/memory';
 import type {
   CreatePracticeSetInput,
+  DeletePracticeSetInput,
   PracticeAttempt,
   PracticeMistake,
   PracticeSet,
   SubmitAnswerInput,
-  SubmitAnswerResult
+  SubmitAnswerResult,
+  UpdatePracticeSetInput
 } from '../../shared/practice';
 import type {
   CreateLongPlanInput,
@@ -44,6 +46,7 @@ import type {
   CreateNoteInput,
   CreateReminderInput,
   CreateTaskInput,
+  DeleteNoteInput,
   DeleteReminderInput,
   DeleteTaskInput,
   MemoryItem,
@@ -95,7 +98,10 @@ export type WorkspaceData = WorkspaceDataState & {
   deleteTask: (input: DeleteTaskInput) => Promise<void>;
   createNote: (input: CreateNoteInput) => Promise<WorkspaceNote>;
   updateNote: (input: UpdateWorkspaceNoteInput) => Promise<WorkspaceNote>;
+  deleteNote: (input: DeleteNoteInput) => Promise<void>;
   createPracticeSet: (input: CreatePracticeSetInput) => Promise<PracticeSet>;
+  updatePracticeSet: (input: UpdatePracticeSetInput) => Promise<PracticeSet>;
+  deletePracticeSet: (input: DeletePracticeSetInput) => Promise<void>;
   submitPracticeAnswer: (input: SubmitAnswerInput) => Promise<SubmitAnswerResult>;
   generatePlan: (workspaceId: string) => Promise<WorkspacePlan>;
   searchWorkspace: (workspaceId: string, query: string, limit?: number) => Promise<SearchResult[]>;
@@ -448,6 +454,16 @@ export function useWorkspaceData(): WorkspaceData {
     [refreshKnowledge]
   );
 
+  const deleteNote = useCallback(async (input: DeleteNoteInput) => {
+    const api = apiOrThrow();
+    if (!api.deleteNote) throw new Error('当前存储不支持删除笔记。');
+    await api.deleteNote(input);
+    setState((current) => ({
+      ...current,
+      notes: current.notes.filter((note) => note.id !== input.noteId)
+    }));
+  }, []);
+
   const createPracticeSet = useCallback(async (input: CreatePracticeSetInput) => {
     const set = await apiOrThrow().createPracticeSet(input);
     setState((current) => ({
@@ -455,6 +471,27 @@ export function useWorkspaceData(): WorkspaceData {
       practiceSets: [...current.practiceSets.filter((item) => item.id !== set.id), set]
     }));
     return set;
+  }, []);
+
+  const updatePracticeSet = useCallback(async (input: UpdatePracticeSetInput) => {
+    const api = apiOrThrow();
+    if (!api.updatePracticeSet) throw new Error('当前存储不支持修改练习集。');
+    const set = await api.updatePracticeSet(input);
+    setState((current) => ({
+      ...current,
+      practiceSets: current.practiceSets.map((item) => (item.id === set.id ? set : item))
+    }));
+    return set;
+  }, []);
+
+  const deletePracticeSet = useCallback(async (input: DeletePracticeSetInput) => {
+    const api = apiOrThrow();
+    if (!api.deletePracticeSet) throw new Error('当前存储不支持删除练习集。');
+    await api.deletePracticeSet(input);
+    setState((current) => ({
+      ...current,
+      practiceSets: current.practiceSets.filter((set) => set.id !== input.setId)
+    }));
   }, []);
 
   const submitPracticeAnswer = useCallback(async (input: SubmitAnswerInput) => {
@@ -682,7 +719,10 @@ export function useWorkspaceData(): WorkspaceData {
     deleteWorkspace,
     createNote,
     updateNote,
+    deleteNote,
     createPracticeSet,
+    updatePracticeSet,
+    deletePracticeSet,
     submitPracticeAnswer,
     generatePlan,
     searchWorkspace,

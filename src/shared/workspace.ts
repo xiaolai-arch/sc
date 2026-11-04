@@ -147,6 +147,10 @@ export interface UpdateWorkspaceNoteInput {
   related?: string[];
 }
 
+export interface DeleteNoteInput {
+  noteId: string;
+}
+
 export interface SubmitReviewInput {
   date: string;
   workspaceId?: string;
@@ -205,6 +209,7 @@ export interface WorkspaceService {
   deleteTask?(input: DeleteTaskInput): Promise<void>;
   createNote(input: CreateNoteInput): Promise<WorkspaceNote>;
   updateNote(input: UpdateWorkspaceNoteInput): Promise<WorkspaceNote>;
+  deleteNote?(input: DeleteNoteInput): Promise<void>;
   getMemory(workspaceId?: string): Promise<MemoryItem[]>;
   getReminders(): Promise<Reminder[]>;
   /** Open tasks pinned to a start time, used by the scheduler. */

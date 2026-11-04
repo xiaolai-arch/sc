@@ -7,8 +7,10 @@ import {
 } from '../../shared/conversations';
 import type { LongPlan, LongPlanDay } from '../../shared/plans';
 import type { SendMessageInput, WorkspaceNote } from '../../shared/workspace';
+import type { PracticeSet } from '../../shared/practice';
 import type { SearchResult } from '../../shared/search';
 import { SettingsPage } from '../settings/SettingsPage';
+import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
 import { ChatPane } from './ChatPane';
 import {
@@ -150,11 +152,14 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     updateWorkspace,
     deleteWorkspace,
     createNote,
+    deleteNote,
     createReminder,
     updateReminder,
     deleteReminder,
     createMemory,
     createPracticeSet,
+    updatePracticeSet,
+    deletePracticeSet,
     memoryRecords,
     updateMemory,
     deleteMemory,
@@ -183,6 +188,13 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   const [previewNote, setPreviewNote] = useState<WorkspaceNote | null>(null);
   const [practiceOpen, setPracticeOpen] = useState(false);
   const [practiceSetId, setPracticeSetId] = useState<string | null>(null);
+  const [renameSetId, setRenameSetId] = useState<string | null>(null);
+  const [renameTitle, setRenameTitle] = useState('');
+  const [renameSubject, setRenameSubject] = useState('');
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [renamingSet, setRenamingSet] = useState(false);
+  const [confirmDeleteSetId, setConfirmDeleteSetId] = useState<string | null>(null);
+  const [practiceError, setPracticeError] = useState<string | null>(null);
   const [activeAssistantId, setActiveAssistantId] = useState<string | null>(null);
   const [typing, setTyping] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState<ChatMessage | null>(null);
@@ -1149,6 +1161,46 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     setChatScope('workspace');
   }
 
+  function openRenameSet(set: PracticeSet) {
+    setRenameSetId(set.id);
+    setRenameTitle(set.title);
+    setRenameSubject(set.subject);
+    setRenameError(null);
+  }
+
+  async function saveSetRename() {
+    if (!renameSetId || renameTitle.trim() === '' || renamingSet) return;
+    setRenamingSet(true);
+    setRenameError(null);
+    try {
+      await updatePracticeSet({
+        setId: renameSetId,
+        title: renameTitle.trim(),
+        subject: renameSubject.trim()
+      });
+      setRenameSetId(null);
+    } catch (cause) {
+      setRenameError(messageOf(cause));
+    } finally {
+      setRenamingSet(false);
+    }
+  }
+
+  async function removePracticeSet(set: PracticeSet) {
+    if (confirmDeleteSetId !== set.id) {
+      setConfirmDeleteSetId(set.id);
+      return;
+    }
+    setPracticeError(null);
+    try {
+      await deletePracticeSet({ setId: set.id });
+      setConfirmDeleteSetId(null);
+      setPracticeSetId(filteredPracticeSets.find((entry) => entry.id !== set.id)?.id ?? null);
+    } catch (cause) {
+      setPracticeError(messageOf(cause));
+    }
+  }
+
   if (loading && workspaces.length === 0) {
     return (
       <WorkspaceStatus
@@ -1310,6 +1362,10 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               onPrompt={promptButler}
               onPreviewNote={setPreviewNote}
               onCreateNote={createNote}
+              onDeleteNote={async (input) => {
+                await deleteNote(input);
+                if (previewNote?.id === input.noteId) setPreviewNote(null);
+              }}
               busy={typing}
               onUpdateTask={updateTask}
               onCreateTask={createTask}
@@ -1447,6 +1503,39 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
                   </button>
                 ))
               )}
+              {selectedPracticeSet ? (
+                <div className="mt-2 space-y-1 border-t border-gray-200/70 px-2 pt-3 dark:border-white/10">
+                  <button
+                    type="button"
+                    aria-label={`重命名练习集：${selectedPracticeSet.title}`}
+                    onClick={() => openRenameSet(selectedPracticeSet)}
+                    className="w-full rounded-lg px-2 py-1.5 text-left text-[12px] font-medium text-gray-500 transition-colors duration-200 hover:bg-black/[0.04] hover:text-[#1d1d1f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:text-[#8e8e93] dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
+                  >
+                    重命名
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={
+                      confirmDeleteSetId === selectedPracticeSet.id
+                        ? `确认删除练习集：${selectedPracticeSet.title}`
+                        : `删除练习集：${selectedPracticeSet.title}`
+                    }
+                    onClick={() => void removePracticeSet(selectedPracticeSet)}
+                    className={`w-full rounded-lg px-2 py-1.5 text-left text-[12px] font-medium transition-colors duration-200 hover:bg-black/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:hover:bg-white/[0.06] ${
+                      confirmDeleteSetId === selectedPracticeSet.id
+                        ? 'text-[#d70015] dark:text-[#ff7b72]'
+                        : 'text-gray-500 hover:text-[#d70015] dark:text-[#8e8e93] dark:hover:text-[#ff7b72]'
+                    }`}
+                  >
+                    {confirmDeleteSetId === selectedPracticeSet.id ? '确认删除' : '删除练习集'}
+                  </button>
+                  {practiceError ? (
+                    <p role="alert" className="px-2 text-[12px] text-[#d70015] dark:text-[#ff7b72]">
+                      {practiceError}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
             <div className="flex min-w-0 flex-1 flex-col">
               <div className="flex h-14 shrink-0 items-center justify-between border-b border-gray-200/70 px-4 dark:border-white/10">
@@ -1559,6 +1648,50 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
             </div>
           </div>
         ) : null}
+      </Dialog>
+
+      <Dialog
+        open={renameSetId !== null}
+        onClose={() => setRenameSetId(null)}
+        title="重命名练习集"
+      >
+        <div className="space-y-3">
+          <label className="block text-[12px] font-medium text-gray-500 dark:text-[#8e8e93]">
+            标题
+            <input
+              aria-label="练习集标题"
+              value={renameTitle}
+              onChange={(event) => setRenameTitle(event.target.value)}
+              className="mt-1 w-full rounded-xl border-0 bg-[#f5f5f7] px-3 py-2 text-[13px] text-[#1d1d1f] outline-none transition-all duration-200 focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#f5f5f7]"
+            />
+          </label>
+          <label className="block text-[12px] font-medium text-gray-500 dark:text-[#8e8e93]">
+            科目
+            <input
+              aria-label="练习集科目"
+              value={renameSubject}
+              onChange={(event) => setRenameSubject(event.target.value)}
+              className="mt-1 w-full rounded-xl border-0 bg-[#f5f5f7] px-3 py-2 text-[13px] text-[#1d1d1f] outline-none transition-all duration-200 focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#f5f5f7]"
+            />
+          </label>
+          {renameError ? (
+            <p role="alert" className="text-[12px] text-[#d70015] dark:text-[#ff7b72]">
+              {renameError}
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button size="sm" variant="secondary" onClick={() => setRenameSetId(null)}>
+              取消
+            </Button>
+            <Button
+              size="sm"
+              disabled={renameTitle.trim() === '' || renamingSet}
+              onClick={() => void saveSetRename()}
+            >
+              {renamingSet ? '正在保存…' : '保存'}
+            </Button>
+          </div>
+        </div>
       </Dialog>
     </div>
   );

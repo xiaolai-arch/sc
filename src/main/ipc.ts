@@ -16,6 +16,7 @@ import type {
   CreateReminderInput,
   CreateTaskInput,
   CreateWorkspaceInput,
+  DeleteNoteInput,
   DeleteReminderInput,
   DeleteTaskInput,
   SendMessageInput,
@@ -27,7 +28,12 @@ import type {
   UpdateWorkspaceTaskInput,
   WorkspaceOnboardingInput
 } from '../shared/workspace';
-import type { CreatePracticeSetInput, SubmitAnswerInput } from '../shared/practice';
+import type {
+  CreatePracticeSetInput,
+  DeletePracticeSetInput,
+  SubmitAnswerInput,
+  UpdatePracticeSetInput
+} from '../shared/practice';
 import type {
   CreateKnowledgeTopicInput,
   KnowledgeStatus,
@@ -120,7 +126,10 @@ export const IPC_CHANNELS = {
   createMemory: 'study-coach:memory:create',
   deleteWorkspace: 'study-coach:workspaces:delete',
   updateLongPlan: 'study-coach:plans:update',
-  mergeKnowledgeTopics: 'study-coach:knowledge:merge'
+  mergeKnowledgeTopics: 'study-coach:knowledge:merge',
+  deleteNote: 'study-coach:workspaces:delete-note',
+  updatePracticeSet: 'study-coach:practice:update-set',
+  deletePracticeSet: 'study-coach:practice:delete-set'
 } as const;
 
 /** Streaming uses a separate request/event pair so the request map stays stable. */
@@ -319,6 +328,11 @@ function requireUpdateNote(value: unknown): UpdateWorkspaceNoteInput {
   const input = requireObject(value, '更新笔记');
   requireString(input.noteId, '笔记 ID');
   return input as unknown as UpdateWorkspaceNoteInput;
+}
+
+function requireDeleteNote(value: unknown): DeleteNoteInput {
+  const input = requireObject(value, '删除笔记');
+  return { noteId: requireString(input.noteId, '笔记 ID') };
 }
 
 const REMINDER_TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -551,6 +565,28 @@ function requireCreatePracticeSet(value: unknown): CreatePracticeSetInput {
     throw new Error('练习题目不能为空。');
   }
   return input as unknown as CreatePracticeSetInput;
+}
+
+function requireUpdatePracticeSet(value: unknown): UpdatePracticeSetInput {
+  const input = requireObject(value, '更新练习');
+  const setId = requireString(input.setId, '练习 ID');
+  if (input.title === undefined && input.subject === undefined) {
+    throw new Error('练习更新参数无效。');
+  }
+  if (input.title !== undefined) requireString(input.title, '练习标题');
+  if (input.subject !== undefined && typeof input.subject !== 'string') {
+    throw new Error('练习科目无效。');
+  }
+  return {
+    setId,
+    ...(input.title !== undefined ? { title: input.title as string } : {}),
+    ...(input.subject !== undefined ? { subject: input.subject as string } : {})
+  };
+}
+
+function requireDeletePracticeSet(value: unknown): DeletePracticeSetInput {
+  const input = requireObject(value, '删除练习');
+  return { setId: requireString(input.setId, '练习 ID') };
 }
 
 function requireSynthesizeMemory(value: unknown): SynthesizeMemoryInput {
@@ -1013,7 +1049,22 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
     updateLongPlan: async (input) =>
       api.updateLongPlan(requireUpdateLongPlan(input)),
     mergeKnowledgeTopics: async (input) =>
-      api.mergeKnowledgeTopics(requireMergeKnowledgeTopics(input))
+      api.mergeKnowledgeTopics(requireMergeKnowledgeTopics(input)),
+    deleteNote: async (input) => {
+      const parsed = requireDeleteNote(input);
+      if (!api.deleteNote) throw new Error('当前存储不支持删除笔记。');
+      return api.deleteNote(parsed);
+    },
+    updatePracticeSet: async (input) => {
+      const parsed = requireUpdatePracticeSet(input);
+      if (!api.updatePracticeSet) throw new Error('当前存储不支持修改练习集。');
+      return api.updatePracticeSet(parsed);
+    },
+    deletePracticeSet: async (input) => {
+      const parsed = requireDeletePracticeSet(input);
+      if (!api.deletePracticeSet) throw new Error('当前存储不支持删除练习集。');
+      return api.deletePracticeSet(parsed);
+    }
   };
 
   // Every path through the bridge gets the same sanitized error envelope,
@@ -1229,6 +1280,9 @@ export function createStudyCoachBridge(
       call(IPC_CHANNELS.deleteWorkspace, { workspaceId }),
     updateLongPlan: (input) => call(IPC_CHANNELS.updateLongPlan, input),
     mergeKnowledgeTopics: (input) => call(IPC_CHANNELS.mergeKnowledgeTopics, input),
+    deleteNote: (input) => call(IPC_CHANNELS.deleteNote, input),
+    updatePracticeSet: (input) => call(IPC_CHANNELS.updatePracticeSet, input),
+    deletePracticeSet: (input) => call(IPC_CHANNELS.deletePracticeSet, input),
     async stream(input, onEvent) {
       const requestId = createRequestId();
       const unsubscribe = subscribe?.(BUTLER_STREAM_CHANNELS.event, (payload) => {

@@ -173,6 +173,35 @@ test('writes a note from the records section', async () => {
   expect(snapshot.notes.some((note) => note.title === '今天数学卡在极限')).toBe(true);
 });
 
+test('deletes a note after a second confirmation click', async () => {
+  const api = setup();
+  await openProjects();
+  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'kaoyan');
+
+  await userEvent.click(screen.getByRole('button', { name: '写一条记录' }));
+  await userEvent.type(screen.getByLabelText('记录正文'), '准备删除的记录');
+  await userEvent.click(screen.getByRole('button', { name: '保存记录' }));
+
+  await userEvent.click(await screen.findByRole('button', { name: '删除记录：准备删除的记录' }));
+  // The first click only arms the confirmation.
+  expect(
+    (await api.getWorkspaceSnapshot('kaoyan')).notes.some(
+      (note) => note.title === '准备删除的记录'
+    )
+  ).toBe(true);
+
+  await userEvent.click(screen.getByRole('button', { name: '确认删除记录：准备删除的记录' }));
+
+  await waitFor(async () => {
+    expect(
+      (await api.getWorkspaceSnapshot('kaoyan')).notes.some(
+        (note) => note.title === '准备删除的记录'
+      )
+    ).toBe(false);
+  });
+  expect(screen.queryByText('准备删除的记录')).not.toBeInTheDocument();
+});
+
 test('disables the quick note form without a project', async () => {
   setup();
   await openProjects();

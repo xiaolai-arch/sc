@@ -15,6 +15,7 @@ import type {
   CreateNoteInput,
   CreateReminderInput,
   CreateTaskInput,
+  DeleteNoteInput,
   DeleteReminderInput,
   DeleteTaskInput,
   Reminder,
@@ -638,6 +639,7 @@ type RecordsSectionProps = {
   notes: WorkspaceNote[];
   onCreateNote: (input: CreateNoteInput) => Promise<WorkspaceNote>;
   onPreviewNote: (note: WorkspaceNote) => void;
+  onDeleteNote?: (input: DeleteNoteInput) => Promise<void>;
   onPrompt: (prompt: string) => void;
 };
 
@@ -646,14 +648,36 @@ export function RecordsSection({
   notes,
   onCreateNote,
   onPreviewNote,
+  onDeleteNote,
   onPrompt
 }: RecordsSectionProps) {
   const [noteFormOpen, setNoteFormOpen] = useState(false);
   const [noteTitle, setNoteTitle] = useState('');
   const [noteBody, setNoteBody] = useState('');
   const [noteError, setNoteError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [savingNote, setSavingNote] = useState(false);
   const filteredNotes = filterNotes(notes, workspace);
+
+  async function deleteNote(note: WorkspaceNote) {
+    if (!onDeleteNote) return;
+    if (confirmDeleteId !== note.id) {
+      setConfirmDeleteId(note.id);
+      return;
+    }
+    setPendingDeleteId(note.id);
+    setDeleteError(null);
+    try {
+      await onDeleteNote({ noteId: note.id });
+      setConfirmDeleteId(null);
+    } catch (cause) {
+      setDeleteError(messageOf(cause));
+    } finally {
+      setPendingDeleteId(null);
+    }
+  }
 
   async function saveNote() {
     const body = noteBody.trim();
@@ -744,6 +768,12 @@ export function RecordsSection({
         ) : null}
       </div>
 
+      {deleteError ? (
+        <p role="alert" className="mb-2 text-[12px] text-[#d70015] dark:text-[#ff7b72]">
+          {deleteError}
+        </p>
+      ) : null}
+
       {filteredNotes.length === 0 ? (
         <Empty
           text="这个项目还没有记录。"
@@ -753,19 +783,41 @@ export function RecordsSection({
       ) : (
         <div className="divide-y divide-gray-100 dark:divide-white/[0.08]">
           {filteredNotes.slice(0, 10).map((note) => (
-            <button
-              key={note.id}
-              type="button"
-              onClick={() => onPreviewNote(note)}
-              className="flex w-full flex-col gap-0.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
-            >
-              <span className="truncate text-[14px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
-                {note.title}
-              </span>
-              <span className="truncate text-[12px] text-gray-500 dark:text-[#8e8e93]">
-                {note.subject} · {note.updated}
-              </span>
-            </button>
+            <div key={note.id} className="flex items-center gap-2 py-2">
+              <button
+                type="button"
+                onClick={() => onPreviewNote(note)}
+                className="flex min-w-0 flex-1 flex-col gap-0.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+              >
+                <span className="truncate text-[14px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
+                  {note.title}
+                </span>
+                <span className="truncate text-[12px] text-gray-500 dark:text-[#8e8e93]">
+                  {note.subject} · {note.updated}
+                </span>
+              </button>
+              {onDeleteNote ? (
+                <button
+                  type="button"
+                  aria-label={
+                    confirmDeleteId === note.id
+                      ? `确认删除记录：${note.title}`
+                      : `删除记录：${note.title}`
+                  }
+                  disabled={pendingDeleteId === note.id}
+                  onClick={() => void deleteNote(note)}
+                  className={cn(
+                    actionClass,
+                    'shrink-0',
+                    confirmDeleteId === note.id
+                      ? 'text-[#d70015] dark:text-[#ff7b72]'
+                      : ''
+                  )}
+                >
+                  {confirmDeleteId === note.id ? '确认删除' : '删除'}
+                </button>
+              ) : null}
+            </div>
           ))}
         </div>
       )}

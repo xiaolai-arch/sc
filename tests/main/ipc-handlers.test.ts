@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ButlerService, WorkspaceService } from '../../src/shared/workspace';
+import type { PracticeService } from '../../src/shared/practice';
 import type { StudyCoachApi } from '../../src/shared/ipc';
 import { createAppContext, type AppContext } from '../../src/main/context';
 import {
@@ -45,7 +46,8 @@ function fakeButler(overrides: Partial<ButlerService> = {}): ButlerService {
 
 async function makeContext(
   workspace: WorkspaceService = fakeWorkspace(),
-  butler: ButlerService = fakeButler()
+  butler: ButlerService = fakeButler(),
+  practiceService?: PracticeService
 ): Promise<{ context: AppContext; dir: string; workspace: WorkspaceService; butler: ButlerService }> {
   const dir = await mkdtemp(join(tmpdir(), 'study-coach-ipc-'));
   cleanup.push(dir);
@@ -54,6 +56,7 @@ async function makeContext(
     defaultVaultPath: join(dir, 'vault'),
     workspaceService: workspace,
     butlerService: butler,
+    ...(practiceService ? { practiceService } : {}),
     secretStore: new InMemorySecretStore(),
     now: () => new Date(2026, 9, 31, 10, 0, 0)
   });
@@ -108,6 +111,41 @@ test('routes every channel to the matching api method', async () => {
   expect(butler.send).toHaveBeenCalledWith({ workspaceId: 'ws-1', message: '今天学什么？' });
 });
 
+test('deletes a note through the workspace service', async () => {
+  const deleteNote = vi.fn().mockResolvedValue(undefined);
+  const workspace = fakeWorkspace({ deleteNote });
+  const { context } = await makeContext(workspace);
+  const handlers = createIpcHandlers(context.api);
+
+  await handlers.deleteNote({ noteId: 'note-1' });
+
+  expect(deleteNote).toHaveBeenCalledWith({ noteId: 'note-1' });
+});
+
+test('updates and deletes practice sets through the practice service', async () => {
+  const updateSet = vi.fn().mockResolvedValue({ id: 'ps-1', title: '线代冲刺' });
+  const deleteSet = vi.fn().mockResolvedValue(undefined);
+  const practice = {
+    listSets: vi.fn(),
+    getSet: vi.fn(),
+    createSet: vi.fn(),
+    updateSet,
+    deleteSet,
+    submitAnswer: vi.fn(),
+    getMistakes: vi.fn(),
+    getDue: vi.fn(),
+    listAttempts: vi.fn()
+  } as unknown as PracticeService;
+  const { context } = await makeContext(fakeWorkspace(), fakeButler(), practice);
+  const handlers = createIpcHandlers(context.api);
+
+  await handlers.updatePracticeSet({ setId: 'ps-1', title: '线代冲刺' });
+  await handlers.deletePracticeSet({ setId: 'ps-1' });
+
+  expect(updateSet).toHaveBeenCalledWith({ setId: 'ps-1', title: '线代冲刺' });
+  expect(deleteSet).toHaveBeenCalledWith({ setId: 'ps-1' });
+});
+
 test('rejects malformed handler parameters before they reach services', async () => {
   const { context, workspace } = await makeContext();
   const handlers = createIpcHandlers(context.api);
@@ -126,6 +164,12 @@ test('rejects malformed handler parameters before they reach services', async ()
     '任务状态无效。'
   );
   await expect(handlers.updateNote({ noteId: '' })).rejects.toThrow('笔记 ID不能为空。');
+  await expect(handlers.deleteNote({ noteId: '' })).rejects.toThrow('笔记 ID不能为空。');
+  await expect(handlers.updatePracticeSet({ setId: '' })).rejects.toThrow('练习 ID不能为空。');
+  await expect(handlers.updatePracticeSet({ setId: 'ps-1' })).rejects.toThrow(
+    '练习更新参数无效。'
+  );
+  await expect(handlers.deletePracticeSet({ setId: '' })).rejects.toThrow('练习 ID不能为空。');
   await expect(handlers.submitReview({ date: '2026-10-31' })).rejects.toThrow(
     '复盘答案参数无效。'
   );

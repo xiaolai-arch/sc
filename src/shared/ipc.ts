@@ -16,11 +16,13 @@ import type {
 } from './memory';
 import type {
   CreatePracticeSetInput,
+  DeletePracticeSetInput,
   PracticeAttempt,
   PracticeMistake,
   PracticeSet,
   SubmitAnswerInput,
-  SubmitAnswerResult
+  SubmitAnswerResult,
+  UpdatePracticeSetInput
 } from './practice';
 import type { LongPlanApi } from './plans';
 import type { PlanWorkspaceInput, WorkspacePlan } from './planning';
@@ -81,6 +83,8 @@ export interface PracticeApi {
   listPracticeSets(workspaceId: string): Promise<PracticeSet[]>;
   getPracticeSet(id: string): Promise<PracticeSet | null>;
   createPracticeSet(input: CreatePracticeSetInput): Promise<PracticeSet>;
+  updatePracticeSet?(input: UpdatePracticeSetInput): Promise<PracticeSet>;
+  deletePracticeSet?(input: DeletePracticeSetInput): Promise<void>;
   submitPracticeAnswer(input: SubmitAnswerInput): Promise<SubmitAnswerResult>;
   getPracticeMistakes(workspaceId: string): Promise<PracticeMistake[]>;
   getPracticeDue(input: { workspaceId: string; date: string }): Promise<PracticeMistake[]>;

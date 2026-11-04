@@ -199,6 +199,12 @@ async function main() {
     return fs.readFile(path.join(env.vault, ...segments), 'utf8');
   }
 
+  /** The practice overlay covers the nav; close it before leaving the page. */
+  async function closePracticeIfOpen() {
+    const close = page.getByRole('button', { name: '关闭练习' });
+    if (await close.isVisible().catch(() => false)) await close.click();
+  }
+
   try {
     const taskTitle = `LangChain 工具调用练习（验收 ${RUN}）`;
     const editedTaskTitle = `工具调用练习（验收 ${RUN}）`;
@@ -208,6 +214,8 @@ async function main() {
     const description = `把学习路径落在 Java/Spring 生态，最终交付可演示的 Agent 项目（验收 ${RUN}）。`;
     const sourceTopicName = `LangChain 表达式（验收 ${RUN}）`;
     const practiceTitle = `工具调用基础 1 题（验收 ${RUN}）`;
+    const renamedPracticeTitle = `工具调用进阶 1 题（验收 ${RUN}）`;
+    const recordTitle = `工具调用踩坑记录（验收 ${RUN}）`;
     const reviewCompleted = `跑通了 LangChain 的 tool calling demo（验收 ${RUN}）`;
     const reviewStuck = `工具参数校验总是漏字段（验收 ${RUN}）`;
 
@@ -310,7 +318,7 @@ async function main() {
       await form.getByLabel('新记忆类型').selectOption('preference');
       await shot('memory-create');
       await form.getByRole('button', { name: '保存新记忆' }).click();
-      await page.getByText(memoryText, { exact: false }).waitFor({ timeout: 15_000 });
+      await page.getByText(memoryText, { exact: false }).first().waitFor({ timeout: 15_000 });
       const memory = await readVault('workspaces', sourceWorkspace.id, 'memory.md');
       if (!memory.includes(memoryText)) throw new Error('记忆未写入 memory.md');
       pass('memory vault checks', 'written to workspace memory.md');
@@ -475,6 +483,102 @@ async function main() {
       }
       if (!found) throw new Error('练习集未写入 practice/sets');
       pass('practice vault checks', 'set written under practice/sets');
+    });
+
+    await step('practice set rename/delete', async () => {
+      await closePracticeIfOpen();
+      await openProject();
+      await page.getByRole('button', { name: '练习', exact: true }).click();
+      await page
+        .getByRole('button', { name: new RegExp(`^${escapeRegExp(practiceTitle)}`) })
+        .first()
+        .click();
+
+      await page
+        .getByRole('button', { name: `重命名练习集：${practiceTitle}` })
+        .click();
+      const renameDialog = page.getByRole('dialog', { name: '重命名练习集' });
+      await renameDialog.getByLabel('练习集标题').fill(renamedPracticeTitle);
+      await shot('practice-rename');
+      await renameDialog.getByRole('button', { name: '保存', exact: true }).click();
+      await page
+        .getByRole('button', { name: `重命名练习集：${renamedPracticeTitle}` })
+        .waitFor({ timeout: 15_000 });
+
+      const setsDir = path.join(
+        env.vault,
+        'workspaces',
+        sourceWorkspace.id,
+        'practice',
+        'sets'
+      );
+      let renamedOnDisk = false;
+      for (const file of await fs.readdir(setsDir)) {
+        const raw = await fs.readFile(path.join(setsDir, file), 'utf8');
+        if (raw.includes(renamedPracticeTitle)) renamedOnDisk = true;
+      }
+      if (!renamedOnDisk) throw new Error('重命名未写入 practice/sets');
+
+      await page
+        .getByRole('button', { name: `删除练习集：${renamedPracticeTitle}` })
+        .click();
+      await page
+        .getByRole('button', { name: `确认删除练习集：${renamedPracticeTitle}` })
+        .click();
+      await page
+        .getByRole('button', { name: new RegExp(`^${escapeRegExp(renamedPracticeTitle)}`) })
+        .waitFor({ state: 'detached', timeout: 15_000 });
+
+      let stillOnDisk = false;
+      for (const file of await fs.readdir(setsDir)) {
+        const raw = await fs.readFile(path.join(setsDir, file), 'utf8');
+        if (raw.includes(renamedPracticeTitle)) stillOnDisk = true;
+      }
+      if (stillOnDisk) throw new Error('删除后练习集仍在 practice/sets');
+      await closePracticeIfOpen();
+      pass('practice set checks', 'renamed and deleted on disk');
+    });
+
+    await step('note create/delete', async () => {
+      await closePracticeIfOpen();
+      await openProject();
+      const records = page.getByRole('region', { name: '记录' });
+      await records.getByRole('button', { name: '写一条记录' }).click();
+      await records.getByLabel('记录标题').fill(recordTitle);
+      await records.getByLabel('记录正文').fill(`工具 schema 漏字段，先补再测（验收 ${RUN}）。`);
+      await records.getByRole('button', { name: '保存记录' }).click();
+      await records.getByText(recordTitle, { exact: true }).waitFor({ timeout: 15_000 });
+
+      const notesDir = path.join(
+        env.vault,
+        'workspaces',
+        sourceWorkspace.id,
+        'notes'
+      );
+      let noteOnDisk = false;
+      for (const file of await fs.readdir(notesDir)) {
+        const raw = await fs.readFile(path.join(notesDir, file), 'utf8');
+        if (raw.includes(recordTitle)) noteOnDisk = true;
+      }
+      if (!noteOnDisk) throw new Error('记录未写入 notes');
+
+      await records.getByRole('button', { name: `删除记录：${recordTitle}` }).click();
+      await shot('note-delete');
+      await records
+        .getByRole('button', { name: `确认删除记录：${recordTitle}` })
+        .click();
+      await records.getByText(recordTitle, { exact: true }).waitFor({
+        state: 'detached',
+        timeout: 15_000
+      });
+
+      let noteStillOnDisk = false;
+      for (const file of await fs.readdir(notesDir)) {
+        const raw = await fs.readFile(path.join(notesDir, file), 'utf8');
+        if (raw.includes(recordTitle)) noteStillOnDisk = true;
+      }
+      if (noteStillOnDisk) throw new Error('删除后记录仍在 notes');
+      pass('note vault checks', 'record created and deleted on disk');
     });
 
     await shot('final-state');

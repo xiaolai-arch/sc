@@ -1,15 +1,18 @@
+import { promises as fs } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { formatLocalDate, parseLocalDate } from '../../shared/date';
 import {
   PRACTICE_INTERVALS,
   type CreatePracticeSetInput,
+  type DeletePracticeSetInput,
   type PracticeAttempt,
   type PracticeMistake,
   type PracticeQuestion,
   type PracticeService,
   type PracticeSet,
   type SubmitAnswerInput,
-  type SubmitAnswerResult
+  type SubmitAnswerResult,
+  type UpdatePracticeSetInput
 } from '../../shared/practice';
 import {
   createMutex,
@@ -170,6 +173,24 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
     return raw === null ? [] : parseMistakesFile(raw);
   }
 
+  async function findSet(
+    setId: string
+  ): Promise<{ workspaceId: string; set: PracticeSet } | null> {
+    for (const directory of await listDirectories(workspacesDir(vaultRoot))) {
+      let workspaceId: string;
+      try {
+        workspaceId = assertWorkspaceId(directory);
+      } catch {
+        continue;
+      }
+      const raw = await readFileOrNull(setFile(vaultRoot, workspaceId, setId));
+      if (raw === null) continue;
+      const set = parsePracticeSetFile(raw, workspaceId, setId);
+      if (set !== null && set.id === setId) return { workspaceId, set };
+    }
+    return null;
+  }
+
   async function findQuestion(
     questionId: string
   ): Promise<{ workspaceId: string; set: PracticeSet; question: PracticeQuestion } | null> {
@@ -211,19 +232,7 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
     async getSet(id: string): Promise<PracticeSet | null> {
       const setId = assertSafeSegment(requireString(id, 'practice set id'), 'practice set id');
       await ensureSeeded();
-      for (const directory of await listDirectories(workspacesDir(vaultRoot))) {
-        let workspaceId: string;
-        try {
-          workspaceId = assertWorkspaceId(directory);
-        } catch {
-          continue;
-        }
-        const raw = await readFileOrNull(setFile(vaultRoot, workspaceId, setId));
-        if (raw === null) continue;
-        const set = parsePracticeSetFile(raw, workspaceId, setId);
-        if (set !== null && set.id === setId) return set;
-      }
-      return null;
+      return (await findSet(setId))?.set ?? null;
     },
 
     async createSet(input: CreatePracticeSetInput): Promise<PracticeSet> {
@@ -250,6 +259,50 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
         );
       });
       return set;
+    },
+
+    async updateSet(input: UpdatePracticeSetInput): Promise<PracticeSet> {
+      if (typeof input !== 'object' || input === null) throw new Error('Practice set is required');
+      const setId = assertSafeSegment(
+        requireString(input.setId, 'practice set id'),
+        'practice set id'
+      );
+      const hasTitle = input.title !== undefined;
+      const hasSubject = input.subject !== undefined;
+      if (!hasTitle && !hasSubject) throw new Error('No practice set fields to update');
+      const title = hasTitle ? requireString(input.title, 'Practice set title') : undefined;
+      const subject = hasSubject ? (typeof input.subject === 'string' ? input.subject : '') : undefined;
+      await ensureSeeded();
+      return runExclusively(async () => {
+        const found = await findSet(setId);
+        if (found === null) throw new Error(`Practice set not found: ${setId}`);
+        const next: PracticeSet = {
+          ...found.set,
+          ...(title !== undefined ? { title } : {}),
+          ...(subject !== undefined ? { subject } : {}),
+          updatedAt: now().toISOString()
+        };
+        await writeFileAtomic(
+          setFile(vaultRoot, found.workspaceId, setId),
+          serializePracticeSetFile(next)
+        );
+        return next;
+      });
+    },
+
+    async deleteSet(input: DeletePracticeSetInput): Promise<void> {
+      if (typeof input !== 'object' || input === null) throw new Error('Practice set is required');
+      const setId = assertSafeSegment(
+        requireString(input.setId, 'practice set id'),
+        'practice set id'
+      );
+      await ensureSeeded();
+      await runExclusively(async () => {
+        const found = await findSet(setId);
+        if (found === null) throw new Error(`Practice set not found: ${setId}`);
+        // Only the set file goes away; mistakes and attempts stay as history.
+        await fs.rm(setFile(vaultRoot, found.workspaceId, setId), { force: true });
+      });
     },
 
     async submitAnswer(input: SubmitAnswerInput): Promise<SubmitAnswerResult> {

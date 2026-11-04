@@ -125,6 +125,38 @@ test('opens practice from the projects page', async () => {
 });
 
 
+test('renames and deletes a practice set from the practice sidebar', async () => {
+  const api = setup();
+  await screen.findByText('早上好，xiaolai。');
+  await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
+  await userEvent.click(screen.getByRole('button', { name: '练习' }));
+
+  await userEvent.click(
+    await screen.findByRole('button', { name: '重命名练习集：极限基础 3 题' })
+  );
+  const titleInput = screen.getByLabelText('练习集标题');
+  await userEvent.clear(titleInput);
+  await userEvent.type(titleInput, '极限冲刺');
+  await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+  expect(
+    await screen.findByRole('button', { name: '重命名练习集：极限冲刺' })
+  ).toBeInTheDocument();
+  expect((await api.listPracticeSets('kaoyan')).some((set) => set.title === '极限冲刺')).toBe(
+    true
+  );
+
+  await userEvent.click(screen.getByRole('button', { name: '删除练习集：极限冲刺' }));
+  await userEvent.click(screen.getByRole('button', { name: '确认删除练习集：极限冲刺' }));
+
+  await waitFor(async () => {
+    expect(
+      (await api.listPracticeSets('kaoyan')).some((set) => set.title === '极限冲刺')
+    ).toBe(false);
+  });
+});
+
+
 test('stops an in-flight generation', async () => {
   setup(1);
   await screen.findByText('早上好，xiaolai。');

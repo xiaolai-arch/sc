@@ -41,6 +41,32 @@ test('updates workspace name, goal and description', async () => {
   }
 });
 
+test('deletes a note file and drops it from the snapshot', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'study-coach-note-delete-'));
+  try {
+    const service = createWorkspaceService(dir, { seed: false });
+    const workspace = await service.createWorkspace({
+      name: '英语',
+      kind: 'study',
+      goal: '',
+      description: ''
+    });
+    const note = await service.createNote({
+      workspaceId: workspace.id,
+      title: '听力复盘',
+      subject: '英语',
+      body: '今天精听了一篇 TED。'
+    });
+
+    await service.deleteNote?.({ noteId: note.id });
+
+    expect((await service.getWorkspaceSnapshot(workspace.id)).notes).toEqual([]);
+    await expect(service.deleteNote?.({ noteId: note.id })).rejects.toThrow(/not found/i);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('moves a deleted workspace into a recoverable trash folder', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'study-coach-workspace-delete-'));
   try {

@@ -565,6 +565,11 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       }
       return note;
     },
+    async deleteNote(input) {
+      const workspace = (await getServices()).workspace;
+      if (!workspace.deleteNote) throw new Error('当前存储不支持删除笔记。');
+      return workspace.deleteNote(input);
+    },
     async getMemory(workspaceId) {
       return (await getServices()).workspace.getMemory(workspaceId);
     },
@@ -647,6 +652,16 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     },
     async createPracticeSet(input) {
       return (await getServices()).practice.createSet(input);
+    },
+    async updatePracticeSet(input) {
+      const practice = (await getServices()).practice;
+      if (!practice.updateSet) throw new Error('当前存储不支持修改练习集。');
+      return practice.updateSet(input);
+    },
+    async deletePracticeSet(input) {
+      const practice = (await getServices()).practice;
+      if (!practice.deleteSet) throw new Error('当前存储不支持删除练习集。');
+      return practice.deleteSet(input);
     },
     async submitPracticeAnswer(input) {
       return (await getServices()).practice.submitAnswer(input);

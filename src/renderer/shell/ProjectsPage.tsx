@@ -4,6 +4,7 @@ import type { LearnerProfile } from '../../shared/memory';
 import type {
   CreateNoteInput,
   CreateTaskInput,
+  DeleteNoteInput,
   DeleteTaskInput,
   UpdateWorkspaceInput,
   UpdateWorkspaceTaskInput,
@@ -30,6 +31,7 @@ type ProjectsPageProps = {
   onPrompt: (prompt: string) => void;
   onPreviewNote: (note: WorkspaceNote) => void;
   onCreateNote: (input: CreateNoteInput) => Promise<WorkspaceNote>;
+  onDeleteNote?: (input: DeleteNoteInput) => Promise<void>;
   busy?: boolean;
   onUpdateTask: (input: UpdateWorkspaceTaskInput) => Promise<WorkspaceTask>;
   onCreateTask?: (input: CreateTaskInput) => Promise<WorkspaceTask>;
@@ -59,6 +61,7 @@ export function ProjectsPage({
   onPrompt,
   onPreviewNote,
   onCreateNote,
+  onDeleteNote,
   busy = false,
   onUpdateTask,
   onCreateTask,
@@ -343,6 +346,7 @@ export function ProjectsPage({
               notes={notes}
               onCreateNote={onCreateNote}
               onPreviewNote={onPreviewNote}
+              onDeleteNote={onDeleteNote}
               onPrompt={onPrompt}
             />
           </div>
