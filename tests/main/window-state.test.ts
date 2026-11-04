@@ -74,6 +74,26 @@ test('returns defaults when the file is missing, corrupt or off-screen', async (
   }
 });
 
+test('keeps the saved size but drops the position when the display is gone', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'asaki-window-state-'));
+  try {
+    const file = join(dir, 'window-state.json');
+    await writeFile(
+      file,
+      JSON.stringify({ width: 1200, height: 800, x: -3000, y: 0, maximized: false }),
+      'utf8'
+    );
+
+    expect(await readWindowState(file, [display])).toEqual({
+      width: 1200,
+      height: 800,
+      maximized: false
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('round-trips bounds through the state file', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'asaki-window-state-'));
   try {

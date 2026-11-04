@@ -94,8 +94,11 @@ export async function readWindowState(
   try {
     const raw = await readFile(filePath, 'utf8');
     const state = normalizeWindowState(JSON.parse(raw));
-    if (state === null || !isVisibleOnDisplays(state, displays)) return fallback;
-    return state;
+    if (state === null) return fallback;
+    if (isVisibleOnDisplays(state, displays)) return state;
+    // The window was last placed on a display that is gone: keep the user's
+    // size but let the platform choose a position that is on screen.
+    return { width: state.width, height: state.height, maximized: state.maximized };
   } catch {
     // A missing or corrupt file must never stop the window from opening.
     return fallback;
