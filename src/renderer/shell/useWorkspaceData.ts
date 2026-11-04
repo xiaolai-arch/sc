@@ -3,8 +3,9 @@ import type {
   ButlerStreamListener,
   StreamingButlerApi
 } from '../../shared/butler-stream';
-import { formatLocalDate, parseLocalDate } from '../../shared/date';
+import { formatLocalDate } from '../../shared/date';
 import { friendlyErrorMessage } from '../../shared/errors';
+import { reviewStreak } from '../../shared/review-stats';
 import type { ReviewRecord, StudyCoachApi } from '../../shared/ipc';
 import type {
   CreateKnowledgeTopicInput,
@@ -166,18 +167,6 @@ function replaceWorkspaceSlice<T extends { workspaceId: string }>(
     .slice(0, firstIndex)
     .filter((entry) => entry.workspaceId !== workspaceId).length;
   return [...without.slice(0, before), ...next, ...without.slice(before)];
-}
-
-/** Consecutive review days ending today (skipped days still count as reviewed). */
-function reviewStreak(reviews: ReviewRecord[], today: string): number {
-  const dates = new Set(reviews.map((entry) => entry.date));
-  let streak = 0;
-  const cursor = parseLocalDate(today);
-  while (dates.has(formatLocalDate(cursor))) {
-    streak += 1;
-    cursor.setDate(cursor.getDate() - 1);
-  }
-  return streak;
 }
 
 async function loadPractice(

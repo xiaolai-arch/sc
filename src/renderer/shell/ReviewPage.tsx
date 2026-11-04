@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { formatLocalDate } from '../../shared/date';
+import { reviewedDaysThisWeek, reviewStreak } from '../../shared/review-stats';
 import { friendlyErrorMessage } from '../../shared/errors';
 import type { ReviewRecord } from '../../shared/ipc';
 import type { SubmitReviewInput, Workspace } from '../../shared/workspace';
@@ -46,6 +47,19 @@ export function ReviewPage({
 
   const today = formatLocalDate(new Date());
   const filteredWorkspace = workspaces.find((workspace) => workspace.id === filterId) ?? null;
+  const todayDate = new Date();
+  const yesterday = new Date(
+    todayDate.getFullYear(),
+    todayDate.getMonth(),
+    todayDate.getDate() - 1
+  );
+  const reviewedToday = reviews.some((review) => review.date === today);
+  // Before today's review, keep showing the streak that is still alive so the
+  // number does not drop to zero first thing in the morning.
+  const streak = reviewedToday
+    ? reviewStreak(reviews, today)
+    : reviewStreak(reviews, formatLocalDate(yesterday));
+  const weekDays = reviewedDaysThisWeek(reviews, todayDate);
 
   const openBackfill = () => {
     setDate(today);
@@ -138,6 +152,21 @@ export function ReviewPage({
         ) : undefined
       }
     >
+      {reviews.length > 0 ? (
+        <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-gray-500 dark:text-[#a1a1a6]">
+          <span className="font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
+            连续复盘 {streak} 天
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>本周 {weekDays} 天</span>
+          {!reviewedToday ? (
+            <span className="ml-auto font-medium text-[#0071e3] dark:text-[#4da3ff]">
+              今天还没复盘
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       <ReviewRecords
         workspaces={workspaces}
         workspace={filteredWorkspace}
