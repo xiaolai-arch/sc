@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { homeGreeting } from '../../src/shared/greeting';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { sendPrompt } from './send-prompt';
@@ -22,7 +23,7 @@ function navButton(name: string) {
 }
 
 async function openProjects() {
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
 }
 
@@ -200,6 +201,47 @@ test('edits a note from the records section', async () => {
   ).toBe(true);
 });
 
+test('edits note tags and links related records', async () => {
+  const api = setup();
+  await openProjects();
+  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'kaoyan');
+
+  await userEvent.click(screen.getByRole('button', { name: '写一条记录' }));
+  await userEvent.type(screen.getByLabelText('记录正文'), '第一条记录');
+  await userEvent.click(screen.getByRole('button', { name: '保存记录' }));
+  await screen.findByText('第一条记录');
+
+  await userEvent.click(screen.getByRole('button', { name: '写一条记录' }));
+  await userEvent.type(screen.getByLabelText('记录正文'), '第二条记录');
+  await userEvent.click(screen.getByRole('button', { name: '保存记录' }));
+  await screen.findByText('第二条记录');
+
+  const before = (await api.getWorkspaceSnapshot('kaoyan')).notes;
+  const first = before.find((note) => note.title === '第一条记录');
+  const second = before.find((note) => note.title === '第二条记录');
+  expect(first && second).toBeTruthy();
+
+  await userEvent.click(
+    await screen.findByRole('button', { name: '编辑记录：第一条记录' })
+  );
+  await userEvent.type(screen.getByLabelText('编辑记录标签'), '极限，计算');
+  await userEvent.click(screen.getByRole('checkbox', { name: '关联记录：第二条记录' }));
+  await userEvent.click(screen.getByRole('button', { name: '保存修改' }));
+
+  await waitFor(async () => {
+    const updated = (await api.getWorkspaceSnapshot('kaoyan')).notes.find(
+      (note) => note.id === first?.id
+    );
+    expect(updated?.tags).toEqual(['极限', '计算']);
+    expect(updated?.related).toEqual([second?.id]);
+  });
+
+  await userEvent.click(await screen.findByRole('button', { name: /^第一条记录/ }));
+  const dialog = await screen.findByRole('dialog');
+  expect(within(dialog).getByText('极限')).toBeInTheDocument();
+  expect(within(dialog).getByText('计算')).toBeInTheDocument();
+});
+
 test('deletes a note after a second confirmation click', async () => {
   const api = setup();
   await openProjects();
@@ -254,7 +296,7 @@ test('keeps the note input when saving fails', async () => {
 
 test('creates a reminder and toggles it off', async () => {
   const api = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await userEvent.click(navButton('提醒'));
 
   expect((screen.getByLabelText('提醒时间') as HTMLInputElement).value).toMatch(
@@ -284,7 +326,7 @@ test('creates a reminder and toggles it off', async () => {
 
 test('rolls the reminder switch back when saving fails', async () => {
   const api = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await userEvent.click(navButton('提醒'));
   const spy = vi.spyOn(api, 'updateReminder').mockRejectedValueOnce(new Error('保存失败'));
 
@@ -302,7 +344,7 @@ test('rolls the reminder switch back when saving fails', async () => {
 
 test('routes a project prompt to the selected project, not the open chat', async () => {
   const api = setup();
-  await screen.findByText('早上好，xiaolai。');
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
   await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText(/我先按截止时间和精力排/);
   await waitFor(() =>

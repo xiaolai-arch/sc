@@ -244,6 +244,11 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   }, [sidebarOpen]);
 
   const currentWorkspace = workspaces.find((workspace) => workspace.id === projectId) ?? null;
+  const previewRelatedTitles = previewNote
+    ? previewNote.related
+        .map((id) => notes.find((note) => note.id === id)?.title)
+        .filter((title): title is string => Boolean(title))
+    : [];
   const chatWorkspaceId =
     chatScope === 'workspace'
       ? projectId
@@ -1611,6 +1616,23 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
             <p className="text-[12px] text-gray-500 dark:text-[#8e8e93]">
               {previewNote.subject} · {previewNote.updated}
             </p>
+            {previewNote.tags.length > 0 ? (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {previewNote.tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded-full bg-[#f5f5f7] px-2 py-0.5 text-[11px] text-gray-600 dark:bg-white/[0.08] dark:text-[#a1a1a6]"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {previewRelatedTitles.length > 0 ? (
+              <p className="mt-2 text-[12px] text-gray-500 dark:text-[#8e8e93]">
+                关联：{previewRelatedTitles.join('、')}
+              </p>
+            ) : null}
             <div className="mt-3 whitespace-pre-wrap text-[14px] leading-6 text-[#1d1d1f] dark:text-[#f5f5f7]">
               {previewNote.body}
             </div>

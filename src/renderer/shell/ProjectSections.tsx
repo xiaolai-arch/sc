@@ -171,6 +171,16 @@ function filterNotes(notes: WorkspaceNote[], workspace: Workspace | null) {
   return notes.filter((note) => !workspace || note.workspaceId === workspace.id);
 }
 
+/** Splits a free-form tag input on Chinese/English commas and newlines. */
+function parseNoteTags(value: string): string[] {
+  const tags = new Set<string>();
+  for (const part of value.split(/[,，\n]/)) {
+    const tag = part.trim();
+    if (tag) tags.add(tag);
+  }
+  return [...tags];
+}
+
 function filterMemories(memoryRecords: MemoryRecord[], workspace: Workspace | null) {
   return memoryRecords
     .filter((record) => !workspace || record.workspaceId === workspace.id)
@@ -664,6 +674,8 @@ export function RecordsSection({
   const [editingNote, setEditingNote] = useState<WorkspaceNote | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editBody, setEditBody] = useState('');
+  const [editTags, setEditTags] = useState('');
+  const [editRelated, setEditRelated] = useState<string[]>([]);
   const [editError, setEditError] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
@@ -674,6 +686,8 @@ export function RecordsSection({
     setEditingNote(note);
     setEditTitle(note.title);
     setEditBody(note.body);
+    setEditTags(note.tags.join('，'));
+    setEditRelated([...note.related]);
     setEditError(null);
     setNoteFormOpen(false);
     setNoteError(null);
@@ -688,7 +702,13 @@ export function RecordsSection({
     setSavingEdit(true);
     setEditError(null);
     try {
-      await onUpdateNote({ noteId: editingNote.id, title, body });
+      await onUpdateNote({
+        noteId: editingNote.id,
+        title,
+        body,
+        tags: parseNoteTags(editTags),
+        related: editRelated
+      });
       setEditingNote(null);
     } catch (cause) {
       setEditError(messageOf(cause));
@@ -818,6 +838,45 @@ export function RecordsSection({
               onChange={(event) => setEditBody(event.target.value)}
               className="mt-2 w-full resize-none rounded-xl border-0 bg-white px-3 py-2 text-[13px] leading-6 text-[#1d1d1f] outline-none transition-all duration-200 placeholder:text-gray-400 focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#f5f5f7]"
             />
+            <input
+              aria-label="编辑记录标签"
+              placeholder="标签，用逗号分隔"
+              value={editTags}
+              onChange={(event) => setEditTags(event.target.value)}
+              className={`${inputClass} mt-2 w-full`}
+            />
+            {filteredNotes.some((note) => note.id !== editingNote.id) ? (
+              <fieldset className="mt-2">
+                <legend className="text-[12px] text-gray-500 dark:text-[#8e8e93]">
+                  关联记录
+                </legend>
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                  {filteredNotes
+                    .filter((note) => note.id !== editingNote.id)
+                    .map((note) => (
+                      <label
+                        key={note.id}
+                        className="flex items-center gap-1.5 text-[13px] text-[#1d1d1f] dark:text-[#f5f5f7]"
+                      >
+                        <input
+                          type="checkbox"
+                          aria-label={`关联记录：${note.title}`}
+                          checked={editRelated.includes(note.id)}
+                          onChange={(event) =>
+                            setEditRelated((current) =>
+                              event.target.checked
+                                ? [...current, note.id]
+                                : current.filter((id) => id !== note.id)
+                            )
+                          }
+                          className="h-3.5 w-3.5 accent-[#0071e3]"
+                        />
+                        <span className="max-w-[180px] truncate">{note.title}</span>
+                      </label>
+                    ))}
+                </div>
+              </fieldset>
+            ) : null}
             {editError ? (
               <p role="alert" className="mt-1 text-[12px] text-[#d70015] dark:text-[#ff7b72]">
                 {editError}
