@@ -242,6 +242,35 @@ test('edits note tags and links related records', async () => {
   expect(within(dialog).getByText('计算')).toBeInTheDocument();
 });
 
+test('shows records beyond the first ten on demand', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage, { streamPace: 0.05 });
+  window.studyCoach = api;
+  window.studyCoachPrototype = { reset: vi.fn() };
+  for (let index = 1; index <= 12; index += 1) {
+    await api.createNote({
+      workspaceId: 'kaoyan',
+      title: `记录 ${index}`,
+      subject: '数学',
+      body: `正文 ${index}`
+    });
+  }
+  render(<Workspace hasApiKey={false} onRefresh={vi.fn()} />);
+
+  await openProjects();
+  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'kaoyan');
+
+  expect(await screen.findByText('记录 12')).toBeInTheDocument();
+  expect(screen.queryByText('记录 2')).not.toBeInTheDocument();
+  expect(screen.getAllByRole('button', { name: /^编辑记录：/ })).toHaveLength(10);
+
+  await userEvent.click(screen.getByRole('button', { name: /^查看全部记录（\d+）$/ }));
+
+  expect(await screen.findByText('记录 2')).toBeInTheDocument();
+  expect(screen.getByText('记录 1')).toBeInTheDocument();
+  expect(screen.getAllByRole('button', { name: /^编辑记录：/ }).length).toBeGreaterThan(10);
+});
+
 test('deletes a note after a second confirmation click', async () => {
   const api = setup();
   await openProjects();

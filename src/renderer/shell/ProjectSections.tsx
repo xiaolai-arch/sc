@@ -679,7 +679,9 @@ export function RecordsSection({
   const [editError, setEditError] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
+  const [showAllNotes, setShowAllNotes] = useState(false);
   const filteredNotes = filterNotes(notes, workspace);
+  const visibleNotes = showAllNotes ? filteredNotes : filteredNotes.slice(0, 10);
 
   function startEditNote(note: WorkspaceNote) {
     if (!onUpdateNote) return;
@@ -920,7 +922,7 @@ export function RecordsSection({
         />
       ) : (
         <div className="divide-y divide-gray-100 dark:divide-white/[0.08]">
-          {filteredNotes.slice(0, 10).map((note) => (
+          {visibleNotes.map((note) => (
             <div key={note.id} className="flex items-center gap-2 py-2">
               <button
                 type="button"
@@ -969,6 +971,15 @@ export function RecordsSection({
           ))}
         </div>
       )}
+      {filteredNotes.length > 10 ? (
+        <button
+          type="button"
+          onClick={() => setShowAllNotes((current) => !current)}
+          className="mt-2 rounded-full px-3 py-1.5 text-[12px] font-medium text-[#0071e3] transition-colors duration-200 hover:bg-[#0071e3]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:text-[#4da3ff] dark:hover:bg-[#0a84ff]/20"
+        >
+          {showAllNotes ? '收起记录' : `查看全部记录（${filteredNotes.length}）`}
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={() => onPrompt('记一下：')}
