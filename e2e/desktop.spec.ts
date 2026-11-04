@@ -10,7 +10,9 @@ test.describe('ASAKI desktop', () => {
 
     try {
       await test.step('starts in the conversation shell', async () => {
-        await expect(page.getByText('早上好，xiaolai。')).toBeVisible();
+        await expect(
+          page.getByText(/^(早上好|中午好|下午好|晚上好|夜深了)，xiaolai。$/)
+        ).toBeVisible();
         await expect(page.getByRole('button', { name: '新对话' })).toBeVisible();
         await page.getByRole('button', { name: '新对话' }).click();
       });
@@ -34,7 +36,9 @@ test.describe('ASAKI desktop', () => {
       await test.step('persists the conversation and project across reload', async () => {
         await page.reload();
         await page.waitForLoadState('domcontentloaded');
-        await expect(page.getByText('早上好，xiaolai。')).toBeVisible();
+        await expect(
+          page.getByText(/^(早上好|中午好|下午好|晚上好|夜深了)，xiaolai。$/)
+        ).toBeVisible();
 
         await page.getByRole('button', { name: '考研', exact: true }).click();
         await page.getByRole('button', { name: /我想考研/ }).click();
