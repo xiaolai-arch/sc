@@ -560,7 +560,8 @@ export function createWorkspaceService(
       });
     },
 
-    async getMemory(workspaceId?: string): Promise<MemoryItem[]> {      await ensureVault();
+    async getMemory(workspaceId?: string): Promise<MemoryItem[]> {
+      await ensureVault();
       if (workspaceId === undefined) {
         const items: MemoryItem[] = [];
         for (const workspace of await listWorkspaceRecords()) {
