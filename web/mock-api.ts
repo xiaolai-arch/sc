@@ -1047,11 +1047,25 @@ export function createMockApi(
     async updatePracticeSet(input: UpdatePracticeSetInput): Promise<PracticeSet> {
       const set = state.practiceSets.find((entry) => entry.id === input.setId);
       if (!set) throw new Error('练习集不存在');
-      if (input.title === undefined && input.subject === undefined) {
+      if (
+        input.title === undefined &&
+        input.subject === undefined &&
+        input.questions === undefined
+      ) {
         throw new Error('没有要修改的内容');
       }
       if (input.title !== undefined) set.title = input.title;
       if (input.subject !== undefined) set.subject = input.subject;
+      if (input.questions !== undefined) {
+        if (input.questions.length === 0) throw new Error('练习至少需要一道题');
+        set.questions = input.questions.map((question) => ({
+          id: question.id ?? nextId('q'),
+          prompt: question.prompt,
+          options: [...question.options],
+          answer: question.answer,
+          explanation: question.explanation ?? ''
+        }));
+      }
       set.updatedAt = new Date().toISOString();
       persist();
       return structuredClone(set);

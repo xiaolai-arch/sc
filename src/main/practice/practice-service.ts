@@ -269,9 +269,13 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
       );
       const hasTitle = input.title !== undefined;
       const hasSubject = input.subject !== undefined;
-      if (!hasTitle && !hasSubject) throw new Error('No practice set fields to update');
+      const hasQuestions = input.questions !== undefined;
+      if (!hasTitle && !hasSubject && !hasQuestions) {
+        throw new Error('No practice set fields to update');
+      }
       const title = hasTitle ? requireString(input.title, 'Practice set title') : undefined;
       const subject = hasSubject ? (typeof input.subject === 'string' ? input.subject : '') : undefined;
+      const questions = hasQuestions ? normalizeQuestions(input.questions) : undefined;
       await ensureSeeded();
       return runExclusively(async () => {
         const found = await findSet(setId);
@@ -280,6 +284,7 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
           ...found.set,
           ...(title !== undefined ? { title } : {}),
           ...(subject !== undefined ? { subject } : {}),
+          ...(questions !== undefined ? { questions } : {}),
           updatedAt: now().toISOString()
         };
         await writeFileAtomic(

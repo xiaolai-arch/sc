@@ -215,7 +215,9 @@ async function main() {
     const sourceTopicName = `LangChain 表达式（验收 ${RUN}）`;
     const practiceTitle = `工具调用基础 1 题（验收 ${RUN}）`;
     const renamedPracticeTitle = `工具调用进阶 1 题（验收 ${RUN}）`;
+    const editedPracticePrompt = `改过的题干：注册工具先提供什么？（验收 ${RUN}）`;
     const recordTitle = `工具调用踩坑记录（验收 ${RUN}）`;
+    const editedRecordTitle = `工具调用踩坑复盘（验收 ${RUN}）`;
     const reviewCompleted = `跑通了 LangChain 的 tool calling demo（验收 ${RUN}）`;
     const reviewStuck = `工具参数校验总是漏字段（验收 ${RUN}）`;
 
@@ -495,14 +497,15 @@ async function main() {
         .click();
 
       await page
-        .getByRole('button', { name: `重命名练习集：${practiceTitle}` })
+        .getByRole('button', { name: `编辑练习集：${practiceTitle}` })
         .click();
-      const renameDialog = page.getByRole('dialog', { name: '重命名练习集' });
-      await renameDialog.getByLabel('练习集标题').fill(renamedPracticeTitle);
-      await shot('practice-rename');
-      await renameDialog.getByRole('button', { name: '保存', exact: true }).click();
+      const editDialog = page.getByRole('dialog', { name: '编辑练习集' });
+      await editDialog.getByLabel('标题').fill(renamedPracticeTitle);
+      await editDialog.getByLabel('第 1 题题干').fill(editedPracticePrompt);
+      await shot('practice-edit');
+      await editDialog.getByRole('button', { name: '保存修改', exact: true }).click();
       await page
-        .getByRole('button', { name: `重命名练习集：${renamedPracticeTitle}` })
+        .getByRole('button', { name: `编辑练习集：${renamedPracticeTitle}` })
         .waitFor({ timeout: 15_000 });
 
       const setsDir = path.join(
@@ -515,9 +518,11 @@ async function main() {
       let renamedOnDisk = false;
       for (const file of await fs.readdir(setsDir)) {
         const raw = await fs.readFile(path.join(setsDir, file), 'utf8');
-        if (raw.includes(renamedPracticeTitle)) renamedOnDisk = true;
+        if (raw.includes(renamedPracticeTitle) && raw.includes(editedPracticePrompt)) {
+          renamedOnDisk = true;
+        }
       }
-      if (!renamedOnDisk) throw new Error('重命名未写入 practice/sets');
+      if (!renamedOnDisk) throw new Error('练习集编辑未写入 practice/sets');
 
       await page
         .getByRole('button', { name: `删除练习集：${renamedPracticeTitle}` })
@@ -539,7 +544,7 @@ async function main() {
       pass('practice set checks', 'renamed and deleted on disk');
     });
 
-    await step('note create/delete', async () => {
+    await step('note create/edit/delete', async () => {
       await closePracticeIfOpen();
       await openProject();
       const records = page.getByRole('region', { name: '记录' });
@@ -562,12 +567,32 @@ async function main() {
       }
       if (!noteOnDisk) throw new Error('记录未写入 notes');
 
-      await records.getByRole('button', { name: `删除记录：${recordTitle}` }).click();
+      await records.getByRole('button', { name: `编辑记录：${recordTitle}` }).click();
+      await records.getByLabel('编辑记录标题').fill(editedRecordTitle);
+      await records
+        .getByLabel('编辑记录正文')
+        .fill(`补上了参数 schema 校验（验收 ${RUN}）。`);
+      await shot('note-edit');
+      await records.getByRole('button', { name: '保存修改' }).click();
+      await records.getByText(editedRecordTitle, { exact: true }).waitFor({
+        timeout: 15_000
+      });
+
+      let editedOnDisk = false;
+      for (const file of await fs.readdir(notesDir)) {
+        const raw = await fs.readFile(path.join(notesDir, file), 'utf8');
+        if (raw.includes(editedRecordTitle)) editedOnDisk = true;
+      }
+      if (!editedOnDisk) throw new Error('编辑未写入 notes');
+
+      await records
+        .getByRole('button', { name: `删除记录：${editedRecordTitle}` })
+        .click();
       await shot('note-delete');
       await records
-        .getByRole('button', { name: `确认删除记录：${recordTitle}` })
+        .getByRole('button', { name: `确认删除记录：${editedRecordTitle}` })
         .click();
-      await records.getByText(recordTitle, { exact: true }).waitFor({
+      await records.getByText(editedRecordTitle, { exact: true }).waitFor({
         state: 'detached',
         timeout: 15_000
       });
@@ -575,10 +600,10 @@ async function main() {
       let noteStillOnDisk = false;
       for (const file of await fs.readdir(notesDir)) {
         const raw = await fs.readFile(path.join(notesDir, file), 'utf8');
-        if (raw.includes(recordTitle)) noteStillOnDisk = true;
+        if (raw.includes(editedRecordTitle)) noteStillOnDisk = true;
       }
       if (noteStillOnDisk) throw new Error('删除后记录仍在 notes');
-      pass('note vault checks', 'record created and deleted on disk');
+      pass('note vault checks', 'record created, edited and deleted on disk');
     });
 
     await shot('final-state');

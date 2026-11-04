@@ -3,7 +3,8 @@ import { friendlyErrorMessage } from '../../shared/errors';
 import type {
   CreatePracticeQuestionInput,
   CreatePracticeSetInput,
-  PracticeSet
+  PracticeSet,
+  UpdatePracticeSetInput
 } from '../../shared/practice';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
@@ -17,6 +18,8 @@ const MAX_OPTIONS = 6;
 
 type QuestionDraft = {
   key: number;
+  /** Kept across edits so answers and mistakes stay linked to the question. */
+  id?: string;
   prompt: string;
   options: string[];
   answer: number;
@@ -26,8 +29,11 @@ type QuestionDraft = {
 type PracticeSetDialogProps = {
   open: boolean;
   workspaceId: string;
+  /** When set, the dialog edits this set instead of creating a new one. */
+  set?: PracticeSet | null;
   onClose: () => void;
-  onCreate: (input: CreatePracticeSetInput) => Promise<PracticeSet>;
+  onCreate?: (input: CreatePracticeSetInput) => Promise<PracticeSet>;
+  onUpdate?: (input: UpdatePracticeSetInput) => Promise<PracticeSet>;
 };
 
 function blankQuestion(key: number): QuestionDraft {
@@ -40,11 +46,24 @@ function blankQuestion(key: number): QuestionDraft {
   };
 }
 
+function draftFrom(set: PracticeSet, nextKey: () => number): QuestionDraft[] {
+  return set.questions.map((question) => ({
+    key: nextKey(),
+    id: question.id,
+    prompt: question.prompt,
+    options: [...question.options],
+    answer: question.answer,
+    explanation: question.explanation
+  }));
+}
+
 export function PracticeSetDialog({
   open,
   workspaceId,
+  set = null,
   onClose,
-  onCreate
+  onCreate,
+  onUpdate
 }: PracticeSetDialogProps) {
   const formId = useId();
   const nextKey = useRef(0);
@@ -55,20 +74,25 @@ export function PracticeSetDialog({
   ]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const editing = set !== null;
 
   function reset() {
-    setTitle('');
-    setSubject('');
-    setQuestions([blankQuestion(nextKey.current++)]);
+    setTitle(set?.title ?? '');
+    setSubject(set?.subject ?? '');
+    setQuestions(
+      set
+        ? draftFrom(set, () => nextKey.current++)
+        : [blankQuestion(nextKey.current++)]
+    );
     setError(null);
     setSubmitting(false);
   }
 
   useEffect(() => {
     if (open) reset();
-    // Reset only when the dialog is (re)opened; reset is intentionally local.
+    // Reset only when the dialog is (re)opened or retargeted; reset is local.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, set?.id]);
 
   function updateQuestion(key: number, patch: Partial<QuestionDraft>) {
     setQuestions((current) =>
@@ -130,7 +154,7 @@ export function PracticeSetDialog({
   }
 
   function validate(): string | null {
-    if (!workspaceId) return '缺少工作区信息，暂时无法创建练习集。';
+    if (!set && !workspaceId) return '缺少工作区信息，暂时无法创建练习集。';
     if (!title.trim()) return '请填写标题。';
     for (let index = 0; index < questions.length; index += 1) {
       const question = questions[index];
@@ -161,28 +185,45 @@ export function PracticeSetDialog({
       return;
     }
 
-    const input: CreatePracticeSetInput = {
-      workspaceId,
-      title: title.trim(),
-      subject: subject.trim(),
-      questions: questions.map(
-        (question): CreatePracticeQuestionInput => ({
-          prompt: question.prompt.trim(),
-          options: question.options.map((option) => option.trim()),
-          answer: question.answer,
-          explanation: question.explanation.trim()
-        })
-      )
-    };
+    const nextQuestions = questions.map(
+      (question): CreatePracticeQuestionInput => ({
+        ...(question.id !== undefined ? { id: question.id } : {}),
+        prompt: question.prompt.trim(),
+        options: question.options.map((option) => option.trim()),
+        answer: question.answer,
+        explanation: question.explanation.trim()
+      })
+    );
 
     setSubmitting(true);
     setError(null);
     try {
-      await onCreate(input);
+      if (set) {
+        if (!onUpdate) throw new Error('当前版本不支持编辑练习集。');
+        await onUpdate({
+          setId: set.id,
+          title: title.trim(),
+          subject: subject.trim(),
+          questions: nextQuestions
+        });
+      } else {
+        if (!onCreate) throw new Error('当前版本不支持创建练习集。');
+        await onCreate({
+          workspaceId,
+          title: title.trim(),
+          subject: subject.trim(),
+          questions: nextQuestions
+        });
+      }
       reset();
       onClose();
     } catch (cause) {
-      setError(friendlyErrorMessage(cause, '创建练习集失败，请重试。'));
+      setError(
+        friendlyErrorMessage(
+          cause,
+          set ? '保存练习集失败，请重试。' : '创建练习集失败，请重试。'
+        )
+      );
     } finally {
       setSubmitting(false);
     }
@@ -200,7 +241,13 @@ export function PracticeSetDialog({
           取消
         </Button>
         <Button size="sm" disabled={submitting} onClick={() => void submit()}>
-          {submitting ? '正在创建…' : '创建练习集'}
+          {submitting
+            ? editing
+              ? '正在保存…'
+              : '正在创建…'
+            : editing
+              ? '保存修改'
+              : '创建练习集'}
         </Button>
       </div>
     </div>
@@ -210,7 +257,7 @@ export function PracticeSetDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      title="新建练习集"
+      title={editing ? '编辑练习集' : '新建练习集'}
       widthClassName="max-w-2xl"
       footer={footer}
     >

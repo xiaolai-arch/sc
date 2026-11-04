@@ -7,6 +7,7 @@ import type {
   DeleteNoteInput,
   DeleteTaskInput,
   UpdateWorkspaceInput,
+  UpdateWorkspaceNoteInput,
   UpdateWorkspaceTaskInput,
   Workspace,
   WorkspaceNote,
@@ -31,6 +32,7 @@ type ProjectsPageProps = {
   onPrompt: (prompt: string) => void;
   onPreviewNote: (note: WorkspaceNote) => void;
   onCreateNote: (input: CreateNoteInput) => Promise<WorkspaceNote>;
+  onUpdateNote?: (input: UpdateWorkspaceNoteInput) => Promise<WorkspaceNote>;
   onDeleteNote?: (input: DeleteNoteInput) => Promise<void>;
   busy?: boolean;
   onUpdateTask: (input: UpdateWorkspaceTaskInput) => Promise<WorkspaceTask>;
@@ -61,6 +63,7 @@ export function ProjectsPage({
   onPrompt,
   onPreviewNote,
   onCreateNote,
+  onUpdateNote,
   onDeleteNote,
   busy = false,
   onUpdateTask,
@@ -345,6 +348,7 @@ export function ProjectsPage({
               workspace={workspace}
               notes={notes}
               onCreateNote={onCreateNote}
+              onUpdateNote={onUpdateNote}
               onPreviewNote={onPreviewNote}
               onDeleteNote={onDeleteNote}
               onPrompt={onPrompt}

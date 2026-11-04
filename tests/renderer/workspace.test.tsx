@@ -125,26 +125,31 @@ test('opens practice from the projects page', async () => {
 });
 
 
-test('renames and deletes a practice set from the practice sidebar', async () => {
+test('edits and deletes a practice set from the practice sidebar', async () => {
   const api = setup();
   await screen.findByText('早上好，xiaolai。');
   await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
   await userEvent.click(screen.getByRole('button', { name: '练习' }));
 
   await userEvent.click(
-    await screen.findByRole('button', { name: '重命名练习集：极限基础 3 题' })
+    await screen.findByRole('button', { name: '编辑练习集：极限基础 3 题' })
   );
-  const titleInput = screen.getByLabelText('练习集标题');
+  const dialog = screen.getByRole('dialog', { name: '编辑练习集' });
+  const titleInput = within(dialog).getByLabelText('标题');
   await userEvent.clear(titleInput);
   await userEvent.type(titleInput, '极限冲刺');
-  await userEvent.click(screen.getByRole('button', { name: '保存' }));
+  const promptInput = within(dialog).getByLabelText('第 1 题题干');
+  await userEvent.clear(promptInput);
+  await userEvent.type(promptInput, '改过的题干');
+  await userEvent.click(within(dialog).getByRole('button', { name: '保存修改' }));
 
   expect(
-    await screen.findByRole('button', { name: '重命名练习集：极限冲刺' })
+    await screen.findByRole('button', { name: '编辑练习集：极限冲刺' })
   ).toBeInTheDocument();
-  expect((await api.listPracticeSets('kaoyan')).some((set) => set.title === '极限冲刺')).toBe(
-    true
+  const edited = (await api.listPracticeSets('kaoyan')).find(
+    (set) => set.title === '极限冲刺'
   );
+  expect(edited?.questions[0]?.prompt).toBe('改过的题干');
 
   await userEvent.click(screen.getByRole('button', { name: '删除练习集：极限冲刺' }));
   await userEvent.click(screen.getByRole('button', { name: '确认删除练习集：极限冲刺' }));

@@ -190,6 +190,22 @@ export function KnowledgeGraph({
   // the hint would flash on every open.
   const linksReady = getBacklinks ? loadState === 'ready' : true;
   const showLinkHint = linksReady && topics.length > 1 && edges.length === 0;
+  const linkedIds = new Set<string>();
+  for (const edge of edges) {
+    linkedIds.add(edge.from.topic.id);
+    linkedIds.add(edge.to.topic.id);
+  }
+  const isolatedTopics = linksReady
+    ? nodes.filter((node) => !linkedIds.has(node.topic.id)).map((node) => node.topic)
+    : [];
+  const showIsolatedHint = linksReady && edges.length > 0 && isolatedTopics.length > 0;
+  const isolatedLabel =
+    isolatedTopics.length > 0
+      ? `${isolatedTopics
+          .slice(0, 5)
+          .map((topic) => topic.name)
+          .join('、')}${isolatedTopics.length > 5 ? ' 等' : ''}`
+      : '';
 
   return (
     <section aria-label="知识图谱" className="flex w-full flex-col">
@@ -201,6 +217,11 @@ export function KnowledgeGraph({
       {showLinkHint ? (
         <p className="pb-2 text-[11px] text-gray-400 dark:text-[#8e8e93]">
           还没有连线：在主题笔记里用 [[另一个主题名]] 引用其他主题，就会在这里连起来。
+        </p>
+      ) : null}
+      {showIsolatedHint ? (
+        <p className="pb-2 text-[11px] text-gray-400 dark:text-[#8e8e93]">
+          {`还没有连线的主题：${isolatedLabel}。在笔记里用 [[主题名]] 引用它们就会连起来。`}
         </p>
       ) : null}
 

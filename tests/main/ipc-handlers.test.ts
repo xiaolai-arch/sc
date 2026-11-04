@@ -140,9 +140,12 @@ test('updates and deletes practice sets through the practice service', async () 
   const handlers = createIpcHandlers(context.api);
 
   await handlers.updatePracticeSet({ setId: 'ps-1', title: '线代冲刺' });
+  const questions = [{ prompt: '矩阵可逆的条件？', options: ['A', 'B'], answer: 1 }];
+  await handlers.updatePracticeSet({ setId: 'ps-1', questions });
   await handlers.deletePracticeSet({ setId: 'ps-1' });
 
   expect(updateSet).toHaveBeenCalledWith({ setId: 'ps-1', title: '线代冲刺' });
+  expect(updateSet).toHaveBeenCalledWith({ setId: 'ps-1', questions });
   expect(deleteSet).toHaveBeenCalledWith({ setId: 'ps-1' });
 });
 
@@ -168,6 +171,9 @@ test('rejects malformed handler parameters before they reach services', async ()
   await expect(handlers.updatePracticeSet({ setId: '' })).rejects.toThrow('练习 ID不能为空。');
   await expect(handlers.updatePracticeSet({ setId: 'ps-1' })).rejects.toThrow(
     '练习更新参数无效。'
+  );
+  await expect(handlers.updatePracticeSet({ setId: 'ps-1', questions: [] })).rejects.toThrow(
+    '练习题目不能为空。'
   );
   await expect(handlers.deletePracticeSet({ setId: '' })).rejects.toThrow('练习 ID不能为空。');
   await expect(handlers.submitReview({ date: '2026-10-31' })).rejects.toThrow(

@@ -20,6 +20,7 @@ import type {
   DeleteTaskInput,
   Reminder,
   UpdateReminderInput,
+  UpdateWorkspaceNoteInput,
   UpdateWorkspaceTaskInput,
   Workspace,
   WorkspaceNote,
@@ -639,6 +640,7 @@ type RecordsSectionProps = {
   notes: WorkspaceNote[];
   onCreateNote: (input: CreateNoteInput) => Promise<WorkspaceNote>;
   onPreviewNote: (note: WorkspaceNote) => void;
+  onUpdateNote?: (input: UpdateWorkspaceNoteInput) => Promise<WorkspaceNote>;
   onDeleteNote?: (input: DeleteNoteInput) => Promise<void>;
   onPrompt: (prompt: string) => void;
 };
@@ -648,6 +650,7 @@ export function RecordsSection({
   notes,
   onCreateNote,
   onPreviewNote,
+  onUpdateNote,
   onDeleteNote,
   onPrompt
 }: RecordsSectionProps) {
@@ -658,8 +661,41 @@ export function RecordsSection({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [editingNote, setEditingNote] = useState<WorkspaceNote | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editBody, setEditBody] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   const filteredNotes = filterNotes(notes, workspace);
+
+  function startEditNote(note: WorkspaceNote) {
+    if (!onUpdateNote) return;
+    setEditingNote(note);
+    setEditTitle(note.title);
+    setEditBody(note.body);
+    setEditError(null);
+    setNoteFormOpen(false);
+    setNoteError(null);
+  }
+
+  async function saveEditedNote() {
+    if (!editingNote || !onUpdateNote || savingEdit) return;
+    const body = editBody.trim();
+    if (!body) return;
+    const firstLine = body.split('\n').map((line) => line.trim()).find(Boolean) ?? '';
+    const title = editTitle.trim() || firstLine;
+    setSavingEdit(true);
+    setEditError(null);
+    try {
+      await onUpdateNote({ noteId: editingNote.id, title, body });
+      setEditingNote(null);
+    } catch (cause) {
+      setEditError(messageOf(cause));
+    } finally {
+      setSavingEdit(false);
+    }
+  }
 
   async function deleteNote(note: WorkspaceNote) {
     if (!onDeleteNote) return;
@@ -766,6 +802,49 @@ export function RecordsSection({
             </div>
           </div>
         ) : null}
+        {editingNote ? (
+          <div className="mt-2 rounded-xl bg-[#f5f5f7] p-3 dark:bg-white/[0.06]">
+            <input
+              aria-label="编辑记录标题"
+              placeholder="标题（可选）"
+              value={editTitle}
+              onChange={(event) => setEditTitle(event.target.value)}
+              className={`${inputClass} w-full`}
+            />
+            <textarea
+              aria-label="编辑记录正文"
+              rows={3}
+              value={editBody}
+              onChange={(event) => setEditBody(event.target.value)}
+              className="mt-2 w-full resize-none rounded-xl border-0 bg-white px-3 py-2 text-[13px] leading-6 text-[#1d1d1f] outline-none transition-all duration-200 placeholder:text-gray-400 focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#f5f5f7]"
+            />
+            {editError ? (
+              <p role="alert" className="mt-1 text-[12px] text-[#d70015] dark:text-[#ff7b72]">
+                {editError}
+              </p>
+            ) : null}
+            <div className="mt-2 flex justify-end gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingNote(null);
+                  setEditError(null);
+                }}
+                className={actionClass}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={!editBody.trim() || savingEdit}
+                onClick={() => void saveEditedNote()}
+                className={primaryButtonClass}
+              >
+                保存修改
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {deleteError ? (
@@ -796,6 +875,16 @@ export function RecordsSection({
                   {note.subject} · {note.updated}
                 </span>
               </button>
+              {onUpdateNote ? (
+                <button
+                  type="button"
+                  aria-label={`编辑记录：${note.title}`}
+                  onClick={() => startEditNote(note)}
+                  className={cn(actionClass, 'shrink-0')}
+                >
+                  编辑
+                </button>
+              ) : null}
               {onDeleteNote ? (
                 <button
                   type="button"

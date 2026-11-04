@@ -29,6 +29,7 @@ import type {
   WorkspaceOnboardingInput
 } from '../shared/workspace';
 import type {
+  CreatePracticeQuestionInput,
   CreatePracticeSetInput,
   DeletePracticeSetInput,
   SubmitAnswerInput,
@@ -570,17 +571,24 @@ function requireCreatePracticeSet(value: unknown): CreatePracticeSetInput {
 function requireUpdatePracticeSet(value: unknown): UpdatePracticeSetInput {
   const input = requireObject(value, '更新练习');
   const setId = requireString(input.setId, '练习 ID');
-  if (input.title === undefined && input.subject === undefined) {
+  const hasQuestions = input.questions !== undefined;
+  if (input.title === undefined && input.subject === undefined && !hasQuestions) {
     throw new Error('练习更新参数无效。');
   }
   if (input.title !== undefined) requireString(input.title, '练习标题');
   if (input.subject !== undefined && typeof input.subject !== 'string') {
     throw new Error('练习科目无效。');
   }
+  if (hasQuestions && (!Array.isArray(input.questions) || input.questions.length === 0)) {
+    throw new Error('练习题目不能为空。');
+  }
   return {
     setId,
     ...(input.title !== undefined ? { title: input.title as string } : {}),
-    ...(input.subject !== undefined ? { subject: input.subject as string } : {})
+    ...(input.subject !== undefined ? { subject: input.subject as string } : {}),
+    ...(hasQuestions
+      ? { questions: input.questions as CreatePracticeQuestionInput[] }
+      : {})
   };
 }
 

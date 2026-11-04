@@ -111,6 +111,8 @@ export interface UpdatePracticeSetInput {
   setId: string;
   title?: string;
   subject?: string;
+  /** Replaces the whole question list; provided question ids are preserved. */
+  questions?: CreatePracticeQuestionInput[];
 }
 
 export interface DeletePracticeSetInput {

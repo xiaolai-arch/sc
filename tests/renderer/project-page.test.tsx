@@ -173,6 +173,33 @@ test('writes a note from the records section', async () => {
   expect(snapshot.notes.some((note) => note.title === '今天数学卡在极限')).toBe(true);
 });
 
+test('edits a note from the records section', async () => {
+  const api = setup();
+  await openProjects();
+  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'kaoyan');
+
+  await userEvent.click(screen.getByRole('button', { name: '写一条记录' }));
+  await userEvent.type(screen.getByLabelText('记录正文'), '修改前的正文');
+  await userEvent.click(screen.getByRole('button', { name: '保存记录' }));
+
+  await userEvent.click(
+    await screen.findByRole('button', { name: '编辑记录：修改前的正文' })
+  );
+  const titleInput = screen.getByLabelText('编辑记录标题');
+  await userEvent.clear(titleInput);
+  await userEvent.type(titleInput, '修改后的标题');
+  const bodyInput = screen.getByLabelText('编辑记录正文');
+  await userEvent.clear(bodyInput);
+  await userEvent.type(bodyInput, '修改后的正文');
+  await userEvent.click(screen.getByRole('button', { name: '保存修改' }));
+
+  expect(await screen.findByText('修改后的标题')).toBeInTheDocument();
+  const notes = (await api.getWorkspaceSnapshot('kaoyan')).notes;
+  expect(
+    notes.some((note) => note.title === '修改后的标题' && note.body === '修改后的正文')
+  ).toBe(true);
+});
+
 test('deletes a note after a second confirmation click', async () => {
   const api = setup();
   await openProjects();

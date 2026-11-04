@@ -224,6 +224,41 @@ test('renames a practice set without touching its questions', async () => {
   await expect(service.updateSet?.({ setId: 'missing', title: 'x' })).rejects.toThrow('not found');
 });
 
+test('replaces practice questions while keeping the ids it is given', async () => {
+  const service = at('2026-11-01');
+  const created = await service.createSet({
+    workspaceId: 'kaoyan',
+    title: '线代小测',
+    questions: [
+      { prompt: '矩阵可逆的条件？', options: ['|A| = 0', '|A| ≠ 0'], answer: 1 },
+      { prompt: '单位矩阵的行列式？', options: ['0', '1'], answer: 1 }
+    ]
+  });
+  const keptId = created.questions[0]!.id;
+
+  const updated = await service.updateSet?.({
+    setId: created.id,
+    questions: [
+      { id: keptId, prompt: '矩阵可逆的充要条件？', options: ['|A| = 0', '|A| ≠ 0'], answer: 1 },
+      { prompt: '新增：秩为 n 说明？', options: ['不可逆', '满秩'], answer: 1 }
+    ]
+  });
+
+  expect(updated?.title).toBe('线代小测');
+  expect(updated?.questions).toHaveLength(2);
+  expect(updated?.questions[0]).toMatchObject({
+    id: keptId,
+    prompt: '矩阵可逆的充要条件？'
+  });
+  expect(updated?.questions[1]?.prompt).toBe('新增：秩为 n 说明？');
+
+  const fresh = at('2026-11-02');
+  expect((await fresh.getSet(created.id))?.questions[0]?.id).toBe(keptId);
+  await expect(service.updateSet?.({ setId: created.id, questions: [] })).rejects.toThrow(
+    'at least one question'
+  );
+});
+
 test('deletes a practice set but keeps its answer history', async () => {
   const service = at('2026-11-01');
   const created = await service.createSet({

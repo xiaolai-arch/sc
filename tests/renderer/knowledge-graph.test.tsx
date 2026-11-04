@@ -100,6 +100,42 @@ test('hides the link hint once the graph has an edge', () => {
   expect(screen.queryByText(/还没有连线/)).not.toBeInTheDocument();
 });
 
+test('points out topics that still have no links', () => {
+  const isolated = makeTopic('kt-c', '向量数据库', 'learning');
+  const backlinks = new Map<string, KnowledgeBacklink[]>([
+    ['kt-b', [{ topicId: 'kt-a', name: 'LangChain' }]]
+  ]);
+  render(
+    <KnowledgeGraph
+      topics={[langChain, rag, isolated]}
+      backlinks={backlinks}
+      selectedId={null}
+      onSelect={vi.fn()}
+    />
+  );
+
+  expect(
+    screen.getByText(/还没有连线的主题：向量数据库。在笔记里用 \[\[主题名\]\]/)
+  ).toBeInTheDocument();
+});
+
+test('hides the isolated-topic hint when every topic is linked', () => {
+  const backlinks = new Map<string, KnowledgeBacklink[]>([
+    ['kt-b', [{ topicId: 'kt-a', name: 'LangChain' }]],
+    ['kt-a', [{ topicId: 'kt-b', name: 'RAG' }]]
+  ]);
+  render(
+    <KnowledgeGraph
+      topics={[langChain, rag]}
+      backlinks={backlinks}
+      selectedId={null}
+      onSelect={vi.fn()}
+    />
+  );
+
+  expect(screen.queryByText(/还没有连线的主题/)).not.toBeInTheDocument();
+});
+
 test('marks the selected node and shows name plus level', () => {
   render(
     <KnowledgeGraph
