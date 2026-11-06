@@ -30,10 +30,32 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  verify-windows:
+    name: Typecheck, unit tests, build (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run typecheck:e2e
+      - run: npm test
+      - run: npm run build
+
   e2e:
-    name: Electron e2e (fake model)
+    name: Electron e2e (fake model, ${{ matrix.os }})
     needs: verify
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     env:
       CI: 'true'
@@ -52,7 +74,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-e2e
+          name: playwright-e2e-${{ matrix.os }}
           path: test-results/e2e
           if-no-files-found: ignore
           retention-days: 7

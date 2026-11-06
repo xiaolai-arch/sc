@@ -199,6 +199,14 @@ async function main() {
     return fs.readFile(path.join(env.vault, ...segments), 'utf8');
   }
 
+  /** Deleting the last task removes its day file, so absence counts as deleted. */
+  async function readVaultIfExists(...segments) {
+    return fs.readFile(path.join(env.vault, ...segments), 'utf8').catch((error) => {
+      if (error && error.code === 'ENOENT') return '';
+      throw error;
+    });
+  }
+
   /** The practice overlay covers the nav; close it before leaving the page. */
   async function closePracticeIfOpen() {
     const close = page.getByRole('button', { name: '关闭练习' });
@@ -259,7 +267,7 @@ async function main() {
         .getByRole('button', { name: `确认删除任务：${editedTaskTitle}` })
         .click();
       await plan.getByText(editedTaskTitle, { exact: true }).waitFor({ state: 'detached' });
-      const deletedFile = await readVault(...taskFile);
+      const deletedFile = await readVaultIfExists(...taskFile);
       if (deletedFile.includes(editedTaskTitle)) throw new Error('删除未写入 vault');
       pass('task vault checks', 'created, edited and deleted on disk');
     });

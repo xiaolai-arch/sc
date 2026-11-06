@@ -4,6 +4,7 @@ import { access, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, isAbsolute, join } from 'node:path';
 import type { LocalCliAgent } from '../../shared/types';
+import { prepareCliSpawn, resolveWindowsCommand } from './cli-command';
 import type {
   LocalCliAuthStatus,
   LocalCliEntry,
@@ -22,6 +23,8 @@ type Resolver = (name: string) => Promise<string | null>;
 export interface LocalCliDiscoveryOptions {
   env?: NodeJS.ProcessEnv;
   homeDir?: string;
+  /** Test seam; defaults to the running platform. */
+  platform?: NodeJS.Platform;
   /** Extra directories to search before PATH. */
   pathDirs?: string[];
   /** Test seam; production spawns the real process. */
@@ -95,15 +98,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function defaultRunner(
+async function defaultRunner(
   command: string,
   args: string[],
   options: { timeoutMs: number }
 ): Promise<RunResult> {
+  // On Windows npm-installed CLIs are `.cmd` shims; execFile cannot start one
+  // without cmd.exe, so probes go through the same resolver as agent runs.
+  const spec = await prepareCliSpawn(command, args);
   return new Promise((resolve) => {
     execFile(
-      command,
-      args,
+      spec.command,
+      spec.args,
       {
         timeout: options.timeoutMs,
         maxBuffer: 2 * 1024 * 1024,
@@ -127,16 +133,23 @@ function defaultRunner(
   });
 }
 
-async function isExecutable(path: string): Promise<boolean> {
+async function isExecutable(
+  path: string,
+  platform: NodeJS.Platform
+): Promise<boolean> {
   try {
-    await access(path, constants.X_OK);
+    // Windows has no executable bit; PATHEXT resolution already chose the file.
+    await access(path, platform === 'win32' ? constants.F_OK : constants.X_OK);
     return true;
   } catch {
     return false;
   }
 }
 
-function commonPathDirs(home: string): string[] {
+function commonPathDirs(home: string, platform: NodeJS.Platform): string[] {
+  if (platform === 'win32') {
+    return [join(home, 'AppData', 'Roaming', 'npm')];
+  }
   return [
     join(home, '.local', 'bin'),
     join(home, '.npm-global', 'bin'),
@@ -151,12 +164,16 @@ function commonPathDirs(home: string): string[] {
   ];
 }
 
-function pathDirsFromEnv(env: NodeJS.ProcessEnv, home: string): string[] {
+function pathDirsFromEnv(
+  env: NodeJS.ProcessEnv,
+  home: string,
+  platform: NodeJS.Platform
+): string[] {
   const fromPath = (env.PATH ?? env.Path ?? '')
     .split(delimiter)
     .map((entry) => entry.trim())
     .filter(Boolean);
-  return [...new Set([...fromPath, ...commonPathDirs(home)])];
+  return [...new Set([...fromPath, ...commonPathDirs(home, platform)])];
 }
 
 const SAFE_BINARY = /^[A-Za-z0-9._-]+$/;
@@ -171,15 +188,35 @@ async function defaultResolve(
   env: NodeJS.ProcessEnv,
   home: string,
   pathDirs: string[],
-  run: Runner
+  run: Runner,
+  platform: NodeJS.Platform
 ): Promise<string | null> {
-  if (name.includes('/') || isAbsolute(name)) {
-    return (await isExecutable(name)) ? name : null;
+  if (name.includes('/') || name.includes('\\') || isAbsolute(name)) {
+    return (await isExecutable(name, platform)) ? name : null;
   }
   if (!SAFE_BINARY.test(name)) return null;
+
+  if (platform === 'win32') {
+    const resolved = await resolveWindowsCommand(name, {
+      ...env,
+      PATH: pathDirs.join(delimiter)
+    });
+    if (resolved !== null) return resolved;
+    // `where` also finds App Execution Aliases that are not plain files.
+    const where = await run('where', [name], { timeoutMs: 2_500 });
+    if (where.code === 0) {
+      const found = stripAnsi(where.stdout)
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find((line) => isAbsolute(line));
+      if (found && (await isExecutable(found, platform))) return found;
+    }
+    return null;
+  }
+
   for (const dir of pathDirs) {
     const candidate = join(dir, name);
-    if (await isExecutable(candidate)) return candidate;
+    if (await isExecutable(candidate, platform)) return candidate;
   }
   const shell = env.SHELL?.trim() || '/bin/zsh';
   const probe = await run(shell, ['-lc', `command -v -- ${name}`], {
@@ -191,7 +228,7 @@ async function defaultResolve(
     .map((line) => line.trim())
     .reverse()
     .find((line) => isAbsolute(line));
-  return path && (await isExecutable(path)) ? path : null;
+  return path && (await isExecutable(path, platform)) ? path : null;
 }
 
 function hasFeature(help: string, patterns: RegExp[]): boolean {
@@ -430,15 +467,16 @@ export async function scanLocalClis(
 ): Promise<LocalCliScanResult> {
   const env = options.env ?? process.env;
   const home = options.homeDir ?? homedir();
+  const platform = options.platform ?? process.platform;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const run = options.run ?? defaultRunner;
   const pathDirs = [
     ...(options.pathDirs ?? []),
-    ...pathDirsFromEnv(env, home)
+    ...pathDirsFromEnv(env, home, platform)
   ];
   const resolve =
     options.resolve ??
-    ((name: string) => defaultResolve(name, env, home, pathDirs, run));
+    ((name: string) => defaultResolve(name, env, home, pathDirs, run, platform));
   const readTextFile = options.readTextFile ?? ((path: string) => readFile(path, 'utf8'));
 
   const entries = await Promise.all(

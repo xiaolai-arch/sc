@@ -97,6 +97,35 @@ npm run dev:web
 STUDY_COACH_USER_DATA_DIR=/tmp/study-coach-dev npm run dev
 ```
 
+### 在 Windows 上开发
+
+需要 Windows 10/11、Node.js 24 LTS（最低 22）、Git for Windows。命令与 macOS 相同：
+
+```powershell
+git clone <仓库地址> asaki
+cd asaki
+npm ci
+npm run dev        # Electron 桌面应用
+npm test           # 单元 + 集成测试
+npm run build
+```
+
+PowerShell 里设置临时环境变量：
+
+```powershell
+$env:STUDY_COACH_USER_DATA_DIR = "$env:TEMP\study-coach-dev"
+npm run dev
+
+# 真机验收（可选）
+$env:ASAKI_ACCEPTANCE_VAULT = "$env:USERPROFILE\Documents\StudyCoachVault"
+$env:ASAKI_ACCEPTANCE_WORKSPACE = "kaoyan"
+npm run test:acceptance
+```
+
+默认 vault 位于 `%USERPROFILE%\Documents\StudyCoachVault`。设置页里的本地 CLI agent 会从 `PATH` 和 `%APPDATA%\npm` 查找 `codex`、`claude`、`zcode`、`opencode`，npm 全局安装的 `.cmd` shim 会自动通过 `cmd.exe` 启动；扫描时用 `where` 兜底查找 App Execution Alias。
+
+目前 Windows 只支持从源码开发/运行：`npm run dist` 仍然只打 macOS 包，还没有 Windows 安装包（未签名 `.exe`/`nsis` 均未配置）。e2e 在 Windows 上通过临时 `.cmd` shim 启动 fake CLI，CI 会同时跑 macOS 和 Windows。
+
 ## 测试
 
 ```bash
@@ -144,7 +173,7 @@ npm run package                # 同上（build + --dir）
 npm run dist                   # build + zip + dmg
 ```
 
-产物在 `dist/`，例如 `dist/mac-arm64/ASAKI.app`、`dist/ASAKI-1.0.0-arm64.dmg`。
+产物在 `dist/`，例如 `dist/mac-arm64/ASAKI.app`、`dist/ASAKI-1.0.0-arm64.dmg`。Windows 安装包尚未配置（见上节）。
 
 默认不签名，本地没有证书也能构建：
 

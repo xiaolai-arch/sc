@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
+import { prepareCliSpawn } from './cli-command';
 import type { LocalCliAgent, ProviderConfig } from '../../shared/types';
 import type {
   ModelClient,
@@ -373,23 +374,22 @@ export function extractCodexAnswer(stdout: string): string {
   return lines[lines.length - 1] ?? '';
 }
 
-function defaultRunner(
+async function defaultRunner(
   command: string,
   args: string[],
   input: string,
   options: { cwd: string; timeoutMs: number; signal?: AbortSignal }
 ): Promise<CliRunResult> {
+  if (options.signal?.aborted) throw abortError();
+  const spec = await prepareCliSpawn(command, args);
   return new Promise((resolve, reject) => {
-    if (options.signal?.aborted) {
-      reject(abortError());
-      return;
-    }
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(command, args, {
+      child = spawn(spec.command, spec.args, {
         cwd: options.cwd,
         env: process.env,
-        stdio: ['pipe', 'pipe', 'pipe']
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true
       });
     } catch (error) {
       reject(error);
@@ -441,24 +441,23 @@ function defaultRunner(
   });
 }
 
-function defaultStreamRunner(
+async function defaultStreamRunner(
   command: string,
   args: string[],
   input: string,
   options: { cwd: string; timeoutMs: number; signal?: AbortSignal },
   onLine: (line: string) => void
 ): Promise<CliRunResult> {
+  if (options.signal?.aborted) throw abortError();
+  const spec = await prepareCliSpawn(command, args);
   return new Promise((resolve, reject) => {
-    if (options.signal?.aborted) {
-      reject(abortError());
-      return;
-    }
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(command, args, {
+      child = spawn(spec.command, spec.args, {
         cwd: options.cwd,
         env: process.env,
-        stdio: ['pipe', 'pipe', 'pipe']
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true
       });
     } catch (error) {
       reject(error);

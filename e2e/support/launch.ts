@@ -6,6 +6,20 @@ import { join, resolve } from 'node:path';
 export const PROJECT_ROOT = resolve(__dirname, '..', '..');
 export const FAKE_CLI_PATH = join(PROJECT_ROOT, 'e2e', 'fixtures', 'fake-codex.mjs');
 
+/**
+ * Windows cannot execute a `.mjs` file directly, so the fixture gets a `.cmd`
+ * shim that starts it with the Node binary running Playwright.
+ */
+async function fakeCliCommand(root: string): Promise<string> {
+  await chmod(FAKE_CLI_PATH, 0o755).catch(() => undefined);
+  if (process.platform !== 'win32') return FAKE_CLI_PATH;
+  const shim = join(root, 'fake-codex.cmd');
+  await writeFile(shim, `@echo off\r\n"${process.execPath}" "${FAKE_CLI_PATH}" %*\r\n`, {
+    encoding: 'utf8'
+  });
+  return shim;
+}
+
 export type IsolatedEnvironment = {
   root: string;
   userData: string;
@@ -23,7 +37,7 @@ export async function createIsolatedEnvironment(): Promise<IsolatedEnvironment> 
   const userData = join(root, 'user-data');
   const vault = join(root, 'vault');
   await mkdir(userData, { recursive: true });
-  await chmod(FAKE_CLI_PATH, 0o755);
+  const command = await fakeCliCommand(root);
   await writeFile(
     join(userData, 'state.json'),
     `${JSON.stringify(
@@ -31,7 +45,7 @@ export async function createIsolatedEnvironment(): Promise<IsolatedEnvironment> 
         onboarded: false,
         settings: {
           vaultPath: vault,
-          provider: { kind: 'local-cli', agent: 'codex', command: FAKE_CLI_PATH }
+          provider: { kind: 'local-cli', agent: 'codex', command }
         }
       },
       null,

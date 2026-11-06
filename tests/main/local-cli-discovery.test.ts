@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { scanLocalClis } from '../../src/main/agent/local-cli-discovery';
 
 function result(stdout: string, code = 0) {
@@ -129,4 +132,35 @@ test('uses stored zcode credentials and returns install hints for missing agents
     features: [],
     installHint: 'npm install -g @openai/codex'
   });
+});
+
+test('resolves .cmd shims on Windows through PATH and PATHEXT', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'asaki-win-cli-'));
+  try {
+    const shim = join(root, 'codex.cmd');
+    await writeFile(shim, '@echo off\r\n');
+    const run = vi.fn(async (_command: string, args: string[]) => {
+      if (args[0] === '--version') return result('0.166.0\n');
+      if (args[0] === 'login') return result('Logged in with API key');
+      return result('--json resume --search --image');
+    });
+
+    const scan = await scanLocalClis({
+      platform: 'win32',
+      env: { PATH: root, PATHEXT: '.CMD;.EXE' },
+      homeDir: root,
+      run,
+      now: () => new Date('2026-11-01T10:00:00.000Z')
+    });
+
+    const codex = scan.entries.find((entry) => entry.agent === 'codex');
+    expect(codex).toMatchObject({ installed: true, version: '0.166.0' });
+    // Windows paths are case-insensitive; macOS test filesystems may not be.
+    expect(codex?.path?.toLowerCase()).toBe(shim.toLowerCase());
+    expect(scan.entries.filter((entry) => entry.agent !== 'codex').every((entry) => !entry.installed)).toBe(
+      true
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
