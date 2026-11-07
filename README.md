@@ -277,6 +277,10 @@ npm run dev
 - 原 M1 考研后端计划：`docs/superpowers/plans/2026-10-31-study-coach-m1-foundation.md`
 - Web 原型实施计划：`docs/superpowers/plans/2026-10-31-study-coach-web-prototype.md`
 
+## 变更记录
+
+见 [CHANGELOG.md](CHANGELOG.md)。各平台打包、签名与发布步骤见 `docs/releases/`。
+
 ## License
 
 MIT，见 [LICENSE](LICENSE)。
