@@ -115,11 +115,12 @@ function nextTempPath(directory: string): string {
   return join(directory, `.window-state-${process.pid}-${tempCounter}.tmp`);
 }
 
-/** Persists the window state atomically; failures are left to the caller. */
-export async function writeWindowState(
-  filePath: string,
-  state: WindowState
-): Promise<void> {
+// Windows rejects a rename while another writer is replacing the same target.
+// renameWithRetry handles brief antivirus locks, but overlapping saves would
+// keep colliding, so async writes to the same file are queued instead.
+const writeQueues = new Map<string, Promise<void>>();
+
+async function writeAtomically(filePath: string, state: WindowState): Promise<void> {
   const directory = dirname(filePath);
   await mkdir(directory, { recursive: true });
   const tempPath = nextTempPath(directory);
@@ -133,6 +134,25 @@ export async function writeWindowState(
     await rm(tempPath, { force: true }).catch(() => undefined);
     throw error;
   }
+}
+
+/**
+ * Persists the window state atomically; failures are left to the caller.
+ * Writes to the same file run in order so a debounced save and a direct save
+ * cannot rename over each other.
+ */
+export function writeWindowState(
+  filePath: string,
+  state: WindowState
+): Promise<void> {
+  const previous = writeQueues.get(filePath) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(() => writeAtomically(filePath, state));
+  writeQueues.set(filePath, next);
+  const release = () => {
+    if (writeQueues.get(filePath) === next) writeQueues.delete(filePath);
+  };
+  void next.then(release, release);
+  return next;
 }
 
 /**
