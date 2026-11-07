@@ -162,6 +162,21 @@ function openQuickCapture(): void {
   }
 }
 
+/** Opens a page the tray offers directly (review, settings). */
+function openSection(target: 'review' | 'settings'): void {
+  showWindow();
+  const send = () => {
+    if (mainWindow === null) return;
+    mainWindow.webContents.send(APP_EVENT_CHANNELS.navigate, { target });
+  };
+  if (mainWindow?.webContents.isLoading()) {
+    mainWindow.webContents.once('did-finish-load', () => {
+      setTimeout(send, 300);
+    });
+  } else {
+    send();
+  }
+}
 
 app.whenReady().then(async () => {
   const context = await createAppContext({
@@ -290,8 +305,8 @@ app.whenReady().then(async () => {
             console.error('ASAKI tray plan failed:', serializeError(error).message);
           });
         },
-        onEveningReview: showWindow,
-        onOpenSettings: showWindow,
+        onEveningReview: () => openSection('review'),
+        onOpenSettings: () => openSection('settings'),
         onQuit: () => app.quit()
       }
     });

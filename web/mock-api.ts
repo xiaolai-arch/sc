@@ -1938,6 +1938,10 @@ export function createMockApi(
       return () => undefined;
     },
 
+    onNavigate() {
+      return () => undefined;
+    },
+
     async getUsageSummary(): Promise<UsageSummary> {
       return {
         days: [],

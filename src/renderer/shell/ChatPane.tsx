@@ -21,7 +21,7 @@ type ChatPaneProps = {
   stats?: string[];
   messages: ChatMessage[];
   typing: boolean;
-  onSend: (text: string) => void;
+  onSend: (text: string) => void | boolean | Promise<void | boolean>;
   modelLabel: string;
   hasApiKey: boolean;
   onOpenSettings: () => void;

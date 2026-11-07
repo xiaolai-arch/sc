@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { homeGreeting } from '../../src/shared/greeting';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Workspace } from '../../src/renderer/shell/Workspace';
 import { createMockApi } from '../../web/mock-api';
@@ -351,4 +351,26 @@ test('keeps the drawer interactive on desktop screens', async () => {
   expect(
     await screen.findByText('极限定义还不稳，建议先复习再做新题。')
   ).toBeInTheDocument();
+});
+
+test('opens review and settings from app navigation events', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage, { streamPace: 0.05 });
+  let navigate: ((target: 'review' | 'settings') => void) | null = null;
+  api.onNavigate = (listener) => {
+    navigate = listener;
+    return () => {
+      navigate = null;
+    };
+  };
+  window.studyCoach = api;
+  window.studyCoachPrototype = { reset: vi.fn() };
+  render(<Workspace hasApiKey={false} onRefresh={vi.fn()} />);
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
+
+  act(() => navigate?.('review'));
+  expect(await screen.findByRole('button', { name: '补录复盘' })).toBeInTheDocument();
+
+  act(() => navigate?.('settings'));
+  expect(await screen.findByRole('button', { name: '保存设置' })).toBeInTheDocument();
 });

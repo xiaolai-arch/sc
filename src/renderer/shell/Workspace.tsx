@@ -213,6 +213,11 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   const [modelSaving, setModelSaving] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
   const [streamStatus, setStreamStatus] = useState<string | null>(null);
+  const [budgetPrompt, setBudgetPrompt] = useState<{ used: number; limit: number } | null>(
+    null
+  );
+  const budgetConfirmResolveRef = useRef<((accepted: boolean) => void) | null>(null);
+  const budgetConfirmedRef = useRef(false);
   const focusSessionCounterRef = useRef(0);
   const recordedFocusSessionsRef = useRef<Set<number>>(new Set());
   const tasksRef = useRef(tasks);
@@ -332,6 +337,20 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   }, []);
 
   useEffect(() => {
+    const api = window.studyCoach;
+    if (!api?.onNavigate) return undefined;
+    return api.onNavigate((target) => {
+      setSidebarOpen(false);
+      if (target === 'review') {
+        setProjectId(null);
+        setSection('review');
+        return;
+      }
+      setSection('settings');
+    });
+  }, []);
+
+  useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
       if (event.key.toLowerCase() !== 'n') return;
@@ -421,6 +440,38 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     ...(streamingMessage ? [streamingMessage] : [])
   ];
 
+  /**
+   * Manual turns keep working after the daily token budget is spent, but the
+   * user confirms once per app session instead of being silently blocked.
+   */
+  async function confirmBudget(): Promise<boolean> {
+    if (budgetConfirmedRef.current) return true;
+    const api = window.studyCoach;
+    if (!api?.getUsageSummary) return true;
+    try {
+      const [settings, usage] = await Promise.all([api.getSettings(), api.getUsageSummary(1)]);
+      const day = usage.days.find((entry) => entry.date === today);
+      const used = (day?.inputTokens ?? 0) + (day?.outputTokens ?? 0);
+      const limit = settings.budget.dailyTokens;
+      // A zero budget only pauses proactive check-ins, not manual turns.
+      if (!(limit > 0) || used < limit) return true;
+      return await new Promise<boolean>((resolve) => {
+        budgetConfirmResolveRef.current = resolve;
+        setBudgetPrompt({ used, limit });
+      });
+    } catch {
+      // Budget lookup failures must never block a conversation.
+      return true;
+    }
+  }
+
+  function settleBudget(accepted: boolean) {
+    if (accepted) budgetConfirmedRef.current = true;
+    budgetConfirmResolveRef.current?.(accepted);
+    budgetConfirmResolveRef.current = null;
+    setBudgetPrompt(null);
+  }
+
   async function runTurn(
     text: string,
     options: {
@@ -433,6 +484,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     }
   ) {
     if (typing) return;
+    if (!(await confirmBudget())) return;
     const generation = ++streamGenerationRef.current;
     setActionError(null);
     setStreamStatus(null);
@@ -727,8 +779,9 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     await runTurn(text, { appendUser: true });
   }
 
-  async function submitComposer(text: string) {
-    if (typing) return;
+  async function submitComposer(text: string): Promise<boolean> {
+    if (typing) return false;
+    if (!(await confirmBudget())) return false;
     const conversation = conversations.active;
     if (editingMessageId && conversation) {
       const index = conversation.messages.findIndex(
@@ -739,12 +792,13 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
           await conversations.truncate(conversation.id, index);
         } catch (cause) {
           setActionError(messageOf(cause));
-          return;
+          return false;
         }
       }
     }
     setEditingMessageId(null);
     await runTurn(text, { appendUser: true, conversation });
+    return true;
   }
 
   async function regenerateMessage(messageId: string) {
@@ -1280,7 +1334,7 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
               stats={chatStats}
               messages={chatMessages}
               typing={typing}
-              onSend={(text) => void submitComposer(text)}
+              onSend={(text) => submitComposer(text)}
               modelLabel={displayModel}
               hasApiKey={hasApiKey}
               onOpenSettings={openSettings}
@@ -1608,6 +1662,35 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
           </div>
         </div>
       ) : null}
+
+      <Dialog
+        open={budgetPrompt !== null}
+        onClose={() => settleBudget(false)}
+        title="今日 token 预算已用完"
+        footer={
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => settleBudget(false)}
+              className="rounded-full px-4 py-2 text-[13px] font-medium text-gray-500 transition-all duration-300 hover:bg-black/[0.04] hover:text-black active:scale-[0.98] dark:text-[#a1a1a6] dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={() => settleBudget(true)}
+              className="rounded-full bg-[#0071e3] px-4 py-2 text-[13px] font-medium text-white transition-all duration-300 hover:opacity-80 active:scale-[0.98]"
+            >
+              继续发送
+            </button>
+          </div>
+        }
+      >
+        <p className="text-[14px] leading-6 text-[#1d1d1f] dark:text-[#f5f5f7]">
+          今天已使用 {budgetPrompt?.used ?? 0} token，每日上限是 {budgetPrompt?.limit ?? 0}。
+          继续对话会超出预算；确认后本次打开应用不再重复提醒。
+        </p>
+      </Dialog>
 
       <GlobalSearchDialog
         open={searchOpen}

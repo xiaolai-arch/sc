@@ -9,7 +9,8 @@ type ComposerProps = {
   modelLabel: string;
   text: string;
   onTextChange: (text: string) => void;
-  onSend: (text: string) => void;
+  /** Returning `false` keeps the draft (e.g. the user cancelled sending). */
+  onSend: (text: string) => void | boolean | Promise<void | boolean>;
   disabled?: boolean;
   onStop?: () => void;
   editing?: boolean;
@@ -31,11 +32,11 @@ export function Composer({
   onOpenModelPicker,
   hero = false
 }: ComposerProps) {
-  function send() {
+  async function send() {
     const trimmed = text.trim();
     if (!trimmed || disabled) return;
-    onSend(trimmed);
-    onTextChange('');
+    const accepted = await onSend(trimmed);
+    if (accepted !== false) onTextChange('');
   }
 
   return (

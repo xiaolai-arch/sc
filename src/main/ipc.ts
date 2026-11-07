@@ -153,7 +153,8 @@ export const CONVERSATION_EVENT_CHANNELS = {
 
 /** Outbound app events (global shortcut, tray). */
 export const APP_EVENT_CHANNELS = {
-  quickCapture: 'study-coach:app:quick-capture'
+  quickCapture: 'study-coach:app:quick-capture',
+  navigate: 'study-coach:app:navigate'
 } as const;
 
 /** Renderer-initiated app actions that live outside the handler table. */
@@ -1319,6 +1320,14 @@ export function createStudyCoachBridge(
     onQuickCapture(listener) {
       if (!subscribe) return () => undefined;
       return subscribe(APP_EVENT_CHANNELS.quickCapture, () => listener());
+    },
+    onNavigate(listener) {
+      if (!subscribe) return () => undefined;
+      return subscribe(APP_EVENT_CHANNELS.navigate, (payload) => {
+        if (!isRecord(payload)) return;
+        const target = payload['target'];
+        if (target === 'review' || target === 'settings') listener(target);
+      });
     },
     exportBackup: () => call<BackupResult | null>(APP_IPC_CHANNELS.exportBackup),
     restoreBackup: () => call<RestoreResult | null>(APP_IPC_CHANNELS.restoreBackup),

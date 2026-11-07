@@ -11,7 +11,8 @@ import {
 
 test('locks the app event channels', () => {
   expect(APP_EVENT_CHANNELS).toEqual({
-    quickCapture: 'study-coach:app:quick-capture'
+    quickCapture: 'study-coach:app:quick-capture',
+    navigate: 'study-coach:app:navigate'
   });
 });
 
@@ -79,6 +80,27 @@ test('bridge subscribes to quick capture events and unsubscribes', () => {
 
   unsubscribe?.();
   expect(unsubscribed).toEqual([APP_EVENT_CHANNELS.quickCapture]);
+});
+
+test('bridge subscribes to navigation events and ignores invalid targets', () => {
+  const listeners = new Map<string, (payload: unknown) => void>();
+  const subscribe: Subscribe = (channel, listener) => {
+    listeners.set(channel, listener);
+    return () => undefined;
+  };
+  const bridge = createStudyCoachBridge(async () => null, subscribe);
+  const targets: string[] = [];
+
+  bridge.onNavigate?.((target) => {
+    targets.push(target);
+  });
+  const emit = listeners.get(APP_EVENT_CHANNELS.navigate);
+  emit?.({ target: 'review' });
+  emit?.({ target: 'settings' });
+  emit?.({ target: 'chat' });
+  emit?.('review');
+
+  expect(targets).toEqual(['review', 'settings']);
 });
 
 test('locks the public channel names', () => {

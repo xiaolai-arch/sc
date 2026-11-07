@@ -43,6 +43,9 @@ import type {
   WorkspaceService
 } from './workspace';
 
+/** Pages the tray can open directly. */
+export type AppNavigationTarget = 'review' | 'settings';
+
 export interface Bootstrap {
   needsOnboarding: boolean;
   today: string;
@@ -141,6 +144,8 @@ export interface ConversationApi {
   onConversationOpened(listener: (conversationId: string) => void): () => void;
   /** Global shortcut / tray asks the renderer to open the quick capture dialog. */
   onQuickCapture?(listener: () => void): () => void;
+  /** Tray menu asks the renderer to open a specific page. */
+  onNavigate?(listener: (target: AppNavigationTarget) => void): () => void;
   /** Opens a native directory picker and writes a local backup. */
   exportBackup?(): Promise<BackupResult | null>;
   /** Opens a picker, snapshots current data, then restores a backup. */
