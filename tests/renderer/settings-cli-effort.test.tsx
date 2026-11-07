@@ -2,6 +2,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SettingsPage } from '../../src/renderer/settings/SettingsPage';
+import { pickOption } from './select-option';
 
 const baseSettings = {
   vaultPath: '/tmp/vault',
@@ -41,7 +42,7 @@ test('renders the effort selector with a default and explains the CLI flags', as
   window.studyCoach = apiStub() as never;
   render(<SettingsPage onClose={() => {}} />);
 
-  expect(await screen.findByLabelText('推理强度')).toHaveValue('');
+  expect(await screen.findByLabelText('推理强度')).toHaveTextContent('默认');
   expect(
     screen.getByText(/Codex 使用 -c model_reasoning_effort，Claude 使用 --effort/)
   ).toBeInTheDocument();
@@ -62,7 +63,7 @@ test('saves the chosen effort and omits it for the default', async () => {
     (update.mock.calls.at(-1)?.[0] as { provider: { effort?: string } }).provider.effort
   ).toBeUndefined();
 
-  await userEvent.selectOptions(screen.getByLabelText('推理强度'), 'high');
+  await pickOption('推理强度', '高');
   await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
   expect(
     (update.mock.calls.at(-1)?.[0] as { provider: { effort?: string } }).provider.effort
@@ -78,7 +79,7 @@ test('hides the effort selector for unsupported agents', async () => {
   }) as never;
   render(<SettingsPage onClose={() => {}} />);
 
-  expect(await screen.findByLabelText('CLI agent')).toHaveValue('zcode');
+  expect(await screen.findByLabelText('CLI agent')).toHaveTextContent('ZCode');
   expect(screen.queryByLabelText('推理强度')).not.toBeInTheDocument();
 });
 
@@ -98,9 +99,9 @@ test('does not save effort for zcode and restores it when switching back', async
   }) as never;
   render(<SettingsPage onClose={() => {}} />);
 
-  expect(await screen.findByLabelText('推理强度')).toHaveValue('high');
+  expect(await screen.findByLabelText('推理强度')).toHaveTextContent('高');
 
-  await userEvent.selectOptions(screen.getByLabelText('CLI agent'), 'zcode');
+  await pickOption('CLI agent', 'ZCode');
   expect(screen.queryByLabelText('推理强度')).not.toBeInTheDocument();
 
   await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
@@ -110,8 +111,8 @@ test('does not save effort for zcode and restores it when switching back', async
   expect(saved.provider).toMatchObject({ kind: 'local-cli', agent: 'zcode' });
   expect(saved.provider.effort).toBeUndefined();
 
-  await userEvent.selectOptions(screen.getByLabelText('CLI agent'), 'claude');
-  expect(screen.getByLabelText('推理强度')).toHaveValue('high');
+  await pickOption('CLI agent', 'Claude Code');
+  expect(screen.getByLabelText('推理强度')).toHaveTextContent('高');
 });
 
 test('loads an existing effort and keeps it when switching agents', async () => {
@@ -128,8 +129,8 @@ test('loads an existing effort and keeps it when switching agents', async () => 
   }) as never;
   render(<SettingsPage onClose={() => {}} />);
 
-  expect(await screen.findByLabelText('推理强度')).toHaveValue('low');
+  expect(await screen.findByLabelText('推理强度')).toHaveTextContent('低');
 
-  await userEvent.selectOptions(screen.getByLabelText('CLI agent'), 'claude');
-  expect(screen.getByLabelText('推理强度')).toHaveValue('low');
+  await pickOption('CLI agent', 'Claude Code');
+  expect(screen.getByLabelText('推理强度')).toHaveTextContent('低');
 });

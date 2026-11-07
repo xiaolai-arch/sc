@@ -9,6 +9,7 @@ import type {
 } from '../../src/shared/practice';
 import type { Workspace } from '../../src/shared/workspace';
 import { LearningPane } from '../../src/renderer/shell/LearningPane';
+import { pickOption } from './select-option';
 
 type PaneProps = Parameters<typeof LearningPane>[0];
 
@@ -109,7 +110,7 @@ describe('LearningPane practice UI', () => {
     await user.type(screen.getByLabelText('科目'), '数学');
     await user.type(screen.getByLabelText('第 1 题选项 1'), '1');
     await user.type(screen.getByLabelText('第 1 题选项 2'), '2');
-    await user.selectOptions(screen.getByLabelText('第 1 题正确答案'), '1');
+    await pickOption('第 1 题正确答案', 'B · 2');
     await user.type(screen.getByLabelText('第 1 题解析'), '基础加法');
 
     await user.click(screen.getByRole('button', { name: '创建练习集' }));

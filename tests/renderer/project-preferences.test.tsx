@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { Workspace } from '../../src/renderer/shell/Workspace';
 import { formatLocalDate } from '../../src/shared/date';
 import { createMockApi } from '../../web/mock-api';
+import { pickOption } from './select-option';
 
 function setup() {
   localStorage.clear();
@@ -19,20 +20,20 @@ test('updates the project check-in preference and keeps it', async () => {
   const api = setup();
   await screen.findByText(homeGreeting('xiaolai', new Date()));
   await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
-  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'kaoyan');
+  await pickOption('切换项目', '考研');
 
   const select = await screen.findByLabelText('参与检查');
-  expect(select).toHaveValue('daily');
+  expect(select).toHaveTextContent('每天');
 
-  await userEvent.selectOptions(select, 'off');
+  await pickOption('参与检查', '关闭');
   await waitFor(async () => {
     expect(
       (await api.listWorkspaces()).find((workspace) => workspace.id === 'kaoyan')?.checkIn
     ).toBe('off');
   });
-  expect(screen.getByLabelText('参与检查')).toHaveValue('off');
+  expect(screen.getByLabelText('参与检查')).toHaveTextContent('关闭');
 
-  await userEvent.selectOptions(screen.getByLabelText('参与检查'), 'daily');
+  await pickOption('参与检查', '每天');
   await waitFor(async () => {
     expect(
       (await api.listWorkspaces()).find((workspace) => workspace.id === 'kaoyan')?.checkIn

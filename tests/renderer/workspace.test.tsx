@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { sendPrompt } from './send-prompt';
 import { Workspace } from '../../src/renderer/shell/Workspace';
 import { createMockApi } from '../../web/mock-api';
+import { pickOption } from './select-option';
 
 function setup(streamPace = 0.05) {
   localStorage.clear();
@@ -61,7 +62,7 @@ test('opens the projects page and filters by project', async () => {
   await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
   expect(await screen.findByText('外刊精读')).toBeInTheDocument();
 
-  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'kaoyan');
+  await pickOption('切换项目', '考研');
 
   expect(await screen.findByText('极限与连续')).toBeInTheDocument();
   expect(screen.getByText('2027 考研：数学一 / 英语一 / 政治')).toBeInTheDocument();
@@ -75,7 +76,7 @@ test('records a note and previews it from the records tab', async () => {
   expect((await screen.findAllByText(/记下了/, {}, { timeout: 3000 })).length).toBeGreaterThan(0);
 
   await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
-  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'kaoyan');
+  await pickOption('切换项目', '考研');
   const noteButton = await screen.findByRole(
     'button',
     { name: /^今天数学卡在极限/ },
@@ -122,7 +123,7 @@ test('creates a project through the conversation', async () => {
   ).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
-  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'kaoyan');
+  await pickOption('切换项目', '考研');
   expect(await screen.findByRole('heading', { name: '考研' })).toBeInTheDocument();
   expect(await screen.findByText('2027 考研：数学一 / 英语一 / 政治')).toBeInTheDocument();
 });

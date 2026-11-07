@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SettingsPage } from '../../src/renderer/settings/SettingsPage';
+import { pickOption } from './select-option';
 
 const settings = {
   vaultPath: '/tmp/vault',
@@ -153,7 +154,7 @@ test('requires a base URL for non-Anthropic providers', async () => {
   } as never;
   render(<SettingsPage onClose={() => {}} />);
   await screen.findByLabelText('模型名称');
-  await userEvent.selectOptions(screen.getByLabelText('提供商'), 'openai-compatible');
+  await pickOption('提供商', 'OpenAI 兼容');
   await userEvent.clear(screen.getByLabelText('Base URL'));
   await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('请填写 Base URL');
@@ -219,7 +220,7 @@ test('saves a local cli provider without an api key', async () => {
     setApiKey: vi.fn()
   } as never;
   render(<SettingsPage onClose={() => {}} />);
-  expect(await screen.findByLabelText('CLI agent')).toHaveValue('codex');
+  expect(await screen.findByLabelText('CLI agent')).toHaveTextContent('Codex');
   expect(screen.queryByLabelText('API Key')).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
   expect(update).toHaveBeenCalledWith(
@@ -248,14 +249,15 @@ test('labels CLI agents with their product names while keeping stable ids', asyn
   render(<SettingsPage onClose={() => {}} />);
 
   const select = await screen.findByLabelText('CLI agent');
-  const options = within(select).getAllByRole('option');
+  await userEvent.click(select);
+  const options = await screen.findAllByRole('option');
   expect(options.map((option) => option.textContent)).toEqual([
     'Codex',
     'Claude Code',
     'ZCode',
     'OpenCode'
   ]);
-  expect(options.map((option) => option.getAttribute('value'))).toEqual([
+  expect(options.map((option) => option.getAttribute('data-value'))).toEqual([
     'codex',
     'claude',
     'zcode',
@@ -275,7 +277,7 @@ test('hides model and effort for zcode and explains where to change them', async
   } as never;
 
   render(<SettingsPage onClose={() => {}} />);
-  expect(await screen.findByLabelText('CLI agent')).toHaveValue('zcode');
+  expect(await screen.findByLabelText('CLI agent')).toHaveTextContent('ZCode');
   expect(screen.queryByLabelText('模型名称')).not.toBeInTheDocument();
   expect(screen.getByText(/在 zcode 内/)).toBeInTheDocument();
 });
@@ -297,7 +299,7 @@ test('shows model and effort for opencode', async () => {
   } as never;
 
   render(<SettingsPage onClose={() => {}} />);
-  expect(await screen.findByLabelText('CLI agent')).toHaveValue('opencode');
+  expect(await screen.findByLabelText('CLI agent')).toHaveTextContent('OpenCode');
   expect(screen.getByLabelText('模型名称')).toHaveValue('anthropic/claude-sonnet-5-5');
   expect(screen.getByLabelText('推理强度')).toBeInTheDocument();
 });
@@ -313,7 +315,7 @@ test('clears the saved key before switching to a different endpoint', async () =
   render(<SettingsPage onClose={() => {}} />);
   await screen.findByLabelText('模型名称');
 
-  await userEvent.selectOptions(screen.getByLabelText('提供商'), 'openai-compatible');
+  await pickOption('提供商', 'OpenAI 兼容');
   await userEvent.type(screen.getByLabelText('Base URL'), 'https://api.example.com/v1');
   await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
 
@@ -380,7 +382,7 @@ test('scans local CLIs and selects a detected agent with native tools', async ()
   expect(list).toHaveTextContent('未安装 · 安装 zcode 后运行 zcode login');
 
   await userEvent.click(screen.getByRole('button', { name: '使用 Claude Code' }));
-  expect(screen.getByLabelText('CLI agent')).toHaveValue('claude');
+  expect(screen.getByLabelText('CLI agent')).toHaveTextContent('Claude Code');
   expect(screen.getByLabelText('CLI 命令')).toHaveValue('claude');
 
   expect(screen.getByLabelText('使用 CLI 原生工具')).toBeChecked();

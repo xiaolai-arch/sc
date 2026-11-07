@@ -4,6 +4,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Workspace } from '../../src/renderer/shell/Workspace';
 import { createMockApi } from '../../web/mock-api';
+import { pickOption } from './select-option';
 
 function setup() {
   localStorage.clear();
@@ -17,7 +18,7 @@ function setup() {
 async function openProjectTasks() {
   await screen.findByText(homeGreeting('xiaolai', new Date()));
   await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
-  await userEvent.selectOptions(await screen.findByLabelText('切换项目'), 'kaoyan');
+  await pickOption('切换项目', '考研');
 }
 
 function navButton(name: string) {
@@ -73,7 +74,7 @@ test('creates a daily task whose next occurrence appears after completion', asyn
 
   await userEvent.click(screen.getByRole('button', { name: '新增任务' }));
   await userEvent.type(screen.getByLabelText('新任务标题'), '每日背单词');
-  await userEvent.selectOptions(screen.getByLabelText('新任务重复'), 'daily');
+  await pickOption('新任务重复', '每天');
   await userEvent.click(screen.getByRole('button', { name: '保存任务' }));
 
   expect(await screen.findByText('每日背单词')).toBeInTheDocument();
@@ -128,7 +129,7 @@ test('drops an open project edit when switching projects', async () => {
   await userEvent.clear(nameInput);
   await userEvent.type(nameInput, '改到一半的考研');
 
-  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'english');
+  await pickOption('切换项目', '英语');
   expect(await screen.findByRole('heading', { name: '英语' })).toBeInTheDocument();
   expect(screen.queryByLabelText('项目名称')).not.toBeInTheDocument();
 
@@ -166,7 +167,7 @@ test('creates a repeating reminder, edits it and deletes it', async () => {
   await userEvent.click(navButton('提醒'));
 
   await userEvent.type(screen.getByLabelText('提醒内容'), '跑步');
-  await userEvent.selectOptions(screen.getByLabelText('提醒重复'), 'weekend');
+  await pickOption('提醒重复', '周末');
   await userEvent.click(screen.getByRole('button', { name: '添加提醒' }));
 
   expect(await screen.findByText('跑步')).toBeInTheDocument();
@@ -178,7 +179,7 @@ test('creates a repeating reminder, edits it and deletes it', async () => {
   const labelInput = screen.getByLabelText('编辑提醒内容');
   await userEvent.clear(labelInput);
   await userEvent.type(labelInput, '晨跑');
-  await userEvent.selectOptions(screen.getByLabelText('编辑提醒重复'), 'weekdays');
+  await pickOption('编辑提醒重复', '工作日');
   await userEvent.click(screen.getByRole('button', { name: '保存' }));
 
   expect(await screen.findByText('晨跑')).toBeInTheDocument();

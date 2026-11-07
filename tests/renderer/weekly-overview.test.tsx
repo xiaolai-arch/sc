@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { ReviewPage } from '../../src/renderer/shell/ReviewPage';
 import { WeeklyOverview } from '../../src/renderer/shell/WeeklyOverview';
 import type { WeeklyOverview as WeeklyOverviewData } from '../../src/shared/weekly-stats';
+import { pickOption } from './select-option';
 
 const overview: WeeklyOverviewData = {
   weekStart: '2026-11-02',
@@ -99,7 +100,7 @@ test('shows this week’s overview on the review page and follows the workspace 
   expect(screen.getByText('1 / 2')).toBeInTheDocument();
   expect(screen.getByText('40 分钟')).toBeInTheDocument();
 
-  await userEvent.selectOptions(screen.getByLabelText('按工作区筛选复盘'), 'english');
+  await pickOption('按工作区筛选复盘', '英语');
   expect(screen.getByText('0 / 1')).toBeInTheDocument();
   expect(screen.getByText('0 分钟')).toBeInTheDocument();
 });

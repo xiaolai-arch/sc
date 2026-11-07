@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { KnowledgePage } from '../../src/renderer/shell/KnowledgePage';
+import { pickOption } from './select-option';
 import type {
   CreateKnowledgeTopicInput,
   KnowledgeNote,
@@ -215,7 +216,7 @@ test('edits a topic through the dialog', async () => {
   await screen.findByRole('textbox', { name: '知识笔记' });
 
   await userEvent.click(screen.getByRole('button', { name: '编辑 LangChain' }));
-  await userEvent.selectOptions(screen.getByLabelText('状态'), 'learning');
+  await pickOption('状态', '在学');
   await userEvent.clear(screen.getByLabelText('掌握程度'));
   await userEvent.type(screen.getByLabelText('掌握程度'), '5');
   await userEvent.click(screen.getByRole('button', { name: '保存' }));
@@ -244,7 +245,7 @@ test('merges the selected topic into another one', async () => {
 
   await userEvent.click(screen.getByRole('button', { name: '合并 LangChain' }));
   expect(screen.getByRole('dialog')).toBeInTheDocument();
-  await userEvent.selectOptions(screen.getByLabelText('合并到'), 'kt-2');
+  await pickOption('合并到', 'RAG');
   await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '合并' }));
 
   expect(onMergeTopic).toHaveBeenCalledWith({ sourceId: 'kt-1', targetId: 'kt-2' });

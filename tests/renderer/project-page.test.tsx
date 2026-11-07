@@ -6,6 +6,7 @@ import { sendPrompt } from './send-prompt';
 import { Workspace } from '../../src/renderer/shell/Workspace';
 import { FOCUS_DURATION_MS } from '../../src/renderer/shell/focus-timer';
 import { createMockApi } from '../../web/mock-api';
+import { pickOption } from './select-option';
 
 function setup() {
   localStorage.clear();
@@ -163,7 +164,7 @@ test('records 25 minutes exactly once when focus completes', async () => {
 test('writes a note from the records section', async () => {
   const api = setup();
   await openProjects();
-  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'kaoyan');
+  await pickOption('切换项目', '考研');
 
   await userEvent.click(screen.getByRole('button', { name: '写一条记录' }));
   await userEvent.type(screen.getByLabelText('记录正文'), '今天数学卡在极限');
@@ -177,7 +178,7 @@ test('writes a note from the records section', async () => {
 test('edits a note from the records section', async () => {
   const api = setup();
   await openProjects();
-  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'kaoyan');
+  await pickOption('切换项目', '考研');
 
   await userEvent.click(screen.getByRole('button', { name: '写一条记录' }));
   await userEvent.type(screen.getByLabelText('记录正文'), '修改前的正文');
@@ -204,7 +205,7 @@ test('edits a note from the records section', async () => {
 test('edits note tags and links related records', async () => {
   const api = setup();
   await openProjects();
-  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'kaoyan');
+  await pickOption('切换项目', '考研');
 
   await userEvent.click(screen.getByRole('button', { name: '写一条记录' }));
   await userEvent.type(screen.getByLabelText('记录正文'), '第一条记录');
@@ -258,7 +259,7 @@ test('shows records beyond the first ten on demand', async () => {
   render(<Workspace hasApiKey={false} onRefresh={vi.fn()} />);
 
   await openProjects();
-  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'kaoyan');
+  await pickOption('切换项目', '考研');
 
   expect(await screen.findByText('记录 12')).toBeInTheDocument();
   expect(screen.queryByText('记录 2')).not.toBeInTheDocument();
@@ -274,7 +275,7 @@ test('shows records beyond the first ten on demand', async () => {
 test('deletes a note after a second confirmation click', async () => {
   const api = setup();
   await openProjects();
-  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'kaoyan');
+  await pickOption('切换项目', '考研');
 
   await userEvent.click(screen.getByRole('button', { name: '写一条记录' }));
   await userEvent.type(screen.getByLabelText('记录正文'), '准备删除的记录');
@@ -311,7 +312,7 @@ test('disables the quick note form without a project', async () => {
 test('keeps the note input when saving fails', async () => {
   const api = setup();
   await openProjects();
-  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'kaoyan');
+  await pickOption('切换项目', '考研');
   const spy = vi.spyOn(api, 'createNote').mockRejectedValueOnce(new Error('保存失败'));
 
   await userEvent.click(screen.getByRole('button', { name: '写一条记录' }));
@@ -381,7 +382,7 @@ test('routes a project prompt to the selected project, not the open chat', async
   );
 
   await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
-  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'kaoyan');
+  await pickOption('切换项目', '考研');
   await userEvent.click(screen.getByRole('button', { name: '让阿咲调整' }));
 
   await waitFor(async () => {

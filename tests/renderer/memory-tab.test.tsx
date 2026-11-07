@@ -9,6 +9,7 @@ import {
 } from '../../src/renderer/shell/ProjectSections';
 import { Workspace } from '../../src/renderer/shell/Workspace';
 import { createMockApi } from '../../web/mock-api';
+import { pickOption } from './select-option';
 
 function setup() {
   localStorage.clear();
@@ -44,7 +45,7 @@ test('edits text and kind, then keeps the change after reload', async () => {
   await userEvent.clear(textarea);
   expect(screen.getByRole('button', { name: '保存记忆' })).toBeDisabled();
   await userEvent.type(textarea, '极限定义已经稳住');
-  await userEvent.selectOptions(screen.getByLabelText('记忆类型'), 'strength');
+  await pickOption('记忆类型', '优势');
   await userEvent.click(screen.getByRole('button', { name: '保存记忆' }));
 
   expect(await screen.findByText('极限定义已经稳住')).toBeInTheDocument();
@@ -102,7 +103,7 @@ test('adds a memory manually and refreshes the profile', async () => {
 
   await userEvent.click(screen.getByRole('button', { name: '新增记忆' }));
   await userEvent.type(screen.getByLabelText('新记忆内容'), '我更喜欢早上背单词');
-  await userEvent.selectOptions(screen.getByLabelText('新记忆类型'), 'preference');
+  await pickOption('新记忆类型', '偏好');
   await userEvent.click(screen.getByRole('button', { name: '保存新记忆' }));
 
   expect(await screen.findByText('我更喜欢早上背单词')).toBeInTheDocument();

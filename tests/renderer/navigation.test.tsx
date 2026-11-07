@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { Workspace } from '../../src/renderer/shell/Workspace';
 import { createMockApi } from '../../web/mock-api';
+import { pickOption } from './select-option';
 
 function setup() {
   localStorage.clear();
@@ -217,7 +218,7 @@ test('filters memories from the project list on the memory page', async () => {
     await screen.findByText('外刊表达积累有效，继续保持。')
   ).toBeInTheDocument();
 
-  await userEvent.selectOptions(screen.getByLabelText('按工作区筛选记忆'), 'kaoyan');
+  await pickOption('按工作区筛选记忆', '考研');
   expect(
     await screen.findByText('极限定义还不稳，建议先复习再做新题。')
   ).toBeInTheDocument();
@@ -225,7 +226,7 @@ test('filters memories from the project list on the memory page', async () => {
     expect(screen.queryByText('外刊表达积累有效，继续保持。')).not.toBeInTheDocument()
   );
 
-  await userEvent.selectOptions(screen.getByLabelText('按工作区筛选记忆'), '');
+  await pickOption('按工作区筛选记忆', '全部工作区');
   expect(
     await screen.findByText('外刊表达积累有效，继续保持。')
   ).toBeInTheDocument();

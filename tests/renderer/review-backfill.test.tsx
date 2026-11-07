@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import type { ReviewRecord } from '../../src/shared/ipc';
 import type { SubmitReviewInput, Workspace } from '../../src/shared/workspace';
 import { ReviewPage } from '../../src/renderer/shell/ReviewPage';
+import { pickOption } from './select-option';
 
 const workspaces: Workspace[] = [
   {
@@ -102,7 +103,7 @@ test('submits the exact backfill input and refreshes after success', async () =>
   await userEvent.click(screen.getByRole('button', { name: '补录复盘' }));
 
   fireEvent.change(screen.getByLabelText('日期'), { target: { value: '2026-10-31' } });
-  await userEvent.selectOptions(screen.getByLabelText('工作区'), 'kaoyan');
+  await pickOption('工作区', '考研');
   await userEvent.type(screen.getByLabelText('完成'), '完成数学 10 题');
   await userEvent.type(screen.getByLabelText('卡点'), '极限定义');
   await userEvent.type(screen.getByLabelText('明天'), '复盘错题');
@@ -179,13 +180,13 @@ test('keeps filtering reviews by workspace', async () => {
   expect(screen.getByText('完成：完成外刊精读')).toBeInTheDocument();
   expect(screen.getByText('完成：完成全局整理')).toBeInTheDocument();
 
-  await userEvent.selectOptions(screen.getByLabelText('按工作区筛选复盘'), 'kaoyan');
+  await pickOption('按工作区筛选复盘', '考研');
 
   expect(screen.getByText('完成：完成数学 10 题')).toBeInTheDocument();
   expect(screen.queryByText('完成：完成外刊精读')).not.toBeInTheDocument();
   expect(screen.queryByText('完成：完成全局整理')).not.toBeInTheDocument();
 
-  await userEvent.selectOptions(screen.getByLabelText('按工作区筛选复盘'), '');
+  await pickOption('按工作区筛选复盘', '全部工作区');
 
   expect(screen.getByText('完成：完成外刊精读')).toBeInTheDocument();
   expect(screen.getByText('完成：完成全局整理')).toBeInTheDocument();
@@ -194,7 +195,7 @@ test('keeps filtering reviews by workspace', async () => {
 test('explains when only other workspaces have reviews', async () => {
   renderPage({ reviews: [makeReview({ completed: '完成数学 10 题' })] });
 
-  await userEvent.selectOptions(screen.getByLabelText('按工作区筛选复盘'), 'english');
+  await pickOption('按工作区筛选复盘', '英语');
 
   expect(screen.getByText('「英语」还没有复盘记录。')).toBeInTheDocument();
   expect(
