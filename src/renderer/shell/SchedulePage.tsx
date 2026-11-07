@@ -1,4 +1,5 @@
 import { useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { friendlyErrorMessage } from '../../shared/errors';
 import type {
   UpdateWorkspaceTaskInput,
   Workspace,
@@ -60,6 +61,7 @@ export function SchedulePage({
   onUpdateTask
 }: SchedulePageProps) {
   const [drag, setDrag] = useState<DragState | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
   const { entries, unscheduled } = buildDailySchedule(
     tasks,
     workspaces,
@@ -75,7 +77,14 @@ export function SchedulePage({
     .join(' · ');
 
   function update(input: UpdateWorkspaceTaskInput) {
-    void onUpdateTask(input).catch(() => undefined);
+    setUpdateError(null);
+    try {
+      void onUpdateTask(input).catch((cause) =>
+        setUpdateError(friendlyErrorMessage(cause, '保存任务修改失败，请重试。'))
+      );
+    } catch (cause) {
+      setUpdateError(friendlyErrorMessage(cause, '保存任务修改失败，请重试。'));
+    }
   }
 
   function startDrag(entry: ScheduleEntry, event: ReactPointerEvent<HTMLButtonElement>) {
@@ -123,6 +132,21 @@ export function SchedulePage({
       }
     >
       <div className="mx-auto w-full max-w-[720px]">
+        {updateError ? (
+          <div
+            role="alert"
+            className="mb-4 flex items-center justify-between gap-3 rounded-xl bg-[#ff3b30]/10 px-4 py-2.5 text-[13px] text-[#d70015] dark:bg-[#ff3b30]/15 dark:text-[#ff7b72]"
+          >
+            <span className="min-w-0 truncate">{updateError}</span>
+            <button
+              type="button"
+              onClick={() => setUpdateError(null)}
+              className="shrink-0 rounded-full px-2 py-1 font-medium text-[#0071e3] dark:text-[#4da3ff]"
+            >
+              知道了
+            </button>
+          </div>
+        ) : null}
         <div className="mb-6 text-center">
           <h2 className="text-[22px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
             今天的时间表

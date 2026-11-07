@@ -26,6 +26,7 @@ import {
 } from './focus-timer';
 import { KnowledgePage } from './KnowledgePage';
 import { GlobalSearchDialog } from './GlobalSearchDialog';
+import { FirstRunDialog } from './FirstRunDialog';
 import { LearningPane } from './LearningPane';
 import { MistakeReviewDialog } from './MistakeReviewDialog';
 import { LongPlanPage } from './LongPlanPage';
@@ -52,6 +53,7 @@ import { friendlyErrorMessage } from '../../shared/errors';
 
 type WorkspaceProps = {
   hasApiKey: boolean;
+  needsOnboarding?: boolean;
   onRefresh: () => void;
 };
 
@@ -126,7 +128,7 @@ function WorkspaceStatus({
   );
 }
 
-export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
+export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: WorkspaceProps) {
   const {
     workspaces,
     tasks,
@@ -216,6 +218,9 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   const [budgetPrompt, setBudgetPrompt] = useState<{ used: number; limit: number } | null>(
     null
   );
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const [pendingSection, setPendingSection] = useState<Section | null>(null);
+  const [onboardingDone, setOnboardingDone] = useState(false);
   const budgetConfirmResolveRef = useRef<((accepted: boolean) => void) | null>(null);
   const budgetConfirmedRef = useRef(false);
   const focusSessionCounterRef = useRef(0);
@@ -224,9 +229,11 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
   tasksRef.current = tasks;
   const [traceById, setTraceById] = useState<Record<string, ChatTraceItem[]>>({});
   const [actionError, setActionError] = useState<string | null>(null);
+  const [canRetryTurn, setCanRetryTurn] = useState(false);
   const [modelLabel, setModelLabel] = useState('模板计划');
   const [displayName, setDisplayName] = useState('xiaolai');
   const streamGenerationRef = useRef(0);
+  const retryTurnRef = useRef<{ text: string; conversation: Conversation } | null>(null);
   const activeConversationIdRef = useRef<string | null>(null);
   activeConversationIdRef.current = conversations.active?.id ?? null;
 
@@ -486,6 +493,8 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     if (typing) return;
     if (!(await confirmBudget())) return;
     const generation = ++streamGenerationRef.current;
+    retryTurnRef.current = null;
+    setCanRetryTurn(false);
     setActionError(null);
     setStreamStatus(null);
     setTyping(true);
@@ -749,6 +758,12 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
         return;
       }
       setActionError(streamError ?? messageOf(cause));
+      if (conversation) {
+        // Keep enough state to let the banner resend this turn instead of
+        // only refreshing lists.
+        retryTurnRef.current = { text, conversation };
+        setCanRetryTurn(true);
+      }
       try {
         await conversations.select(conversation.id);
         await conversations.refresh();
@@ -958,9 +973,17 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
     setSidebarOpen(true);
   }
 
-  function changeSection(next: Section) {
+  function applySection(next: Section) {
     setSection(next);
     setSidebarOpen(false);
+  }
+
+  function changeSection(next: Section) {
+    if (section === 'settings' && settingsDirty && next !== 'settings') {
+      setPendingSection(next);
+      return;
+    }
+    applySection(next);
   }
 
   /** Leaving a turn must not leave its Stop button bound to the new view. */
@@ -1280,12 +1303,22 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
             type="button"
             onClick={() => {
               setActionError(null);
+              if (canRetryTurn && retryTurnRef.current) {
+                const failed = retryTurnRef.current;
+                retryTurnRef.current = null;
+                setCanRetryTurn(false);
+                void runTurn(failed.text, {
+                  appendUser: false,
+                  conversation: failed.conversation
+                });
+                return;
+              }
               void retry();
               void conversations.refresh();
             }}
             className="shrink-0 rounded-full px-2 py-1 font-medium text-[#0071e3] transition-all duration-300 hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#4da3ff]"
           >
-            重试
+            {canRetryTurn ? '重试发送' : '重试'}
           </button>
         </div>
       ) : null}
@@ -1512,6 +1545,8 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
             >
               <SettingsPage
                 page
+                hasApiKey={hasApiKey}
+                onDirtyChange={setSettingsDirty}
                 onClose={() => {
                   changeSection('chat');
                   void loadModelLabel();
@@ -1691,6 +1726,49 @@ export function Workspace({ hasApiKey, onRefresh }: WorkspaceProps) {
           继续对话会超出预算；确认后本次打开应用不再重复提醒。
         </p>
       </Dialog>
+
+      <Dialog
+        open={pendingSection !== null}
+        onClose={() => setPendingSection(null)}
+        title="设置尚未保存"
+        footer={
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setPendingSection(null)}
+              className="rounded-full px-4 py-2 text-[13px] font-medium text-gray-500 transition-all duration-300 hover:bg-black/[0.04] hover:text-black active:scale-[0.98] dark:text-[#a1a1a6] dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const next = pendingSection;
+                setPendingSection(null);
+                setSettingsDirty(false);
+                if (next) applySection(next);
+              }}
+              className="rounded-full bg-[#0071e3] px-4 py-2 text-[13px] font-medium text-white transition-all duration-300 hover:opacity-80 active:scale-[0.98]"
+            >
+              放弃修改并离开
+            </button>
+          </div>
+        }
+      >
+        <p className="text-[14px] leading-6 text-[#1d1d1f] dark:text-[#f5f5f7]">
+          你有未保存的设置修改，离开后这些修改会丢失。
+        </p>
+      </Dialog>
+
+      <FirstRunDialog
+        open={needsOnboarding && !onboardingDone}
+        onComplete={() => {
+          setOnboardingDone(true);
+          onRefresh();
+          void reload();
+        }}
+        onSkip={() => setOnboardingDone(true)}
+      />
 
       <GlobalSearchDialog
         open={searchOpen}

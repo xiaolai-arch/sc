@@ -148,3 +148,17 @@ test('closes with Escape', async () => {
   fireEvent.keyDown(document, { key: 'Escape' });
   expect(onClose).toHaveBeenCalled();
 });
+
+test('does not select a result on the Enter that confirms an IME candidate', async () => {
+  const { onSelectResult, onSelectConversation } = setup();
+  const input = screen.getByLabelText('搜索全部内容');
+  await userEvent.type(input, '矩阵');
+  await screen.findByText('矩阵笔记');
+
+  fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
+  expect(onSelectResult).not.toHaveBeenCalled();
+  expect(onSelectConversation).not.toHaveBeenCalled();
+
+  fireEvent.keyDown(input, { key: 'Enter' });
+  expect(onSelectResult.mock.calls.length + onSelectConversation.mock.calls.length).toBe(1);
+});

@@ -175,16 +175,22 @@ function replaceWorkspaceSlice<T extends { workspaceId: string }>(
 
 async function loadPractice(
   api: StudyCoachApi,
-  workspaceIds: string[]
+  workspaceIds: string[],
+  onError?: (cause: unknown) => void
 ): Promise<PracticeData> {
   const date = formatLocalDate(new Date());
   const perWorkspace = await Promise.all(
     workspaceIds.map(async (workspaceId) => {
+      const read = <T>(promise: Promise<T>, fallback: T): Promise<T> =>
+        promise.catch((cause) => {
+          onError?.(cause);
+          return fallback;
+        });
       const [sets, mistakes, due, attempts] = await Promise.all([
-        api.listPracticeSets(workspaceId).catch(() => [] as PracticeSet[]),
-        api.getPracticeMistakes(workspaceId).catch(() => [] as PracticeMistake[]),
-        api.getPracticeDue({ workspaceId, date }).catch(() => [] as PracticeMistake[]),
-        api.listPracticeAttempts(workspaceId).catch(() => [] as PracticeAttempt[])
+        read(api.listPracticeSets(workspaceId), [] as PracticeSet[]),
+        read(api.getPracticeMistakes(workspaceId), [] as PracticeMistake[]),
+        read(api.getPracticeDue({ workspaceId, date }), [] as PracticeMistake[]),
+        read(api.listPracticeAttempts(workspaceId), [] as PracticeAttempt[])
       ]);
       return { sets, mistakes, due, attempts };
     })
@@ -228,15 +234,37 @@ export function useWorkspaceData(): WorkspaceData {
       const api = apiOrThrow();
       const [workspaces, reminders] = await Promise.all([api.listWorkspaces(), api.getReminders()]);
       const workspaceIds = workspaces.map((workspace) => workspace.id);
+      // A failing slice must not look like an empty one: remember it and keep
+      // the successful data visible while the banner offers a retry.
+      const failures: string[] = [];
+      const noteFailure = (cause: unknown) => {
+        const message = messageOf(cause);
+        if (!failures.includes(message)) failures.push(message);
+      };
       const [snapshots, practice, memoryRecords, memoryProfile, reviews, longPlans, knowledgeTopics] =
         await Promise.all([
           Promise.all(workspaces.map((workspace) => api.getWorkspaceSnapshot(workspace.id))),
-          loadPractice(api, workspaceIds),
-          api.listMemory().catch(() => [] as MemoryRecord[]),
-          api.getMemoryProfile().catch(() => null),
-          api.listReviews({ limit: 60 }).catch(() => [] as ReviewRecord[]),
-          api.listLongPlans().catch(() => [] as LongPlan[]),
-          api.listKnowledgeTopics().catch(() => [] as KnowledgeTopic[])
+          loadPractice(api, workspaceIds, noteFailure),
+          api.listMemory().catch((cause) => {
+            noteFailure(cause);
+            return [] as MemoryRecord[];
+          }),
+          api.getMemoryProfile().catch((cause) => {
+            noteFailure(cause);
+            return null;
+          }),
+          api.listReviews({ limit: 60 }).catch((cause) => {
+            noteFailure(cause);
+            return [] as ReviewRecord[];
+          }),
+          api.listLongPlans().catch((cause) => {
+            noteFailure(cause);
+            return [] as LongPlan[];
+          }),
+          api.listKnowledgeTopics().catch((cause) => {
+            noteFailure(cause);
+            return [] as KnowledgeTopic[];
+          })
         ]);
       if (request !== requestRef.current) return;
 
@@ -255,7 +283,10 @@ export function useWorkspaceData(): WorkspaceData {
         ...practice,
         streak: reviewStreak(reviews, formatLocalDate(new Date())),
         loading: false,
-        error: null
+        error:
+          failures.length > 0
+            ? `部分数据加载失败：${failures[0]}`
+            : null
       });
     } catch (cause) {
       if (request !== requestRef.current) return;

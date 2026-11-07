@@ -124,6 +124,19 @@ test('submits the exact backfill input and refreshes after success', async () =>
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 
+test('refuses to create a second review for the same date and workspace', async () => {
+  const onSubmitReview = vi.fn(async () => undefined);
+  renderPage({ reviews: [makeReview({ date: '2026-10-30' })], onSubmitReview });
+
+  await userEvent.click(screen.getByRole('button', { name: '补录复盘' }));
+  fireEvent.change(screen.getByLabelText('日期'), { target: { value: '2026-10-30' } });
+  await userEvent.type(screen.getByLabelText('完成'), '重复的一次');
+  await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+  expect(screen.getByRole('alert')).toHaveTextContent('这一天已经有复盘了');
+  expect(onSubmitReview).not.toHaveBeenCalled();
+});
+
 test('expands and collapses a review to read the full text', async () => {
   renderPage({ reviews: [makeReview({ completed: longCompleted })] });
 

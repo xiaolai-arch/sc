@@ -28,9 +28,10 @@ export type IsolatedEnvironment = {
 };
 
 /**
- * Creates a throwaway userData directory and vault. The pre-seeded state keeps
- * the local CLI provider pointed at the fake fixture, so onboarding cannot
- * switch the app to a real CLI or a network-backed model.
+ * Creates a throwaway userData directory and vault. The pre-seeded state points
+ * the local CLI provider at the fake fixture and skips the first-run dialog so
+ * existing e2e flows start in the workspace; onboarding has its own renderer
+ * test.
  */
 export async function createIsolatedEnvironment(): Promise<IsolatedEnvironment> {
   const root = await mkdtemp(join(tmpdir(), 'study-coach-e2e-'));
@@ -42,7 +43,7 @@ export async function createIsolatedEnvironment(): Promise<IsolatedEnvironment> 
     join(userData, 'state.json'),
     `${JSON.stringify(
       {
-        onboarded: false,
+        onboarded: true,
         settings: {
           vaultPath: vault,
           provider: { kind: 'local-cli', agent: 'codex', command }

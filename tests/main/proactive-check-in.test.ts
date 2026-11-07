@@ -253,7 +253,7 @@ test('creates a weekly review conversation with its own title and notification',
   }
 });
 
-test('deduplicates weekly reviews and keeps them separate from daily check-ins', async () => {
+test('counts the daily cap across check-in conversations', async () => {
   const { dir, value } = await store();
   try {
     const service = new ProactiveCheckInService({
@@ -262,6 +262,30 @@ test('deduplicates weekly reviews and keeps them separate from daily check-ins',
       modelClient: null,
       getSettings: async () =>
         settings({ budget: { proactiveSessionsPerDay: 1, dailyTokens: 1000 } }),
+      now: () => NOW
+    });
+
+    expect(await service.check('morning', '2026-11-01')).not.toBeNull();
+    // The weekly review gets its own conversation, but the daily allowance is
+    // shared, so it must not slip past the cap after the morning check-in.
+    expect(await service.check('weekly', '2026-11-01')).toBeNull();
+
+    const summaries = await value.list();
+    expect(summaries.map((summary) => summary.title)).toEqual(['今天的检查 · 11-01']);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('keeps weekly reviews in their own conversation and deduplicates them', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () =>
+        settings({ budget: { proactiveSessionsPerDay: 4, dailyTokens: 1000 } }),
       now: () => NOW
     });
 

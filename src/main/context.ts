@@ -490,14 +490,6 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
         });
       }
 
-      const currentSettings = await settings.get();
-      if (currentSettings.provider.kind !== 'local-cli') {
-        await settings.update({
-          provider: { kind: 'local-cli', agent: 'codex', command: 'codex' }
-        });
-        await syncServices(await settings.get());
-      }
-
       await state.update((current) => ({ ...current, onboarded: true }));
     },
 

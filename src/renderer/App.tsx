@@ -37,6 +37,7 @@ export function App() {
       ) : (
         <Workspace
           hasApiKey={bootstrap.hasApiKey}
+          needsOnboarding={bootstrap.needsOnboarding}
           onRefresh={() => {
             void refresh();
           }}

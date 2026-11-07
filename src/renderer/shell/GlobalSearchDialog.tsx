@@ -160,6 +160,8 @@ export function GlobalSearchDialog({
   }
 
   function onInputKeyDown(event: React.KeyboardEvent<HTMLInputElement>): void {
+    // Do not treat the Enter that confirms an IME candidate as a selection.
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       setActiveIndex((current) =>

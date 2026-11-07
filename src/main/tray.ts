@@ -68,6 +68,16 @@ const NOTIFICATION_LABELS: Record<NotificationState, string> = {
   disabled: '通知：已关闭'
 };
 
+/**
+ * Whether the tray should count a task today. Undated backlog counts; dated
+ * tasks count only on their due/start day so tomorrow's work does not inflate
+ * today's progress.
+ */
+export function isTaskForDay(task: WorkspaceTask, today: string): boolean {
+  const day = task.due ?? task.startAt?.slice(0, 10);
+  return day === undefined || day === today;
+}
+
 export function summarizeWorkspaceTasks(tasks: readonly WorkspaceTask[]): TrayProgress {
   if (tasks.length === 0) {
     return { total: 0, completed: 0, percent: 0, nextTask: null };

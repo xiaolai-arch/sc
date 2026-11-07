@@ -279,15 +279,21 @@ export function KnowledgePage({
     if (typeof window !== 'undefined' && !window.confirm(`删除知识主题「${topic.name}」？`)) {
       return;
     }
-    await onDeleteTopic(topic.id);
-    const remaining = topics.filter((entry) => entry.id !== topic.id);
-    setSelectedId((current) => (current === topic.id ? remaining[0]?.id ?? null : current));
+    setError(null);
+    try {
+      await onDeleteTopic(topic.id);
+      const remaining = topics.filter((entry) => entry.id !== topic.id);
+      setSelectedId((current) => (current === topic.id ? remaining[0]?.id ?? null : current));
+    } catch (cause) {
+      setError(friendlyErrorMessage(cause, '删除主题失败，请重试。'));
+    }
   }
 
   function openMerge(topic: KnowledgeTopic) {
     const other = topics.find((entry) => entry.id !== topic.id);
     if (!other) return;
-    setMergeTargetId(other.id);
+    // Start empty so a merge target is always a deliberate choice.
+    setMergeTargetId('');
     setMergeError(null);
     setMergeOpen(true);
   }
@@ -596,6 +602,7 @@ export function KnowledgePage({
               onChange={(event) => setMergeTargetId(event.target.value)}
               className={inputClass}
             >
+              <option value="">请选择目标主题</option>
               {topics
                 .filter((topic) => topic.id !== selected?.id)
                 .map((topic) => (

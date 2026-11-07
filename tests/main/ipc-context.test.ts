@@ -262,10 +262,13 @@ test('notifies the entry point after settings are persisted', async () => {
   expect(updates).toEqual([true, false]);
 });
 
-test('workspace onboarding creates a workspace and selects the local CLI agent', async () => {
+test('workspace onboarding creates a workspace without changing the provider', async () => {
   const dir = await tempDir();
   const context = await contextAt(dir);
   expect((await context.api.getBootstrap()).needsOnboarding).toBe(true);
+  await context.api.updateSettings({
+    provider: { kind: 'anthropic', model: 'claude-sonnet-5-5' }
+  });
 
   await context.api.completeWorkspaceOnboarding({
     name: '我的学习',
@@ -275,11 +278,9 @@ test('workspace onboarding creates a workspace and selects the local CLI agent',
   });
 
   expect((await context.api.getBootstrap()).needsOnboarding).toBe(false);
-  expect((await context.api.getBootstrap()).hasApiKey).toBe(true);
   expect((await context.api.getSettings()).provider).toEqual({
-    kind: 'local-cli',
-    agent: 'codex',
-    command: 'codex'
+    kind: 'anthropic',
+    model: 'claude-sonnet-5-5'
   });
   const workspaces = await context.api.listWorkspaces();
   expect(workspaces.some((workspace) => workspace.name === '我的学习')).toBe(true);

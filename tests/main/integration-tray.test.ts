@@ -5,6 +5,7 @@ import {
   buildTrayTitle,
   buildTrayTooltip,
   createTrayController,
+  isTaskForDay,
   summarizeWorkspaceTasks,
   type TrayLike,
   type TrayMenuItem
@@ -58,6 +59,23 @@ describe('tray summary and notification gating', () => {
     expect(buildTrayTooltip(summarizeWorkspaceTasks(allDone))).toBe(
       'ASAKI · 今日 3/3 · 今日任务已完成'
     );
+  });
+
+  test('counts only today and undated tasks in the tray', () => {
+    expect(isTaskForDay(TASKS[0]!, '2026-11-01')).toBe(true);
+    expect(isTaskForDay({ ...TASKS[0]!, due: '2026-11-01' }, '2026-11-01')).toBe(true);
+    expect(isTaskForDay({ ...TASKS[0]!, startAt: '2026-11-01T09:00' }, '2026-11-01')).toBe(true);
+    expect(isTaskForDay({ ...TASKS[0]!, due: '2026-11-02' }, '2026-11-01')).toBe(false);
+    expect(isTaskForDay({ ...TASKS[0]!, startAt: '2026-10-31T09:00' }, '2026-11-01')).toBe(
+      false
+    );
+    // `due` wins over `startAt` when both are set.
+    expect(
+      isTaskForDay(
+        { ...TASKS[0]!, due: '2026-11-01', startAt: '2026-10-31T09:00' },
+        '2026-11-01'
+      )
+    ).toBe(true);
   });
 
   test('offers quick capture from the tray menu', () => {

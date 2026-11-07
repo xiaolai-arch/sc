@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { formatLocalDate } from '../../shared/date';
 import type { AppSettings } from '../../shared/types';
 import type { WorkspaceService } from '../../shared/workspace';
 import type { ModelClient } from '../agent/model-client';
@@ -96,14 +97,22 @@ export class ProactiveCheckInService {
       if (used >= settings.budget.dailyTokens) return null;
     }
 
-    const conversation = await this.findOrCreateConversation(date, trigger);
-    const checkIns = conversation.messages.filter((message) => message.trigger);
-    if (checkIns.some((message) => message.trigger === trigger)) return null;
-    if (checkIns.length >= settings.budget.proactiveSessionsPerDay) return null;
+    const existing = await this.findConversation(date, trigger);
+    if (existing?.messages.some((message) => message.trigger === trigger)) return null;
+    const checkInsToday = await this.countCheckInsForDate(date);
+    if (checkInsToday >= settings.budget.proactiveSessionsPerDay) return null;
 
     const rawContext = await gatherContext(this.workspaceService, { message: '' }, this.now());
     const context = excludeCheckInOff(rawContext);
     if (rawContext.workspaces.length > 0 && context.workspaces.length === 0) return null;
+    // Only create the conversation once the check is certain to happen, so a
+    // skipped check does not leave an empty "今天的检查" behind.
+    const conversation =
+      existing ??
+      (await this.conversationStore.create({
+        kind: 'check-in',
+        title: checkInTitle(trigger, date)
+      }));
     const text = await this.generate(trigger, date, context);
     const createdAt = this.now().toISOString();
     await this.conversationStore.appendMessage(conversation.id, {
@@ -137,20 +146,39 @@ export class ProactiveCheckInService {
     };
   }
 
-  private async findOrCreateConversation(
+  /**
+   * Counts check-ins across every check-in conversation for the date. Morning,
+   * evening and weekly reviews use separate conversations, so counting one
+   * conversation would let the weekly check bypass the daily cap.
+   */
+  private async countCheckInsForDate(date: string): Promise<number> {
+    const summaries = await this.conversationStore.list();
+    const ids = summaries
+      .filter((summary) => summary.kind === 'check-in')
+      .map((summary) => summary.id);
+    let count = 0;
+    for (const id of ids) {
+      const conversation = await this.conversationStore.get(id);
+      if (!conversation) continue;
+      count += conversation.messages.filter(
+        (message) =>
+          message.trigger && formatLocalDate(new Date(message.createdAt)) === date
+      ).length;
+    }
+    return count;
+  }
+
+  private async findConversation(
     date: string,
     trigger: CheckInTrigger
-  ): Promise<Conversation> {
+  ): Promise<Conversation | null> {
     const title = checkInTitle(trigger, date);
     const summaries = await this.conversationStore.list();
     const existing = summaries.find(
       (summary) => summary.kind === 'check-in' && summary.title === title
     );
-    if (existing) {
-      const conversation = await this.conversationStore.get(existing.id);
-      if (conversation) return conversation;
-    }
-    return this.conversationStore.create({ kind: 'check-in', title });
+    if (!existing) return null;
+    return this.conversationStore.get(existing.id);
   }
 
   private async generate(

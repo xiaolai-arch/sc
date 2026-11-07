@@ -353,8 +353,30 @@ test('keeps the drawer interactive on desktop screens', async () => {
   ).toBeInTheDocument();
 });
 
-test('opens review and settings from app navigation events', async () => {
-  localStorage.clear();
+test('warns before leaving settings with unsaved edits', async () => {
+  const { api } = setup();
+  await mount(api);
+
+  await userEvent.click(screen.getByRole('button', { name: '打开设置' }));
+  const model = await screen.findByLabelText('模型名称');
+  await userEvent.type(model, '-x');
+
+  await userEvent.click(nav().getByRole('button', { name: '记忆' }));
+  expect(await screen.findByText('设置尚未保存')).toBeInTheDocument();
+  expect(screen.getByLabelText('模型名称')).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: '取消' }));
+  expect(screen.queryByText('设置尚未保存')).not.toBeInTheDocument();
+  expect(screen.getByLabelText('模型名称')).toBeInTheDocument();
+
+  await userEvent.click(nav().getByRole('button', { name: '记忆' }));
+  await userEvent.click(await screen.findByRole('button', { name: '放弃修改并离开' }));
+  expect(
+    await screen.findByText('极限定义还不稳，建议先复习再做新题。')
+  ).toBeInTheDocument();
+});
+
+test('opens review and settings from app navigation events', async () => {  localStorage.clear();
   const api = createMockApi(localStorage, { streamPace: 0.05 });
   let navigate: ((target: 'review' | 'settings') => void) | null = null;
   api.onNavigate = (listener) => {

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SettingsPage } from '../../src/renderer/settings/SettingsPage';
 
@@ -40,8 +40,28 @@ test('saves provider model and api key without echoing the key', async () => {
   expect(screen.getByLabelText('API Key')).toHaveValue('');
 });
 
-test('saves the display name used by greetings', async () => {
-  const update = vi.fn().mockResolvedValue({ ...settings, displayName: '小林' });
+test('shows whether a key is configured and clears it after confirmation', async () => {
+  const setKey = vi.fn().mockResolvedValue(undefined);
+  window.studyCoach = {
+    getSettings: vi.fn().mockResolvedValue(settings),
+    updateSettings: vi.fn().mockResolvedValue(settings),
+    setApiKey: setKey
+  } as never;
+
+  render(<SettingsPage onClose={() => {}} hasApiKey />);
+  await screen.findByLabelText('模型名称');
+  expect(screen.getByText('已配置')).toBeInTheDocument();
+  expect(screen.getByText(/safeStorage/)).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: '清除已保存的密钥' }));
+  expect(setKey).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole('button', { name: '确认清除' }));
+
+  await waitFor(() => expect(setKey).toHaveBeenCalledWith(''));
+  expect(await screen.findByText('未配置')).toBeInTheDocument();
+});
+
+test('saves the display name used by greetings', async () => {  const update = vi.fn().mockResolvedValue({ ...settings, displayName: '小林' });
   window.studyCoach = {
     getSettings: vi.fn().mockResolvedValue({ ...settings, displayName: 'xiaolai' }),
     updateSettings: update,

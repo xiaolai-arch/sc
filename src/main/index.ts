@@ -13,7 +13,8 @@ import { applyLaunchAtLogin } from './login-item';
 import { registerAppShortcuts } from './shortcuts';
 import { createContextScheduler, planFirstEmptyWorkspace } from './scheduler';
 import { DEFAULT_VAULT_DIRECTORY } from './settings/defaults';
-import { createElectronNotificationSink, createElectronTray } from './tray';
+import { createElectronNotificationSink, createElectronTray, isTaskForDay } from './tray';
+import { formatLocalDate } from '../shared/date';
 import {
   DEFAULT_WINDOW_STATE,
   readWindowState,
@@ -294,16 +295,32 @@ app.whenReady().then(async () => {
         const snapshots = await Promise.all(
           workspaces.map((workspace) => context.api.getWorkspaceSnapshot(workspace.id))
         );
-        return snapshots.flatMap((snapshot) => snapshot.tasks);
+        const today = formatLocalDate(new Date());
+        return snapshots
+          .flatMap((snapshot) => snapshot.tasks)
+          .filter((task) => isTaskForDay(task, today));
       },
       getSettings: () => context.settings.get(),
       actions: {
         onOpen: showWindow,
         onQuickCapture: openQuickCapture,
         onGeneratePlan: () => {
-          void planFirstEmptyWorkspace(context).catch((error: unknown) => {
-            console.error('ASAKI tray plan failed:', serializeError(error).message);
-          });
+          void planFirstEmptyWorkspace(context)
+            .then((planned) => {
+              if (planned) return;
+              const date = formatLocalDate(new Date());
+              notify({
+                key: `tray-plan-${date}`,
+                kind: 'morning-plan',
+                date,
+                scheduledTime: '',
+                title: 'ASAKI',
+                body: '每个项目都已有任务，没有生成新计划。可以在「今日安排」里调整。'
+              });
+            })
+            .catch((error: unknown) => {
+              console.error('ASAKI tray plan failed:', serializeError(error).message);
+            });
         },
         onEveningReview: () => openSection('review'),
         onOpenSettings: () => openSection('settings'),

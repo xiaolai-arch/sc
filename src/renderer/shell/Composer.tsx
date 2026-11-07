@@ -1,9 +1,4 @@
-import {
-  ChevronDownIcon,
-  LockIcon,
-  PlusIcon,
-  SendIcon
-} from '../ui/icons';
+import { SendIcon } from '../ui/icons';
 
 type ComposerProps = {
   modelLabel: string;
@@ -60,6 +55,9 @@ export function Composer({
           value={text}
           onChange={(event) => onTextChange(event.target.value)}
           onKeyDown={(event) => {
+            // Enter confirms an IME candidate while composing; sending then
+            // would submit half-composed text.
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault();
               send();
@@ -70,24 +68,7 @@ export function Composer({
           aria-label="向阿咲提问"
           className="min-h-[48px] max-h-36 w-full resize-none bg-transparent px-1 py-1 text-[14px] leading-6 text-[#1d1d1f] outline-none placeholder:text-gray-500 dark:text-[#f5f5f7]"
         />
-        <div className="mt-2 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              aria-label="添加附件"
-              className="flex h-8 w-8 items-center justify-center rounded-full text-gray-500 transition-all duration-300 hover:bg-black/[0.04] hover:opacity-80 hover:text-black active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#8e8e93] dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
-            >
-              <PlusIcon className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              className="flex h-8 items-center gap-1 rounded-full px-2.5 text-[12px] font-medium text-gray-500 transition-all duration-300 hover:bg-black/[0.04] hover:opacity-80 hover:text-black active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#8e8e93] dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
-            >
-              <LockIcon className="h-3.5 w-3.5" />
-              计划模式
-              <ChevronDownIcon className="h-3 w-3" />
-            </button>
-          </div>
+        <div className="mt-2 flex items-center justify-end gap-2">
           <div className="flex min-w-0 items-center gap-3">
             {onOpenModelPicker ? (
               <button

@@ -130,6 +130,13 @@ export function ReviewPage({
       setError('日期不能晚于今天。');
       return;
     }
+    const existing = reviews.find(
+      (review) => review.date === date && (review.workspaceId ?? '') === workspaceId
+    );
+    if (existing) {
+      setError('这一天已经有复盘了。请选择其他日期，或先修改已有记录。');
+      return;
+    }
 
     const answers = {
       completed: completed.trim(),

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatLocalDate } from '../../shared/date';
 import { friendlyErrorMessage } from '../../shared/errors';
 import type {
@@ -30,6 +30,10 @@ type SettingsPageProps = {
   embedded?: boolean;
   /** Full-page mode: the surrounding page owns the heading and back button. */
   page?: boolean;
+  /** Whether the Electron/browser session already holds a stored key. */
+  hasApiKey?: boolean;
+  /** Reports unsaved edits so the shell can guard navigation. */
+  onDirtyChange?: (dirty: boolean) => void;
 };
 
 const providerLabels: Record<ProviderConfig['kind'], string> = {
@@ -90,7 +94,13 @@ function cliAuthClass(entry: LocalCliEntry): string {
   return 'text-gray-500 dark:text-[#a1a1a6]';
 }
 
-export function SettingsPage({ onClose, embedded = false, page = false }: SettingsPageProps) {
+export function SettingsPage({
+  onClose,
+  embedded = false,
+  page = false,
+  hasApiKey = false,
+  onDirtyChange
+}: SettingsPageProps) {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [kind, setKind] = useState<ProviderConfig['kind']>('anthropic');
@@ -106,6 +116,13 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
   const [cliScanning, setCliScanning] = useState(false);
   const [cliScanError, setCliScanError] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState('');
+  const [keyConfigured, setKeyConfigured] = useState(hasApiKey);
+  const [confirmClearKey, setConfirmClearKey] = useState(false);
+  const [clearingKey, setClearingKey] = useState(false);
+
+  useEffect(() => {
+    setKeyConfigured(hasApiKey);
+  }, [hasApiKey]);
   const [sessions, setSessions] = useState('4');
   const [tokens, setTokens] = useState('200000');
   const [inputPrice, setInputPrice] = useState('0');
@@ -133,6 +150,63 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
   });
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
   const [displayName, setDisplayName] = useState('xiaolai');
+  const baselineRef = useRef<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+
+  function formSnapshot(apiKeyValue = apiKey): string {
+    return JSON.stringify([
+      kind,
+      model,
+      baseURL,
+      cliAgent,
+      cliCommand,
+      cliEffort,
+      cliIsolate,
+      cliNativeTools,
+      sessions,
+      tokens,
+      inputPrice,
+      outputPrice,
+      notifications,
+      launchAtLogin,
+      displayName,
+      apiKeyValue
+    ]);
+  }
+
+  useEffect(() => {
+    if (!loaded) return;
+    const current = formSnapshot();
+    if (baselineRef.current === null) {
+      baselineRef.current = current;
+      setDirty(false);
+      return;
+    }
+    setDirty(current !== baselineRef.current);
+  }, [
+    loaded,
+    kind,
+    model,
+    baseURL,
+    cliAgent,
+    cliCommand,
+    cliEffort,
+    cliIsolate,
+    cliNativeTools,
+    sessions,
+    tokens,
+    inputPrice,
+    outputPrice,
+    notifications,
+    launchAtLogin,
+    displayName,
+    apiKey
+  ]);
+
+  useEffect(() => {
+    if (dirty) setStatus(null);
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -312,6 +386,7 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
         // A key issued for the previous endpoint must never be sent to the new
         // one. Clear it before rebuilding services, then save a new key if given.
         await api.setApiKey('');
+        setKeyConfigured(false);
       }
       await api.updateSettings({
         displayName: trimmedDisplayName,
@@ -327,10 +402,13 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
       });
       if (apiKey.trim()) {
         await api.setApiKey(apiKey.trim());
+        setKeyConfigured(true);
       }
       setSavedProvider(provider);
       setApiKey('');
       setStatus('已保存');
+      baselineRef.current = formSnapshot('');
+      setDirty(false);
       // Re-price the existing summary with the just-saved prices. A refresh
       // failure must not turn the successful save into an error.
       try {
@@ -344,6 +422,30 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
       setError(friendlyErrorMessage(cause, '保存设置失败，请重试。'));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function clearApiKey() {
+    const api = window.studyCoach;
+    if (!api) return;
+    if (!confirmClearKey) {
+      setConfirmClearKey(true);
+      return;
+    }
+    setClearingKey(true);
+    setError(null);
+    try {
+      await api.setApiKey('');
+      setKeyConfigured(false);
+      setApiKey('');
+      setConfirmClearKey(false);
+      setStatus('已清除 API Key');
+      baselineRef.current = formSnapshot('');
+      setDirty(false);
+    } catch (cause) {
+      setError(friendlyErrorMessage(cause, '清除 API Key 失败，请重试。'));
+    } finally {
+      setClearingKey(false);
     }
   }
 
@@ -784,18 +886,58 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
 
             {kind !== 'local-cli' ? (
               <div className="mt-5">
-                <Label htmlFor="settings-api-key">API Key</Label>
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="settings-api-key">API Key</Label>
+                  <span
+                    className={`text-[12px] font-medium ${
+                      keyConfigured
+                        ? 'text-[#1d7a36] dark:text-[#7ee787]'
+                        : 'text-gray-500 dark:text-[#a1a1a6]'
+                    }`}
+                  >
+                    {keyConfigured ? '已配置' : '未配置'}
+                  </span>
+                </div>
                 <Input
                   id="settings-api-key"
                   type="password"
                   value={apiKey}
                   onChange={(event) => setApiKey(event.target.value)}
-                  placeholder="已保存则留空"
+                  placeholder={keyConfigured ? '已保存，留空则保持不变' : '粘贴 API Key'}
                   autoComplete="off"
                 />
                 <p className="mt-2 text-sm text-gray-500 dark:text-[#a1a1a6]">
-                  原型模式下，API Key 只保存在当前页面内存，不会写入浏览器存储或发送到服务器。
+                  {window.studyCoachPrototype
+                    ? '原型模式下，API Key 只保存在当前页面内存，刷新页面即清空。'
+                    : 'API Key 通过系统钥匙串加密保存（Electron safeStorage），不会写入 vault、日志或测试快照；对话时只发送给当前选择的模型服务。'}
                 </p>
+                {keyConfigured ? (
+                  <div className="mt-2 flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="danger"
+                      size="sm"
+                      disabled={clearingKey}
+                      onClick={() => void clearApiKey()}
+                    >
+                      {clearingKey
+                        ? '正在清除…'
+                        : confirmClearKey
+                          ? '确认清除'
+                          : '清除已保存的密钥'}
+                    </Button>
+                    {confirmClearKey ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setConfirmClearKey(false)}
+                      >
+                        取消
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </Card>
