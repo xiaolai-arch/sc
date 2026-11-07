@@ -9,6 +9,7 @@ import {
   registerIpcHandlers,
   serializeError
 } from './ipc';
+import { applyLaunchAtLogin } from './login-item';
 import { registerAppShortcuts } from './shortcuts';
 import { createContextScheduler, planFirstEmptyWorkspace } from './scheduler';
 import { DEFAULT_VAULT_DIRECTORY } from './settings/defaults';
@@ -29,6 +30,13 @@ if (userDataOverride) {
   app.setPath('userData', userDataOverride);
 } else {
   app.setPath('userData', join(app.getPath('appData'), 'study-coach'));
+}
+
+if (process.platform === 'win32') {
+  // Keep notifications and the taskbar grouped under the same identity as the
+  // Start Menu shortcut created by the NSIS installer (appId in
+  // electron-builder.yml). Without this Windows may drop toast notifications.
+  app.setAppUserModelId('com.studycoach.desktop');
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -158,8 +166,14 @@ function openQuickCapture(): void {
 app.whenReady().then(async () => {
   const context = await createAppContext({
     userDataPath: app.getPath('userData'),
-    defaultVaultPath: join(app.getPath('documents'), DEFAULT_VAULT_DIRECTORY)
+    defaultVaultPath: join(app.getPath('documents'), DEFAULT_VAULT_DIRECTORY),
+    onSettingsUpdated: (next) => {
+      applyLaunchAtLogin(app, next.launchAtLogin);
+    }
   });
+  // Re-apply the stored preference so a state file edited outside the app (or
+  // an OS reset) converges on the next launch.
+  applyLaunchAtLogin(app, (await context.settings.get()).launchAtLogin);
   registerIpcHandlers(context.api, ipcMain);
   initialWindowState = await readWindowState(
     windowStateFile(),

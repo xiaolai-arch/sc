@@ -270,13 +270,18 @@ test('two stores on the same directory see each other writes', async () => {
   expect(summaries[0]?.id).toBe(created.id);
 });
 
-test('writes conversation files with owner-only permissions', async () => {
-  const dir = await tempDir();
-  const store = new ConversationStore(dir);
-  const created = await store.create();
-  const stats = await stat(join(dir, `${created.id}.json`));
-  expect(stats.mode & 0o777).toBe(0o600);
-});
+// Windows reports 0o666 for writable files; POSIX permission bits are not
+// meaningful there, so there is nothing to assert.
+test.skipIf(process.platform === 'win32')(
+  'writes conversation files with owner-only permissions',
+  async () => {
+    const dir = await tempDir();
+    const store = new ConversationStore(dir);
+    const created = await store.create();
+    const stats = await stat(join(dir, `${created.id}.json`));
+    expect(stats.mode & 0o777).toBe(0o600);
+  }
+);
 
 test('renames a conversation and rejects an empty title', async () => {
   const dir = await tempDir();

@@ -273,3 +273,29 @@ describe('context integration with real vault and butler factories', () => {
     expect(model.calls).toHaveLength(2);
     expect(notifications).toEqual(['morning-plan', 'evening-review']);
   });
+
+test('skips proactive check-ins once the daily token budget is spent', async () => {
+  const dir = await tempDir();
+  const model = new FakeModelClient(['不该被调用']);
+  const context = await createAppContext({
+    userDataPath: join(dir, 'user-data'),
+    defaultVaultPath: join(dir, 'vault'),
+    secretStore: new InMemorySecretStore(),
+    modelClient: model,
+    now: fixedNow
+  });
+
+  await context.usage.record({
+    provider: 'local-cli',
+    model: 'fake',
+    inputTokens: 600,
+    outputTokens: 500
+  });
+  const current = await context.api.getSettings();
+  await context.api.updateSettings({
+    budget: { ...current.budget, dailyTokens: 1000 }
+  });
+
+  expect(await context.checkIns.check('morning', '2026-10-31')).toBeNull();
+  expect(model.calls).toHaveLength(0);
+});

@@ -1,19 +1,24 @@
 import { promises as fs } from 'node:fs';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createWorkspaceService } from '../../src/main/workspace/create-workspace-service';
 
 let root: string;
+let scratch: string;
 let parentBefore: string[];
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'workspace-security-'));
+  // Keep the vault inside a private parent: inspecting the shared system tmpdir
+  // made this suite flaky when other processes created files concurrently.
+  scratch = await mkdtemp(join(tmpdir(), 'workspace-security-'));
+  root = join(scratch, 'vault');
+  await mkdir(root, { recursive: true });
   parentBefore = await readdir(dirname(root));
 });
 
 afterEach(async () => {
-  await rm(root, { recursive: true, force: true });
+  await rm(scratch, { recursive: true, force: true });
 });
 
 const ESCAPES = ['../escape', '..\\escape', '../../etc/passwd', '/etc', 'a/b', '.', '..', 'kaoyan/../../evil'];
@@ -99,16 +104,9 @@ test('after every rejected escape nothing was written outside the vault root', a
   await Promise.all(attempts);
 
   const parentAfter = await readdir(dirname(root));
-  // The parent is the shared system tmpdir; other test files churn their own
-  // mkdtemp entries concurrently, so only assert that no *new* entry appeared
-  // other than the other suites' known temp-dir prefixes.
+  // The parent is private to this test, so anything new would be a leak.
   const appeared = parentAfter.filter((name) => !parentBefore.includes(name));
-  expect(
-    appeared.filter(
-      (name) =>
-        !/^(workspace-|study-coach-|memory-|practice-|search-|settings-|asaki-)/.test(name)
-    )
-  ).toEqual([]);
+  expect(appeared).toEqual([]);
 
   const tree = await walk(root);
   for (const file of tree) {

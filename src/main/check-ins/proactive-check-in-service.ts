@@ -18,6 +18,11 @@ export interface ProactiveCheckInOptions {
   workspaceService: WorkspaceService | null;
   modelClient: ModelClient | null;
   getSettings: () => Promise<AppSettings>;
+  /**
+   * Tokens already recorded for the current local day. Used to honor the
+   * "每日 token 上限" budget before spending another proactive model call.
+   */
+  getDailyTokensUsed?: () => Promise<number>;
   now?: () => Date;
 }
 
@@ -64,6 +69,7 @@ export class ProactiveCheckInService {
   private readonly workspaceService: WorkspaceService | null;
   private readonly modelClient: ModelClient | null;
   private readonly getSettings: () => Promise<AppSettings>;
+  private readonly getDailyTokensUsed: (() => Promise<number>) | undefined;
   private readonly now: () => Date;
 
   constructor(options: ProactiveCheckInOptions) {
@@ -71,6 +77,7 @@ export class ProactiveCheckInService {
     this.workspaceService = options.workspaceService;
     this.modelClient = options.modelClient;
     this.getSettings = options.getSettings;
+    this.getDailyTokensUsed = options.getDailyTokensUsed;
     this.now = options.now ?? (() => new Date());
   }
 
@@ -81,6 +88,13 @@ export class ProactiveCheckInService {
     const settings = await this.getSettings();
     if (!settings.notifications.enabled) return null;
     if (settings.notifications.snoozedUntil === date) return null;
+
+    // The limit includes manual usage, matching the global daily budget. A
+    // failed usage read must not block the check; zero disables proactive calls.
+    if (this.getDailyTokensUsed) {
+      const used = await this.getDailyTokensUsed().catch(() => 0);
+      if (used >= settings.budget.dailyTokens) return null;
+    }
 
     const conversation = await this.findOrCreateConversation(date, trigger);
     const checkIns = conversation.messages.filter((message) => message.trigger);

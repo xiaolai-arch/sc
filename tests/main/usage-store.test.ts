@@ -89,7 +89,9 @@ test('clears the file and tolerates corrupt content', async () => {
   }
 });
 
-test('writes owner-only permissions', async () => {
+// Windows reports 0o666 for writable files; POSIX permission bits are not
+// meaningful there, so there is nothing to assert.
+test.skipIf(process.platform === 'win32')('writes owner-only permissions', async () => {
   const dir = await tempDir();
   try {
     const filePath = join(dir, 'usage.json');

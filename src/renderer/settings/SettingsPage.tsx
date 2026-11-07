@@ -446,6 +446,10 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
     outputTokens: 0,
     calls: 0
   };
+  const tokenLimit = Number.parseInt(tokens, 10);
+  const todayTokens = todayUsage.inputTokens + todayUsage.outputTokens;
+  const budgetExhausted =
+    Number.isInteger(tokenLimit) && tokenLimit >= 0 && todayTokens >= tokenLimit;
 
   return (
     <div>
@@ -819,6 +823,9 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
                   value={tokens}
                   onChange={(event) => setTokens(event.target.value)}
                 />
+                <p className="mt-1 text-[12px] text-gray-500 dark:text-[#a1a1a6]">
+                  今日 token 达到上限后，主动检查会暂停；0 表示暂停主动检查。
+                </p>
               </div>
               <div>
                 <Label htmlFor="settings-input-price">输入价格（元/百万 token）</Label>
@@ -856,9 +863,14 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
               </p>
             ) : null}
             {usage === null || usage.totals.calls === 0 ? (
-              <p className="mt-4 text-sm text-gray-500 dark:text-[#a1a1a6]">
-                还没有用量记录。和阿咲对话后这里会显示本地统计。
-              </p>
+              <div className="mt-4 space-y-1">
+                <p className="text-sm text-gray-500 dark:text-[#a1a1a6]">
+                  还没有用量记录。和阿咲对话后这里会显示本地统计。
+                </p>
+                <p className="text-sm text-gray-500 dark:text-[#a1a1a6]">
+                  每日 token 上限：{Number.isInteger(tokenLimit) ? tokenLimit : '不限'}
+                </p>
+              </div>
             ) : (
               <>
                 <div className="mt-6 grid gap-5 md:grid-cols-2">
@@ -867,6 +879,16 @@ export function SettingsPage({ onClose, embedded = false, page = false }: Settin
                     <p className="mt-1 text-sm text-black dark:text-[#f5f5f7]">
                       输入 {todayUsage.inputTokens} · 输出 {todayUsage.outputTokens} · 调用{' '}
                       {todayUsage.calls}
+                    </p>
+                    <p
+                      className={
+                        budgetExhausted
+                          ? 'mt-1 text-sm text-[#d70015] dark:text-[#ff7b72]'
+                          : 'mt-1 text-sm text-gray-500 dark:text-[#a1a1a6]'
+                      }
+                    >
+                      每日 token：{todayTokens} / {Number.isInteger(tokenLimit) ? tokenLimit : '不限'}
+                      {budgetExhausted ? '（预算已用完，主动检查会暂停）' : ''}
                     </p>
                   </div>
                   <div>

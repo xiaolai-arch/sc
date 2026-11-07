@@ -47,6 +47,9 @@ jobs:
       - run: npm run typecheck:e2e
       - run: npm test
       - run: npm run build
+      # Unsigned, unpacked packaging smoke test: catches icon/installer config
+      # regressions without needing a certificate.
+      - run: npx electron-builder --win --dir
 
   e2e:
     name: Electron e2e (fake model, ${{ matrix.os }})

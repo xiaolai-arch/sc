@@ -340,20 +340,32 @@ test('skips symlinks, hidden directories and non-markdown files', async () => {
     const notesDir = join(root, 'workspaces', 'kaoyan', 'notes');
     const target = join(outside, 'target.md');
     await writeFileAtomic(target, serializeNoteFile(noteRecord('outside-1', '链接独门词', '软链内容')));
-    await fs.symlink(target, join(notesDir, 'linked.md'));
+    let symlinkCreated = true;
+    try {
+      await fs.symlink(target, join(notesDir, 'linked.md'));
+    } catch (error) {
+      // Creating symlinks on Windows needs Developer Mode or elevation.
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EPERM' && code !== 'EACCES' && code !== 'ENOTSUP') throw error;
+      symlinkCreated = false;
+    }
 
     await writeFileAtomic(join(root, 'workspaces', 'kaoyan', '.hidden', 'secret.md'), serializeNoteFile(noteRecord('hidden-1', '隐藏独门词', '隐藏内容')));
     await writeFileAtomic(join(notesDir, 'raw.txt'), '非 markdown 独门词');
 
     await service.rebuild();
-    expect(await service.search('kaoyan', '链接独门词')).toEqual([]);
+    if (symlinkCreated) {
+      expect(await service.search('kaoyan', '链接独门词')).toEqual([]);
+    }
     expect(await service.search('kaoyan', '隐藏独门词')).toEqual([]);
     expect(await service.search('kaoyan', '非 markdown 独门词')).toEqual([]);
 
     // Watcher events for symlinks are dropped too (lstat says "not a file").
-    fake.emit('add', join(notesDir, 'linked.md'));
-    await sleep(30);
-    expect(await service.search('kaoyan', '链接独门词')).toEqual([]);
+    if (symlinkCreated) {
+      fake.emit('add', join(notesDir, 'linked.md'));
+      await sleep(30);
+      expect(await service.search('kaoyan', '链接独门词')).toEqual([]);
+    }
   } finally {
     await rm(outside, { recursive: true, force: true });
   }

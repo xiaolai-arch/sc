@@ -159,6 +159,64 @@ test('deduplicates the same trigger and respects the proactive budget', async ()
   }
 });
 
+test('stops proactive checks once the daily token budget is used', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () => settings({ budget: { proactiveSessionsPerDay: 4, dailyTokens: 1000 } }),
+      getDailyTokensUsed: async () => 1000,
+      now: () => NOW
+    });
+
+    expect(await service.check('morning', '2026-11-01')).toBeNull();
+    expect(await value.list()).toHaveLength(0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a zero token limit pauses proactive checks', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () => settings({ budget: { proactiveSessionsPerDay: 4, dailyTokens: 0 } }),
+      getDailyTokensUsed: async () => 0,
+      now: () => NOW
+    });
+
+    expect(await service.check('morning', '2026-11-01')).toBeNull();
+    expect(await value.list()).toHaveLength(0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('does not block check-ins when the usage read fails', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () => settings({ budget: { proactiveSessionsPerDay: 4, dailyTokens: 1000 } }),
+      getDailyTokensUsed: async () => {
+        throw new Error('unreadable');
+      },
+      now: () => NOW
+    });
+
+    expect(await service.check('morning', '2026-11-01')).not.toBeNull();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('creates a weekly review conversation with its own title and notification', async () => {
   const { dir, value } = await store();
   try {

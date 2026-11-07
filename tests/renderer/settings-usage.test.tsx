@@ -65,6 +65,22 @@ test('renders today, seven-day totals and the price estimate', async () => {
   expect(within(card).getByText(today)).toBeInTheDocument();
 });
 
+test('shows today tokens against the daily budget and flags an overrun', async () => {
+  window.studyCoach = apiStub({
+    getSettings: vi.fn().mockResolvedValue({
+      ...baseSettings,
+      budget: { ...baseSettings.budget, dailyTokens: 1000 }
+    })
+  }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  expect(await screen.findByText('用量与成本')).toBeInTheDocument();
+  const card = document.getElementById('settings-usage')!;
+  expect(
+    await within(card).findByText('每日 token：1500 / 1000（预算已用完，主动检查会暂停）')
+  ).toBeInTheDocument();
+});
+
 test('prompts to configure prices when none are set', async () => {
   window.studyCoach = apiStub({
     getSettings: vi.fn().mockResolvedValue({

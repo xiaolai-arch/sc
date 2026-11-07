@@ -124,7 +124,14 @@ npm run test:acceptance
 
 默认 vault 位于 `%USERPROFILE%\Documents\StudyCoachVault`。设置页里的本地 CLI agent 会从 `PATH` 和 `%APPDATA%\npm` 查找 `codex`、`claude`、`zcode`、`opencode`，npm 全局安装的 `.cmd` shim 会自动通过 `cmd.exe` 启动；扫描时用 `where` 兜底查找 App Execution Alias。
 
-目前 Windows 只支持从源码开发/运行：`npm run dist` 仍然只打 macOS 包，还没有 Windows 安装包（未签名 `.exe`/`nsis` 均未配置）。e2e 在 Windows 上通过临时 `.cmd` shim 启动 fake CLI，CI 会同时跑 macOS 和 Windows。
+Windows 可以本地打包（x64，未签名）：
+
+```powershell
+npm run package:win   # 快速验证：dist/win-unpacked/ASAKI.exe
+npm run dist:win      # 安装包 + 便携版
+```
+
+`dist:win` 生成 `dist/ASAKI-1.0.0-x64-setup.exe`（NSIS 安装包）和 `dist/ASAKI-1.0.0-x64-portable.exe`（免安装）。未签名产物首次运行会触发 SmartScreen 提示；签名方式见 `docs/releases/windows.md`。e2e 在 Windows 上通过临时 `.cmd` shim 启动 fake CLI，CI 会同时跑 macOS 和 Windows。
 
 ## 测试
 
@@ -164,16 +171,21 @@ npm run test:acceptance
 
 ## 打包
 
-`electron-builder.yml` 配置 macOS arm64 的 `dir`（快速本地验证）、`zip` 和 `dmg`：
+`electron-builder.yml` 配置 macOS arm64 的 `dir`（快速本地验证）、`zip` 和 `dmg`，以及 Windows x64 的 `nsis` 安装包和 `portable` 便携版：
 
 ```bash
+# macOS
 npm run build
 npx electron-builder --dir     # 只生成未签名 .app，最快
 npm run package                # 同上（build + --dir）
 npm run dist                   # build + zip + dmg
+
+# Windows
+npm run package:win            # build + 未签名 dist/win-unpacked
+npm run dist:win               # build + NSIS 安装包 + 便携版
 ```
 
-产物在 `dist/`，例如 `dist/mac-arm64/ASAKI.app`、`dist/ASAKI-1.0.0-arm64.dmg`。Windows 安装包尚未配置（见上节）。
+产物在 `dist/`，例如 `dist/mac-arm64/ASAKI.app`、`dist/ASAKI-1.0.0-arm64.dmg`、`dist/ASAKI-1.0.0-x64-setup.exe`、`dist/ASAKI-1.0.0-x64-portable.exe`。
 
 默认不签名，本地没有证书也能构建：
 
@@ -181,7 +193,7 @@ npm run dist                   # build + zip + dmg
 CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --dir
 ```
 
-需要签名/分发时，在环境中提供 electron-builder 支持的凭据（如 `CSC_LINK` + `CSC_KEY_PASSWORD`，或钥匙串里的 `CSC_NAME`）；`electron-builder.yml` 已开启 `hardenedRuntime`，未提供凭据时会自动跳过签名。CI 不打包、不接触任何证书。
+需要签名/分发时，在环境中提供 electron-builder 支持的凭据（如 `CSC_LINK` + `CSC_KEY_PASSWORD`，或钥匙串里的 `CSC_NAME`）；`electron-builder.yml` 已开启 `hardenedRuntime`，未提供凭据时会自动跳过签名。CI 只做未签名的 Windows 打包冒烟检查，不接触任何证书。
 
 ## 架构
 

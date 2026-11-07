@@ -35,4 +35,30 @@ mac:
   hardenedRuntime: true
   gatekeeperAssess: false
 
+win:
+  # A 1024px PNG is checked in; electron-builder converts it to the .ico the
+  # installer needs. Add build/icon.ico if a hand-tuned icon is preferred.
+  icon: build/icon.png
+  # x64 only for v1, matching the tested Windows target.
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  # Signing is optional: set CSC_LINK/CSC_KEY_PASSWORD (or a certificate in the
+  # store) to sign the installer and executable; otherwise the build is unsigned.
+  # SmartScreen will warn about an unsigned installer on other machines.
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: ASAKI
+  artifactName: ${productName}-${version}-${arch}-setup.${ext}
+
+portable:
+  artifactName: ${productName}-${version}-${arch}-portable.${ext}
+
 artifactName: ${productName}-${version}-${arch}.${ext}

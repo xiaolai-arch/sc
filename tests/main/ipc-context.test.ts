@@ -240,6 +240,28 @@ test('settings updates are persisted and validated', async () => {
   expect((await second.api.getSettings()).launchAtLogin).toBe(true);
 });
 
+test('notifies the entry point after settings are persisted', async () => {
+  const dir = await tempDir();
+  const { workspace, butler } = services();
+  const updates: boolean[] = [];
+  const context = await createAppContext({
+    userDataPath: dir,
+    defaultVaultPath: join(dir, 'vault'),
+    workspaceService: workspace,
+    butlerService: butler,
+    secretStore: new InMemorySecretStore(),
+    onSettingsUpdated: (next) => {
+      updates.push(next.launchAtLogin);
+    },
+    now: () => new Date(2026, 9, 31, 9, 0, 0)
+  });
+
+  await context.api.updateSettings({ launchAtLogin: true });
+  await context.api.updateSettings({ launchAtLogin: false });
+
+  expect(updates).toEqual([true, false]);
+});
+
 test('workspace onboarding creates a workspace and selects the local CLI agent', async () => {
   const dir = await tempDir();
   const context = await contextAt(dir);

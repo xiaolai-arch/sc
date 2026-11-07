@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { dirname } from 'node:path';
+import { renameWithRetry } from '../fs/rename';
 
 function isENOENT(err: unknown): boolean {
   return (err as NodeJS.ErrnoException).code === 'ENOENT';
@@ -33,7 +34,7 @@ export async function writeFileAtomic(absPath: string, content: string): Promise
   await fs.mkdir(dirname(absPath), { recursive: true });
   const tmpPath = `${absPath}.${randomUUID().slice(0, 8)}.tmp`;
   await fs.writeFile(tmpPath, content, 'utf8');
-  await fs.rename(tmpPath, absPath);
+  await renameWithRetry(tmpPath, absPath);
 }
 
 /** Sorted `.md` file names inside a directory ([] when missing). */

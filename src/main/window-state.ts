@@ -1,6 +1,7 @@
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { renameSyncWithRetry, renameWithRetry } from './fs/rename';
 
 /**
  * The part of the main window geometry worth restoring between launches.
@@ -127,7 +128,7 @@ export async function writeWindowState(
       encoding: 'utf8',
       mode: 0o600
     });
-    await rename(tempPath, filePath);
+    await renameWithRetry(tempPath, filePath);
   } catch (error) {
     await rm(tempPath, { force: true }).catch(() => undefined);
     throw error;
@@ -147,7 +148,7 @@ export function writeWindowStateSync(filePath: string, state: WindowState): void
       encoding: 'utf8',
       mode: 0o600
     });
-    renameSync(tempPath, filePath);
+    renameSyncWithRetry(tempPath, filePath);
   } catch (error) {
     rmSync(tempPath, { force: true });
     throw error;

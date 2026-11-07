@@ -22,7 +22,9 @@
     "test:e2e:debug": "npm run build && playwright test --config e2e/playwright.config.ts --debug",
     "test:acceptance": "npm run build && node scripts/acceptance/crud.cjs",
     "package": "npm run build && electron-builder --dir",
+    "package:win": "npm run build && electron-builder --win --dir",
     "dist": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win",
     "typecheck:e2e": "tsc --noEmit -p e2e/tsconfig.json"
   },
   "dependencies": {

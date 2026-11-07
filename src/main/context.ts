@@ -84,6 +84,12 @@ export interface CreateAppContextOptions {
   /** Offline model seam used by integration tests. Never used for network here. */
   modelClient?: ModelClient | null;
   secretStore?: SecretStore;
+  /**
+   * Called after settings are persisted. The Electron entry point uses it to
+   * apply OS-level settings (launch at login) immediately instead of waiting
+   * for the next launch.
+   */
+  onSettingsUpdated?: (settings: AppSettings) => void | Promise<void>;
   now?: () => Date;
 }
 
@@ -179,6 +185,15 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
   const now = options.now ?? (() => new Date());
   const today = () => formatLocalDate(now());
   const usageStore = new UsageStore(join(options.userDataPath, 'usage.json'), { now });
+
+  /** Tokens recorded for today across providers; drives the daily budget. */
+  async function dailyTokensUsed(): Promise<number> {
+    const date = today();
+    const entries = await usageStore.list();
+    return entries
+      .filter((entry) => entry.date === date)
+      .reduce((sum, entry) => sum + entry.inputTokens + entry.outputTokens, 0);
+  }
 
   let active: ActiveServices | null = null;
   let pendingRebuild: Promise<ActiveServices> | null = null;
@@ -331,6 +346,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       workspaceService: workspace,
       modelClient,
       getSettings: () => settings.get(),
+      getDailyTokensUsed: dailyTokensUsed,
       now
     });
 
@@ -492,6 +508,14 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     async updateSettings(patch: Partial<AppSettings>) {
       const updated = await settings.update(patch);
       await syncServices(updated);
+      if (options.onSettingsUpdated) {
+        // OS integration is best-effort: the settings document is already saved.
+        try {
+          await options.onSettingsUpdated(updated);
+        } catch {
+          // Ignore; the next launch applies the stored value again.
+        }
+      }
       return updated;
     },
 
