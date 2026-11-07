@@ -242,6 +242,15 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
   const retryTurnRef = useRef<{ text: string; conversation: Conversation } | null>(null);
   const activeConversationIdRef = useRef<string | null>(null);
   activeConversationIdRef.current = conversations.active?.id ?? null;
+  /** A turn can outlive its view (navigation, test teardown); stop updating then. */
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -526,8 +535,10 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
         });
       }
     } catch (cause) {
-      setActionError(messageOf(cause));
-      setTyping(false);
+      if (mountedRef.current) {
+        setActionError(messageOf(cause));
+        setTyping(false);
+      }
       return false;
     }
 
@@ -542,8 +553,10 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
       try {
         await conversations.append(conversation.id, userMessage);
       } catch (cause) {
-        setActionError(messageOf(cause));
-        setTyping(false);
+        if (mountedRef.current) {
+          setActionError(messageOf(cause));
+          setTyping(false);
+        }
         // The user message never reached the conversation, so the caller must
         // keep the draft instead of clearing it.
         return false;
@@ -578,6 +591,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     const cloneTrace = (): ChatTraceItem[] => trace.map((item) => ({ ...item }));
 
     const updateStreaming = (updater: (message: ChatMessage) => ChatMessage) => {
+      if (!mountedRef.current) return;
       setStreamingMessage((current) =>
         current && current.id === assistantId ? updater(current) : current
       );
@@ -661,6 +675,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
           message: text
         } satisfies SendMessageInput,
         (event) => {
+          if (!mountedRef.current) return;
           switch (event.type) {
             case 'retry':
               setStreamStatus(event.message);
@@ -746,6 +761,9 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
         }
       );
 
+      // The view can unmount while the turn streams; skip the rest so no
+      // state update runs after the React root (or test DOM) is gone.
+      if (!mountedRef.current) return true;
       flushNow();
       const finalConversationId = result.conversationId ?? conversation.id;
       if (generation !== streamGenerationRef.current) {
@@ -763,6 +781,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
       await reload();
       return true;
     } catch (cause) {
+      if (!mountedRef.current) return false;
       flushNow();
       if (generation !== streamGenerationRef.current) {
         // The user navigated away or started another turn; a cancellation is
@@ -789,20 +808,22 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
       // longer the only copy; the banner offers a retry of the answer.
       return true;
     } finally {
-      flushNow();
-      if (trace.length > 0) {
-        settleTrace();
-        setTraceById((current) => ({
-          ...current,
-          [assistantId]: trace.map((item) => ({ ...item }))
-        }));
-      }
-      // A superseded turn must not clear the state of the turn that replaced it.
-      if (generation === streamGenerationRef.current) {
-        setStreamingMessage(null);
-        setActiveAssistantId(null);
-        setStreamStatus(null);
-        setTyping(false);
+      if (mountedRef.current) {
+        flushNow();
+        if (trace.length > 0) {
+          settleTrace();
+          setTraceById((current) => ({
+            ...current,
+            [assistantId]: trace.map((item) => ({ ...item }))
+          }));
+        }
+        // A superseded turn must not clear the state of the turn that replaced it.
+        if (generation === streamGenerationRef.current) {
+          setStreamingMessage(null);
+          setActiveAssistantId(null);
+          setStreamStatus(null);
+          setTyping(false);
+        }
       }
     }
   }

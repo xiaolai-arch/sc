@@ -183,15 +183,19 @@ async function main() {
       .click();
   }
 
+  /** The dropdown menu is portaled to body, so options are found from the page. */
+  async function pickOption(scope, label, optionLabel) {
+    await scope.getByLabel(label).click();
+    await page.getByRole('option', { name: optionLabel, exact: true }).click();
+  }
+
   async function openProject() {
     const sidebar = page.locator('aside[aria-label="导航"]');
     await sidebar
       .getByRole('button', { name: sourceWorkspace.name, exact: true })
       .click();
     await sidebar.getByRole('button', { name: '全部工作区' }).click();
-    const select = page.getByLabel('切换项目');
-    await select.waitFor({ state: 'visible', timeout: 15_000 });
-    await select.selectOption({ label: sourceWorkspace.name });
+    await pickOption(page, '切换项目', sourceWorkspace.name);
     await page.getByRole('region', { name: '计划' }).waitFor({ timeout: 15_000 });
   }
 
@@ -277,7 +281,7 @@ async function main() {
       await nav('提醒');
       await page.getByLabel('提醒时间').fill('09:30');
       await page.getByLabel('提醒内容').fill(reminderLabel);
-      await page.getByLabel('提醒重复').selectOption('weekdays');
+      await pickOption(page, '提醒重复', '工作日');
       await page.getByRole('button', { name: '添加提醒' }).click();
       await page.getByText(reminderLabel, { exact: false }).first().waitFor({
         timeout: 15_000
@@ -291,7 +295,7 @@ async function main() {
       const form = page.getByRole('form', { name: `编辑提醒：${reminderLabel}` });
       await form.getByLabel('编辑提醒时间').fill('10:15');
       await form.getByLabel('编辑提醒内容').fill(editedReminderLabel);
-      await form.getByLabel('编辑提醒重复').selectOption('weekend');
+      await pickOption(form, '编辑提醒重复', '周末');
       await shot('reminder-editing');
       await form.getByRole('button', { name: '保存', exact: true }).click();
       await page.getByText(editedReminderLabel, { exact: false }).first().waitFor({
@@ -322,10 +326,10 @@ async function main() {
       const form = page.getByRole('form', { name: '新增记忆' });
       const workspaceSelect = form.getByLabel('新记忆工作区');
       if ((await workspaceSelect.count()) > 0) {
-        await workspaceSelect.selectOption({ label: sourceWorkspace.name });
+        await pickOption(form, '新记忆工作区', sourceWorkspace.name);
       }
       await form.getByLabel('新记忆内容').fill(memoryText);
-      await form.getByLabel('新记忆类型').selectOption('preference');
+      await pickOption(form, '新记忆类型', '偏好');
       await shot('memory-create');
       await form.getByRole('button', { name: '保存新记忆' }).click();
       await page.getByText(memoryText, { exact: false }).first().waitFor({ timeout: 15_000 });
@@ -380,9 +384,7 @@ async function main() {
         await page.getByRole('button', { name: '新增主题' }).click();
         const create = page.getByRole('dialog', { name: '新增知识主题' });
         await create.getByLabel('主题名称').fill(fallbackName);
-        await create
-          .getByLabel('所属工作区')
-          .selectOption({ label: sourceWorkspace.name });
+        await pickOption(create, '所属工作区', sourceWorkspace.name);
         await create.getByRole('button', { name: '保存', exact: true }).click();
         await page.getByRole('heading', { name: fallbackName }).waitFor({
           timeout: 15_000
@@ -394,7 +396,7 @@ async function main() {
       await page.getByRole('button', { name: '新增主题' }).click();
       const create = page.getByRole('dialog', { name: '新增知识主题' });
       await create.getByLabel('主题名称').fill(sourceTopicName);
-      await create.getByLabel('所属工作区').selectOption({ label: sourceWorkspace.name });
+      await pickOption(create, '所属工作区', sourceWorkspace.name);
       await create.getByLabel('摘要').fill(`LCEL 的管道组合还没系统练过（验收 ${RUN}）`);
       await create.getByRole('button', { name: '保存', exact: true }).click();
       await page.getByRole('heading', { name: sourceTopicName }).waitFor({
@@ -421,7 +423,7 @@ async function main() {
         .getByRole('button', { name: `合并 ${sourceTopicName}` })
         .click();
       const merge = page.getByRole('dialog', { name: '合并知识主题' });
-      await merge.getByLabel('合并到').selectOption({ label: target.name });
+      await pickOption(merge, '合并到', target.name);
       await shot('knowledge-merge');
       await merge.getByRole('button', { name: '合并', exact: true }).click();
       await page.getByRole('heading', { name: target.name, exact: true }).waitFor({
@@ -441,7 +443,7 @@ async function main() {
       await page.getByRole('button', { name: '补录复盘' }).click();
       const dialog = page.getByRole('dialog', { name: '补录复盘' });
       await dialog.getByLabel('日期').fill(REVIEW_DATE);
-      await dialog.getByLabel('工作区').selectOption({ label: sourceWorkspace.name });
+      await pickOption(dialog, '工作区', sourceWorkspace.name);
       await dialog.getByLabel('完成').fill(reviewCompleted);
       await dialog.getByLabel('卡点').fill(reviewStuck);
       await dialog.getByLabel('明天').fill(`补齐参数 schema，加两个测试（验收 ${RUN}）`);
@@ -470,7 +472,7 @@ async function main() {
       await dialog.getByLabel('第 1 题题干').fill('给 Agent 注册工具时，最先要提供什么？');
       await dialog.getByLabel('第 1 题选项 1').fill('工具名称和参数 schema');
       await dialog.getByLabel('第 1 题选项 2').fill('模型的温度参数');
-      await dialog.getByLabel('第 1 题正确答案').selectOption('0');
+      await pickOption(dialog, '第 1 题正确答案', 'A · 工具名称和参数 schema');
       await dialog.getByLabel('第 1 题解析').fill('名称用于选择工具，schema 用于校验参数。');
       await shot('practice-create');
       await dialog.getByRole('button', { name: '创建练习集' }).click();
