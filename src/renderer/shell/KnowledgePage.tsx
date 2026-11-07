@@ -13,6 +13,7 @@ import type {
 import type { Workspace } from '../../shared/workspace';
 import { Dialog } from '../ui/Dialog';
 import { PlusIcon } from '../ui/icons';
+import { Select } from '../ui/Select';
 import { KnowledgeGraph } from './KnowledgeGraph';
 import { KnowledgeNotePane } from './KnowledgeNotePane';
 import { PageFrame } from './PageFrame';
@@ -503,10 +504,12 @@ export function KnowledgePage({
           </label>
           <label className={labelClass}>
             所属工作区
-            <select
+            <Select
+              size="field"
               value={form.workspaceId}
               onChange={(event) => setForm({ ...form, workspaceId: event.target.value })}
-              className={inputClass}
+              className="mt-1"
+              disabled={saving}
             >
               <option value="">全局（所有工作区）</option>
               {workspaces.map((workspace) => (
@@ -514,17 +517,19 @@ export function KnowledgePage({
                   {workspace.name}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <div className="grid grid-cols-2 gap-3">
             <label className={labelClass}>
               状态
-              <select
+              <Select
+                size="field"
                 value={form.status}
                 onChange={(event) =>
                   setForm({ ...form, status: event.target.value as TopicForm['status'] })
                 }
-                className={inputClass}
+                className="mt-1"
+                disabled={saving}
               >
                 {form.status === '' ? <option value="">默认（在学）</option> : null}
                 {STATUS_ORDER.map((status) => (
@@ -532,7 +537,7 @@ export function KnowledgePage({
                     {STATUS_LABELS[status]}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
             <label className={labelClass}>
               掌握程度
@@ -596,11 +601,13 @@ export function KnowledgePage({
           </p>
           <label className={labelClass}>
             合并到
-            <select
+            <Select
+              size="field"
               aria-label="合并到"
               value={mergeTargetId}
               onChange={(event) => setMergeTargetId(event.target.value)}
-              className={inputClass}
+              className="mt-1"
+              disabled={merging}
             >
               <option value="">请选择目标主题</option>
               {topics
@@ -610,7 +617,7 @@ export function KnowledgePage({
                     {topic.name}
                   </option>
                 ))}
-            </select>
+            </Select>
           </label>
           {mergeError ? <p className="text-[12px] text-[#ff3b30]">{mergeError}</p> : null}
           <div className="flex justify-end gap-2 pt-1">

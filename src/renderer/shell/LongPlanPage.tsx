@@ -22,6 +22,7 @@ import type { KnowledgeStatus } from '../../shared/knowledge';
 import type { Workspace } from '../../shared/workspace';
 import { Dialog } from '../ui/Dialog';
 import { ChevronDownIcon, ChevronRightIcon, PlusIcon } from '../ui/icons';
+import { Select } from '../ui/Select';
 import { PageFrame } from './PageFrame';
 
 const KNOWLEDGE_STATUS_LABELS: Record<KnowledgeStatus, string> = {
@@ -912,21 +913,21 @@ export function LongPlanPage({
               >
                 工作区
               </label>
-              <select
+              <Select
                 id="long-plan-workspace"
+                size="field"
                 value={form.workspaceId}
                 onChange={(event) =>
                   setForm((current) => ({ ...current, workspaceId: event.target.value }))
                 }
                 disabled={creating}
-                className="h-10 w-full rounded-xl border-0 bg-[#f5f5f7] px-3 text-[13px] text-[#1d1d1f] outline-none focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#f5f5f7]"
               >
                 {workspaces.map((workspace) => (
                   <option key={workspace.id} value={workspace.id}>
                     {workspace.name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
 
             <div>

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SettingsPage } from '../../src/renderer/settings/SettingsPage';
 
@@ -232,6 +232,35 @@ test('saves a local cli provider without an api key', async () => {
     })
   );
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+test('labels CLI agents with their product names while keeping stable ids', async () => {
+  const localSettings = {
+    ...settings,
+    provider: { kind: 'local-cli' as const, agent: 'codex' as const, command: 'codex' }
+  };
+  window.studyCoach = {
+    getSettings: vi.fn().mockResolvedValue(localSettings),
+    updateSettings: vi.fn(),
+    setApiKey: vi.fn()
+  } as never;
+
+  render(<SettingsPage onClose={() => {}} />);
+
+  const select = await screen.findByLabelText('CLI agent');
+  const options = within(select).getAllByRole('option');
+  expect(options.map((option) => option.textContent)).toEqual([
+    'Codex',
+    'Claude Code',
+    'ZCode',
+    'OpenCode'
+  ]);
+  expect(options.map((option) => option.getAttribute('value'))).toEqual([
+    'codex',
+    'claude',
+    'zcode',
+    'opencode'
+  ]);
 });
 
 test('hides model and effort for zcode and explains where to change them', async () => {

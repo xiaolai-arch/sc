@@ -37,9 +37,6 @@ type ReviewPageProps = {
   onSubmitted?: () => void;
 };
 
-const filterClass =
-  'h-9 rounded-xl border-0 bg-[#f5f5f7] px-3 text-[13px] text-gray-700 outline-none transition-all duration-200 focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#a1a1a6]';
-
 export function ReviewPage({
   workspaces,
   reviews,
@@ -176,11 +173,12 @@ export function ReviewPage({
         showActions ? (
           <div className="flex items-center gap-2">
             {workspaces.length > 0 ? (
-              <select
+              <Select
                 aria-label="按工作区筛选复盘"
+                size="sm"
+                fullWidth={false}
                 value={filterId}
                 onChange={(event) => setFilterId(event.target.value)}
-                className={filterClass}
               >
                 <option value="">全部工作区</option>
                 {workspaces.map((workspace) => (
@@ -188,7 +186,7 @@ export function ReviewPage({
                     {workspace.name}
                   </option>
                 ))}
-              </select>
+              </Select>
             ) : null}
             {onSubmitReview ? (
               <Button size="sm" onClick={openBackfill}>

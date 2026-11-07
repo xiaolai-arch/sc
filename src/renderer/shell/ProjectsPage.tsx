@@ -16,6 +16,7 @@ import type {
 import { PageFrame } from './PageFrame';
 import { PlanSection, RecordsSection } from './ProjectSections';
 import type { FocusSession } from './focus-timer';
+import { Select } from '../ui/Select';
 
 type ProjectsPageProps = {
   workspace: Workspace | null;
@@ -210,13 +211,14 @@ export function ProjectsPage({
                 >
                   练习
                 </button>
-                <select
+                <Select
                   aria-label="切换项目"
+                  size="sm"
+                  fullWidth={false}
                   value={workspace?.id ?? ''}
                   onChange={(event) =>
                     onSelectWorkspace(event.target.value === '' ? null : event.target.value)
                   }
-                  className="h-9 rounded-xl border-0 bg-[#f5f5f7] px-3 text-[13px] text-gray-700 outline-none transition-all duration-200 focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#a1a1a6]"
                 >
                   <option value="">全部项目</option>
                   {workspaces.map((project) => (
@@ -224,7 +226,7 @@ export function ProjectsPage({
                       {project.name}
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
             </div>
             {editingWorkspace && workspace ? (
@@ -305,18 +307,19 @@ export function ProjectsPage({
                 >
                   参与检查
                 </label>
-                <select
+                <Select
                   id="workspace-check-in"
                   aria-label="参与检查"
+                  size="sm"
+                  fullWidth={false}
                   value={workspace.checkIn === 'off' ? 'off' : 'daily'}
                   onChange={(event) =>
                     void updateCheckIn(event.target.value as 'daily' | 'off')
                   }
-                  className="h-8 rounded-xl border-0 bg-[#f5f5f7] px-2 text-[12px] text-gray-700 outline-none transition-all duration-200 focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#a1a1a6]"
                 >
                   <option value="daily">每天</option>
                   <option value="off">关闭</option>
-                </select>
+                </Select>
               </div>
             ) : null}
             {workspaceError ? (

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { friendlyErrorMessage } from '../../shared/errors';
 import { cn } from '../ui/cn';
 import { CheckIcon } from '../ui/icons';
+import { Select } from '../ui/Select';
 import type { ReviewRecord } from '../../shared/ipc';
 import {
   TASK_REPEAT_LABELS,
@@ -431,13 +432,14 @@ export function PlanSection({
           onChange={(event) => onChange({ ...draft, acceptance: event.target.value })}
           className={`${inputClass} sm:col-span-2`}
         />
-        <select
+        <Select
           aria-label={`${keyPrefix}重复`}
+          size="sm"
           value={draft.repeat}
           onChange={(event) =>
             onChange({ ...draft, repeat: event.target.value as TaskRepeat | '' })
           }
-          className={`${inputClass} sm:col-span-2`}
+          className="sm:col-span-2"
         >
           <option value="">不重复</option>
           {TASK_REPEATS.map((repeat) => (
@@ -445,7 +447,7 @@ export function PlanSection({
               {TASK_REPEAT_LABELS[repeat]}
             </option>
           ))}
-        </select>
+        </Select>
       </div>
     );
   }
@@ -1159,18 +1161,20 @@ export function MemorySection({
           className="rounded-2xl bg-[#f5f5f7] p-3 dark:bg-white/[0.06]"
         >
           {!workspace && workspaces.length > 0 ? (
-            <select
+            <Select
               aria-label="新记忆工作区"
+              size="sm"
               value={targetWorkspaceId}
               onChange={(event) => setNewMemoryWorkspaceId(event.target.value)}
-              className={`${inputClass} mb-2 w-full`}
+              className="mb-2"
+              disabled={savingMemory}
             >
               {workspaces.map((entry) => (
                 <option key={entry.id} value={entry.id}>
                   {entry.name}
                 </option>
               ))}
-            </select>
+            </Select>
           ) : null}
           <textarea
             aria-label="新记忆内容"
@@ -1180,18 +1184,20 @@ export function MemorySection({
             onChange={(event) => setNewMemoryText(event.target.value)}
             className={`${inputClass} w-full resize-none leading-6`}
           />
-          <select
+          <Select
             aria-label="新记忆类型"
+            size="sm"
             value={newMemoryKind}
             onChange={(event) => setNewMemoryKind(event.target.value as MemoryKind)}
-            className={`${inputClass} mt-1 w-full`}
+            className="mt-1"
+            disabled={savingMemory}
           >
             {MEMORY_KIND_ORDER.map((kind) => (
               <option key={kind} value={kind}>
                 {MEMORY_KIND_LABELS[kind]}
               </option>
             ))}
-          </select>
+          </Select>
           {memoryError?.id === 'new' ? (
             <p role="alert" className="mt-1 text-[12px] text-[#d70015] dark:text-[#ff7b72]">
               {memoryError.message}
@@ -1292,20 +1298,22 @@ export function MemorySection({
                   onChange={(event) => setMemoryText(event.target.value)}
                   className="w-full resize-none rounded-xl border-0 bg-[#f5f5f7] px-3 py-2 text-[13px] leading-6 text-[#1d1d1f] outline-none transition-all duration-200 focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#f5f5f7]"
                 />
-                <select
+                <Select
                   aria-label="记忆类型"
+                  size="sm"
                   value={memoryKind}
                   onChange={(event) =>
                     setMemoryKind(event.target.value as MemoryKind)
                   }
-                  className={`${inputClass} mt-1 w-full`}
+                  className="mt-1"
+                  disabled={savingMemory}
                 >
                   {MEMORY_KIND_ORDER.map((kind) => (
                     <option key={kind} value={kind}>
                       {MEMORY_KIND_LABELS[kind]}
                     </option>
                   ))}
-                </select>
+                </Select>
                 {memoryError?.id === memory.id ? (
                   <p role="alert" className="mt-1 text-[12px] text-[#d70015] dark:text-[#ff7b72]">
                     {memoryError.message}
@@ -1561,20 +1569,24 @@ export function RemindersSection({
   function repeatSelect(
     label: string,
     value: ReminderRepeat,
-    onChange: (next: ReminderRepeat) => void
+    onChange: (next: ReminderRepeat) => void,
+    disabled = false
   ) {
     return (
-      <select
+      <Select
         aria-label={label}
+        size="sm"
+        fullWidth={false}
         value={value}
         onChange={(event) => onChange(event.target.value as ReminderRepeat)}
-        className={`${inputClass} w-[96px] shrink-0`}
+        className="w-[96px] shrink-0"
+        disabled={disabled}
       >
         <option value="daily">每天</option>
         <option value="weekdays">工作日</option>
         <option value="weekend">周末</option>
         {value === 'custom' ? <option value="custom">自定义</option> : null}
-      </select>
+      </Select>
     );
   }
 
@@ -1602,7 +1614,7 @@ export function RemindersSection({
             onChange={(event) => setReminderLabel(event.target.value)}
             className={`${inputClass} flex-1`}
           />
-          {repeatSelect('提醒重复', reminderRepeat, setReminderRepeat)}
+          {repeatSelect('提醒重复', reminderRepeat, setReminderRepeat, creatingReminder)}
         </div>
         {reminderError ? (
           <p role="alert" className="mt-1 text-[12px] text-[#d70015] dark:text-[#ff7b72]">
@@ -1653,7 +1665,12 @@ export function RemindersSection({
                     onChange={(event) => setEditLabel(event.target.value)}
                     className={`${inputClass} min-w-[120px] flex-1`}
                   />
-                  {repeatSelect('编辑提醒重复', editRepeat, setEditRepeat)}
+                  {repeatSelect(
+                    '编辑提醒重复',
+                    editRepeat,
+                    setEditRepeat,
+                    pendingReminderId === reminder.id
+                  )}
                   <button
                     type="button"
                     onClick={() => setEditingId(null)}

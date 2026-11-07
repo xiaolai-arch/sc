@@ -65,11 +65,11 @@ export function FirstRunDialog({ open, onComplete, onSkip }: FirstRunDialogProps
   return (
     <Dialog
       open={open}
-      onClose={onSkip}
+      onClose={busy ? () => undefined : onSkip}
       title="欢迎使用阿咲"
       footer={
         <div className="flex items-center justify-between gap-2">
-          <Button variant="ghost" size="sm" onClick={onSkip}>
+          <Button variant="ghost" size="sm" onClick={onSkip} disabled={busy}>
             稍后再说
           </Button>
           <Button size="sm" disabled={busy} onClick={() => void createWorkspace()}>
@@ -93,6 +93,7 @@ export function FirstRunDialog({ open, onComplete, onSkip }: FirstRunDialogProps
           value={name}
           onChange={(event) => setName(event.target.value)}
           placeholder="例如：考研、英语、我的项目"
+          disabled={busy}
         />
       </div>
 
@@ -103,6 +104,7 @@ export function FirstRunDialog({ open, onComplete, onSkip }: FirstRunDialogProps
             id="first-run-kind"
             value={kind}
             onChange={(event) => setKind(event.target.value as WorkspaceKind)}
+            disabled={busy}
           >
             {KIND_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
@@ -118,6 +120,7 @@ export function FirstRunDialog({ open, onComplete, onSkip }: FirstRunDialogProps
             value={goal}
             onChange={(event) => setGoal(event.target.value)}
             placeholder="先完成今天最重要的一件事"
+            disabled={busy}
           />
         </div>
       </div>

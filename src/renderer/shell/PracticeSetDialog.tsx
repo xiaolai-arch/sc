@@ -361,6 +361,7 @@ export function PracticeSetDialog({
                     onChange={(event) =>
                       updateQuestion(question.key, { answer: Number(event.target.value) })
                     }
+                    disabled={submitting}
                   >
                     {question.options.map((option, optionIndex) => (
                       <option key={optionIndex} value={optionIndex}>

@@ -794,7 +794,7 @@ export function SettingsPage({
                   >
                     {cliAgents.map((agent) => (
                       <option key={agent} value={agent}>
-                        {agent}
+                        {cliAgentLabels[agent]}
                       </option>
                     ))}
                   </Select>
