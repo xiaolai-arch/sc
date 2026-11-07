@@ -72,7 +72,9 @@ test.describe('ASAKI feature smoke', () => {
         await page.getByRole('button', { name: '新增记忆' }).click();
         await page.getByLabel('新记忆内容').fill('偏好早上学习');
         await page.getByRole('button', { name: '保存新记忆' }).click();
-        await expect(page.getByText('偏好早上学习')).toBeVisible();
+        await expect(
+          page.getByRole('button', { name: '编辑记忆：偏好早上学习' })
+        ).toBeVisible();
       });
 
       await test.step('backfills a review', async () => {
