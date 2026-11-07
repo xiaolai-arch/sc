@@ -27,6 +27,19 @@ function setup() {
   };
 }
 
+// Let any turn started by the test settle before the jsdom environment is torn
+// down; otherwise its final state updates run without `window` and surface as
+// an unhandled ReferenceError.
+afterEach(async () => {
+  await waitFor(
+    () =>
+      expect(
+        screen.queryByRole('button', { name: '停止生成' })
+      ).not.toBeInTheDocument(),
+    { timeout: 3000 }
+  );
+});
+
 test('opens the quick capture dialog from the app event', async () => {
   const { openCapture } = setup();
   await screen.findByText(homeGreeting('xiaolai', new Date()));
