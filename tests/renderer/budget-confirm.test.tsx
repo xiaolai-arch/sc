@@ -48,6 +48,11 @@ test('asks once before a manual turn over the daily token budget', async () => {
 
   expect((await screen.findAllByText(/我先按截止时间和精力排/)).length).toBeGreaterThan(0);
   await waitFor(() => expect(screen.queryByText('今日 token 预算已用完')).not.toBeInTheDocument());
+  // Let the turn finish before teardown; a late stream update would otherwise
+  // dispatch state after jsdom is gone.
+  await waitFor(() =>
+    expect(screen.queryByRole('button', { name: '停止生成' })).not.toBeInTheDocument()
+  );
 });
 
 test('a zero budget only pauses proactive check-ins', async () => {
@@ -61,4 +66,7 @@ test('a zero budget only pauses proactive check-ins', async () => {
 
   expect((await screen.findAllByText(/我先按截止时间和精力排/)).length).toBeGreaterThan(0);
   expect(screen.queryByText('今日 token 预算已用完')).not.toBeInTheDocument();
+  await waitFor(() =>
+    expect(screen.queryByRole('button', { name: '停止生成' })).not.toBeInTheDocument()
+  );
 });
