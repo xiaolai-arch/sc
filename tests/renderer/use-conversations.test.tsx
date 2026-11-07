@@ -51,6 +51,45 @@ test('a slow selection cannot overwrite a newer one', async () => {
   expect(result.current.active?.id).toBe('fast');
 });
 
+test('clears the previous conversation while the next one loads', async () => {
+  const pending = deferred<Conversation>();
+  window.studyCoach = {
+    listConversations: async () => [],
+    getConversation: (id: string) =>
+      id === 'a' ? Promise.resolve(conversation('a')) : pending.promise
+  } as never;
+
+  const { result } = renderHook(() => useConversations());
+  await waitFor(() => expect(result.current.loading).toBe(false));
+
+  await act(async () => {
+    await result.current.select('a');
+  });
+  expect(result.current.active?.id).toBe('a');
+  expect(result.current.selecting).toBe(false);
+
+  act(() => {
+    void result.current.select('b');
+  });
+  // The old thread must not stay visible or sendable while 'b' loads.
+  expect(result.current.active).toBeNull();
+  expect(result.current.selecting).toBe(true);
+
+  await act(async () => {
+    pending.resolve(conversation('b'));
+    await pending.promise;
+  });
+  expect(result.current.active?.id).toBe('b');
+  expect(result.current.selecting).toBe(false);
+
+  // Re-selecting the open conversation (e.g. reload after a turn) does not
+  // blank the view.
+  await act(async () => {
+    await result.current.select('b');
+  });
+  expect(result.current.active?.id).toBe('b');
+});
+
 test('tray/notification opens are surfaced for the renderer to switch pages', async () => {
   let openListener: ((id: string) => void) | undefined;
   window.studyCoach = {

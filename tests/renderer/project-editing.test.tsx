@@ -119,6 +119,30 @@ test('edits the project name, goal and description', async () => {
   });
 });
 
+test('drops an open project edit when switching projects', async () => {
+  const api = setup();
+  await openProjectTasks();
+
+  await userEvent.click(screen.getByRole('button', { name: '编辑项目' }));
+  const nameInput = screen.getByLabelText('项目名称');
+  await userEvent.clear(nameInput);
+  await userEvent.type(nameInput, '改到一半的考研');
+
+  await userEvent.selectOptions(screen.getByLabelText('切换项目'), 'english');
+  expect(await screen.findByRole('heading', { name: '英语' })).toBeInTheDocument();
+  expect(screen.queryByLabelText('项目名称')).not.toBeInTheDocument();
+
+  // Reopening starts from the project that is now selected, and saving it
+  // cannot write the abandoned 考研 draft into 英语.
+  await userEvent.click(screen.getByRole('button', { name: '编辑项目' }));
+  expect(screen.getByLabelText('项目名称')).toHaveValue('英语');
+  await userEvent.click(screen.getByRole('button', { name: '保存项目' }));
+
+  const workspaces = await api.listWorkspaces();
+  expect(workspaces.find((entry) => entry.id === 'kaoyan')?.name).toBe('考研');
+  expect(workspaces.find((entry) => entry.id === 'english')?.name).toBe('英语');
+});
+
 test('deletes a project after confirmation', async () => {
   const api = setup();
   await openProjectTasks();

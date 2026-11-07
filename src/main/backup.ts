@@ -1,4 +1,5 @@
 import { copyFile, cp, mkdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { BackupResult, RestoreResult } from '../shared/ipc';
 
@@ -201,16 +202,64 @@ function restoreStamp(date: Date): string {
   )}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
 }
 
-async function swapDirectory(staged: string, target: string): Promise<void> {
-  await rm(target, { recursive: true, force: true });
-  await rename(staged, target);
+/**
+ * Replaces `target` with `staged` without ever deleting the only copy first.
+ * The existing target is renamed aside (same volume, atomic), then the staged
+ * directory takes its place; if that rename fails, the old directory is put
+ * back. Only after a successful swap is the old copy removed.
+ */
+export async function swapDirectory(staged: string, target: string): Promise<void> {
+  const previous = `${target}.asaki-restore-old-${process.pid}-${randomUUID()}`;
+  let movedAside = false;
+  try {
+    await rename(target, previous);
+    movedAside = true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+
+  try {
+    await rename(staged, target);
+  } catch (error) {
+    if (movedAside) {
+      await rename(previous, target).catch(() => undefined);
+    }
+    throw error;
+  }
+
+  if (movedAside) {
+    await rm(previous, { recursive: true, force: true }).catch(() => undefined);
+  }
 }
 
-async function copyFileAtomic(source: string, target: string): Promise<void> {
-  const temp = `${target}.restore-tmp`;
+export async function copyFileAtomic(source: string, target: string): Promise<void> {
+  const temp = `${target}.restore-tmp-${process.pid}-${randomUUID()}`;
   await copyFile(source, temp);
-  await rm(target, { force: true });
-  await rename(temp, target);
+  const previous = `${target}.restore-old-${process.pid}-${randomUUID()}`;
+  let movedAside = false;
+  try {
+    await rename(target, previous);
+    movedAside = true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      await rm(temp, { force: true }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  try {
+    await rename(temp, target);
+  } catch (error) {
+    await rm(temp, { force: true }).catch(() => undefined);
+    if (movedAside) {
+      await rename(previous, target).catch(() => undefined);
+    }
+    throw error;
+  }
+
+  if (movedAside) {
+    await rm(previous, { force: true }).catch(() => undefined);
+  }
 }
 
 /**
@@ -269,13 +318,14 @@ export async function restoreBackup(options: RestoreBackupOptions): Promise<Rest
 
   // Stage copies next to their targets so the swap is a same-volume rename.
   const realTargetVault = await realPathOrResolve(vaultPath);
-  const vaultStage = join(dirname(realTargetVault), `.asaki-restore-vault-${process.pid}`);
+  const restoreId = `${process.pid}-${randomUUID()}`;
+  const vaultStage = join(dirname(realTargetVault), `.asaki-restore-vault-${restoreId}`);
   let conversationsStage: string | null = null;
   try {
     await rm(vaultStage, { recursive: true, force: true });
     await cp(sourceVault, vaultStage, { recursive: true, dereference: true });
     if (conversationsExists) {
-      conversationsStage = join(userDataPath, `.asaki-restore-conversations-${process.pid}`);
+      conversationsStage = join(userDataPath, `.asaki-restore-conversations-${restoreId}`);
       await rm(conversationsStage, { recursive: true, force: true });
       await cp(conversationsSource, conversationsStage, { recursive: true, dereference: true });
     }

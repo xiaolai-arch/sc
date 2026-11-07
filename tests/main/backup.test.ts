@@ -1,11 +1,23 @@
-import { access, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  access,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  writeFile
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  copyFileAtomic,
   createBackup,
   handleExportBackup,
   handleRestoreBackup,
-  restoreBackup
+  restoreBackup,
+  swapDirectory
 } from '../../src/main/backup';
 
 async function exists(path: string): Promise<boolean> {
@@ -304,6 +316,59 @@ test('rejects a backup folder inside the current vault', async () => {
       restoreBackup({ backupPath: inside, vaultPath: vault, userDataPath: userData, now: NOW })
     ).rejects.toThrow(/不能位于/);
     expect(await exists(join(userData, 'restore-safety'))).toBe(false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('swapDirectory replaces the target only after the staged rename succeeds', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'study-coach-swap-'));
+  try {
+    const target = join(root, 'vault');
+    const staged = join(root, 'staged');
+    await mkdir(target, { recursive: true });
+    await writeFile(join(target, 'old.md'), 'old', 'utf8');
+    await mkdir(staged, { recursive: true });
+    await writeFile(join(staged, 'new.md'), 'new', 'utf8');
+
+    await swapDirectory(staged, target);
+
+    expect(await readFile(join(target, 'new.md'), 'utf8')).toBe('new');
+    expect(await exists(join(target, 'old.md'))).toBe(false);
+    expect(await exists(staged)).toBe(false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('swapDirectory puts the old directory back when the staged rename fails', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'study-coach-swap-'));
+  try {
+    const target = join(root, 'vault');
+    await mkdir(target, { recursive: true });
+    await writeFile(join(target, 'keep.md'), 'current', 'utf8');
+
+    await expect(swapDirectory(join(root, 'missing-stage'), target)).rejects.toThrow();
+
+    expect(await readFile(join(target, 'keep.md'), 'utf8')).toBe('current');
+    expect((await readdir(root)).filter((name) => name.includes('asaki-restore-old'))).toEqual(
+      []
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('copyFileAtomic leaves the previous file intact when the source is missing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'study-coach-swap-'));
+  try {
+    const target = join(root, 'usage.json');
+    await writeFile(target, 'old', 'utf8');
+
+    await expect(copyFileAtomic(join(root, 'missing.json'), target)).rejects.toThrow();
+
+    expect(await readFile(target, 'utf8')).toBe('old');
+    expect(await readdir(root)).toEqual(['usage.json']);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

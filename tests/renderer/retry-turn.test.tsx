@@ -41,3 +41,21 @@ test('retries the failed turn from the error banner instead of only refreshing',
     expect(screen.queryByRole('button', { name: '停止生成' })).not.toBeInTheDocument()
   );
 });
+
+test('keeps the draft when the message never reaches the conversation', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage, { streamPace: 0.01 });
+  api.createConversation = async () => {
+    throw new Error('写入失败');
+  };
+  window.studyCoach = api;
+  window.studyCoachPrototype = { reset: vi.fn() };
+  render(<Workspace hasApiKey={false} onRefresh={vi.fn()} />);
+
+  const composer = await screen.findByLabelText('向阿咲提问');
+  await userEvent.type(composer, '这句话不能丢');
+  await userEvent.click(screen.getByRole('button', { name: '发送' }));
+
+  expect(await screen.findByText(/写入失败/)).toBeInTheDocument();
+  expect(screen.getByLabelText('向阿咲提问')).toHaveValue('这句话不能丢');
+});

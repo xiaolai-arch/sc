@@ -369,8 +369,19 @@ test('warns before leaving settings with unsaved edits', async () => {
   expect(screen.queryByText('设置尚未保存')).not.toBeInTheDocument();
   expect(screen.getByLabelText('模型名称')).toBeInTheDocument();
 
+  // Sidebar workspace switches and new drafts must also be guarded, not just
+  // the page-level navigation buttons.
+  await userEvent.click(screen.getByRole('button', { name: '考研' }));
+  expect(await screen.findByText('设置尚未保存')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: '取消' }));
+
+  await userEvent.click(screen.getByRole('button', { name: '新对话' }));
+  expect(await screen.findByText('设置尚未保存')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: '取消' }));
+
   await userEvent.click(nav().getByRole('button', { name: '记忆' }));
-  await userEvent.click(await screen.findByRole('button', { name: '放弃修改并离开' }));
+  expect(await screen.findByText('设置尚未保存')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: '放弃修改并离开' }));
   expect(
     await screen.findByText('极限定义还不稳，建议先复习再做新题。')
   ).toBeInTheDocument();

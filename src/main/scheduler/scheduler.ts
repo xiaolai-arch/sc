@@ -7,6 +7,9 @@ import {
   type NotificationState
 } from './time';
 
+/** Three ticks (90s by default) is enough for a transient OS/IO failure. */
+const MAX_TRIGGER_ATTEMPTS = 3;
+
 export type SchedulerTriggerKind =
   | 'morning-plan'
   | 'evening-review'
@@ -183,6 +186,13 @@ export class Scheduler {
     | undefined;
   private readonly onError: ((error: unknown) => void) | undefined;
   private readonly delivered = new Set<string>();
+  /** Generated notifications whose sink failed; retry the sink, not the work. */
+  private readonly pending = new Map<
+    string,
+    { notification: SchedulerNotification; attempts: number }
+  >();
+  /** Consecutive callback failures per trigger, so one broken day cannot loop forever. */
+  private readonly attempts = new Map<string, number>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private running: Promise<SchedulerTickResult> | null = null;
 
@@ -251,7 +261,33 @@ export class Scheduler {
       if (this.delivered.has(key)) continue;
 
       if (state !== 'enabled') {
+        // A suppressed notification is dropped rather than shown late.
+        this.pending.delete(key);
         result.suppressed.push({ key, kind: trigger.kind, reason: state });
+        continue;
+      }
+
+      // A previous tick already generated this notification but its sink
+      // failed. Retry only the sink so a broken notifier cannot spend another
+      // model call or budget unit every 30 seconds.
+      const pending = this.pending.get(key);
+      if (pending) {
+        try {
+          await this.notify(pending.notification);
+          this.delivered.add(key);
+          this.pending.delete(key);
+          this.attempts.delete(key);
+          result.delivered.push(pending.notification);
+        } catch (error) {
+          pending.attempts += 1;
+          if (pending.attempts >= MAX_TRIGGER_ATTEMPTS) {
+            // Give up on the day rather than retry forever; surface the cause.
+            this.delivered.add(key);
+            this.pending.delete(key);
+            this.onError?.(error);
+          }
+          result.failed.push(key);
+        }
         continue;
       }
 
@@ -297,11 +333,29 @@ export class Scheduler {
             if (trigger.kind === 'evening-review') await this.onEveningReview?.(date);
           }
         }
+      } catch (error) {
+        const count = (this.attempts.get(key) ?? 0) + 1;
+        if (count >= MAX_TRIGGER_ATTEMPTS) {
+          // Consume the trigger after repeated failures; otherwise a broken
+          // model or vault read would retry on every tick for the rest of the day.
+          this.delivered.add(key);
+          this.attempts.delete(key);
+          this.onError?.(error);
+        } else {
+          this.attempts.set(key, count);
+        }
+        result.failed.push(key);
+        continue;
+      }
+
+      try {
         await this.notify(notification);
         this.delivered.add(key);
+        this.attempts.delete(key);
         result.delivered.push(notification);
       } catch {
-        // Leave the key unconsumed so a later tick can retry exactly once.
+        // Keep the generated notification so later ticks retry delivery only.
+        this.pending.set(key, { notification, attempts: 1 });
         result.failed.push(key);
       }
     }

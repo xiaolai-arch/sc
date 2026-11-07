@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { friendlyErrorMessage } from '../../shared/errors';
 import type { LearnerProfile } from '../../shared/memory';
 import type {
@@ -80,13 +80,29 @@ export function ProjectsPage({
   onResetFocus
 }: ProjectsPageProps) {
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
-  const [editingWorkspace, setEditingWorkspace] = useState(false);
+  // Which project the open editor belongs to. Comparing it against the
+  // selected project keeps a switch from ever submitting project A's drafts
+  // into project B.
+  const [editingFor, setEditingFor] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState('');
   const [goalDraft, setGoalDraft] = useState('');
   const [descriptionDraft, setDescriptionDraft] = useState('');
   const [savingWorkspace, setSavingWorkspace] = useState(false);
   const [deletingWorkspace, setDeletingWorkspace] = useState(false);
   const [confirmDeleteWorkspace, setConfirmDeleteWorkspace] = useState(false);
+
+  const workspaceId = workspace?.id ?? null;
+  const editingWorkspace = editingFor !== null && editingFor === workspaceId;
+
+  useEffect(() => {
+    if (editingFor === null || editingFor === workspaceId) return;
+    setEditingFor(null);
+    setNameDraft('');
+    setGoalDraft('');
+    setDescriptionDraft('');
+    setConfirmDeleteWorkspace(false);
+    setWorkspaceError(null);
+  }, [editingFor, workspaceId]);
 
   function startWorkspaceEdit() {
     if (!workspace) return;
@@ -95,7 +111,7 @@ export function ProjectsPage({
     setDescriptionDraft(workspace.description ?? '');
     setConfirmDeleteWorkspace(false);
     setWorkspaceError(null);
-    setEditingWorkspace(true);
+    setEditingFor(workspace.id);
   }
 
   async function removeWorkspace() {
@@ -109,7 +125,7 @@ export function ProjectsPage({
     try {
       await onDeleteWorkspace(workspace.id);
       setConfirmDeleteWorkspace(false);
-      setEditingWorkspace(false);
+      setEditingFor(null);
     } catch (cause) {
       setWorkspaceError(friendlyErrorMessage(cause, '删除失败，请重试。'));
     } finally {
@@ -119,6 +135,9 @@ export function ProjectsPage({
 
   async function saveWorkspace() {
     if (!workspace || savingWorkspace) return;
+    // The editor only renders for its own project, but keep the invariant
+    // local: a stale submit must never write drafts into another project.
+    if (editingFor !== workspace.id) return;
     const name = nameDraft.trim();
     if (!name) {
       setWorkspaceError('项目名称不能为空。');
@@ -133,7 +152,7 @@ export function ProjectsPage({
         goal: goalDraft.trim(),
         description: descriptionDraft.trim()
       });
-      setEditingWorkspace(false);
+      setEditingFor(null);
     } catch (cause) {
       setWorkspaceError(friendlyErrorMessage(cause, '保存失败，请重试。'));
     } finally {
@@ -197,7 +216,7 @@ export function ProjectsPage({
                   <button
                     type="button"
                     onClick={() =>
-                      editingWorkspace ? setEditingWorkspace(false) : startWorkspaceEdit()
+                      editingWorkspace ? setEditingFor(null) : startWorkspaceEdit()
                     }
                     className="rounded-full px-4 py-2 text-[13px] font-medium text-[#0071e3] transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:bg-[#0071e3]/10 hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#4da3ff] dark:hover:bg-[#0a84ff]/20"
                   >
@@ -280,7 +299,7 @@ export function ProjectsPage({
                     <button
                       type="button"
                       onClick={() => {
-                        setEditingWorkspace(false);
+                        setEditingFor(null);
                         setConfirmDeleteWorkspace(false);
                         setWorkspaceError(null);
                       }}

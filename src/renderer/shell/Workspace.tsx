@@ -219,7 +219,13 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     null
   );
   const [settingsDirty, setSettingsDirty] = useState(false);
-  const [pendingSection, setPendingSection] = useState<Section | null>(null);
+  const [settingsPromptOpen, setSettingsPromptOpen] = useState(false);
+  const settingsDirtyRef = useRef(false);
+  settingsDirtyRef.current = settingsDirty;
+  const sectionRef = useRef<Section>('chat');
+  sectionRef.current = section;
+  /** The navigation the user asked for while Settings had unsaved edits. */
+  const pendingNavigationRef = useRef<(() => void) | null>(null);
   const [onboardingDone, setOnboardingDone] = useState(false);
   const budgetConfirmResolveRef = useRef<((accepted: boolean) => void) | null>(null);
   const budgetConfirmedRef = useRef(false);
@@ -347,13 +353,16 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     const api = window.studyCoach;
     if (!api?.onNavigate) return undefined;
     return api.onNavigate((target) => {
-      setSidebarOpen(false);
-      if (target === 'review') {
-        setProjectId(null);
-        setSection('review');
+      if (target === 'settings') {
+        setSidebarOpen(false);
+        setSection('settings');
         return;
       }
-      setSection('settings');
+      guardSettings(() => {
+        setSidebarOpen(false);
+        setProjectId(null);
+        setSection('review');
+      });
     });
   }, []);
 
@@ -419,15 +428,17 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
   // actually leaves Settings/Projects and shows the selected conversation.
   useEffect(() => {
     if (!conversations.externalOpen) return;
-    stopActiveStreamForNavigation();
-    setStreamingMessage(null);
-    setActionError(null);
-    setEditingMessageId(null);
-    setComposerText('');
-    setModelPickerOpen(false);
-    setModelError(null);
-    setSidebarOpen(false);
-    setSection('chat');
+    guardSettings(() => {
+      stopActiveStreamForNavigation();
+      setStreamingMessage(null);
+      setActionError(null);
+      setEditingMessageId(null);
+      setComposerText('');
+      setModelPickerOpen(false);
+      setModelError(null);
+      setSidebarOpen(false);
+      setSection('chat');
+    });
   }, [conversations.externalOpen?.seq]);
 
   const chatMessages: ChatMessage[] = [
@@ -489,9 +500,9 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
       /** Overrides the chat scope for a newly created conversation. */
       workspaceId?: string | null;
     }
-  ) {
-    if (typing) return;
-    if (!(await confirmBudget())) return;
+  ): Promise<boolean> {
+    if (typing) return false;
+    if (!(await confirmBudget())) return false;
     const generation = ++streamGenerationRef.current;
     retryTurnRef.current = null;
     setCanRetryTurn(false);
@@ -517,7 +528,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     } catch (cause) {
       setActionError(messageOf(cause));
       setTyping(false);
-      return;
+      return false;
     }
 
     if (options.appendUser) {
@@ -533,7 +544,9 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
       } catch (cause) {
         setActionError(messageOf(cause));
         setTyping(false);
-        return;
+        // The user message never reached the conversation, so the caller must
+        // keep the draft instead of clearing it.
+        return false;
       }
     }
 
@@ -743,11 +756,12 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
           await conversations.select(finalConversationId);
         }
         await reload();
-        return;
+        return true;
       }
       await conversations.select(finalConversationId);
       await conversations.refresh();
       await reload();
+      return true;
     } catch (cause) {
       flushNow();
       if (generation !== streamGenerationRef.current) {
@@ -755,7 +769,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
         // not an error worth showing in the new view.
         await conversations.refresh().catch(() => undefined);
         await reload().catch(() => undefined);
-        return;
+        return true;
       }
       setActionError(streamError ?? messageOf(cause));
       if (conversation) {
@@ -771,6 +785,9 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
       } catch {
         // The visible error banner already explains the failure.
       }
+      // The user message was stored before streaming, so the draft is no
+      // longer the only copy; the banner offers a retry of the answer.
+      return true;
     } finally {
       flushNow();
       if (trace.length > 0) {
@@ -795,7 +812,9 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
   }
 
   async function submitComposer(text: string): Promise<boolean> {
-    if (typing) return false;
+    // While another conversation is loading, `active` is null; sending now
+    // would create a brand-new thread instead of reaching the selected one.
+    if (typing || conversations.selecting) return false;
     if (!(await confirmBudget())) return false;
     const conversation = conversations.active;
     if (editingMessageId && conversation) {
@@ -812,8 +831,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
       }
     }
     setEditingMessageId(null);
-    await runTurn(text, { appendUser: true, conversation });
-    return true;
+    return runTurn(text, { appendUser: true, conversation });
   }
 
   async function regenerateMessage(messageId: string) {
@@ -978,12 +996,43 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     setSidebarOpen(false);
   }
 
+  /**
+   * Runs a navigation action, but asks first when it would leave Settings with
+   * unsaved edits. The action is replayed after the user confirms, so callers
+   * can defer the whole jump (including workspace and draft changes).
+   */
+  function guardSettings(action: () => void): boolean {
+    if (sectionRef.current === 'settings' && settingsDirtyRef.current) {
+      pendingNavigationRef.current = action;
+      setSettingsPromptOpen(true);
+      return false;
+    }
+    action();
+    return true;
+  }
+
+  function cancelPendingNavigation() {
+    pendingNavigationRef.current = null;
+    setSettingsPromptOpen(false);
+  }
+
+  function confirmDiscardSettings() {
+    const action = pendingNavigationRef.current;
+    pendingNavigationRef.current = null;
+    setSettingsPromptOpen(false);
+    setSettingsDirty(false);
+    // The action runs before React re-renders, so update the ref the guard
+    // reads directly; otherwise it would prompt a second time.
+    settingsDirtyRef.current = false;
+    action?.();
+  }
+
   function changeSection(next: Section) {
-    if (section === 'settings' && settingsDirty && next !== 'settings') {
-      setPendingSection(next);
+    if (next === 'settings') {
+      applySection(next);
       return;
     }
-    applySection(next);
+    guardSettings(() => applySection(next));
   }
 
   /** Leaving a turn must not leave its Stop button bound to the new view. */
@@ -1021,48 +1070,56 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
   }
 
   function selectDaily() {
-    const alreadyHere = section === 'chat' && chatScope === 'daily';
-    setSidebarOpen(false);
-    setSection('chat');
-    setProjectId(null);
-    setChatScope('daily');
-    const active = conversations.active;
-    const belongsDaily =
-      active?.workspaceId === DAILY_WORKSPACE_ID ||
-      (!active?.workspaceId && active?.kind === 'check-in');
-    if (active && belongsDaily) {
-      if (alreadyHere) leaveConversation();
-      return;
-    }
-    if (active) leaveConversation();
+    guardSettings(() => {
+      const alreadyHere = section === 'chat' && chatScope === 'daily';
+      setSidebarOpen(false);
+      setSection('chat');
+      setProjectId(null);
+      setChatScope('daily');
+      const active = conversations.active;
+      const belongsDaily =
+        active?.workspaceId === DAILY_WORKSPACE_ID ||
+        (!active?.workspaceId && active?.kind === 'check-in');
+      if (active && belongsDaily) {
+        if (alreadyHere) leaveConversation();
+        return;
+      }
+      if (active) leaveConversation();
+    });
   }
 
   function selectUnfiled() {
-    setSidebarOpen(false);
-    setSection('chat');
-    setProjectId(null);
-    setChatScope('unfiled');
-    const active = conversations.active;
-    if (active && !active.workspaceId && active.kind !== 'check-in') return;
-    if (active) leaveConversation();
+    guardSettings(() => {
+      setSidebarOpen(false);
+      setSection('chat');
+      setProjectId(null);
+      setChatScope('unfiled');
+      const active = conversations.active;
+      if (active && !active.workspaceId && active.kind !== 'check-in') return;
+      if (active) leaveConversation();
+    });
   }
 
   function selectWorkspace(id: string) {
-    setSidebarOpen(false);
-    setSection('chat');
-    setProjectId(id);
-    setChatScope('workspace');
-    // Keep an open conversation in this workspace; the folder row is a
-    // disclosure toggle, not a "go home" action. 新对话 starts a fresh draft.
-    if (conversations.active?.workspaceId === id) return;
-    if (conversations.active) leaveConversation();
+    guardSettings(() => {
+      setSidebarOpen(false);
+      setSection('chat');
+      setProjectId(id);
+      setChatScope('workspace');
+      // Keep an open conversation in this workspace; the folder row is a
+      // disclosure toggle, not a "go home" action. 新对话 starts a fresh draft.
+      if (conversations.active?.workspaceId === id) return;
+      if (conversations.active) leaveConversation();
+    });
   }
 
   function selectAll() {
-    setSidebarOpen(false);
-    setProjectId(null);
     if (section === 'memory' || section === 'review') return;
-    setSection('projects');
+    guardSettings(() => {
+      setSidebarOpen(false);
+      setProjectId(null);
+      setSection('projects');
+    });
   }
 
   function changeNavigation(next: NavSection) {
@@ -1086,87 +1143,97 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
   /** Every "ask the butler" affordance lands in chat and sends the prompt. */
   function promptButler(prompt: string, workspaceIdOverride?: string) {
     if (typing) return;
-    changeSection('chat');
-    const explicitWorkspaceId =
-      workspaceIdOverride ??
-      projectId ??
-      (chatScope === 'unfiled' ? null : DAILY_WORKSPACE_ID);
-    const active = conversations.active;
-    const activeWorkspaceId =
-      active?.workspaceId === DAILY_WORKSPACE_ID
-        ? DAILY_WORKSPACE_ID
-        : active?.workspaceId ?? (active ? null : explicitWorkspaceId);
-    const needsNewConversation = Boolean(
-      active && activeWorkspaceId !== explicitWorkspaceId
-    );
-    if (needsNewConversation) {
-      leaveConversation();
-      if (explicitWorkspaceId === DAILY_WORKSPACE_ID) {
-        setProjectId(null);
-        setChatScope('daily');
-      } else if (explicitWorkspaceId === null) {
-        setProjectId(null);
-        setChatScope('unfiled');
-      } else {
-        setProjectId(explicitWorkspaceId);
-        setChatScope('workspace');
+    guardSettings(() => {
+      changeSection('chat');
+      const explicitWorkspaceId =
+        workspaceIdOverride ??
+        projectId ??
+        (chatScope === 'unfiled' ? null : DAILY_WORKSPACE_ID);
+      const active = conversations.active;
+      const activeWorkspaceId =
+        active?.workspaceId === DAILY_WORKSPACE_ID
+          ? DAILY_WORKSPACE_ID
+          : active?.workspaceId ?? (active ? null : explicitWorkspaceId);
+      const needsNewConversation = Boolean(
+        active && activeWorkspaceId !== explicitWorkspaceId
+      );
+      if (needsNewConversation) {
+        leaveConversation();
+        if (explicitWorkspaceId === DAILY_WORKSPACE_ID) {
+          setProjectId(null);
+          setChatScope('daily');
+        } else if (explicitWorkspaceId === null) {
+          setProjectId(null);
+          setChatScope('unfiled');
+        } else {
+          setProjectId(explicitWorkspaceId);
+          setChatScope('workspace');
+        }
       }
-    }
-    void runTurn(prompt, {
-      appendUser: true,
-      workspaceId: explicitWorkspaceId,
-      ...(needsNewConversation ? { newConversation: true } : {})
+      void runTurn(prompt, {
+        appendUser: true,
+        workspaceId: explicitWorkspaceId,
+        ...(needsNewConversation ? { newConversation: true } : {})
+      });
     });
   }
 
   /** Schedule actions always start a cross-workspace daily conversation. */
   function promptDaily(prompt: string) {
     if (typing) return;
-    resetDraftState();
-    setProjectId(null);
-    setChatScope('daily');
-    setSection('chat');
-    void runTurn(prompt, {
-      appendUser: true,
-      newConversation: true,
-      workspaceId: DAILY_WORKSPACE_ID
+    guardSettings(() => {
+      resetDraftState();
+      setProjectId(null);
+      setChatScope('daily');
+      setSection('chat');
+      void runTurn(prompt, {
+        appendUser: true,
+        newConversation: true,
+        workspaceId: DAILY_WORKSPACE_ID
+      });
     });
   }
 
   function startDraft() {
-    resetDraftState();
-    if (projectId && section !== 'chat') {
-      setChatScope('workspace');
-    } else if (chatScope === 'workspace' && !projectId) {
-      setChatScope('daily');
-    }
-    setSection('chat');
+    guardSettings(() => {
+      resetDraftState();
+      if (projectId && section !== 'chat') {
+        setChatScope('workspace');
+      } else if (chatScope === 'workspace' && !projectId) {
+        setChatScope('daily');
+      }
+      setSection('chat');
+    });
   }
 
   function startNewWorkspace() {
-    resetDraftState();
-    setProjectId(null);
-    setChatScope('daily');
-    setSection('chat');
-    setComposerText('我想新建一个工作区：');
+    guardSettings(() => {
+      resetDraftState();
+      setProjectId(null);
+      setChatScope('daily');
+      setSection('chat');
+      setComposerText('我想新建一个工作区：');
+    });
   }
 
   function selectConversation(id: string) {
-    // Reopening the streaming conversation should let it finish and reload, not
-    // cancel it; switching away cancels so Stop can never target the old turn.
-    const sameStreamingConversation =
-      typing && conversations.active?.id === id;
-    streamGenerationRef.current += 1;
-    if (!sameStreamingConversation) stopActiveStreamForNavigation();
-    setStreamingMessage(null);
-    setActionError(null);
-    setEditingMessageId(null);
-    setComposerText('');
-    setSidebarOpen(false);
-    setModelPickerOpen(false);
-    setModelError(null);
-    setSection('chat');
-    void conversations.select(id);
+    guardSettings(() => {
+      // Reopening the streaming conversation should let it finish and reload, not
+      // cancel it; switching away cancels so Stop can never target the old turn.
+      const sameStreamingConversation =
+        typing && conversations.active?.id === id;
+      streamGenerationRef.current += 1;
+      if (!sameStreamingConversation) stopActiveStreamForNavigation();
+      setStreamingMessage(null);
+      setActionError(null);
+      setEditingMessageId(null);
+      setComposerText('');
+      setSidebarOpen(false);
+      setModelPickerOpen(false);
+      setModelError(null);
+      setSection('chat');
+      void conversations.select(id);
+    });
   }
 
   async function openNotePreview(workspaceId: string, noteId: string): Promise<void> {
@@ -1183,13 +1250,17 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
   function openSearchResult(result: SearchResult) {
     setSearchOpen(false);
     if (result.kind === 'knowledge-topic') {
-      setKnowledgeFocusTopicId(result.docId);
-      changeNavigation('knowledge');
+      guardSettings(() => {
+        setKnowledgeFocusTopicId(result.docId);
+        changeNavigation('knowledge');
+      });
       return;
     }
     if (result.kind === 'plan') {
-      setPlanFocusId(result.docId);
-      changeSection('plan');
+      guardSettings(() => {
+        setPlanFocusId(result.docId);
+        changeSection('plan');
+      });
       return;
     }
     if (result.kind === 'memory') {
@@ -1201,17 +1272,23 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
       return;
     }
     if (result.kind === 'note' && result.workspaceId) {
-      setProjectId(result.workspaceId);
-      setChatScope('workspace');
-      changeSection('projects');
-      void openNotePreview(result.workspaceId, result.docId);
+      const workspaceId = result.workspaceId;
+      const docId = result.docId;
+      guardSettings(() => {
+        setProjectId(workspaceId);
+        setChatScope('workspace');
+        setSection('projects');
+        void openNotePreview(workspaceId, docId);
+      });
       return;
     }
-    if (result.workspaceId) {
-      setProjectId(result.workspaceId);
-      setChatScope('workspace');
-    }
-    changeSection('projects');
+    guardSettings(() => {
+      if (result.workspaceId) {
+        setProjectId(result.workspaceId);
+        setChatScope('workspace');
+      }
+      changeSection('projects');
+    });
   }
 
   /** Turn one long-plan day into ordinary tasks, so 今日安排 can schedule them. */
@@ -1367,6 +1444,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
               stats={chatStats}
               messages={chatMessages}
               typing={typing}
+              loading={conversations.selecting}
               onSend={(text) => submitComposer(text)}
               modelLabel={displayModel}
               hasApiKey={hasApiKey}
@@ -1728,26 +1806,21 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
       </Dialog>
 
       <Dialog
-        open={pendingSection !== null}
-        onClose={() => setPendingSection(null)}
+        open={settingsPromptOpen}
+        onClose={cancelPendingNavigation}
         title="设置尚未保存"
         footer={
           <div className="flex justify-end gap-2">
             <button
               type="button"
-              onClick={() => setPendingSection(null)}
+              onClick={cancelPendingNavigation}
               className="rounded-full px-4 py-2 text-[13px] font-medium text-gray-500 transition-all duration-300 hover:bg-black/[0.04] hover:text-black active:scale-[0.98] dark:text-[#a1a1a6] dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
             >
               取消
             </button>
             <button
               type="button"
-              onClick={() => {
-                const next = pendingSection;
-                setPendingSection(null);
-                setSettingsDirty(false);
-                if (next) applySection(next);
-              }}
+              onClick={confirmDiscardSettings}
               className="rounded-full bg-[#0071e3] px-4 py-2 text-[13px] font-medium text-white transition-all duration-300 hover:opacity-80 active:scale-[0.98]"
             >
               放弃修改并离开

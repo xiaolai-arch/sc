@@ -21,6 +21,8 @@ type ChatPaneProps = {
   stats?: string[];
   messages: ChatMessage[];
   typing: boolean;
+  /** A different conversation is loading; the composer is not yet targetable. */
+  loading?: boolean;
   onSend: (text: string) => void | boolean | Promise<void | boolean>;
   modelLabel: string;
   hasApiKey: boolean;
@@ -50,6 +52,7 @@ export function ChatPane({
   stats = [],
   messages,
   typing,
+  loading = false,
   onSend,
   modelLabel,
   hasApiKey,
@@ -70,7 +73,7 @@ export function ChatPane({
 }: ChatPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
-  const showWelcome = messages.length === 0 && !typing;
+  const showWelcome = messages.length === 0 && !typing && !loading;
   const lastRole = messages[messages.length - 1]?.role;
   const lastUserMessageId = [...messages].reverse().find((message) => message.role === 'user')?.id;
   const lastMessage = messages[messages.length - 1];
@@ -187,7 +190,7 @@ export function ChatPane({
                   text={composerText}
                   onTextChange={onComposerTextChange}
                   onSend={onSend}
-                  disabled={typing}
+                  disabled={typing || loading}
                 />
               </div>
             </div>
@@ -209,6 +212,12 @@ export function ChatPane({
       >
         <div className="mx-auto w-full max-w-[760px] space-y-6">
           {modelBanner}
+
+          {loading ? (
+            <p className="text-[13px] text-gray-500 dark:text-[#8e8e93]" role="status">
+              正在打开对话…
+            </p>
+          ) : null}
 
           {messages.map((message) =>
             message.role === 'user' ? (
@@ -260,7 +269,7 @@ export function ChatPane({
         text={composerText}
         onTextChange={onComposerTextChange}
         onSend={onSend}
-        disabled={typing}
+        disabled={typing || loading}
         editing={editing}
         {...(onStop ? { onStop } : {})}
         {...(onCancelEdit ? { onCancelEdit } : {})}

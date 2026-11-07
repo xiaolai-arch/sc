@@ -12,6 +12,8 @@ export type ConversationController = {
   summaries: ConversationSummary[];
   active: Conversation | null;
   loading: boolean;
+  /** A conversation switch is in flight; the previous one is already cleared. */
+  selecting: boolean;
   error: string | null;
   /** Set when a tray/notification opens a conversation outside the renderer. */
   externalOpen: { id: string; seq: number } | null;
@@ -42,7 +44,10 @@ export function useConversations(): ConversationController {
   const [summaries, setSummaries] = useState<ConversationSummary[]>([]);
   const [active, setActive] = useState<Conversation | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selecting, setSelecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const activeIdRef = useRef<string | null>(null);
+  activeIdRef.current = active?.id ?? null;
   const [externalOpen, setExternalOpen] = useState<{ id: string; seq: number } | null>(
     null
   );
@@ -68,6 +73,13 @@ export function useConversations(): ConversationController {
 
   const select = useCallback(async (id: string) => {
     const request = ++selectRequestRef.current;
+    // Clear the previous conversation before waiting: otherwise its messages
+    // stay on screen, and a send during the wait would target the old thread.
+    const switching = activeIdRef.current !== id;
+    if (switching) {
+      setActive(null);
+      setSelecting(true);
+    }
     setLoading(true);
     try {
       const api = apiOrThrow();
@@ -79,7 +91,10 @@ export function useConversations(): ConversationController {
       if (request !== selectRequestRef.current) return;
       setError(messageOf(cause));
     } finally {
-      if (request === selectRequestRef.current) setLoading(false);
+      if (request === selectRequestRef.current) {
+        setLoading(false);
+        setSelecting(false);
+      }
     }
   }, []);
 
@@ -96,12 +111,14 @@ export function useConversations(): ConversationController {
   const startDraft = useCallback(() => {
     selectRequestRef.current += 1;
     setActive(null);
+    setSelecting(false);
     setError(null);
     setLoading(false);
   }, []);
 
   const create = useCallback(async (input?: CreateConversationInput) => {
     const request = ++selectRequestRef.current;
+    setSelecting(false);
     const api = apiOrThrow();
     const conversation = await api.createConversation(input);
     if (request === selectRequestRef.current) {
@@ -182,6 +199,7 @@ export function useConversations(): ConversationController {
     summaries,
     active,
     loading,
+    selecting,
     error,
     externalOpen,
     refresh,
