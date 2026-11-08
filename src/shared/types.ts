@@ -73,6 +73,22 @@ export interface BudgetSettings {
   outputPricePerMillion?: number;
 }
 
+/**
+ * Speech-to-text endpoint used by the local video-notes tool. The API key is
+ * stored separately in the secret store, never in AppSettings.
+ */
+export interface TranscriptionSettings {
+  /** OpenAI-compatible base URL, normally ending in `/v1`. */
+  baseURL: string;
+  /** ASR model name, e.g. `mimo-v2.5-asr`. */
+  model: string;
+}
+
+export const DEFAULT_TRANSCRIPTION_SETTINGS: TranscriptionSettings = {
+  baseURL: 'https://token-plan-cn.xiaomimimo.com/v1',
+  model: 'mimo-v2.5-asr'
+};
+
 export interface AppSettings {
   /** How the butler addresses the user in greetings and the sidebar. */
   displayName?: string;
@@ -80,6 +96,7 @@ export interface AppSettings {
   provider: ProviderConfig;
   notifications: NotificationSettings;
   budget: BudgetSettings;
+  transcription: TranscriptionSettings;
   launchAtLogin: boolean;
 }
 

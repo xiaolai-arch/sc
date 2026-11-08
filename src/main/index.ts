@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, screen } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, screen, shell } from 'electron';
 import { join } from 'node:path';
 import { handleExportBackup, handleRestoreBackup } from './backup';
 import { createAppContext } from './context';
@@ -14,6 +14,7 @@ import { registerAppShortcuts } from './shortcuts';
 import { createContextScheduler, planFirstEmptyWorkspace } from './scheduler';
 import { DEFAULT_VAULT_DIRECTORY } from './settings/defaults';
 import { createElectronNotificationSink, createElectronTray, isTaskForDay } from './tray';
+import { MEDIA_EXTENSIONS } from './video-notes/media';
 import { formatLocalDate } from '../shared/date';
 import {
   DEFAULT_WINDOW_STATE,
@@ -259,6 +260,56 @@ app.whenReady().then(async () => {
   ipcMain.handle(APP_IPC_CHANNELS.restartApp, () => {
     app.relaunch();
     app.quit();
+  });
+
+  ipcMain.handle(APP_IPC_CHANNELS.pickVideoFiles, async () => {
+    try {
+      const options = {
+        title: '选择课程视频',
+        properties: ['openFile', 'multiSelections'] as const,
+        filters: [
+          {
+            name: '视频/音频',
+            extensions: MEDIA_EXTENSIONS.map((extension) => extension.slice(1))
+          },
+          { name: '所有文件', extensions: ['*'] }
+        ]
+      };
+      const selection = mainWindow
+        ? await dialog.showOpenDialog(mainWindow, {
+            ...options,
+            properties: [...options.properties]
+          })
+        : await dialog.showOpenDialog({ ...options, properties: [...options.properties] });
+      return selection.canceled ? null : selection.filePaths;
+    } catch (error) {
+      throw new Error(serializeError(error).message);
+    }
+  });
+
+  ipcMain.handle(APP_IPC_CHANNELS.pickOutputDirectory, async () => {
+    try {
+      const options = {
+        title: '选择笔记输出文件夹',
+        properties: ['openDirectory', 'createDirectory'] as const
+      };
+      const selection = mainWindow
+        ? await dialog.showOpenDialog(mainWindow, {
+            ...options,
+            properties: [...options.properties]
+          })
+        : await dialog.showOpenDialog({ ...options, properties: [...options.properties] });
+      return selection.canceled ? null : (selection.filePaths[0] ?? null);
+    } catch (error) {
+      throw new Error(serializeError(error).message);
+    }
+  });
+
+  ipcMain.handle(APP_IPC_CHANNELS.openPath, async (_event, value: unknown) => {
+    if (typeof value !== 'string' || value.trim().length === 0 || value.length > 4096) {
+      throw new Error('路径无效。');
+    }
+    return shell.openPath(value);
   });
 
   const shortcuts = registerAppShortcuts(globalShortcut, [

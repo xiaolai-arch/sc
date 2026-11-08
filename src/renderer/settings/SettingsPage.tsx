@@ -7,6 +7,7 @@ import type {
   NotificationSettings,
   ProviderConfig
 } from '../../shared/types';
+import { DEFAULT_TRANSCRIPTION_SETTINGS } from '../../shared/types';
 import type {
   LocalCliEntry,
   LocalCliFeature,
@@ -150,6 +151,20 @@ export function SettingsPage({
   });
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
   const [displayName, setDisplayName] = useState('xiaolai');
+  // Transcription is saved independently from the main settings form.
+  const [transcriptionBaseURL, setTranscriptionBaseURL] = useState(
+    DEFAULT_TRANSCRIPTION_SETTINGS.baseURL
+  );
+  const [transcriptionModel, setTranscriptionModel] = useState(
+    DEFAULT_TRANSCRIPTION_SETTINGS.model
+  );
+  const [transcriptionApiKey, setTranscriptionApiKey] = useState('');
+  const [transcriptionHasKey, setTranscriptionHasKey] = useState(false);
+  const [transcriptionSaving, setTranscriptionSaving] = useState(false);
+  const [transcriptionStatus, setTranscriptionStatus] = useState<{
+    kind: 'success' | 'error';
+    message: string;
+  } | null>(null);
   const baselineRef = useRef<string | null>(null);
   const [dirty, setDirty] = useState(false);
 
@@ -244,7 +259,20 @@ export function SettingsPage({
               return null;
             })
           : Promise.resolve(null);
-      const [value, usageSummary] = await Promise.all([api.getSettings(), usagePromise]);
+      const transcriptionPromise =
+        typeof api.getTranscriptionConfig === 'function'
+          ? api.getTranscriptionConfig().catch(() => null)
+          : Promise.resolve(null);
+      const [value, usageSummary, transcription] = await Promise.all([
+        api.getSettings(),
+        usagePromise,
+        transcriptionPromise
+      ]);
+      if (transcription) {
+        setTranscriptionBaseURL(transcription.baseURL);
+        setTranscriptionModel(transcription.model);
+        setTranscriptionHasKey(transcription.hasApiKey);
+      }
       setSavedProvider(value.provider);
       setKind(value.provider.kind);
       setModel(value.provider.model ?? '');
@@ -446,6 +474,38 @@ export function SettingsPage({
       setError(friendlyErrorMessage(cause, '清除 API Key 失败，请重试。'));
     } finally {
       setClearingKey(false);
+    }
+  }
+
+  async function saveTranscription() {
+    const api = window.studyCoach;
+    if (!api || transcriptionSaving) return;
+    const baseURL = transcriptionBaseURL.trim().replace(/\/+$/, '');
+    const model = transcriptionModel.trim();
+    if (!baseURL || !model) {
+      setTranscriptionStatus({ kind: 'error', message: 'Base URL 和模型名称不能为空。' });
+      return;
+    }
+    setTranscriptionSaving(true);
+    setTranscriptionStatus(null);
+    try {
+      const next = await api.saveTranscriptionConfig({
+        baseURL,
+        model,
+        ...(transcriptionApiKey.trim() ? { apiKey: transcriptionApiKey.trim() } : {})
+      });
+      setTranscriptionBaseURL(next.baseURL);
+      setTranscriptionModel(next.model);
+      setTranscriptionHasKey(next.hasApiKey);
+      setTranscriptionApiKey('');
+      setTranscriptionStatus({ kind: 'success', message: '语音转写设置已保存。' });
+    } catch (cause) {
+      setTranscriptionStatus({
+        kind: 'error',
+        message: friendlyErrorMessage(cause, '保存语音转写设置失败，请重试。')
+      });
+    } finally {
+      setTranscriptionSaving(false);
     }
   }
 
@@ -940,6 +1000,90 @@ export function SettingsPage({
                 ) : null}
               </div>
             ) : null}
+          </Card>
+
+          <Card id="settings-transcription">
+            <h3 className="text-[17px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
+              视频笔记转写
+            </h3>
+            <p className="mt-2 text-gray-500 dark:text-[#a1a1a6]">
+              知识库的「视频笔记」工具用它把课程音频转成文字。凭据单独保存，与对话模型的 API Key 互不影响。
+            </p>
+            <div className="mt-6 grid gap-5 md:grid-cols-2">
+              <div>
+                <Label htmlFor="settings-transcription-base-url">转写 Base URL</Label>
+                <Input
+                  id="settings-transcription-base-url"
+                  value={transcriptionBaseURL}
+                  onChange={(event) => setTranscriptionBaseURL(event.target.value)}
+                  placeholder={DEFAULT_TRANSCRIPTION_SETTINGS.baseURL}
+                  autoComplete="off"
+                />
+              </div>
+              <div>
+                <Label htmlFor="settings-transcription-model">转写模型</Label>
+                <Input
+                  id="settings-transcription-model"
+                  value={transcriptionModel}
+                  onChange={(event) => setTranscriptionModel(event.target.value)}
+                  placeholder={DEFAULT_TRANSCRIPTION_SETTINGS.model}
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+            <div className="mt-5">
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="settings-transcription-api-key">转写 API Key</Label>
+                <span
+                  className={`text-[12px] font-medium ${
+                    transcriptionHasKey
+                      ? 'text-[#1d7a36] dark:text-[#7ee787]'
+                      : 'text-gray-500 dark:text-[#a1a1a6]'
+                  }`}
+                >
+                  {transcriptionHasKey ? '已保存' : '未保存'}
+                </span>
+              </div>
+              <Input
+                id="settings-transcription-api-key"
+                type="password"
+                value={transcriptionApiKey}
+                onChange={(event) => setTranscriptionApiKey(event.target.value)}
+                placeholder={
+                  transcriptionHasKey ? '已保存，留空则保持不变' : '粘贴语音识别 API Key'
+                }
+                autoComplete="off"
+              />
+              <p className="mt-2 text-sm text-gray-500 dark:text-[#a1a1a6]">
+                密钥通过系统钥匙串加密保存，只发送给上面的语音识别服务。更换 Base URL 时会自动清除旧密钥。
+              </p>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <Button
+                size="sm"
+                disabled={transcriptionSaving}
+                onClick={() => void saveTranscription()}
+              >
+                {transcriptionSaving ? '正在保存…' : '保存转写设置'}
+              </Button>
+              {transcriptionStatus ? (
+                <p
+                  {...(transcriptionStatus.kind === 'success'
+                    ? { role: 'status' }
+                    : { role: 'alert' })}
+                  className={
+                    transcriptionStatus.kind === 'error'
+                      ? 'text-sm text-[#d70015] dark:text-[#ff7b72]'
+                      : 'inline-flex items-center gap-2 text-sm text-[#1d1d1f] dark:text-[#f5f5f7]'
+                  }
+                >
+                  {transcriptionStatus.kind === 'success' ? (
+                    <CheckIcon className="h-4 w-4 text-[#34c759]" />
+                  ) : null}
+                  {transcriptionStatus.message}
+                </p>
+              ) : null}
+            </div>
           </Card>
 
           <Card id="settings-budget">

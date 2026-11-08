@@ -1,4 +1,5 @@
 import type { AppSettings, ProviderConfig } from '../../shared/types';
+import { DEFAULT_TRANSCRIPTION_SETTINGS } from '../../shared/types';
 
 export const DEFAULT_VAULT_DIRECTORY = 'StudyCoachVault';
 
@@ -21,6 +22,7 @@ export function createDefaultSettings(vaultPath: string): AppSettings {
       dndEnd: '07:30'
     },
     budget: { proactiveSessionsPerDay: 4, dailyTokens: 200000 },
+    transcription: { ...DEFAULT_TRANSCRIPTION_SETTINGS },
     launchAtLogin: false
   };
 }

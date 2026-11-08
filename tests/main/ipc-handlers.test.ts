@@ -8,6 +8,7 @@ import { createAppContext, type AppContext } from '../../src/main/context';
 import {
   BUTLER_STREAM_CHANNELS,
   IPC_CHANNELS,
+  VIDEO_NOTES_CHANNELS,
   createIpcHandlers,
   registerIpcHandlers,
   serializeError
@@ -73,12 +74,13 @@ test('registers every channel exactly once', async () => {
     }
   });
 
-  expect(registered.size).toBe(Object.keys(IPC_CHANNELS).length + 2);
+  expect(registered.size).toBe(Object.keys(IPC_CHANNELS).length + 3);
   for (const channel of Object.values(IPC_CHANNELS)) {
     expect(registered.has(channel)).toBe(true);
   }
   expect(registered.has(BUTLER_STREAM_CHANNELS.stream)).toBe(true);
   expect(registered.has(BUTLER_STREAM_CHANNELS.cancel)).toBe(true);
+  expect(registered.has(VIDEO_NOTES_CHANNELS.generate)).toBe(true);
 });
 
 test('routes every channel to the matching api method', async () => {

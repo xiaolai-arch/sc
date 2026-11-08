@@ -25,6 +25,7 @@ import { createDefaultSettings } from './settings/defaults';
 import { InMemorySecretStore, SafeStorageSecretStore, type SecretStore } from './settings/secret-store';
 import { SettingsService } from './settings/settings-service';
 import { JsonStateStore, type AppState } from './state-store';
+import { createVideoNotesService, type VideoNotesService } from './video-notes';
 import { createRecordingModelClient } from './usage/recording-model-client';
 import { UsageStore } from './usage/usage-store';
 import { createWorkspaceService } from './workspace/create-workspace-service';
@@ -84,6 +85,10 @@ export interface CreateAppContextOptions {
   /** Offline model seam used by integration tests. Never used for network here. */
   modelClient?: ModelClient | null;
   secretStore?: SecretStore;
+  /** Separate credential file for the ASR endpoint; never exposed to the renderer. */
+  transcriptionSecretStore?: SecretStore;
+  /** Test seam for the whole video-notes pipeline. */
+  videoNotesService?: VideoNotesService;
   /**
    * Called after settings are persisted. The Electron entry point uses it to
    * apply OS-level settings (launch at login) immediately instead of waiting
@@ -98,6 +103,8 @@ export interface AppContext {
   state: JsonStateStore;
   settings: SettingsService;
   secrets: SecretStore;
+  transcriptionSecrets: SecretStore;
+  videoNotes: VideoNotesService;
   conversationStore: ConversationStore;
   usage: UsageStore;
   readonly workspace: WorkspaceService;
@@ -119,6 +126,8 @@ export interface AppContext {
 interface ActiveServices {
   vaultPath: string;
   providerSignature: string;
+  /** The active model client (already wrapped for usage recording). */
+  modelClient: ModelClient | null;
   workspace: WorkspaceService;
   butler: ButlerService;
   practice: PracticeService;
@@ -182,6 +191,9 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
   const secrets =
     options.secretStore ??
     new SafeStorageSecretStore(join(options.userDataPath, 'secrets', 'api-key.bin'));
+  const transcriptionSecrets =
+    options.transcriptionSecretStore ??
+    new SafeStorageSecretStore(join(options.userDataPath, 'secrets', 'transcription-key.bin'));
   const now = options.now ?? (() => new Date());
   const today = () => formatLocalDate(now());
   const usageStore = new UsageStore(join(options.userDataPath, 'usage.json'), { now });
@@ -354,6 +366,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     return {
       vaultPath: nextSettings.vaultPath,
       providerSignature: JSON.stringify(nextSettings.provider),
+      modelClient,
       workspace,
       butler,
       practice: createPractice(nextSettings.vaultPath),
@@ -420,6 +433,24 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
   }
 
   await rebuildServices(stored.settings);
+
+  // The ASR key and the note-model client are resolved per run, so a settings
+  // or credential change applies without rebuilding this service.
+  const videoNotes =
+    options.videoNotesService ??
+    createVideoNotesService({
+      cacheRoot: join(options.userDataPath, 'video-notes-cache'),
+      getAsrConfig: async () => {
+        const current = await settings.get();
+        return {
+          baseURL: current.transcription.baseURL,
+          model: current.transcription.model,
+          apiKey: await transcriptionSecrets.getApiKey()
+        };
+      },
+      getModelClient: async () => (await getServices()).modelClient,
+      now
+    });
 
   async function readReviews(input: ListReviewsInput = {}): Promise<ReviewRecord[]> {
     const services = await getServices();
@@ -517,8 +548,54 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       await rebuildServices(await settings.get());
     },
 
+    async getTranscriptionConfig() {
+      const current = await settings.get();
+      return {
+        baseURL: current.transcription.baseURL,
+        model: current.transcription.model,
+        hasApiKey: await transcriptionSecrets.hasApiKey()
+      };
+    },
+
+    async saveTranscriptionConfig(input) {
+      const previous = await settings.get();
+      const normalized = (value: string) => value.trim().replace(/\/+$/, '').toLowerCase();
+      const endpointChanged =
+        normalized(previous.transcription.baseURL) !== normalized(input.baseURL);
+      const updated = await settings.update({
+        transcription: { baseURL: input.baseURL, model: input.model }
+      });
+      // A key belongs to an endpoint; switching endpoints without supplying a
+      // new key clears it instead of leaking the old credential to a new host.
+      if (input.apiKey !== undefined) {
+        await transcriptionSecrets.setApiKey(input.apiKey);
+      } else if (endpointChanged) {
+        await transcriptionSecrets.clearApiKey();
+      }
+      return {
+        baseURL: updated.transcription.baseURL,
+        model: updated.transcription.model,
+        hasApiKey: await transcriptionSecrets.hasApiKey()
+      };
+    },
+
     async scanLocalClis() {
       return scanLocalClis();
+    },
+
+    // The native file pickers and shell.openPath live in the Electron entry
+    // point; these stubs keep the contract complete for headless contexts.
+    async pickVideoFiles() {
+      return null;
+    },
+    async pickOutputDirectory() {
+      return null;
+    },
+    async openPath() {
+      throw new Error('打开文件需要在桌面应用中使用。');
+    },
+    async generateVideoNotes(input, onProgress) {
+      return videoNotes.generate(input, onProgress);
     },
 
     async listWorkspaces() {
@@ -827,6 +904,8 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     state,
     settings,
     secrets,
+    transcriptionSecrets,
+    videoNotes,
     conversationStore,
     usage: usageStore,
     get workspace() {

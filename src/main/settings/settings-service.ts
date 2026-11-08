@@ -2,8 +2,10 @@ import type {
   AppSettings,
   LocalCliEffort,
   NotificationSettings,
-  ProviderConfig
+  ProviderConfig,
+  TranscriptionSettings
 } from '../../shared/types';
+import { DEFAULT_TRANSCRIPTION_SETTINGS } from '../../shared/types';
 import type { SettingsPatch } from '../../shared/ipc';
 import type { AppState, JsonStateStore } from '../state-store';
 import { createDefaultSettings } from './defaults';
@@ -40,10 +42,21 @@ function normalizeSettings(settings: AppSettings): AppSettings {
     typeof settings.displayName === 'string' && settings.displayName.trim().length > 0
       ? settings.displayName.trim()
       : createDefaultSettings('').displayName;
+  const transcription = settings.transcription;
   return {
     ...settings,
     displayName,
-    notifications: normalizeNotifications(settings.notifications)
+    notifications: normalizeNotifications(settings.notifications),
+    transcription: {
+      baseURL:
+        typeof transcription?.baseURL === 'string' && transcription.baseURL.trim().length > 0
+          ? transcription.baseURL.trim()
+          : DEFAULT_TRANSCRIPTION_SETTINGS.baseURL,
+      model:
+        typeof transcription?.model === 'string' && transcription.model.trim().length > 0
+          ? transcription.model.trim()
+          : DEFAULT_TRANSCRIPTION_SETTINGS.model
+    }
   };
 }
 
@@ -167,6 +180,7 @@ function validateBudget(value: unknown): AppSettings['budget'] | undefined {
 
 function mergeSettings(current: AppSettings, patch: unknown): AppSettings {
   if (!isRecord(patch)) throw new Error('设置参数无效。');
+  const transcriptionPatch = validateTranscription(patch.transcription);
   const next: AppSettings = {
     displayName:
       patch.displayName === undefined
@@ -182,10 +196,31 @@ function mergeSettings(current: AppSettings, patch: unknown): AppSettings {
       ...current.budget,
       ...(validateBudget(patch.budget) ?? {})
     },
+    transcription: {
+      ...current.transcription,
+      ...transcriptionPatch
+    },
     launchAtLogin:
       patch.launchAtLogin === undefined ? current.launchAtLogin : validateBoolean(patch.launchAtLogin)
   };
   return next;
+}
+
+function validateTranscription(value: unknown): Partial<TranscriptionSettings> {
+  if (value === undefined) return {};
+  if (!isRecord(value)) throw new Error('语音转写设置格式无效。');
+  const result: Partial<TranscriptionSettings> = {};
+  if (value.baseURL !== undefined) {
+    const baseURL = nonEmptyString(value.baseURL, '语音转写 Base URL');
+    if (!/^https?:\/\//i.test(baseURL)) {
+      throw new Error('语音转写 Base URL 必须以 http:// 或 https:// 开头。');
+    }
+    result.baseURL = baseURL.replace(/\/+$/, '');
+  }
+  if (value.model !== undefined) {
+    result.model = nonEmptyString(value.model, '语音转写模型名称');
+  }
+  return result;
 }
 
 function validateBoolean(value: unknown): boolean {

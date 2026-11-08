@@ -35,9 +35,55 @@ test('returns documented defaults', async () => {
       dndEnd: '07:30'
     },
     budget: { proactiveSessionsPerDay: 4, dailyTokens: 200000 },
+    transcription: {
+      baseURL: 'https://token-plan-cn.xiaomimimo.com/v1',
+      model: 'mimo-v2.5-asr'
+    },
     launchAtLogin: false
   });
   expect(JSON.stringify(settings)).not.toContain('apiKey');
+});
+
+test('merges and validates the transcription endpoint', async () => {
+  const { service } = memorySettings();
+
+  const updated = await service.update({
+    transcription: {
+      baseURL: 'https://asr.example.com/v2///',
+      model: '  whisper-large  '
+    }
+  });
+  expect(updated.transcription).toEqual({
+    baseURL: 'https://asr.example.com/v2',
+    model: 'whisper-large'
+  });
+
+  await expect(
+    service.update({ transcription: { baseURL: 'ftp://host' } as never })
+  ).rejects.toThrow(/http/);
+  await expect(
+    service.update({ transcription: { model: '   ' } as never })
+  ).rejects.toThrow('语音转写模型名称不能为空。');
+  await expect(service.update({ transcription: 'nope' } as never)).rejects.toThrow(
+    /语音转写设置格式无效/
+  );
+  // Failed writes leave the previous value intact.
+  expect((await service.get()).transcription.model).toBe('whisper-large');
+});
+
+test('fills transcription defaults for settings written before the feature existed', async () => {
+  const defaults = createDefaultSettings('/tmp/old-vault');
+  const { transcription: _transcription, ...oldSettings } = defaults;
+  const state = new JsonStateStore({
+    filePath: null,
+    createDefault: () => ({ onboarded: true, settings: oldSettings as never })
+  });
+  const service = new SettingsService(state);
+
+  expect((await service.get()).transcription).toEqual({
+    baseURL: 'https://token-plan-cn.xiaomimimo.com/v1',
+    model: 'mimo-v2.5-asr'
+  });
 });
 
 test('merges nested settings and persists them across store instances', async () => {

@@ -12,11 +12,12 @@ import type {
 } from '../../shared/knowledge';
 import type { Workspace } from '../../shared/workspace';
 import { Dialog } from '../ui/Dialog';
-import { PlusIcon } from '../ui/icons';
+import { PlayIcon, PlusIcon } from '../ui/icons';
 import { Select } from '../ui/Select';
 import { KnowledgeGraph } from './KnowledgeGraph';
 import { KnowledgeNotePane } from './KnowledgeNotePane';
 import { PageFrame } from './PageFrame';
+import { VideoNotesDialog } from './VideoNotesDialog';
 import {
   STATUS_DOT_CLASS,
   STATUS_LABELS,
@@ -42,6 +43,8 @@ type KnowledgePageProps = {
   getKnowledgeNote: (topicId: string) => Promise<KnowledgeNote>;
   saveKnowledgeNote: (input: SaveKnowledgeNoteInput) => Promise<KnowledgeNote>;
   getKnowledgeBacklinks: (topicId: string) => Promise<KnowledgeBacklink[]>;
+  /** Opens Settings from the video-notes dialog. */
+  onOpenSettings?: () => void;
 };
 
 type TopicForm = {
@@ -145,7 +148,8 @@ export function KnowledgePage({
   onMergeTopic,
   getKnowledgeNote,
   saveKnowledgeNote,
-  getKnowledgeBacklinks
+  getKnowledgeBacklinks,
+  onOpenSettings
 }: KnowledgePageProps) {
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -156,6 +160,7 @@ export function KnowledgePage({
   const [form, setForm] = useState<TopicForm>(() => emptyForm(defaultWorkspaceId));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [videoNotesOpen, setVideoNotesOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergeTargetId, setMergeTargetId] = useState('');
   const [merging, setMerging] = useState(false);
@@ -351,6 +356,16 @@ export function KnowledgePage({
               图谱
             </button>
           </div>
+          <button
+            type="button"
+            aria-label="视频笔记"
+            title="用本地课程视频生成笔记"
+            onClick={() => setVideoNotesOpen(true)}
+            className="flex h-9 items-center gap-1.5 rounded-xl bg-[#f5f5f7] px-2.5 text-[13px] font-medium text-gray-700 transition-colors duration-200 hover:bg-black/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 md:px-3 dark:bg-white/[0.08] dark:text-[#a1a1a6] dark:hover:bg-white/[0.12]"
+          >
+            <PlayIcon className="h-4 w-4" />
+            <span className="hidden md:inline">视频笔记</span>
+          </button>
           <button
             type="button"
             onClick={openCreate}
@@ -639,6 +654,12 @@ export function KnowledgePage({
           </div>
         </form>
       </Dialog>
+
+      <VideoNotesDialog
+        open={videoNotesOpen}
+        onClose={() => setVideoNotesOpen(false)}
+        {...(onOpenSettings ? { onOpenSettings } : {})}
+      />
     </PageFrame>
   );
 }

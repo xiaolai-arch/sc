@@ -91,6 +91,14 @@ import { buildTemplatePlan } from '../src/shared/plan-template';
 import type { SearchResult, SearchResultKind } from '../src/shared/search';
 import { parseLocalDate } from '../src/shared/date';
 import type { AppSettings } from '../src/shared/types';
+import { DEFAULT_TRANSCRIPTION_SETTINGS } from '../src/shared/types';
+import type {
+  SaveTranscriptionConfigInput,
+  VideoNotesInput,
+  VideoNotesProgress,
+  VideoNotesResult,
+  TranscriptionConfigView
+} from '../src/shared/video-notes';
 import {
   demoMemory,
   demoNotes,
@@ -157,6 +165,7 @@ const defaultSettings: AppSettings = {
     dndEnd: '07:30'
   },
   budget: { proactiveSessionsPerDay: 4, dailyTokens: 200000 },
+  transcription: { ...DEFAULT_TRANSCRIPTION_SETTINGS },
   launchAtLogin: false
 };
 
@@ -261,7 +270,11 @@ function readState(storage: Storage | null): MockState {
         ...parsed.settings,
         provider: parsed.settings?.provider ?? defaultSettings.provider,
         notifications: { ...defaultSettings.notifications, ...parsed.settings?.notifications },
-        budget: { ...defaultSettings.budget, ...parsed.settings?.budget }
+        budget: { ...defaultSettings.budget, ...parsed.settings?.budget },
+        transcription: {
+          ...defaultSettings.transcription,
+          ...parsed.settings?.transcription
+        }
       },
       reviews: Array.isArray(parsed.reviews) ? (parsed.reviews as ReviewRecord[]) : [],
       workspaces: Array.isArray(parsed.workspaces) ? parsed.workspaces : seeded.workspaces,
@@ -398,6 +411,7 @@ export function createMockApi(
   const resolved = resolveStorage(storage);
   let state = readState(resolved);
   let apiKey: string | null = null;
+  let transcriptionApiKey: string | null = null;
 
   const today = () => formatLocalDate(new Date());
   const persist = () => {
@@ -767,7 +781,8 @@ export function createMockApi(
         ...patch,
         provider: patch.provider ?? state.settings.provider,
         notifications: { ...state.settings.notifications, ...patch.notifications },
-        budget: { ...state.settings.budget, ...patch.budget }
+        budget: { ...state.settings.budget, ...patch.budget },
+        transcription: { ...state.settings.transcription, ...patch.transcription }
       };
       persist();
       return structuredClone(state.settings);
@@ -775,6 +790,51 @@ export function createMockApi(
 
     async setApiKey(key: string): Promise<void> {
       apiKey = key.trim() ? key : null;
+    },
+
+    async getTranscriptionConfig(): Promise<TranscriptionConfigView> {
+      return {
+        baseURL: state.settings.transcription.baseURL,
+        model: state.settings.transcription.model,
+        hasApiKey: transcriptionApiKey !== null
+      };
+    },
+
+    async saveTranscriptionConfig(
+      input: SaveTranscriptionConfigInput
+    ): Promise<TranscriptionConfigView> {
+      state.settings = {
+        ...state.settings,
+        transcription: { baseURL: input.baseURL, model: input.model }
+      };
+      if (input.apiKey !== undefined) {
+        transcriptionApiKey = input.apiKey.trim() ? input.apiKey.trim() : null;
+      }
+      persist();
+      return {
+        baseURL: state.settings.transcription.baseURL,
+        model: state.settings.transcription.model,
+        hasApiKey: transcriptionApiKey !== null
+      };
+    },
+
+    async pickVideoFiles(): Promise<string[] | null> {
+      return null;
+    },
+
+    async pickOutputDirectory(): Promise<string | null> {
+      return null;
+    },
+
+    async openPath(): Promise<string> {
+      return '浏览器原型无法打开本地文件。';
+    },
+
+    async generateVideoNotes(
+      _input: VideoNotesInput,
+      _onProgress: (progress: VideoNotesProgress) => void
+    ): Promise<VideoNotesResult> {
+      throw new Error('浏览器原型不支持生成视频笔记，请在桌面应用中使用。');
     },
 
     async scanLocalClis(): Promise<LocalCliScanResult> {

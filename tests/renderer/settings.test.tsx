@@ -399,3 +399,51 @@ test('scans local CLIs and selects a detected agent with native tools', async ()
     })
   );
 });
+
+test('saves transcription settings independently from the main form', async () => {
+  const saveTranscriptionConfig = vi.fn(
+    async (input: { baseURL: string; model: string; apiKey?: string }) => ({
+      baseURL: input.baseURL,
+      model: input.model,
+      hasApiKey: true
+    })
+  );
+  const updateSettings = vi.fn();
+  window.studyCoach = {
+    getSettings: vi.fn().mockResolvedValue(settings),
+    updateSettings,
+    setApiKey: vi.fn(),
+    getTranscriptionConfig: vi.fn().mockResolvedValue({
+      baseURL: 'https://old.example.com/v1',
+      model: 'old-asr',
+      hasApiKey: false
+    }),
+    saveTranscriptionConfig
+  } as never;
+
+  render(<SettingsPage onClose={() => {}} />);
+
+  const baseURL = await screen.findByLabelText('转写 Base URL');
+  const model = screen.getByLabelText('转写模型');
+  expect(baseURL).toHaveValue('https://old.example.com/v1');
+  expect(model).toHaveValue('old-asr');
+
+  await userEvent.clear(baseURL);
+  await userEvent.type(baseURL, 'https://asr.example.com/v1/');
+  await userEvent.clear(model);
+  await userEvent.type(model, 'mimo-v2.5-asr');
+  await userEvent.type(screen.getByLabelText('转写 API Key'), 'asr-key');
+  await userEvent.click(screen.getByRole('button', { name: '保存转写设置' }));
+
+  await waitFor(() =>
+    expect(saveTranscriptionConfig).toHaveBeenCalledWith({
+      baseURL: 'https://asr.example.com/v1',
+      model: 'mimo-v2.5-asr',
+      apiKey: 'asr-key'
+    })
+  );
+  expect(updateSettings).not.toHaveBeenCalled();
+  expect(await screen.findByText('语音转写设置已保存。')).toBeInTheDocument();
+  expect(screen.getByText('已保存')).toBeInTheDocument();
+  expect(screen.getByLabelText('转写 API Key')).toHaveValue('');
+});

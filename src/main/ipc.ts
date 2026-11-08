@@ -60,6 +60,13 @@ import type {
   UpdateLongPlanInput,
   UpdateLongPlanItemInput
 } from '../shared/plans';
+import type {
+  SaveTranscriptionConfigInput,
+  VideoNotesInput,
+  VideoNotesLanguage,
+  VideoNotesProgress,
+  VideoNotesResult
+} from '../shared/video-notes';
 
 /** Every IPC channel exposed to the preload bridge. */
 export const IPC_CHANNELS = {
@@ -68,6 +75,8 @@ export const IPC_CHANNELS = {
   getSettings: 'study-coach:settings:get',
   updateSettings: 'study-coach:settings:update',
   setApiKey: 'study-coach:settings:set-api-key',
+  getTranscriptionConfig: 'study-coach:settings:transcription:get',
+  saveTranscriptionConfig: 'study-coach:settings:transcription:save',
   listWorkspaces: 'study-coach:workspaces:list',
   createWorkspace: 'study-coach:workspaces:create',
   updateWorkspace: 'study-coach:workspaces:update',
@@ -161,7 +170,16 @@ export const APP_EVENT_CHANNELS = {
 export const APP_IPC_CHANNELS = {
   exportBackup: 'study-coach:app:export-backup',
   restoreBackup: 'study-coach:app:restore-backup',
-  restartApp: 'study-coach:app:restart'
+  restartApp: 'study-coach:app:restart',
+  pickVideoFiles: 'study-coach:app:pick-video-files',
+  pickOutputDirectory: 'study-coach:app:pick-output-directory',
+  openPath: 'study-coach:app:open-path'
+} as const;
+
+/** Video-note generation streams progress on its own event channel. */
+export const VIDEO_NOTES_CHANNELS = {
+  generate: 'study-coach:video-notes:generate',
+  progress: 'study-coach:video-notes:progress'
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
@@ -912,6 +930,64 @@ function requireLongPlanItemDone(value: unknown): UpdateLongPlanItemInput {
   return { planId, weekId, itemId, kind: input.kind, done: input.done };
 }
 
+const VIDEO_NOTES_LANGUAGES: readonly VideoNotesLanguage[] = ['auto', 'zh', 'en'];
+const MAX_VIDEO_FILES = 50;
+
+function requireVideoNotesInput(value: unknown): VideoNotesInput {
+  const input = requireObject(value, '生成视频笔记');
+  if (!Array.isArray(input.videoPaths) || input.videoPaths.length === 0) {
+    throw new Error('请先选择视频文件。');
+  }
+  if (input.videoPaths.length > MAX_VIDEO_FILES) {
+    throw new Error(`一次最多处理 ${MAX_VIDEO_FILES} 个文件。`);
+  }
+  const videoPaths: string[] = [];
+  for (const entry of input.videoPaths) {
+    if (typeof entry !== 'string' || entry.trim().length === 0) {
+      throw new Error('视频路径无效。');
+    }
+    videoPaths.push(entry);
+  }
+  let outputDir: string | undefined;
+  if (input.outputDir !== undefined) {
+    if (typeof input.outputDir !== 'string') throw new Error('输出文件夹无效。');
+    const trimmed = input.outputDir.trim();
+    if (trimmed.length > 0) outputDir = trimmed;
+  }
+  let language: VideoNotesLanguage = 'auto';
+  if (input.language !== undefined) {
+    if (
+      typeof input.language !== 'string' ||
+      !(VIDEO_NOTES_LANGUAGES as readonly string[]).includes(input.language)
+    ) {
+      throw new Error('转写语言无效。');
+    }
+    language = input.language as VideoNotesLanguage;
+  }
+  return {
+    videoPaths,
+    ...(outputDir !== undefined ? { outputDir } : {}),
+    language
+  };
+}
+
+function requireSaveTranscriptionConfig(value: unknown): SaveTranscriptionConfigInput {
+  const input = requireObject(value, '保存语音转写设置');
+  const baseURL = requireString(input.baseURL, '语音转写 Base URL').trim();
+  if (!/^https?:\/\//i.test(baseURL)) {
+    throw new Error('语音转写 Base URL 必须以 http:// 或 https:// 开头。');
+  }
+  const model = requireString(input.model, '语音转写模型').trim();
+  if (input.apiKey !== undefined && typeof input.apiKey !== 'string') {
+    throw new Error('语音转写 API key 无效。');
+  }
+  return {
+    baseURL,
+    model,
+    ...(input.apiKey !== undefined ? { apiKey: input.apiKey } : {})
+  };
+}
+
 function requireUsageDays(value: unknown): number | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 90) {
@@ -973,6 +1049,9 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
       api.updateSettings(requireObject(input, '更新设置') as SettingsPatch),
     scanLocalClis: async () => api.scanLocalClis(),
     setApiKey: async (input) => api.setApiKey(requireApiKey(input)),
+    getTranscriptionConfig: async () => api.getTranscriptionConfig(),
+    saveTranscriptionConfig: async (input) =>
+      api.saveTranscriptionConfig(requireSaveTranscriptionConfig(input)),
     listWorkspaces: async () => api.listWorkspaces(),
     createWorkspace: async (input) => api.createWorkspace(requireCreateWorkspace(input)),
     updateWorkspace: async (input) => {
@@ -1212,6 +1291,32 @@ export function createButlerCancelHandler(registry: Map<string, AbortController>
   };
 }
 
+/**
+ * Runs one video-notes batch and forwards progress to the requesting renderer.
+ * The requestId keeps a delayed run from posting into a closed dialog.
+ */
+export function createVideoNotesHandler(api: StudyCoachApi) {
+  return async (event: IpcEventLike, value: unknown): Promise<VideoNotesResult> => {
+    const payload = requireObject(value, '生成视频笔记');
+    const requestId = requireString(payload.requestId, '请求 ID');
+    const input = requireVideoNotesInput(payload.input);
+    try {
+      return await api.generateVideoNotes(input, (progress: VideoNotesProgress) => {
+        if (event.sender.isDestroyed?.()) return;
+        event.sender.send(VIDEO_NOTES_CHANNELS.progress, {
+          requestId,
+          progress: {
+            ...progress,
+            message: redactSecrets(progress.message).slice(0, 500)
+          }
+        });
+      });
+    } catch (error) {
+      throw toSafeError(error);
+    }
+  };
+}
+
 /** Registers every channel; Electron's ipcMain is injected for testability. */
 export function registerIpcHandlers(api: StudyCoachApi, ipcMain: IpcMainLike): void {
   const handlers = createIpcHandlers(api);
@@ -1226,6 +1331,10 @@ export function registerIpcHandlers(api: StudyCoachApi, ipcMain: IpcMainLike): v
   const cancelHandler = createButlerCancelHandler(registry);
   ipcMain.handle(BUTLER_STREAM_CHANNELS.cancel, (_event, ...args) =>
     cancelHandler(args[0])
+  );
+  const videoNotesHandler = createVideoNotesHandler(api);
+  ipcMain.handle(VIDEO_NOTES_CHANNELS.generate, (event, ...args) =>
+    videoNotesHandler(event as IpcEventLike, args[0])
   );
 }
 
@@ -1247,6 +1356,9 @@ export function createStudyCoachBridge(
     getSettings: () => call(IPC_CHANNELS.getSettings),
     updateSettings: (patch) => call(IPC_CHANNELS.updateSettings, patch),
     setApiKey: (key) => call(IPC_CHANNELS.setApiKey, key),
+    getTranscriptionConfig: () => call(IPC_CHANNELS.getTranscriptionConfig),
+    saveTranscriptionConfig: (input) =>
+      call(IPC_CHANNELS.saveTranscriptionConfig, input),
     scanLocalClis: () => call(IPC_CHANNELS.scanLocalClis),
     listWorkspaces: () => call(IPC_CHANNELS.listWorkspaces),
     createWorkspace: (input) => call(IPC_CHANNELS.createWorkspace, input),
@@ -1332,6 +1444,28 @@ export function createStudyCoachBridge(
     exportBackup: () => call<BackupResult | null>(APP_IPC_CHANNELS.exportBackup),
     restoreBackup: () => call<RestoreResult | null>(APP_IPC_CHANNELS.restoreBackup),
     restartApp: () => call<void>(APP_IPC_CHANNELS.restartApp),
+    pickVideoFiles: () => call<string[] | null>(APP_IPC_CHANNELS.pickVideoFiles),
+    pickOutputDirectory: () =>
+      call<string | null>(APP_IPC_CHANNELS.pickOutputDirectory),
+    openPath: (path) => call<string>(APP_IPC_CHANNELS.openPath, path),
+    async generateVideoNotes(input, onProgress) {
+      const requestId = createRequestId();
+      const unsubscribe = subscribe?.(VIDEO_NOTES_CHANNELS.progress, (payload) => {
+        if (!isRecord(payload) || payload['requestId'] !== requestId) return;
+        const progress = payload['progress'];
+        if (isRecord(progress) && typeof progress['message'] === 'string') {
+          onProgress(progress as unknown as VideoNotesProgress);
+        }
+      });
+      try {
+        return await call<VideoNotesResult>(VIDEO_NOTES_CHANNELS.generate, {
+          requestId,
+          input
+        });
+      } finally {
+        unsubscribe?.();
+      }
+    },
     send: (input) => call(IPC_CHANNELS.send, input),
     searchAll: (input) => call(IPC_CHANNELS.searchAll, input),
     deleteTask: (input) => call(IPC_CHANNELS.deleteTask, input),

@@ -1578,6 +1578,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
               getKnowledgeNote={getKnowledgeNote}
               saveKnowledgeNote={saveKnowledgeNote}
               getKnowledgeBacklinks={getKnowledgeBacklinks}
+              onOpenSettings={() => changeSection('settings')}
             />
           ) : null}
 
