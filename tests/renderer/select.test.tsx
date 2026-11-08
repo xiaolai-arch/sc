@@ -73,6 +73,27 @@ test('supports keyboard navigation and Escape without changing the value', async
   document.removeEventListener('keydown', outsideKeyDown);
 });
 
+test('scrolls the highlighted option into view while navigating', async () => {
+  const user = userEvent.setup();
+  const scrollIntoView = vi.fn();
+  Object.defineProperty(Element.prototype, 'scrollIntoView', {
+    configurable: true,
+    value: scrollIntoView
+  });
+  try {
+    render(<Harness />);
+    trigger().focus();
+    await user.keyboard('{ArrowDown}');
+    await user.keyboard('{ArrowDown}');
+
+    const highlighted = screen.getByRole('option', { name: '选项 B' });
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ block: 'nearest' });
+    expect(scrollIntoView.mock.instances.at(-1)).toBe(highlighted);
+  } finally {
+    Reflect.deleteProperty(Element.prototype, 'scrollIntoView');
+  }
+});
+
 test('closes when clicking outside', async () => {
   const user = userEvent.setup();
   render(

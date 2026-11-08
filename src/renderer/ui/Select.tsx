@@ -160,6 +160,17 @@ export function Select({
     };
   }, [open, updatePosition]);
 
+  // Keyboard navigation can move the highlight past the visible part of the
+  // list; keep the active option in view so it stays visible to the user.
+  useEffect(() => {
+    if (!open || activeIndex < 0) return;
+    const rendered = menuRef.current?.querySelectorAll<HTMLElement>('[role="option"]');
+    const option = rendered?.[activeIndex];
+    if (option && typeof option.scrollIntoView === 'function') {
+      option.scrollIntoView({ block: 'nearest' });
+    }
+  }, [activeIndex, open, position]);
+
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
