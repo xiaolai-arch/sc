@@ -436,7 +436,8 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
   // Tray/notification opens bypass the sidebar, so make sure the renderer
   // actually leaves Settings/Projects and shows the selected conversation.
   useEffect(() => {
-    if (!conversations.externalOpen) return;
+    const external = conversations.externalOpen;
+    if (!external) return;
     guardSettings(() => {
       stopActiveStreamForNavigation();
       setStreamingMessage(null);
@@ -447,8 +448,9 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
       setModelError(null);
       setSidebarOpen(false);
       setSection('chat');
+      void conversations.select(external.id);
     });
-  }, [conversations.externalOpen?.seq]);
+  }, [conversations.externalOpen, conversations.select]);
 
   const chatMessages: ChatMessage[] = [
     ...(conversations.active?.messages ?? []).map((message): ChatMessage => {
@@ -1148,13 +1150,13 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
       selectDaily();
       return;
     }
-    if (next === 'knowledge' || next === 'memory' || next === 'review') {
-      // These pages have their own workspace filter; keep chat scope intact.
-      setProjectId(null);
+    guardSettings(() => {
+      if (next === 'knowledge' || next === 'memory' || next === 'review') {
+        // These pages have their own workspace filter; keep chat scope intact.
+        setProjectId(null);
+      }
       changeSection(next);
-      return;
-    }
-    changeSection(next);
+    });
   }
 
   function openSettings() {
@@ -1298,7 +1300,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
       guardSettings(() => {
         setProjectId(workspaceId);
         setChatScope('workspace');
-        setSection('projects');
+        applySection('projects');
         void openNotePreview(workspaceId, docId);
       });
       return;

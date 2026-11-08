@@ -187,6 +187,41 @@ test('closes the conversation menu with Escape', async () => {
   await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
 });
 
+test('does not offer Stop while another conversation is opening', async () => {
+  const api = setup();
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
+  await sendPrompt('帮我排一下今天的优先级');
+  await screen.findAllByText(/我先按截止时间和精力排/);
+  await waitFor(() =>
+    expect(screen.queryByRole('button', { name: '停止生成' })).not.toBeInTheDocument()
+  );
+
+  await userEvent.click(screen.getByRole('button', { name: '新对话' }));
+
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const original = api.getConversation.bind(api);
+  api.getConversation = async (id: string) => {
+    await gate;
+    return original(id);
+  };
+
+  const sidebar = screen.getAllByRole('complementary')[0]!;
+  await userEvent.click(
+    within(sidebar).getByRole('button', { name: /帮我排一下今天的优先级/ })
+  );
+
+  expect(await screen.findByText('正在打开对话…')).toBeInTheDocument();
+  // A not-yet-streaming view must not bind Stop to the conversation being loaded.
+  expect(screen.queryByRole('button', { name: '停止生成' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '发送' })).toBeDisabled();
+
+  release();
+  await screen.findAllByText(/我先按截止时间和精力排/);
+});
+
 test('does not offer regenerate when an unanswered user message trails the answer', async () => {
   const api = setup();
   await screen.findByText(homeGreeting('xiaolai', new Date()));

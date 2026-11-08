@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { Workspace } from '../../src/renderer/shell/Workspace';
 import { createMockApi } from '../../web/mock-api';
+import { sendPrompt } from './send-prompt';
 import { pickOption } from './select-option';
 
 function setup() {
@@ -386,6 +387,36 @@ test('warns before leaving settings with unsaved edits', async () => {
   expect(
     await screen.findByText('极限定义还不稳，建议先复习再做新题。')
   ).toBeInTheDocument();
+});
+
+test('defers a tray/notification open until unsaved settings are resolved', async () => {
+  const { api } = setup();
+  let open: ((id: string) => void) | null = null;
+  api.onConversationOpened = (listener) => {
+    open = listener;
+    return () => undefined;
+  };
+  await mount(api);
+  await sendPrompt('帮我排一下今天的优先级');
+  await screen.findAllByText(/我先按截止时间和精力排/);
+  const [summary] = await api.listConversations();
+  if (!summary) throw new Error('no conversation');
+
+  await userEvent.click(screen.getByRole('button', { name: '打开设置' }));
+  const model = await screen.findByLabelText('模型名称');
+  await userEvent.type(model, '-x');
+
+  // Cancelling the discard prompt must also cancel the jump, not leave the
+  // app sitting on the conversation behind the settings page.
+  act(() => open?.(summary.id));
+  expect(await screen.findByText('设置尚未保存')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: '取消' }));
+  expect(screen.getByLabelText('模型名称')).toBeInTheDocument();
+
+  act(() => open?.(summary.id));
+  expect(await screen.findByText('设置尚未保存')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: '放弃修改并离开' }));
+  expect(await screen.findAllByText(/我先按截止时间和精力排/)).toHaveLength(1);
 });
 
 test('opens review and settings from app navigation events', async () => {  localStorage.clear();

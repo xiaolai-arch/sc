@@ -90,6 +90,32 @@ test('clears the previous conversation while the next one loads', async () => {
   expect(result.current.active?.id).toBe('b');
 });
 
+test('a failed switch restores the conversation that was open', async () => {
+  window.studyCoach = {
+    listConversations: async () => [],
+    getConversation: async (id: string) => {
+      if (id === 'gone') throw new Error('missing');
+      return conversation(id);
+    }
+  } as never;
+
+  const { result } = renderHook(() => useConversations());
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  await act(async () => {
+    await result.current.select('a');
+  });
+  expect(result.current.active?.id).toBe('a');
+
+  await act(async () => {
+    await result.current.select('gone');
+  });
+  // The composer must not be left on an empty draft that a send would fill
+  // into the wrong conversation.
+  expect(result.current.active?.id).toBe('a');
+  expect(result.current.selecting).toBe(false);
+  expect(result.current.error).toBeTruthy();
+});
+
 test('tray/notification opens are surfaced for the renderer to switch pages', async () => {
   let openListener: ((id: string) => void) | undefined;
   window.studyCoach = {
@@ -105,6 +131,15 @@ test('tray/notification opens are surfaced for the renderer to switch pages', as
   await waitFor(() => expect(result.current.loading).toBe(false));
 
   act(() => openListener?.('check-in-1'));
-  await waitFor(() => expect(result.current.active?.id).toBe('check-in-1'));
-  expect(result.current.externalOpen).toEqual({ id: 'check-in-1', seq: 1 });
+  await waitFor(() =>
+    expect(result.current.externalOpen).toEqual({ id: 'check-in-1', seq: 1 })
+  );
+  // The hook only announces the request; the renderer selects it after its
+  // unsaved-settings guard, so cancelling that prompt also cancels the jump.
+  expect(result.current.active).toBeNull();
+
+  await act(async () => {
+    await result.current.select('check-in-1');
+  });
+  expect(result.current.active?.id).toBe('check-in-1');
 });

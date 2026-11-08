@@ -48,6 +48,8 @@ export function useConversations(): ConversationController {
   const [error, setError] = useState<string | null>(null);
   const activeIdRef = useRef<string | null>(null);
   activeIdRef.current = active?.id ?? null;
+  const activeRef = useRef<Conversation | null>(null);
+  activeRef.current = active;
   const [externalOpen, setExternalOpen] = useState<{ id: string; seq: number } | null>(
     null
   );
@@ -76,6 +78,7 @@ export function useConversations(): ConversationController {
     // Clear the previous conversation before waiting: otherwise its messages
     // stay on screen, and a send during the wait would target the old thread.
     const switching = activeIdRef.current !== id;
+    const previous = activeRef.current;
     if (switching) {
       setActive(null);
       setSelecting(true);
@@ -89,6 +92,10 @@ export function useConversations(): ConversationController {
       setError(null);
     } catch (cause) {
       if (request !== selectRequestRef.current) return;
+      // Put the thread we came from back on screen. Without this the composer
+      // sits on an empty draft and the next message would land in the wrong
+      // conversation as soon as the user types.
+      if (switching) setActive(previous);
       setError(messageOf(cause));
     } finally {
       if (request === selectRequestRef.current) {
@@ -103,10 +110,11 @@ export function useConversations(): ConversationController {
     if (!api?.onConversationOpened) return undefined;
     return api.onConversationOpened((id) => {
       externalOpenSeqRef.current += 1;
+      // Only announce the request here. Workspace opens it after its own
+      // unsaved-settings guard, so cancelling that prompt also cancels the jump.
       setExternalOpen({ id, seq: externalOpenSeqRef.current });
-      void select(id);
     });
-  }, [select]);
+  }, []);
 
   const startDraft = useCallback(() => {
     selectRequestRef.current += 1;

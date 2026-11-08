@@ -271,7 +271,7 @@ export function ChatPane({
         onSend={onSend}
         disabled={typing || loading}
         editing={editing}
-        {...(onStop ? { onStop } : {})}
+        {...(onStop && typing ? { onStop } : {})}
         {...(onCancelEdit ? { onCancelEdit } : {})}
         {...(onOpenModelPicker ? { onOpenModelPicker } : {})}
       />
