@@ -1,5 +1,6 @@
 import {
   Children,
+  Fragment,
   isValidElement,
   useCallback,
   useEffect,
@@ -7,8 +8,6 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type ChangeEvent,
-  type ChangeEventHandler,
   type KeyboardEvent,
   type ReactNode
 } from 'react';
@@ -32,11 +31,23 @@ type SelectOption = {
   disabled: boolean;
 };
 
+/**
+ * The minimal change contract this component actually honours. It deliberately
+ * is not a DOM ChangeEvent: the menu is not a native `<select>`, so advertising
+ * `currentTarget.selectedOptions`, `preventDefault()` and friends would invite
+ * handlers that crash at runtime. These are the fields consumers can rely on.
+ */
+export type SelectChangeEvent = {
+  target: { value: string; name: string };
+  currentTarget: { value: string; name: string };
+};
+
 type SelectProps = {
   value?: string | number | readonly string[];
-  onChange?: ChangeEventHandler<HTMLSelectElement>;
+  onChange?: (event: SelectChangeEvent) => void;
   disabled?: boolean;
   id?: string;
+  name?: string;
   className?: string;
   size?: SelectSize;
   fullWidth?: boolean;
@@ -52,22 +63,37 @@ function textOf(node: ReactNode): string {
   return '';
 }
 
-/** Flattens the `<option>` children into the menu model. */
+/** Flattens the `<option>` children (including fragment wrappers) into the menu model. */
 function readOptions(children: ReactNode): SelectOption[] {
   const options: SelectOption[] = [];
-  Children.forEach(children, (child) => {
-    if (!isValidElement<{ value?: string | number; disabled?: boolean; children?: ReactNode }>(child)) {
-      return;
-    }
-    if (child.type !== 'option') return;
-    const text = textOf(child.props.children);
-    options.push({
-      value: child.props.value !== undefined ? String(child.props.value) : text,
-      label: child.props.children,
-      text,
-      disabled: Boolean(child.props.disabled)
+  const visit = (node: ReactNode) => {
+    Children.forEach(node, (child) => {
+      if (
+        !isValidElement<{
+          value?: string | number;
+          disabled?: boolean;
+          children?: ReactNode;
+        }>(child)
+      ) {
+        return;
+      }
+      // `<>{cond && <option …}</>}` and similar wrappers must not hide options
+      // from the menu now that this component replaces the native <select>.
+      if (child.type === Fragment) {
+        visit(child.props.children);
+        return;
+      }
+      if (child.type !== 'option') return;
+      const text = textOf(child.props.children);
+      options.push({
+        value: child.props.value !== undefined ? String(child.props.value) : text,
+        label: child.props.children,
+        text,
+        disabled: Boolean(child.props.disabled)
+      });
     });
-  });
+  };
+  visit(children);
   return options;
 }
 
@@ -88,6 +114,7 @@ export function Select({
   onChange,
   disabled = false,
   id,
+  name,
   className,
   size = 'md',
   fullWidth = true,
@@ -95,8 +122,12 @@ export function Select({
   children
 }: SelectProps) {
   const options = readOptions(children);
-  const selectedValue = value === undefined ? '' : String(value);
-  const selectedIndex = options.findIndex((option) => option.value === selectedValue);
+  // Like a native uncontrolled <select>, a missing value shows the first
+  // enabled option rather than an empty trigger.
+  const selectedIndex =
+    value === undefined
+      ? options.findIndex((option) => !option.disabled)
+      : options.findIndex((option) => option.value === String(value));
   const selected = selectedIndex >= 0 ? options[selectedIndex] : undefined;
 
   const generatedId = useId();
@@ -199,9 +230,8 @@ export function Select({
 
   function choose(option: SelectOption | undefined) {
     if (!option || option.disabled) return;
-    onChange?.({
-      target: { value: option.value }
-    } as unknown as ChangeEvent<HTMLSelectElement>);
+    const target = { value: option.value, name: name ?? '' };
+    onChange?.({ target, currentTarget: target });
     setOpen(false);
     triggerRef.current?.focus();
   }
@@ -268,6 +298,9 @@ export function Select({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
+        // The listbox is portalled outside the button, so claim ownership for
+        // the option referenced by aria-activedescendant.
+        aria-owns={open ? listId : undefined}
         aria-label={ariaLabel}
         aria-activedescendant={open && activeIndex >= 0 ? optionId(activeIndex) : undefined}
         disabled={disabled}
@@ -319,7 +352,7 @@ export function Select({
                   role="option"
                   tabIndex={-1}
                   data-value={option.value}
-                  aria-selected={option.value === selectedValue}
+                  aria-selected={index === selectedIndex}
                   disabled={option.disabled}
                   onMouseDown={(event) => event.preventDefault()}
                   onMouseEnter={() => setActiveIndex(index)}
@@ -332,7 +365,7 @@ export function Select({
                   )}
                 >
                   <span className="min-w-0 truncate">{option.label}</span>
-                  {option.value === selectedValue ? (
+                  {index === selectedIndex ? (
                     <CheckIcon className="h-3.5 w-3.5 shrink-0" />
                   ) : null}
                 </button>
