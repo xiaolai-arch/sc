@@ -55,13 +55,28 @@ describe('lesson HTML', () => {
     expect(html).not.toContain('#t=65');
   });
 
-  test('builds a table of contents from level 2 and 3 headings', () => {
-    const html = lesson('## 一、总览\n\n### 细节\n\n内容');
+  test('turns each level-2 section into a slide with an agenda', () => {
+    const html = lesson('## 一、总览\n\n### 细节\n\n内容\n\n## 二、练习\n\n更多');
 
-    expect(html).toContain('<h2 id="section-1">');
-    expect(html).toContain('<h3 id="section-2">');
-    expect(html).toContain('<a href="#section-1">一、总览</a>');
-    expect(html).toContain('<a href="#section-2">细节</a>');
+    expect(html).toContain('class="slide cover');
+    expect(html).toContain('class="slide agenda');
+    expect(html.match(/class="slide content-slide/g)).toHaveLength(2);
+    expect(html).toContain('<h2>一、总览</h2>');
+    expect(html).toContain('<h2>二、练习</h2>');
+    expect(html).toContain('data-goto="2"');
+    expect(html).toContain('data-goto="3"');
+    expect(html).toContain('aria-label="第 1 节：一、总览"');
+  });
+
+  test('ships keyboard, button and progress navigation', () => {
+    const html = lesson('## 一、集合\n\n正文');
+
+    expect(html).toContain('ArrowRight');
+    expect(html).toContain('PageDown');
+    expect(html).toContain('data-prev');
+    expect(html).toContain('data-next');
+    expect(html).toContain('aria-valuemax="4"');
+    expect(html).toContain('class="deck-progress"');
   });
 
   test('renders a self-contained dark-mode page', () => {

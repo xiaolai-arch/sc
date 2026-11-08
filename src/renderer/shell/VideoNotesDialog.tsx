@@ -226,7 +226,7 @@ export function VideoNotesDialog({ open, onClose, onOpenSettings }: VideoNotesDi
       <div className="space-y-5">
         <p className="text-[13px] leading-6 text-gray-500 dark:text-[#8e8e93]">
           选几讲网课视频，先用语音识别转成文字，再用模型整理成知识点笔记。
-          每讲会生成一个 Markdown、一个可直接打开的 HTML，以及整门课的索引页。
+          每讲会生成一个 Markdown、一个可翻页的幻灯片式 HTML，以及整门课的索引页。
         </p>
 
         {bridgeMissing || window.studyCoachPrototype ? (

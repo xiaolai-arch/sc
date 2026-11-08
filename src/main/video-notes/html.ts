@@ -122,30 +122,33 @@ function stripTags(html: string): string {
     .trim();
 }
 
-interface TocEntry {
-  level: number;
-  id: string;
-  text: string;
+interface DeckSection {
+  title: string;
+  /** Inline HTML of the section heading (already sanitized by the renderer). */
+  headingHtml: string;
+  bodyHtml: string;
 }
 
-function addHeadingAnchors(html: string): { html: string; toc: TocEntry[] } {
-  const toc: TocEntry[] = [];
-  const withIds = html.replace(/<h([23])>([\s\S]*?)<\/h\1>/g, (_match, level: string, inner: string) => {
-    const id = `section-${toc.length + 1}`;
-    toc.push({ level: Number(level), id, text: stripTags(inner) });
-    return `<h${level} id="${id}">${inner}</h${level}>`;
-  });
-  return { html: withIds, toc };
-}
-
-function renderToc(toc: TocEntry[], className = ''): string {
-  if (toc.length === 0) return '';
-  return `<nav class="toc ${className}" aria-label="目录"><p class="toc-title">目录</p><ol>${toc
-    .map(
-      (entry) =>
-        `<li class="toc-l${entry.level}"><a href="#${entry.id}">${escapeHtml(entry.text)}</a></li>`
-    )
-    .join('')}</ol></nav>`;
+/** Splits the rendered note on level-2 headings: one section per slide. */
+function splitSections(html: string): DeckSection[] {
+  const sections: DeckSection[] = [];
+  for (const chunk of html.split(/(?=<h2)/i)) {
+    const trimmed = chunk.trim();
+    if (trimmed.length === 0) continue;
+    const match = /^<h2[^>]*>([\s\S]*?)<\/h2>([\s\S]*)$/i.exec(trimmed);
+    if (match) {
+      const headingHtml = match[1]!.trim();
+      const title = stripTags(headingHtml).replace(/\s+/g, ' ').trim();
+      sections.push({
+        title: title.length > 0 ? title : '未命名小节',
+        headingHtml,
+        bodyHtml: match[2]!.trim()
+      });
+    } else {
+      sections.push({ title: '概览', headingHtml: '概览', bodyHtml: trimmed });
+    }
+  }
+  return sections;
 }
 
 const BASE_CSS = `
@@ -206,6 +209,73 @@ a[href*="#t="]:hover{text-decoration:none;background:var(--accent);color:#fff}
 @media print{body{background:#fff;color:#000}.toc,.toc-mobile,.hero-actions{display:none}.page{max-width:none;padding:0}.layout{display:block}.content h2{page-break-after:avoid}.content h2,.content h3{break-after:avoid}table,blockquote{break-inside:avoid}a{color:#000}}
 `;
 
+const DECK_CSS = `
+html,body{height:100%}
+body.deck{overflow:hidden;background:var(--bg)}
+body.deck::before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(1100px 620px at 8% -10%,var(--accent-soft),transparent 62%),radial-gradient(900px 520px at 108% 112%,rgba(52,199,89,.08),transparent 60%)}
+@media (prefers-color-scheme:dark){body.deck::before{background:radial-gradient(1100px 620px at 8% -10%,var(--accent-soft),transparent 62%),radial-gradient(900px 520px at 108% 112%,rgba(48,209,88,.06),transparent 60%)}}
+.deck-app{position:relative;z-index:1;display:flex;flex-direction:column;height:100%}
+.deck-stage{position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:22px clamp(12px,3vw,40px) 8px}
+.slide{position:absolute;inset:0;margin:auto;width:min(1120px,calc(100vw - 48px));height:min(690px,calc(100dvh - 132px));display:flex;flex-direction:column;padding:clamp(24px,3.4vw,52px);background:var(--panel);border:1px solid var(--line);border-radius:24px;box-shadow:0 24px 70px rgba(0,0,0,.09);opacity:0;visibility:hidden;pointer-events:none;transform:translate3d(26px,0,0) scale(.992);transition:opacity .28s ease,transform .32s cubic-bezier(.22,.8,.2,1),visibility .32s}
+@media (prefers-color-scheme:dark){.slide{box-shadow:0 24px 70px rgba(0,0,0,.45)}}
+.slide.active{opacity:1;visibility:visible;pointer-events:auto;transform:none;z-index:2}
+.slide.before{transform:translate3d(-26px,0,0) scale(.992)}
+.slide:focus{outline:none}
+.slide:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+.slide-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:14px}
+.kicker{color:var(--faint);font-size:11.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;font-variant-numeric:tabular-nums}
+.kicker.deck-course{max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:none;letter-spacing:.02em;font-weight:500;font-size:12px}
+.slide h1{margin:10px 0 18px;font-size:clamp(34px,4.6vw,64px);line-height:1.12;letter-spacing:-.03em;font-weight:680}
+.slide h2{margin:4px 0 20px;font-size:clamp(23px,2.8vw,36px);line-height:1.3;letter-spacing:-.015em;font-weight:650}
+.slide-body{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding-right:6px;font-size:clamp(14.5px,1.35vw,17px);line-height:1.78;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+.slide-body::-webkit-scrollbar{width:6px}
+.slide-body::-webkit-scrollbar-thumb{background:var(--line);border-radius:999px}
+.slide-body h3{margin:22px 0 8px;font-size:clamp(17px,1.7vw,21px);font-weight:650}
+.slide-body ul,.slide-body ol{margin:0 0 14px;padding-left:22px}
+.slide-body li{margin:4px 0}
+.slide-body p{margin:0 0 12px}
+.slide-body table{font-size:clamp(12.5px,1.15vw,14px)}
+.slide-body th,.slide-body td{padding:8px 10px}
+.slide-body pre{font-size:clamp(11.5px,1.05vw,13px);line-height:1.6}
+.slide-body blockquote{margin:14px 0}
+.slide-main{flex:1;min-height:0;display:flex;flex-direction:column}
+.slide-main.is-short{justify-content:center}
+.slide-main.is-short .slide-body{flex:0 0 auto;overflow:visible}
+.cover{justify-content:center;background:linear-gradient(145deg,var(--panel),var(--soft))}
+.cover-inner{max-width:840px}
+.cover-source{margin:0 0 20px;color:var(--faint);font-size:12.5px;word-break:break-all}
+.cover-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
+.button{border:0;cursor:pointer;font-family:inherit;font-size:13.5px}
+.button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line)}
+.button.ghost:hover{background:var(--soft);opacity:1}
+.deck-hint{margin-top:24px;color:var(--faint);font-size:12.5px;line-height:2}
+.deck-hint kbd{display:inline-block;min-width:20px;margin:0 2px;padding:1px 6px;border:1px solid var(--line);border-radius:6px;background:var(--soft);color:var(--muted);font:11px/1.6 "SF Mono",ui-monospace,Menlo,Consolas,monospace;text-align:center}
+.agenda-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;align-content:start;overflow:auto;overscroll-behavior:contain;min-height:0}
+.agenda-list li{min-width:0}
+.agenda-list button{display:flex;align-items:center;gap:12px;width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:12px;background:var(--soft);color:var(--text);text-align:left;cursor:pointer;font-family:inherit;font-size:13.5px;transition:border-color .16s ease,background .16s ease}
+.agenda-list button:hover{border-color:var(--accent);background:var(--accent-soft)}
+.agenda-num{color:var(--accent);font-size:11.5px;font-weight:700;letter-spacing:.08em;font-variant-numeric:tabular-nums}
+.agenda-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.end{justify-content:center;align-items:flex-start}
+.end h2{font-size:clamp(30px,4vw,48px)}
+.end-summary{margin:0;color:var(--muted);font-size:14.5px}
+.end-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:24px}
+.deck-bar{display:flex;align-items:center;gap:16px;padding:0 clamp(16px,3vw,40px) max(14px,env(safe-area-inset-bottom))}
+.deck-name{flex:0 1 260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--faint);font-size:12px}
+.deck-controls{display:flex;align-items:center;gap:10px;flex:1;min-width:0;justify-content:flex-end}
+.deck-progress{flex:1;max-width:320px;height:3px;border-radius:999px;background:var(--line);overflow:hidden}
+.deck-progress span{display:block;height:100%;width:0;background:var(--accent);border-radius:999px;transition:width .3s ease}
+.deck-count{min-width:52px;text-align:center;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.deck-btn{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--text);cursor:pointer;transition:background .16s ease,border-color .16s ease,opacity .16s ease}
+.deck-btn:hover{background:var(--soft);border-color:var(--faint)}
+.deck-btn:disabled{opacity:.3;cursor:default}
+.deck-btn svg{width:18px;height:18px}
+@media (max-width:760px){.slide{width:calc(100vw - 16px);height:calc(100dvh - 108px);border-radius:16px;padding:20px}.deck-stage{padding:8px 8px 4px}.deck-name{display:none}.deck-controls{gap:6px}.deck-progress{max-width:none}.slide h1{font-size:clamp(28px,9vw,42px)}.agenda-list{grid-template-columns:1fr}.deck-hint{display:none}}
+@media (max-height:520px){.slide{padding:18px 22px}.slide h1{font-size:clamp(26px,6vh,40px)}}
+@media (prefers-reduced-motion:reduce){.slide{transition:none}.deck-progress span{transition:none}}
+@media print{html,body{height:auto;overflow:visible;background:#fff}body.deck::before{display:none}.deck-app{display:block;height:auto}.deck-stage{display:block;padding:0}.slide{position:relative;width:100%;height:auto;max-width:none;margin:0;padding:24px;border:0;border-radius:0;box-shadow:none;opacity:1;visibility:visible;transform:none;page-break-after:always}.slide:last-child{page-break-after:auto}.slide-body,.agenda-list{overflow:visible}.deck-bar{display:none}.deck-hint{display:none}}
+`;
+
 function shell(options: {
   title: string;
   bodyClass: string;
@@ -227,35 +297,251 @@ ${options.content}
 </html>`;
 }
 
+const ICON_PREV =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const ICON_NEXT =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 5.5 16 12l-6.5 6.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const ICON_AGENDA =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6v6H4zM14 5h6v6h-6zM4 13h6v6H4zM14 13h6v6h-6z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>';
+const ICON_FULLSCREEN =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+/** Inline deck navigation. Kept dependency-free so the HTML stays offline-safe. */
+const DECK_SCRIPT = `
+(function () {
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  if (slides.length === 0) return;
+  var counter = document.querySelector('[data-count]');
+  var progress = document.querySelector('[data-progress]');
+  var bar = document.querySelector('.deck-progress');
+  var prevBtn = document.querySelector('[data-prev]');
+  var nextBtn = document.querySelector('[data-next]');
+  var fullBtn = document.querySelector('[data-fullscreen]');
+  var current = 0;
+  var touchX = null;
+  var touchY = null;
+
+  function go(index, options) {
+    options = options || {};
+    var next = Math.max(0, Math.min(slides.length - 1, index));
+    if (next === current && options.force !== true) return;
+    slides.forEach(function (slide, i) {
+      slide.classList.toggle('active', i === next);
+      slide.classList.toggle('before', i < next);
+      slide.classList.toggle('after', i > next);
+      slide.toggleAttribute('inert', i !== next);
+      slide.setAttribute('aria-hidden', i === next ? 'false' : 'true');
+    });
+    current = next;
+    if (counter) counter.textContent = (next + 1) + ' / ' + slides.length;
+    if (progress) progress.style.width = (((next + 1) / slides.length) * 100) + '%';
+    if (bar) bar.setAttribute('aria-valuenow', String(next + 1));
+    if (prevBtn) prevBtn.disabled = next === 0;
+    if (nextBtn) nextBtn.disabled = next === slides.length - 1;
+    if (options.hash !== false) {
+      try { history.replaceState(null, '', '#slide-' + (next + 1)); } catch (error) {}
+    }
+    requestAnimationFrame(function () { centerSlide(slides[current]); });
+  }
+
+  function next() { if (current < slides.length - 1) go(current + 1); }
+  function prev() { if (current > 0) go(current - 1); }
+
+  function centerSlide(slide) {
+    var main = slide.querySelector('.slide-main');
+    if (!main) return;
+    var body = main.querySelector('.slide-body');
+    if (!body) return;
+    main.classList.remove('is-short');
+    if (body.scrollHeight <= body.clientHeight + 2) main.classList.add('is-short');
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-goto]'), function (element) {
+    element.addEventListener('click', function () {
+      go(Number(element.getAttribute('data-goto')));
+    });
+  });
+  if (prevBtn) prevBtn.addEventListener('click', prev);
+  if (nextBtn) nextBtn.addEventListener('click', next);
+  var agendaBtn = document.querySelector('[data-agenda]');
+  if (agendaBtn) agendaBtn.addEventListener('click', function () { go(1); });
+
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(function () {});
+      }
+    } else if (document.exitFullscreen) {
+      document.exitFullscreen().catch(function () {});
+    }
+  }
+  if (fullBtn) fullBtn.addEventListener('click', toggleFullscreen);
+  document.addEventListener('fullscreenchange', function () {
+    if (fullBtn) fullBtn.setAttribute('aria-pressed', document.fullscreenElement ? 'true' : 'false');
+  });
+
+  document.addEventListener('keydown', function (event) {
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+    var key = event.key;
+    var target = event.target;
+    var interactive = target && target.closest && target.closest('button, a, input, textarea, select, [contenteditable="true"]');
+    if (interactive && (key === ' ' || key === 'Enter')) return;
+    var body = slides[current].querySelector('.slide-body, .agenda-list');
+
+    if (key === 'ArrowRight' || key === 'PageDown' || key === ' ') {
+      event.preventDefault(); next(); return;
+    }
+    if (key === 'ArrowLeft' || key === 'PageUp') {
+      event.preventDefault(); prev(); return;
+    }
+    if (key === 'ArrowDown') {
+      if (body && body.scrollHeight > body.clientHeight && body.scrollTop + body.clientHeight < body.scrollHeight - 4) {
+        event.preventDefault();
+        body.scrollBy({ top: body.clientHeight * 0.75, behavior: 'smooth' });
+        return;
+      }
+      event.preventDefault(); next(); return;
+    }
+    if (key === 'ArrowUp') {
+      if (body && body.scrollTop > 4) {
+        event.preventDefault();
+        body.scrollBy({ top: -body.clientHeight * 0.75, behavior: 'smooth' });
+        return;
+      }
+      event.preventDefault(); prev(); return;
+    }
+    if (key === 'Home') { event.preventDefault(); go(0); return; }
+    if (key === 'End') { event.preventDefault(); go(slides.length - 1); return; }
+    if (key === 'f' || key === 'F') { event.preventDefault(); toggleFullscreen(); return; }
+    if (key === 'o' || key === 'O') { event.preventDefault(); go(1); }
+  });
+
+  var stage = document.querySelector('.deck-stage');
+  if (stage) {
+    stage.addEventListener('pointerdown', function (event) {
+      if (event.pointerType === 'mouse') return;
+      touchX = event.clientX;
+      touchY = event.clientY;
+    });
+    stage.addEventListener('pointerup', function (event) {
+      if (touchX === null) return;
+      var dx = event.clientX - touchX;
+      var dy = event.clientY - touchY;
+      touchX = null;
+      if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+        if (dx < 0) next(); else prev();
+      }
+    });
+    stage.addEventListener('pointercancel', function () { touchX = null; });
+  }
+
+  function fromHash() {
+    var match = /^#slide-(\\d+)$/.exec(window.location.hash);
+    if (!match) return 0;
+    var index = Number(match[1]) - 1;
+    return Math.max(0, Math.min(slides.length - 1, index));
+  }
+  window.addEventListener('hashchange', function () {
+    go(fromHash(), { hash: false });
+  });
+  window.addEventListener('resize', function () { centerSlide(slides[current]); });
+  go(fromHash(), { hash: false, force: true });
+})();
+`;
+
 export function renderLessonHtml(input: LessonHtmlInput): string {
   const videoHref = pathToFileURL(input.sourcePath).href;
-  const rendered = addHeadingAnchors(markdownToHtml(input.markdown, videoHref));
-  const toc = renderToc(rendered.toc);
-  const mobileToc = renderToc(rendered.toc, 'mobile');
-  const content = `<div class="page">
-<header class="hero">
-  <div class="eyebrow"><span class="dot"></span>视频笔记 · ${escapeHtml(input.generatedAt)}</div>
-  <h1>${escapeHtml(input.title)}</h1>
-  <div class="meta">
-    <span class="chip">时长 <strong>${formatDuration(input.durationSeconds)}</strong></span>
-    <span class="chip">转录 <strong>${input.transcriptChars.toLocaleString('zh-CN')}</strong> 字</span>
-    <span class="chip">${escapeHtml(input.transcriptModel)}</span>
+  const sections = splitSections(markdownToHtml(input.markdown, videoHref));
+  const total = sections.length + 3;
+  const courseTitle = escapeHtml(input.title);
+  const duration = formatDuration(input.durationSeconds);
+  const transcriptChars = input.transcriptChars.toLocaleString('zh-CN');
+
+  const cover = `<section class="slide cover active" data-slide="0" aria-label="封面" aria-hidden="false">
+  <div class="cover-inner">
+    <div class="eyebrow"><span class="dot"></span>课程笔记 · ${escapeHtml(input.generatedAt)}</div>
+    <h1>${courseTitle}</h1>
+    <p class="cover-source">${escapeHtml(input.sourcePath)}</p>
+    <div class="meta">
+      <span class="chip">时长 <strong>${duration}</strong></span>
+      <span class="chip">转录 <strong>${transcriptChars}</strong> 字</span>
+      <span class="chip">${escapeHtml(input.transcriptModel)}</span>
+    </div>
+    <div class="cover-actions">
+      <button class="button" type="button" data-goto="1">开始阅读 <span aria-hidden="true">→</span></button>
+      <a class="button secondary" href="${escapeHtml(videoHref)}">打开原视频</a>
+      <a class="button ghost" href="./notes.md">Markdown 源文件</a>
+    </div>
+    <p class="deck-hint"><kbd>←</kbd><kbd>→</kbd> 翻页 · <kbd>空格</kbd> 下一页 · <kbd>F</kbd> 全屏 · <kbd>O</kbd> 目录</p>
   </div>
-  <div class="hero-actions">
-    <a class="button" href="${escapeHtml(videoHref)}">打开原视频</a>
-    <a class="button secondary" href="./notes.md">Markdown 源文件</a>
+</section>`;
+
+  const agendaItems = sections
+    .map(
+      (section, index) =>
+        `<li><button type="button" data-goto="${index + 2}" title="${escapeHtml(section.title)}"><span class="agenda-num">${String(index + 1).padStart(2, '0')}</span><span class="agenda-title">${escapeHtml(section.title)}</span></button></li>`
+    )
+    .join('');
+  const agenda = `<section class="slide agenda" data-slide="1" aria-label="目录" aria-hidden="true">
+  <div class="slide-head"><span class="kicker">目录</span><span class="kicker">共 ${sections.length} 节</span></div>
+  <h2>本讲内容</h2>
+  <ol class="agenda-list">${agendaItems}</ol>
+  <p class="deck-hint">点击标题跳转，或用 <kbd>←</kbd><kbd>→</kbd> 逐页阅读</p>
+</section>`;
+
+  const sectionSlides = sections
+    .map(
+      (section, index) => `<section class="slide content-slide" data-slide="${index + 2}" aria-label="第 ${index + 1} 节：${escapeHtml(section.title)}" aria-hidden="true">
+  <div class="slide-head"><span class="kicker">${String(index + 1).padStart(2, '0')} / ${String(sections.length).padStart(2, '0')}</span><span class="kicker deck-course">${courseTitle}</span></div>
+  <div class="slide-main">
+    <h2>${section.headingHtml}</h2>
+    <div class="slide-body">${section.bodyHtml}</div>
   </div>
-</header>
-<details class="toc-mobile"><summary>目录</summary>${mobileToc}</details>
-<div class="layout">
-  ${toc}
-  <main class="content">
-${rendered.html}
-    <footer class="footer">由 ASAKI 视频笔记生成 · 转录 ${escapeHtml(input.transcriptModel)} · ${escapeHtml(input.generatedAt)}</footer>
-  </main>
+</section>`
+    )
+    .join('\n');
+
+  const end = `<section class="slide end" data-slide="${total - 1}" aria-label="结束" aria-hidden="true">
+  <p class="kicker">END</p>
+  <h2>本讲结束</h2>
+  <p class="end-summary">${sections.length} 节知识点 · 转录 ${escapeHtml(transcriptChars)} 字 · 时长 ${duration}</p>
+  <div class="end-actions">
+    <button class="button" type="button" data-goto="0">回到封面</button>
+    <button class="button secondary" type="button" data-goto="1">查看目录</button>
+    <a class="button secondary" href="${escapeHtml(videoHref)}">打开原视频</a>
+  </div>
+  <p class="deck-hint">由 ASAKI 视频笔记生成 · ${escapeHtml(input.generatedAt)}</p>
+</section>`;
+
+  const bar = `<footer class="deck-bar">
+  <span class="deck-name" title="${courseTitle}">${courseTitle}</span>
+  <div class="deck-controls">
+    <button class="deck-btn" type="button" data-prev aria-label="上一页" title="上一页 (←)">${ICON_PREV}</button>
+    <div class="deck-progress" role="progressbar" aria-label="阅读进度" aria-valuemin="1" aria-valuemax="${total}" aria-valuenow="1"><span data-progress></span></div>
+    <span class="deck-count" data-count aria-live="polite">1 / ${total}</span>
+    <button class="deck-btn" type="button" data-agenda aria-label="打开目录" title="目录 (O)">${ICON_AGENDA}</button>
+    <button class="deck-btn" type="button" data-fullscreen aria-label="全屏" aria-pressed="false" title="全屏 (F)">${ICON_FULLSCREEN}</button>
+    <button class="deck-btn" type="button" data-next aria-label="下一页" title="下一页 (→)">${ICON_NEXT}</button>
+  </div>
+</footer>`;
+
+  const content = `<div class="deck-app">
+<div class="deck-stage">
+${cover}
+${agenda}
+${sectionSlides}
+${end}
 </div>
-</div>`;
-  return shell({ title: `${input.title} · 视频笔记`, bodyClass: 'lesson', content });
+${bar}
+</div>
+<script>${DECK_SCRIPT}</script>`;
+
+  return shell({
+    title: `${input.title} · 视频笔记`,
+    bodyClass: 'deck',
+    content,
+    extraCss: DECK_CSS
+  });
 }
 
 export function renderIndexHtml(input: CourseIndexInput): string {
