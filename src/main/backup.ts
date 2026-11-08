@@ -202,11 +202,36 @@ function restoreStamp(date: Date): string {
   )}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
 }
 
+/** Puts the old copy back, returning its path when even that rename failed. */
+async function rollbackRename(previous: string, target: string): Promise<string | null> {
+  try {
+    await rename(previous, target);
+    return null;
+  } catch {
+    return previous;
+  }
+}
+
+/**
+ * Adds the stranded old copy to the error so the user can recover it by hand.
+ * A rollback failure used to be swallowed, leaving a "staged rename failed"
+ * error with no hint that the original data is still on disk under another name.
+ */
+function withRecoveryHint(cause: unknown, stranded: string): Error {
+  const error = cause instanceof Error ? cause : new Error(String(cause));
+  error.message = `${error.message}（原数据未能放回，仍保留在：${stranded}）`;
+  return error;
+}
+
 /**
  * Replaces `target` with `staged` without ever deleting the only copy first.
  * The existing target is renamed aside (same volume, atomic), then the staged
  * directory takes its place; if that rename fails, the old directory is put
  * back. Only after a successful swap is the old copy removed.
+ *
+ * A crash between the two renames leaves a `.asaki-restore-old-*` copy next to
+ * the target. Later restores do not sweep those artifacts, so they are kept
+ * (and reported in the error when a rollback fails) as a manual recovery path.
  */
 export async function swapDirectory(staged: string, target: string): Promise<void> {
   const previous = `${target}.asaki-restore-old-${process.pid}-${randomUUID()}`;
@@ -221,10 +246,8 @@ export async function swapDirectory(staged: string, target: string): Promise<voi
   try {
     await rename(staged, target);
   } catch (error) {
-    if (movedAside) {
-      await rename(previous, target).catch(() => undefined);
-    }
-    throw error;
+    const stranded = movedAside ? await rollbackRename(previous, target) : null;
+    throw stranded ? withRecoveryHint(error, stranded) : error;
   }
 
   if (movedAside) {
@@ -234,7 +257,12 @@ export async function swapDirectory(staged: string, target: string): Promise<voi
 
 export async function copyFileAtomic(source: string, target: string): Promise<void> {
   const temp = `${target}.restore-tmp-${process.pid}-${randomUUID()}`;
-  await copyFile(source, temp);
+  try {
+    await copyFile(source, temp);
+  } catch (error) {
+    await rm(temp, { force: true }).catch(() => undefined);
+    throw error;
+  }
   const previous = `${target}.restore-old-${process.pid}-${randomUUID()}`;
   let movedAside = false;
   try {
@@ -251,10 +279,8 @@ export async function copyFileAtomic(source: string, target: string): Promise<vo
     await rename(temp, target);
   } catch (error) {
     await rm(temp, { force: true }).catch(() => undefined);
-    if (movedAside) {
-      await rename(previous, target).catch(() => undefined);
-    }
-    throw error;
+    const stranded = movedAside ? await rollbackRename(previous, target) : null;
+    throw stranded ? withRecoveryHint(error, stranded) : error;
   }
 
   if (movedAside) {
@@ -322,11 +348,9 @@ export async function restoreBackup(options: RestoreBackupOptions): Promise<Rest
   const vaultStage = join(dirname(realTargetVault), `.asaki-restore-vault-${restoreId}`);
   let conversationsStage: string | null = null;
   try {
-    await rm(vaultStage, { recursive: true, force: true });
     await cp(sourceVault, vaultStage, { recursive: true, dereference: true });
     if (conversationsExists) {
       conversationsStage = join(userDataPath, `.asaki-restore-conversations-${restoreId}`);
-      await rm(conversationsStage, { recursive: true, force: true });
       await cp(conversationsSource, conversationsStage, { recursive: true, dereference: true });
     }
   } catch (error) {

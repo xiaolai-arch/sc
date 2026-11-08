@@ -83,3 +83,60 @@ test('a permanently failing callback is consumed after three attempts', async ()
   expect((await scheduler.tick()).failed).toHaveLength(0);
   expect(calls).toBe(3);
 });
+
+test('a throwing error reporter cannot break the scheduler', async () => {
+  let checkInCalls = 0;
+  const scheduler = new Scheduler({
+    now: () => NOW,
+    getSettings: async () => settings(),
+    notify: () => undefined,
+    onCheckIn: () => {
+      checkInCalls += 1;
+      throw new Error('model unavailable');
+    },
+    onError: () => {
+      throw new Error('reporter broken');
+    }
+  });
+
+  expect((await scheduler.tick()).failed).toHaveLength(1);
+  expect((await scheduler.tick()).failed).toHaveLength(1);
+  // The third failure reports the cause; the reporter's own failure must stay
+  // contained instead of rejecting the tick.
+  await expect(scheduler.tick()).resolves.toBeDefined();
+  expect(checkInCalls).toBe(3);
+});
+
+test('forgets bookkeeping from earlier days', async () => {
+  let now = NOW;
+  const scheduler = new Scheduler({
+    now: () => now,
+    getSettings: async () => settings(),
+    notify: () => {
+      throw new Error('notification unavailable');
+    },
+    onCheckIn: (_kind, date) => ({
+      key: `${date}:check-in:morning`,
+      kind: 'morning-plan',
+      date,
+      scheduledTime: '08:00',
+      title: '阿咲想和你聊聊今天的进度',
+      body: '今天还有 1 个任务没完成。'
+    })
+  });
+
+  await scheduler.tick();
+  const internals = scheduler as unknown as {
+    pending: Map<string, unknown>;
+    attempts: Map<string, unknown>;
+    delivered: Set<string>;
+  };
+  expect(internals.pending.size).toBe(1);
+
+  // A long-running session must not accumulate one entry per trigger per day.
+  now = new Date(2026, 10, 1, 0, 0, 0);
+  await scheduler.tick();
+  expect(internals.pending.size).toBe(0);
+  expect(internals.attempts.size).toBe(0);
+  expect(internals.delivered.size).toBe(0);
+});

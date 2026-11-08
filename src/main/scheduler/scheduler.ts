@@ -218,9 +218,32 @@ export class Scheduler {
     return run;
   }
 
+  private reportError(error: unknown): void {
+    try {
+      this.onError?.(error);
+    } catch {
+      // A broken error reporter must not take the scheduler down with it.
+    }
+  }
+
+  /** Drops bookkeeping from earlier days so long-running sessions do not grow forever. */
+  private pruneOldDays(date: string): void {
+    const prefix = `${date}:`;
+    for (const key of this.delivered) {
+      if (!key.startsWith(prefix)) this.delivered.delete(key);
+    }
+    for (const key of this.pending.keys()) {
+      if (!key.startsWith(prefix)) this.pending.delete(key);
+    }
+    for (const key of this.attempts.keys()) {
+      if (!key.startsWith(prefix)) this.attempts.delete(key);
+    }
+  }
+
   private async runTick(): Promise<SchedulerTickResult> {
     const at = this.now();
     const date = formatLocalDate(at);
+    this.pruneOldDays(date);
     const settings = await this.getSettings();
     let reminders: Reminder[] = [];
     try {
@@ -261,7 +284,8 @@ export class Scheduler {
       if (this.delivered.has(key)) continue;
 
       if (state !== 'enabled') {
-        // A suppressed notification is dropped rather than shown late.
+        // Do not consume the trigger: once DND or the global toggle is off,
+        // a later tick still sees it as due and delivers it.
         this.pending.delete(key);
         result.suppressed.push({ key, kind: trigger.kind, reason: state });
         continue;
@@ -284,7 +308,7 @@ export class Scheduler {
             // Give up on the day rather than retry forever; surface the cause.
             this.delivered.add(key);
             this.pending.delete(key);
-            this.onError?.(error);
+            this.reportError(error);
           }
           result.failed.push(key);
         }
@@ -340,7 +364,7 @@ export class Scheduler {
           // model or vault read would retry on every tick for the rest of the day.
           this.delivered.add(key);
           this.attempts.delete(key);
-          this.onError?.(error);
+          this.reportError(error);
         } else {
           this.attempts.set(key, count);
         }
