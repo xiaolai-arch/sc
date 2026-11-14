@@ -167,8 +167,11 @@ const compareColumn = z.object({
 const compareSlide = z.object({
   ...baseShape,
   type: z.literal('compare'),
-  /** Exactly two columns: this is a two-way contrast, not a table. */
-  columns: z.tuple([compareColumn, compareColumn])
+  /** Two or three columns: a side-by-side contrast, not a full table. */
+  columns: z
+    .array(compareColumn)
+    .min(2, { message: 'needs at least two columns' })
+    .max(3, { message: 'too big' })
 });
 
 const insightSlide = z.object({
