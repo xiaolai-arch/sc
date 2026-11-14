@@ -18,6 +18,12 @@ export interface IndexLesson {
   transcriptChars: number;
   noteChars: number;
   summary: string;
+  /** Deck lessons link to their slides first; quick lessons keep notes.html. */
+  mode?: 'quick' | 'deck';
+  /** File names inside the lesson folder, e.g. `slides.html`. */
+  slidesFile?: string | null;
+  pdfFile?: string | null;
+  reportFile?: string | null;
 }
 
 export interface CourseIndexInput {
@@ -550,9 +556,23 @@ export function renderIndexHtml(input: CourseIndexInput): string {
   const cards = input.lessons
     .map((lesson, index) => {
       const folder = encodeURIComponent(lesson.folder);
+      const slides = lesson.slidesFile ? encodeURIComponent(lesson.slidesFile) : null;
+      const pdf = lesson.pdfFile ? encodeURIComponent(lesson.pdfFile) : null;
+      const report = lesson.reportFile ? encodeURIComponent(lesson.reportFile) : null;
+      // The card title opens the reading artifact: slides for deck lessons,
+      // notes.html for quick notes (which is what older lessons have).
+      const primary = slides !== null ? `./${folder}/${slides}` : `./${folder}/notes.html`;
+      const links = [
+        slides !== null ? `<a href="./${folder}/${slides}">浏览课件</a>` : '',
+        // Deck lessons have no notes.html; quick lessons still do.
+        lesson.mode === 'deck' ? '' : `<a href="./${folder}/notes.html">阅读笔记</a>`,
+        `<a href="./${folder}/notes.md">Markdown</a>`,
+        pdf !== null ? `<a href="./${folder}/${pdf}">PDF</a>` : '',
+        report !== null ? `<a href="./${folder}/${report}">质量报告</a>` : ''
+      ].filter((link) => link !== '');
       return `<article class="card" style="--i:${index}">
   <div class="card-num">${String(index + 1).padStart(2, '0')}</div>
-  <h2><a href="./${folder}/notes.html">${escapeHtml(lesson.title)}</a></h2>
+  <h2><a href="${primary}">${escapeHtml(lesson.title)}</a></h2>
   <p class="card-summary">${escapeHtml(lesson.summary)}</p>
   <div class="card-meta">
     <span>${formatDuration(lesson.durationSeconds)}</span>
@@ -560,8 +580,7 @@ export function renderIndexHtml(input: CourseIndexInput): string {
     <span>${lesson.noteChars.toLocaleString('zh-CN')} 字笔记</span>
   </div>
   <div class="card-links">
-    <a href="./${folder}/notes.html">阅读笔记</a>
-    <a href="./${folder}/notes.md">Markdown</a>
+    ${links.join('\n    ')}
   </div>
 </article>`;
     })

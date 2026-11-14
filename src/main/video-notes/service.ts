@@ -542,7 +542,11 @@ async function rebuildIndex(
       durationSeconds: meta.durationSeconds,
       transcriptChars: meta.transcriptChars,
       noteChars: meta.noteChars,
-      summary: meta.summary
+      summary: meta.summary,
+      mode: meta.mode ?? 'quick',
+      slidesFile: meta.slidesPath ? basename(meta.slidesPath) : null,
+      pdfFile: meta.pdfPath ? basename(meta.pdfPath) : null,
+      reportFile: meta.reportPath ? basename(meta.reportPath) : null
     }));
     await writeFileAtomic(indexPath, renderIndexHtml({ title, generatedAt, lessons }));
   }
@@ -558,7 +562,8 @@ async function rebuildIndex(
         transcriptChars: meta.transcriptChars,
         noteChars: meta.noteChars,
         notesPath: join(dir, 'notes.md'),
-        htmlPath: join(dir, 'notes.html')
+        // Deck lessons have no notes.html; the slides are the reading artifact.
+        htmlPath: meta.mode === 'deck' ? '' : join(dir, 'notes.html')
       };
     })
   };

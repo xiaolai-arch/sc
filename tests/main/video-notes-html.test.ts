@@ -123,4 +123,30 @@ describe('course index HTML', () => {
     // The index-specific card CSS must be present, not only the shared CSS.
     expect(html).toContain('.card:hover');
   });
+
+  test('deck lessons link slides, PDF and report instead of notes.html', () => {
+    const html = renderIndexHtml({
+      title: '课程',
+      generatedAt: '2026-11-15',
+      lessons: [
+        {
+          folder: '01-集合',
+          title: '第一讲',
+          durationSeconds: 1800,
+          transcriptChars: 5000,
+          noteChars: 800,
+          summary: '摘要',
+          mode: 'deck',
+          slidesFile: 'slides.html',
+          pdfFile: 'slides.pdf',
+          reportFile: 'report.md'
+        }
+      ]
+    });
+
+    expect(html).toContain('./01-%E9%9B%86%E5%90%88/slides.html');
+    expect(html).toContain('./01-%E9%9B%86%E5%90%88/slides.pdf');
+    expect(html).toContain('./01-%E9%9B%86%E5%90%88/report.md');
+    expect(html).not.toContain('./01-%E9%9B%86%E5%90%88/notes.html');
+  });
 });
