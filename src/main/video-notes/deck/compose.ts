@@ -158,7 +158,7 @@ const SLIDE_TYPE_REFERENCE = [
   '4. points（要点页）。字段：points（1–5 项，每项 {"text":"...","source":{...}}）。',
   '5. passage（屏幕原文页）。字段：lines（1–30 行字符串，逐字照抄题干、选项、范文）。',
   '6. figure（截图页）。字段：frame（必须是材料里列出的 frames/*.jpg）、keepImage（必须为 true）、captions（0–3 条）。',
-  '7. compare（两栏对比页）。字段：columns（正好 2 栏，每栏 {"heading":"...","items":["..."]}）。',
+  '7. compare（栏对比页）。字段：columns（2–3 栏，每栏 {"heading":"...","items":["..."]}）。',
   '8. insight（补充卡片页）。字段：principle、examples（2–3 项，每项 {"wrong"?:"...","right":"..."}）、pitfall、transfer。',
   '9. derive（推演页）。字段：steps（2–8 步字符串数组）。',
   '10. quote（引文页）。字段：text。',
