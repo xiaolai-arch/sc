@@ -9,6 +9,7 @@ import {
   type VideoLessonRunInput,
   type VideoLessonRunOutput
 } from '../../../src/main/video-notes/service';
+import type { VideoNotesStage } from '../../../src/shared/video-notes';
 
 const NOW = () => new Date(2026, 10, 15, 12, 0, 0);
 
@@ -255,6 +256,37 @@ describe('video job queue', () => {
       { inputTokens: 10, outputTokens: 5 }
     ]);
     jobs.dispose();
+  });
+
+  test('maps deck stages onto their pipeline steps', async () => {
+    const cases: Array<[VideoNotesStage, string]> = [
+      ['keyframes', 'keyframes'],
+      ['screen', 'screen-read'],
+      ['outline', 'outline'],
+      ['notes', 'notes'],
+      ['enrich', 'enrich'],
+      ['factcheck', 'factcheck-a'],
+      ['compose', 'compose'],
+      ['render', 'render'],
+      ['layout', 'layout'],
+      ['pdf', 'export'],
+      ['report', 'report']
+    ];
+
+    for (const [stage, expected] of cases) {
+      const video = join(root, `${stage}.mp4`);
+      const jobs = makeJobs({
+        filePath: join(root, `jobs-${stage}.json`),
+        runLesson: async (input) => {
+          input.onStage?.(stage, 'working…');
+          throw new Error('步骤失败。');
+        }
+      });
+      const job = await jobs.enqueue({ mode: 'deck', videoPaths: [video] });
+      const failed = await jobs.settled(job.id);
+      expect(failed.lessons[0]!.step).toBe(expected);
+      jobs.dispose();
+    }
   });
 
   test('persists the queue and keeps only the newest finished jobs', async () => {

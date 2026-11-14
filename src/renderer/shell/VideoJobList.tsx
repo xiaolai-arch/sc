@@ -32,12 +32,35 @@ const LESSON_LABELS: Record<VideoLessonStatus, string> = {
   skipped: '跳过'
 };
 
-const STEP_LABELS: Record<string, string> = {
+const QUICK_STEP_LABELS: Record<string, string> = {
   probe: '读取视频信息',
   transcribe: '语音转写',
   render: '整理笔记',
   done: '完成'
 };
+
+const DECK_STEP_LABELS: Record<string, string> = {
+  probe: '读取视频信息',
+  transcribe: '语音转写',
+  keyframes: '关键帧',
+  'screen-read': '读屏',
+  outline: '大纲',
+  notes: '整理笔记',
+  enrich: '补充',
+  'factcheck-a': '核查',
+  'factcheck-b': '核查',
+  compose: '合成课件',
+  render: '渲染',
+  layout: '排版',
+  export: 'PDF',
+  report: '报告',
+  done: '完成'
+};
+
+function stepLabel(step: string, mode: VideoNotesMode): string {
+  const labels = mode === 'deck' ? DECK_STEP_LABELS : QUICK_STEP_LABELS;
+  return labels[step] ?? step;
+}
 
 const MODE_LABELS: Record<VideoNotesMode, string> = {
   quick: '快速笔记',
@@ -310,7 +333,7 @@ export function VideoJobList({ open, onClose }: VideoJobListProps) {
                         <span className={lessonClass(lesson.status)}>
                           {LESSON_LABELS[lesson.status]}
                           {lesson.status === 'running' && lesson.step
-                            ? ` · ${STEP_LABELS[lesson.step] ?? lesson.step}`
+                            ? ` · ${stepLabel(lesson.step, job.mode)}`
                             : ''}
                         </span>
                         {job.mode === 'quick' && lesson.status === 'done' ? (

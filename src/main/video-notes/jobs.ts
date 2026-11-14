@@ -228,16 +228,37 @@ function normalizeJob(value: unknown): VideoJob | null {
   };
 }
 
-function stageToStep(stage: string): string {
+function stageToStep(stage: string, mode: VideoNotesMode): string {
   switch (stage) {
     case 'probe':
       return 'probe';
     case 'audio':
     case 'transcribe':
       return 'transcribe';
+    case 'keyframes':
+      return 'keyframes';
+    case 'screen':
+      return 'screen-read';
+    case 'outline':
+      return 'outline';
     case 'notes':
+      // Quick notes are written by the render step; deck notes are their own step.
+      return mode === 'deck' ? 'notes' : 'render';
+    case 'enrich':
+      return 'enrich';
+    case 'factcheck':
+      return 'factcheck-a';
+    case 'compose':
+      return 'compose';
+    case 'render':
     case 'html':
       return 'render';
+    case 'layout':
+      return 'layout';
+    case 'pdf':
+      return 'export';
+    case 'report':
+      return 'report';
     case 'done':
       return 'done';
     default:
@@ -378,7 +399,7 @@ export function createVideoJobsService(options: VideoJobsOptions): VideoJobsServ
             ...(lesson.lessonDir ? { lessonDir: lesson.lessonDir } : {}),
             ...(fromStep ? { fromStep } : {}),
             onStage: (stage, message) => {
-              lesson.step = stageToStep(stage);
+              lesson.step = stageToStep(stage, job.mode);
               lesson.message = message;
               schedulePersist();
               scheduleEmit();
