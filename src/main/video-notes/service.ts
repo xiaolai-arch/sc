@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import type { Dirent } from 'node:fs';
-import { mkdir, readFile, readdir, stat } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, stat } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { formatLocalDate } from '../../shared/date';
-import type { ModelClient, ModelUsage } from '../agent/model-client';
+import type { ModelClient, ModelResponse, ModelUsage } from '../agent/model-client';
 import type {
   VideoNotesEstimate,
   VideoNotesFailure,
@@ -16,6 +16,7 @@ import type {
   VideoNotesStage
 } from '../../shared/video-notes';
 import { writeFileAtomic } from '../workspace/fs-utils';
+import { exportDeckPdf, measureDeckHtml } from '../deck-browser';
 import { formatDuration, renderIndexHtml, renderLessonHtml, type IndexLesson } from './html';
 import { assertMediaTools, extractMp3Chunk, isSupportedMedia, probeDuration } from './media';
 import {
@@ -26,6 +27,29 @@ import {
 } from './mimo';
 import { generateNoteBody } from './notes';
 import { readCheckpoint, runStep, writeCheckpoint, fingerprintOf } from './checkpoint';
+import { extractKeyframes, type Keyframe } from './keyframes';
+import { readScreens, type ScreenRead } from './screen-read';
+import { collectOverflows, type SlideLayout, type SlideOverflow } from './deck/browser';
+import {
+  assembleDeck,
+  composeChapter,
+  refitSlide,
+  COMPOSE_PROMPT_VERSION
+} from './deck/compose';
+import type { DeckNotes, EnrichCard, EnrichResult, FactIssue, Outline } from './deck/content';
+import {
+  applyContested,
+  checkDeck,
+  checkMaterial,
+  reviseMaterial,
+  FACTCHECK_PROMPT_VERSION
+} from './deck/factcheck';
+import { buildEnrichment, ENRICH_PROMPT_VERSION } from './deck/enrich';
+import { buildNotes, renderNotesMarkdown, NOTES_PROMPT_VERSION } from './deck/notes';
+import { buildOutline, OUTLINE_PROMPT_VERSION } from './deck/outline';
+import { renderDeck } from './deck/render';
+import { buildQualityReport } from './deck/report';
+import { validateDeck, type Deck, type Slide } from './deck/schema';
 
 export interface AsrConfig {
   baseURL: string;
@@ -53,6 +77,18 @@ export interface VideoNotesServiceOptions {
     signal?: AbortSignal
   ) => Promise<void>;
   createAsr?: (config: MimoAsrConfig) => (audio: Buffer, language: VideoNotesLanguage) => Promise<string>;
+  /** Deck pipeline: keyframe extraction; production uses ffmpeg. */
+  extractFrames?: (input: {
+    videoPath: string;
+    durationSeconds: number;
+    outDir: string;
+    signal: AbortSignal;
+  }) => Promise<Keyframe[]>;
+  /** Deck pipeline: layout measurement and PDF export; production uses Electron. */
+  deckBrowser?: {
+    measure(html: string): Promise<SlideLayout[]>;
+    exportPdf(html: string, pdfPath: string): Promise<{ slides: number; bytes: number }>;
+  };
 }
 
 export interface VideoLessonRunInput {
@@ -108,12 +144,43 @@ export interface VideoNotesService {
   }): Promise<VideoNotesEstimate>;
 }
 
-/** Ordered quick-mode pipeline (see design 4.1 steps 1, 2, 10). */
-export const VIDEO_NOTES_STEPS = ['probe', 'transcribe', 'render'] as const;
+/**
+ * Pipeline steps in execution order. Quick mode runs probe, transcribe and
+ * render (design 4.1 steps 1, 2, 10); deck mode runs every step after
+ * transcribe. `meta` is written last but never checkpointed, so it is not here.
+ */
+export const VIDEO_NOTES_STEPS = [
+  'probe',
+  'transcribe',
+  'keyframes',
+  'screen-read',
+  'outline',
+  'notes',
+  'enrich',
+  'factcheck-a',
+  'compose',
+  'render',
+  'layout',
+  'factcheck-b',
+  'export',
+  'report'
+] as const;
 export type VideoNotesStep = (typeof VIDEO_NOTES_STEPS)[number];
 
 /** Bump when the note prompt or its options change, to invalidate checkpoints. */
 export const NOTE_PROMPT_VERSION = 1;
+
+/**
+ * The screen-read prompt has no exported version constant of its own; bump this
+ * when its instructions or batch shape change so saved reads are re-requested.
+ */
+export const SCREEN_READ_PROMPT_VERSION = 1;
+
+/** Layout corrections per deck; the design fixes this at two rounds. */
+export const MAX_LAYOUT_ROUNDS = 2;
+
+/** Program-generated shell pages are never handed to the refit model. */
+const SHELL_SLIDE_TYPES: readonly Slide['type'][] = ['cover', 'agenda', 'summary'];
 
 const MAX_FOLDER_ATTEMPTS = 500;
 const QUICK_TOKENS_PER_LESSON = 50_000;
@@ -181,6 +248,42 @@ function withAbortSignal(client: ModelClient, signal: AbortSignal): ModelClient 
   return {
     complete(request) {
       return client.complete({ ...request, signal: request.signal ?? signal });
+    }
+  };
+}
+
+export interface UsageTracker {
+  /** Client that records the usage of every call it forwards. */
+  client: ModelClient;
+  /** Returns the usage accumulated since the previous call, then resets it. */
+  take(): ModelUsage;
+}
+
+function addUsageTo(target: ModelUsage, next: ModelUsage | undefined): void {
+  if (next === undefined) return;
+  target.inputTokens += Number.isFinite(next.inputTokens) ? next.inputTokens : 0;
+  target.outputTokens += Number.isFinite(next.outputTokens) ? next.outputTokens : 0;
+}
+
+/**
+ * Wraps a client so each pipeline step can take exactly its own token usage
+ * and store it in its checkpoint. `take()` resets the counter, so a step that
+ * fails halfway cannot leak its usage into the next one.
+ */
+export function withUsageTracker(client: ModelClient): UsageTracker {
+  let pending: ModelUsage = { inputTokens: 0, outputTokens: 0 };
+  return {
+    client: {
+      async complete(request): Promise<ModelResponse> {
+        const response = await client.complete(request);
+        addUsageTo(pending, response.usage);
+        return response;
+      }
+    },
+    take() {
+      const taken = pending;
+      pending = { inputTokens: 0, outputTokens: 0 };
+      return taken;
     }
   };
 }
@@ -479,6 +582,42 @@ interface RenderStepOutput {
   slideCount: number;
 }
 
+/** A keyframe as saved in the checkpoint: the basename keeps the folder movable. */
+interface SavedKeyframe {
+  t: number;
+  name: string;
+  sharpness: number;
+  scene: boolean;
+}
+
+interface KeyframeStepOutput {
+  frames: SavedKeyframe[];
+}
+
+interface DeckRenderStepOutput {
+  slidesPath: string;
+  bytes: number;
+  deckFingerprint: string;
+}
+
+interface DeckLayoutStepOutput {
+  deck: Deck;
+  slides: SlideLayout[];
+  overflows: SlideOverflow[];
+  rounds: number;
+}
+
+interface FactcheckAStepOutput {
+  issues: FactIssue[];
+  notes: DeckNotes;
+  cards: EnrichCard[];
+}
+
+interface FactcheckBStepOutput {
+  issues: FactIssue[];
+  deck: Deck;
+}
+
 function renderOutputComplete(output: RenderStepOutput | undefined): output is RenderStepOutput {
   return (
     output !== undefined &&
@@ -498,6 +637,24 @@ function renderOutputMatches(
   return readMeta(output.lessonDir).then(
     (meta) => meta !== null && meta.version === 2 && samePath(meta.sourcePath, videoPath)
   );
+}
+
+/**
+ * Rebuilds a deck from a flattened slide list: every slide keeps the chapter it
+ * came from, so the layout step can replace one page with one or two pages
+ * without disturbing chapter order.
+ */
+function rebuildDeck(source: Deck, entries: ReadonlyArray<{ chapter: number; slide: Slide }>): Deck {
+  return {
+    ...source,
+    chapters: source.chapters.map((chapter, chapterIndex) => ({
+      title: chapter.title,
+      start: chapter.start,
+      slides: entries
+        .filter((entry) => entry.chapter === chapterIndex)
+        .map((entry) => entry.slide)
+    }))
+  };
 }
 
 export function estimateFromDuration(
@@ -530,6 +687,14 @@ export function createVideoNotesService(options: VideoNotesServiceOptions): Vide
   const probe = options.probe ?? probeDuration;
   const extract = options.extract ?? extractMp3Chunk;
   const createAsr = options.createAsr ?? ((config) => createMimoAsrClient(config));
+  const extractFrames =
+    options.extractFrames ??
+    ((input: { videoPath: string; durationSeconds: number; outDir: string; signal: AbortSignal }) =>
+      extractKeyframes(input));
+  const deckBrowser = options.deckBrowser ?? {
+    measure: (html: string) => measureDeckHtml(html),
+    exportPdf: (html: string, pdfPath: string) => exportDeckPdf(html, pdfPath)
+  };
   let busy = false;
   let toolsReady: Promise<void> | null = null;
 
@@ -563,6 +728,675 @@ export function createVideoNotesService(options: VideoNotesServiceOptions): Vide
     }
     const allocated = await allocateLessonDir(outputDir, videoPath, usedNames);
     return allocated;
+  }
+
+  async function fileExists(path: string): Promise<boolean> {
+    try {
+      await access(path);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  interface DeckRunContext {
+    videoPath: string;
+    lessonDir: string;
+    folder: string;
+    title: string;
+    durationSeconds: number;
+    transcript: Transcript;
+    modelClient: ModelClient;
+    modelName: string;
+    signal: AbortSignal;
+    fromStep: string | undefined;
+    emit: (
+      stage: VideoNotesStage,
+      message: string,
+      extra?: Pick<VideoNotesProgress, 'current' | 'total'>
+    ) => void;
+  }
+
+  /**
+   * Deck mode, design 4.1 steps 3–15: keyframes → screen-read → outline →
+   * notes → enrich → factcheck-a → compose → render → layout → factcheck-b →
+   * export → report → meta. Every step goes through `runStep`, so a resumed
+   * lesson skips whatever is unchanged and keeps the earlier checkpoints.
+   */
+  async function runDeckPipeline(context: DeckRunContext): Promise<VideoLessonRunOutput> {
+    const {
+      videoPath,
+      lessonDir,
+      folder,
+      title,
+      durationSeconds,
+      transcript,
+      modelName,
+      signal,
+      fromStep,
+      emit
+    } = context;
+    const startedAt = Date.now();
+    const framesDir = join(lessonDir, 'frames');
+    const notesPath = join(lessonDir, 'notes.md');
+    const slidesPath = join(lessonDir, 'slides.html');
+    const pdfPath = join(lessonDir, 'slides.pdf');
+    const reportPath = join(lessonDir, 'report.md');
+
+    const tracker = withUsageTracker(withAbortSignal(context.modelClient, signal));
+    const model = tracker.client;
+    const totalUsage: ModelUsage = { inputTokens: 0, outputTokens: 0 };
+    const addUsage = (usage: ModelUsage | undefined): void => addUsageTo(totalUsage, usage);
+
+    /** Runs one step body and attributes exactly its model usage to it. */
+    async function tracked<T>(work: () => Promise<T>): Promise<{ output: T; usage: ModelUsage }> {
+      tracker.take(); // drop residue from an earlier failed attempt
+      const output = await work();
+      return { output, usage: tracker.take() };
+    }
+
+    // Step 2 artifact: the transcript is written next to the deck outputs.
+    await writeFileAtomic(
+      join(lessonDir, 'transcript.json'),
+      `${JSON.stringify(transcript, null, 2)}\n`
+    );
+    const transcriptSignature = fingerprintOf(transcript);
+
+    // Step 3: keyframes -----------------------------------------------------
+    emit('keyframes', '正在抽取关键帧…');
+    const keyframeFingerprint = fingerprintOf({
+      step: 'keyframes',
+      source: videoPath,
+      durationSeconds
+    });
+    const extractKeyframeStep = (force: boolean) =>
+      runStep<KeyframeStepOutput>({
+        lessonDir,
+        step: 'keyframes',
+        force,
+        fingerprint: keyframeFingerprint,
+        run: () =>
+          tracked(async () => {
+            throwIfAborted(signal);
+            const frames = await extractFrames({
+              videoPath,
+              durationSeconds,
+              outDir: framesDir,
+              signal
+            });
+            return {
+              frames: frames.map((frame) => ({
+                t: frame.t,
+                name: basename(frame.path),
+                sharpness: frame.sharpness,
+                scene: frame.scene
+              }))
+            };
+          }),
+        now
+      });
+
+    let keyframeStep = await extractKeyframeStep(shouldForce('keyframes', fromStep));
+    if (keyframeStep.skipped) {
+      // frames/ may have been deleted; re-extract rather than fail downstream.
+      const missing = await Promise.all(
+        keyframeStep.output.frames.map((frame) =>
+          fileExists(join(framesDir, frame.name)).then((exists) => !exists)
+        )
+      );
+      if (missing.some(Boolean)) keyframeStep = await extractKeyframeStep(true);
+    }
+    addUsage(keyframeStep.usage);
+    throwIfAborted(signal);
+
+    const keyframes: Keyframe[] = keyframeStep.output.frames.map((frame) => ({
+      t: frame.t,
+      path: join(framesDir, frame.name),
+      sharpness: frame.sharpness,
+      scene: frame.scene
+    }));
+    const frames = new Map<string, string>(
+      keyframes.map((frame) => [`frames/${basename(frame.path)}`, frame.path])
+    );
+
+    // Step 4: screen-read ---------------------------------------------------
+    emit('screen', '正在读取屏幕上的文字…');
+    let screenReadCount = 0;
+    const screenStep = await runStep<ScreenRead[]>({
+      lessonDir,
+      step: 'screen-read',
+      force: shouldForce('screen-read', fromStep),
+      fingerprint: fingerprintOf({
+        step: 'screen-read',
+        upstream: keyframeStep.output,
+        promptVersion: SCREEN_READ_PROMPT_VERSION,
+        model: modelName
+      }),
+      run: () =>
+        tracked(async () => {
+          throwIfAborted(signal);
+          return readScreens({
+            frames: keyframes,
+            client: model,
+            signal,
+            onBatch: (batch) => {
+              screenReadCount += batch.length;
+              emit('screen', `正在读取屏幕上的文字（已读 ${screenReadCount} 条）…`, {
+                current: screenReadCount,
+                total: keyframes.length
+              });
+            }
+          });
+        }),
+      now
+    });
+    addUsage(screenStep.usage);
+    const screenReads = screenStep.output;
+    throwIfAborted(signal);
+
+    // Step 5: outline -------------------------------------------------------
+    emit('outline', '正在划分章节大纲…');
+    const outlineStep = await runStep<Outline>({
+      lessonDir,
+      step: 'outline',
+      force: shouldForce('outline', fromStep),
+      fingerprint: fingerprintOf({
+        step: 'outline',
+        upstream: { transcript: transcriptSignature, screen: screenStep.output },
+        promptVersion: OUTLINE_PROMPT_VERSION,
+        model: modelName
+      }),
+      run: () =>
+        tracked(() =>
+          buildOutline({ client: model, transcript, screenReads, signal })
+        ),
+      now
+    });
+    addUsage(outlineStep.usage);
+    const outline = outlineStep.output;
+    throwIfAborted(signal);
+
+    // Step 6: notes ---------------------------------------------------------
+    emit('notes', '正在整理分章笔记…（这一步可能需要几分钟）');
+    const notesStep = await runStep<DeckNotes>({
+      lessonDir,
+      step: 'notes',
+      force: shouldForce('notes', fromStep),
+      fingerprint: fingerprintOf({
+        step: 'notes',
+        upstream: {
+          transcript: transcriptSignature,
+          outline: outlineStep.output,
+          screen: screenStep.output
+        },
+        promptVersion: NOTES_PROMPT_VERSION,
+        model: modelName
+      }),
+      run: () =>
+        tracked(() =>
+          buildNotes({
+            client: model,
+            transcript,
+            outline,
+            screenReads,
+            signal
+          })
+        ),
+      now
+    });
+    addUsage(notesStep.usage);
+    const notesMarkdown = renderNotesMarkdown(notesStep.output, {
+      title,
+      durationSeconds,
+      sourcePath: videoPath
+    });
+    await writeFileAtomic(notesPath, notesMarkdown);
+    throwIfAborted(signal);
+
+    // Step 7: enrich --------------------------------------------------------
+    emit('enrich', '正在补充复习卡片…');
+    const enrichStep = await runStep<EnrichResult>({
+      lessonDir,
+      step: 'enrich',
+      force: shouldForce('enrich', fromStep),
+      fingerprint: fingerprintOf({
+        step: 'enrich',
+        upstream: {
+          notes: notesStep.output,
+          outline: outlineStep.output,
+          transcript: transcriptSignature,
+          screen: screenStep.output
+        },
+        promptVersion: ENRICH_PROMPT_VERSION,
+        model: modelName
+      }),
+      run: () =>
+        tracked(() =>
+          buildEnrichment({
+            client: model,
+            notes: notesStep.output,
+            outline,
+            transcript,
+            screenReads,
+            signal
+          })
+        ),
+      now
+    });
+    addUsage(enrichStep.usage);
+    throwIfAborted(signal);
+
+    // Step 8: fact-check A (notes + cards) ----------------------------------
+    emit('factcheck', '正在核查笔记和补充卡片…');
+    const factcheckAStep = await runStep<FactcheckAStepOutput>({
+      lessonDir,
+      step: 'factcheck-a',
+      force: shouldForce('factcheck-a', fromStep),
+      fingerprint: fingerprintOf({
+        step: 'factcheck-a',
+        upstream: {
+          notes: notesStep.output,
+          cards: enrichStep.output.cards,
+          transcript: transcriptSignature
+        },
+        promptVersion: FACTCHECK_PROMPT_VERSION,
+        model: modelName
+      }),
+      run: () =>
+        tracked(async () => {
+          throwIfAborted(signal);
+          const checked = await checkMaterial({
+            client: model,
+            notes: notesStep.output,
+            cards: enrichStep.output.cards,
+            transcript,
+            signal
+          });
+          if (checked.issues.length === 0) {
+            return {
+              issues: checked.issues,
+              notes: notesStep.output,
+              cards: enrichStep.output.cards
+            };
+          }
+          const revised = await reviseMaterial({
+            client: model,
+            notes: notesStep.output,
+            cards: enrichStep.output.cards,
+            issues: checked.issues,
+            transcript,
+            signal
+          });
+          return { issues: checked.issues, notes: revised.notes, cards: revised.cards };
+        }),
+      now
+    });
+    addUsage(factcheckAStep.usage);
+    const verifiedNotes = factcheckAStep.output.notes;
+    const verifiedCards = factcheckAStep.output.cards;
+    throwIfAborted(signal);
+
+    // Step 9: compose (one call per chapter) --------------------------------
+    emit('compose', '正在合成课件…');
+    const composeStep = await runStep<Deck>({
+      lessonDir,
+      step: 'compose',
+      force: shouldForce('compose', fromStep),
+      fingerprint: fingerprintOf({
+        step: 'compose',
+        upstream: {
+          outline: outlineStep.output,
+          notes: verifiedNotes,
+          cards: verifiedCards,
+          screen: screenStep.output,
+          keyframes: keyframeStep.output
+        },
+        promptVersion: COMPOSE_PROMPT_VERSION,
+        model: modelName
+      }),
+      run: () =>
+        tracked(async () => {
+          const chapters: Array<{
+            title: string;
+            start: number;
+            slides: Slide[];
+            keyPoints: string[];
+          }> = [];
+          for (const [chapterIndex, chapter] of outline.chapters.entries()) {
+            throwIfAborted(signal);
+            emit(
+              'compose',
+              `正在合成课件（第 ${chapterIndex + 1}/${outline.chapters.length} 章）…`,
+              { current: chapterIndex + 1, total: outline.chapters.length }
+            );
+            const chapterNotes = verifiedNotes.chapters[chapterIndex] ?? verifiedNotes.chapters.find(
+              (entry) => entry.title.trim() === chapter.title.trim()
+            );
+            if (chapterNotes === undefined) {
+              throw new Error(`第「${chapter.title}」章没有可用的笔记。`);
+            }
+            const slides = await composeChapter({
+              client: model,
+              chapter,
+              notes: chapterNotes,
+              cards: verifiedCards.filter((card) => card.chapter.trim() === chapter.title.trim()),
+              screenReads,
+              keyframes,
+              durationSeconds,
+              chapterIndex,
+              chapterCount: outline.chapters.length,
+              signal
+            });
+            chapters.push({
+              title: chapter.title,
+              start: chapter.start,
+              slides,
+              keyPoints: chapterNotes.keyPoints
+            });
+          }
+          return assembleDeck({
+            title,
+            sourcePath: videoPath,
+            durationSeconds,
+            outline,
+            chapters
+          });
+        }),
+      now
+    });
+    addUsage(composeStep.usage);
+    const composedDeck = composeStep.output;
+    throwIfAborted(signal);
+
+    // Step 10: render -------------------------------------------------------
+    function renderHtml(deck: Deck): string {
+      return renderDeck(deck, { sourcePath: videoPath, frames });
+    }
+
+    async function persistRender(deck: Deck, force: boolean): Promise<string> {
+      const html = renderHtml(deck);
+      const step = await runStep<DeckRenderStepOutput>({
+        lessonDir,
+        step: 'render',
+        force: force || shouldForce('render', fromStep),
+        fingerprint: fingerprintOf({
+          step: 'render',
+          mode: 'deck',
+          upstream: { deck: fingerprintOf(deck), htmlBytes: html.length }
+        }),
+        run: () =>
+          tracked(async () => {
+            await writeFileAtomic(slidesPath, html);
+            return {
+              slidesPath,
+              bytes: Buffer.byteLength(html, 'utf8'),
+              deckFingerprint: fingerprintOf(deck)
+            };
+          }),
+        now
+      });
+      addUsage(step.usage);
+      if (step.skipped && !(await fileExists(slidesPath))) {
+        await writeFileAtomic(slidesPath, html);
+      }
+      return html;
+    }
+
+    emit('render', '正在渲染课件页面…');
+    const renderedHtml = await persistRender(composedDeck, false);
+    throwIfAborted(signal);
+
+    // Step 11: layout -------------------------------------------------------
+    async function refitDeck(deck: Deck, overflows: readonly SlideOverflow[]): Promise<Deck> {
+      let flat: Array<{ chapter: number; slide: Slide }> = [];
+      deck.chapters.forEach((chapter, chapterIndex) => {
+        for (const slide of chapter.slides) flat.push({ chapter: chapterIndex, slide });
+      });
+
+      let shift = 0;
+      for (const overflow of [...overflows].sort((left, right) => left.index - right.index)) {
+        throwIfAborted(signal);
+        const position = overflow.index + shift;
+        const target = flat[position];
+        if (target === undefined) continue;
+        // The shell pages are program-generated; the refit prompt forbids them.
+        if (SHELL_SLIDE_TYPES.includes(target.slide.type)) continue;
+        const chapterTitle = deck.chapters[target.chapter]?.title ?? '';
+        const refitted = await refitSlide({
+          client: model,
+          slide: target.slide,
+          excessPx: overflow.excessPx,
+          chapterTitle,
+          signal
+        });
+        const next = [
+          ...flat.slice(0, position),
+          ...refitted.map((slide) => ({ chapter: target.chapter, slide })),
+          ...flat.slice(position + 1)
+        ];
+        const candidate = rebuildDeck(deck, next);
+        try {
+          validateDeck(candidate, { framePaths: frames.keys() });
+        } catch {
+          // A refit that breaks the deck rules is dropped; the overflow stays
+          // in the report rather than failing the whole lesson.
+          continue;
+        }
+        shift += refitted.length - 1;
+        flat = next;
+      }
+      return rebuildDeck(deck, flat);
+    }
+
+    async function performLayout(layoutInput: {
+      deck: Deck;
+      html: string;
+      force: boolean;
+    }): Promise<DeckLayoutStepOutput> {
+      const step = await runStep<DeckLayoutStepOutput>({
+        lessonDir,
+        step: 'layout',
+        force: layoutInput.force || shouldForce('layout', fromStep),
+        fingerprint: fingerprintOf({
+          step: 'layout',
+          mode: 'deck',
+          upstream: {
+            deck: fingerprintOf(layoutInput.deck),
+            htmlBytes: layoutInput.html.length
+          },
+          promptVersion: COMPOSE_PROMPT_VERSION,
+          model: modelName
+        }),
+        run: () =>
+          tracked(async () => {
+            let deck = layoutInput.deck;
+            let html = layoutInput.html;
+            emit('layout', '正在检查版面…');
+            let slides = await deckBrowser.measure(html);
+            let overflows = collectOverflows(slides);
+            let rounds = 0;
+            while (overflows.length > 0 && rounds < MAX_LAYOUT_ROUNDS) {
+              throwIfAborted(signal);
+              rounds += 1;
+              emit('layout', `正在重排超出的页面（第 ${rounds} 轮）…`);
+              deck = await refitDeck(deck, overflows);
+              html = renderHtml(deck);
+              await writeFileAtomic(slidesPath, html);
+              slides = await deckBrowser.measure(html);
+              overflows = collectOverflows(slides);
+            }
+            if (overflows.length === 0) emit('layout', '版面检查通过。');
+            return { deck, slides, overflows, rounds };
+          }),
+        now
+      });
+      addUsage(step.usage);
+      return step.output;
+    }
+
+    let layout = await performLayout({
+      deck: composedDeck,
+      html: renderedHtml,
+      force: false
+    });
+    let finalDeck = layout.deck;
+    let finalOverflows = layout.overflows;
+    // Always rewrite: the file must match the (possibly refitted) final deck
+    // even when the layout step itself was skipped.
+    await writeFileAtomic(slidesPath, renderHtml(finalDeck));
+    throwIfAborted(signal);
+
+    // Step 12: fact-check B (whole deck) ------------------------------------
+    emit('factcheck', '正在逐页核查课件…');
+    const factcheckBStep = await runStep<FactcheckBStepOutput>({
+      lessonDir,
+      step: 'factcheck-b',
+      force: shouldForce('factcheck-b', fromStep),
+      fingerprint: fingerprintOf({
+        step: 'factcheck-b',
+        upstream: { deck: fingerprintOf(finalDeck), notes: verifiedNotes },
+        promptVersion: FACTCHECK_PROMPT_VERSION,
+        model: modelName
+      }),
+      run: () =>
+        tracked(async () => {
+          throwIfAborted(signal);
+          const checked = await checkDeck({
+            client: model,
+            deck: finalDeck,
+            notes: verifiedNotes,
+            signal
+          });
+          return { issues: checked.issues, deck: applyContested(checked.deck, checked.issues) };
+        }),
+      now
+    });
+    addUsage(factcheckBStep.usage);
+    const checkedDeck = factcheckBStep.output.deck;
+
+    if (JSON.stringify(checkedDeck) !== JSON.stringify(finalDeck)) {
+      // The fact-check changed pages: render and lay out the final content once
+      // more (design 4.1: steps 10–11 run again, at most once).
+      throwIfAborted(signal);
+      emit('render', '正在重新渲染课件页面…');
+      const checkedHtml = await persistRender(checkedDeck, true);
+      layout = await performLayout({ deck: checkedDeck, html: checkedHtml, force: true });
+      finalDeck = layout.deck;
+      finalOverflows = layout.overflows;
+      await writeFileAtomic(slidesPath, renderHtml(finalDeck));
+    }
+    throwIfAborted(signal);
+
+    // Step 13: export -------------------------------------------------------
+    emit('pdf', '正在导出 PDF…');
+    const exportStep = await runStep<{ pdfPath: string; bytes: number }>({
+      lessonDir,
+      step: 'export',
+      force: shouldForce('export', fromStep),
+      fingerprint: fingerprintOf({
+        step: 'export',
+        mode: 'deck',
+        upstream: { deck: fingerprintOf(finalDeck), slidesPath }
+      }),
+      run: () =>
+        tracked(async () => {
+          throwIfAborted(signal);
+          const result = await deckBrowser.exportPdf(renderHtml(finalDeck), pdfPath);
+          return { pdfPath, bytes: result.bytes };
+        }),
+      now
+    });
+    addUsage(exportStep.usage);
+    if (exportStep.skipped && !(await fileExists(pdfPath))) {
+      await deckBrowser.exportPdf(renderHtml(finalDeck), pdfPath);
+    }
+    throwIfAborted(signal);
+
+    // Step 14: report -------------------------------------------------------
+    emit('report', '正在生成质量报告…');
+    const slideCount = finalDeck.chapters.reduce(
+      (count, chapter) => count + chapter.slides.length,
+      0
+    );
+    const reportMarkdown = buildQualityReport({
+      title,
+      durationSeconds,
+      mode: 'deck',
+      transcriptChars: transcript.chars,
+      chunkCount: transcript.chunks.length,
+      keyframeCount: keyframes.length,
+      screenReadCount: screenReads.length,
+      deck: finalDeck,
+      overflow: finalOverflows,
+      issuesA: factcheckAStep.output.issues,
+      issuesB: factcheckBStep.output.issues,
+      usage: { ...totalUsage },
+      elapsedMs: Date.now() - startedAt
+    });
+    const reportStep = await runStep<{ reportPath: string }>({
+      lessonDir,
+      step: 'report',
+      force: shouldForce('report', fromStep),
+      fingerprint: fingerprintOf({
+        step: 'report',
+        mode: 'deck',
+        upstream: {
+          deck: fingerprintOf(finalDeck),
+          issuesA: factcheckAStep.output.issues,
+          issuesB: factcheckBStep.output.issues,
+          overflow: finalOverflows,
+          keyframeCount: keyframes.length,
+          screenReadCount: screenReads.length,
+          usage: totalUsage
+        }
+      }),
+      run: async () => ({ output: { reportPath } }),
+      now
+    });
+    addUsage(reportStep.usage);
+    await writeFileAtomic(reportPath, reportMarkdown);
+
+    // Step 15: meta (written last, never checkpointed) ----------------------
+    const noteChars = notesMarkdown.trim().length;
+    const overview =
+      verifiedNotes.chapters[0]?.keyPoints[0] ?? verifiedNotes.chapters[0]?.blocks[0]?.text ?? '';
+    const summary = summarizeNote(
+      overview.trim().length === 0 ? '' : `## 一句话总览\n\n${overview}`
+    );
+    const meta: LessonMeta = {
+      version: 2,
+      mode: 'deck',
+      sourcePath: videoPath,
+      folder,
+      title,
+      durationSeconds,
+      transcriptChars: transcript.chars,
+      noteChars,
+      transcriptModel: transcript.model,
+      generatedAt: formatLocalDate(now()),
+      summary,
+      slidesPath,
+      pdfPath,
+      reportPath,
+      slideCount
+    };
+    await writeFileAtomic(join(lessonDir, 'meta.json'), `${JSON.stringify(meta, null, 2)}\n`);
+
+    emit('done', '本讲课件已生成。');
+    return {
+      lessonDir,
+      title,
+      durationSeconds,
+      transcriptChars: transcript.chars,
+      noteChars,
+      notesPath,
+      // Deck mode has no notes.html; the deck itself is the reading artifact.
+      htmlPath: '',
+      slidesPath,
+      pdfPath,
+      reportPath,
+      usage: { ...totalUsage }
+    };
   }
 
   async function runLesson(input: VideoLessonRunInput): Promise<VideoLessonRunOutput> {
@@ -693,6 +1527,22 @@ export function createVideoNotesService(options: VideoNotesServiceOptions): Vide
     });
     const transcript = transcriptStep.output;
     throwIfAborted(signal);
+
+    if (mode === 'deck') {
+      return runDeckPipeline({
+        videoPath,
+        lessonDir,
+        folder,
+        title: lessonTitleFor(videoPath),
+        durationSeconds,
+        transcript,
+        modelClient,
+        modelName,
+        signal,
+        fromStep,
+        emit
+      });
+    }
 
     // Step 10: render (quick notes) ----------------------------------------
     const title = lessonTitleFor(videoPath);

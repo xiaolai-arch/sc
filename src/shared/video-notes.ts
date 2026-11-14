@@ -80,6 +80,16 @@ export type VideoNotesStage =
   | 'transcribe'
   | 'notes'
   | 'html'
+  | 'keyframes'
+  | 'screen'
+  | 'outline'
+  | 'enrich'
+  | 'factcheck'
+  | 'compose'
+  | 'render'
+  | 'layout'
+  | 'pdf'
+  | 'report'
   | 'done'
   | 'error';
 
