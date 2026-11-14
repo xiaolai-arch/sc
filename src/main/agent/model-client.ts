@@ -7,6 +7,19 @@ import { CliAgentClient } from './cli-agent-client';
 
 export type ModelRole = 'system' | 'user' | 'assistant' | 'tool';
 
+/** Media types the providers are expected to accept for inline images. */
+export type ModelImageMediaType = 'image/jpeg' | 'image/png' | 'image/webp';
+
+/**
+ * An image attached to a user message. `path` points at a local file; the
+ * caller is responsible for producing it (screen-read frames, never renderer
+ * supplied paths).
+ */
+export interface ModelImage {
+  path: string;
+  mediaType: ModelImageMediaType;
+}
+
 export interface ModelToolCall {
   id: string;
   name: string;
@@ -21,6 +34,8 @@ export interface ModelMessage {
   /** Present on tool messages: the call this message answers. */
   toolCallId?: string;
   toolName?: string;
+  /** Attached images. Only honoured on user messages; other roles ignore them. */
+  images?: ModelImage[];
 }
 
 export interface ModelToolDefinition {
@@ -40,6 +55,14 @@ export interface ModelRequest {
   /** Working directory for native local-CLI agents (the current vault workspace). */
   cwd?: string;
   signal?: AbortSignal;
+  /**
+   * Pure generation call: no tools are declared or loaded. CLI providers get
+   * an empty tool set where they support it; AI SDK providers simply get no
+   * tool declarations.
+   */
+  noTools?: boolean;
+  /** Overrides the provider's default per-request timeout (CLI default: 180s). */
+  timeoutMs?: number;
 }
 
 export interface ModelUsage {
@@ -78,6 +101,25 @@ export class NoApiKeyError extends Error {
   constructor(readonly providerKind: ProviderConfig['kind']) {
     super(`No API key configured for provider "${providerKind}".`);
     this.name = 'NoApiKeyError';
+  }
+}
+
+/** Raised when a provider cannot read images instead of silently dropping them. */
+export class ModelImageUnsupportedError extends Error {
+  constructor(readonly provider: string) {
+    super(`当前模型不支持读图：${provider}`);
+    this.name = 'ModelImageUnsupportedError';
+  }
+}
+
+/** Raised when a model call exceeds its per-request timeout. */
+export class ModelTimeoutError extends Error {
+  constructor(
+    readonly timeoutMs: number,
+    message = `模型调用超时（${timeoutMs}ms）。`
+  ) {
+    super(message);
+    this.name = 'ModelTimeoutError';
   }
 }
 

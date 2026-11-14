@@ -1,16 +1,20 @@
 import { spawn } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { prepareCliSpawn } from './cli-command';
 import type { LocalCliAgent, ProviderConfig } from '../../shared/types';
-import type {
-  ModelClient,
-  ModelMessage,
-  ModelRequest,
-  ModelResponse,
-  ModelStreamEvent,
-  ModelToolCall,
-  ModelToolDefinition,
-  StreamingModelClient
+import {
+  ModelImageUnsupportedError,
+  ModelTimeoutError,
+  type ModelClient,
+  type ModelImage,
+  type ModelMessage,
+  type ModelRequest,
+  type ModelResponse,
+  type ModelStreamEvent,
+  type ModelToolCall,
+  type ModelToolDefinition,
+  type StreamingModelClient
 } from './model-client';
 
 type LocalCliProvider = Extract<ProviderConfig, { kind: 'local-cli' }>;
@@ -117,6 +121,73 @@ const NATIVE_AGENT_CONFIG: Record<LocalCliAgent, AgentConfig> = {
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 
+/** Images attached to any user message in the conversation. */
+function collectImages(request: ModelRequest): ModelImage[] {
+  const images: ModelImage[] = [];
+  for (const message of request.messages) {
+    // Images belong to user turns; assistant/tool/system messages ignore them.
+    if (message.role === 'user' && message.images?.length) {
+      images.push(...message.images);
+    }
+  }
+  return images;
+}
+
+async function encodeImages(
+  images: ModelImage[]
+): Promise<Array<{ mediaType: string; data: string }>> {
+  const encoded: Array<{ mediaType: string; data: string }> = [];
+  for (const image of images) {
+    const bytes = await readFile(image.path);
+    encoded.push({ mediaType: image.mediaType, data: bytes.toString('base64') });
+  }
+  return encoded;
+}
+
+/**
+ * The single stream-json user message a claude CLI call reads from stdin.
+ * Claude expects one JSON object per line; text comes before the image blocks.
+ */
+export function buildClaudeStreamJsonInput(
+  text: string,
+  images: Array<{ mediaType: string; data: string }>
+): string {
+  const content: Array<Record<string, unknown>> = [{ type: 'text', text }];
+  for (const image of images) {
+    content.push({
+      type: 'image',
+      source: { type: 'base64', media_type: image.mediaType, data: image.data }
+    });
+  }
+  return `${JSON.stringify({ type: 'user', message: { role: 'user', content } })}\n`;
+}
+
+/**
+ * Adds the provider's image flags. claude carries images in its stdin payload,
+ * so only codex (`-i`) and opencode (`--file`) add arguments here.
+ */
+function addImageArgs(
+  agent: LocalCliAgent,
+  args: string[],
+  images: ModelImage[]
+): string[] {
+  if (images.length === 0) return args;
+  if (agent === 'claude') return args;
+  if (agent === 'codex') {
+    const next = [...args];
+    const additions = images.flatMap((image) => ['-i', image.path]);
+    const stdinIndex = next.lastIndexOf('-');
+    if (stdinIndex >= 0) next.splice(stdinIndex, 0, ...additions);
+    else next.push(...additions);
+    return next;
+  }
+  if (agent === 'opencode') {
+    return [...args, ...images.flatMap((image) => ['--file', image.path])];
+  }
+  // zcode
+  throw new ModelImageUnsupportedError(agent);
+}
+
 /**
  * Applies the provider's model/effort to the base CLI arguments.
  * - codex: model and reasoning effort go before the stdin placeholder `-`;
@@ -130,10 +201,11 @@ const DEFAULT_TIMEOUT_MS = 180_000;
 export function buildAgentArgs(
   provider: LocalCliProvider,
   baseArgs: readonly string[],
-  options: { webTools?: boolean; nativeTools?: boolean; cwd?: string } = {}
+  options: { webTools?: boolean; nativeTools?: boolean; cwd?: string; noTools?: boolean } = {}
 ): string[] {
   const args = [...baseArgs];
   const native = options.nativeTools === true;
+  const noTools = options.noTools === true;
 
   if (provider.agent === 'codex') {
     const model = provider.model?.trim();
@@ -165,7 +237,10 @@ export function buildAgentArgs(
       args.push('--bare');
     }
     // Under `--bare` the web tools are only available when named explicitly.
-    if (options.webTools) {
+    // A no-tools request wins: the CLI loads an empty tool set instead.
+    if (noTools) {
+      args.push('--tools', '');
+    } else if (options.webTools) {
       args.push('--tools', 'WebSearch,WebFetch', '--allowedTools', 'WebSearch,WebFetch');
     }
   }
@@ -210,7 +285,9 @@ const TOOL_PROTOCOL = [
 
 function buildPrompt(request: ModelRequest): string {
   const parts = request.messages.map(renderMessage);
-  if (request.tools?.length) {
+  // A no-tools request must not even advertise the tool protocol, otherwise
+  // the CLI may answer with tool calls the caller cannot execute.
+  if (request.tools?.length && !request.noTools) {
     const systemIndex = request.messages.findIndex((message) => message.role === 'system');
     parts.splice(systemIndex >= 0 ? systemIndex + 1 : 0, 0, renderToolSection(request.tools));
   }
@@ -421,7 +498,12 @@ async function defaultRunner(
     options.signal?.addEventListener('abort', onAbort, { once: true });
     const timer = setTimeout(() => {
       child.kill('SIGTERM');
-      fail(new Error(`本地 CLI agent 超时（${options.timeoutMs}ms）。`));
+      fail(
+        new ModelTimeoutError(
+          options.timeoutMs,
+          `本地 CLI agent 超时（${options.timeoutMs}ms）。`
+        )
+      );
     }, options.timeoutMs);
     timer.unref?.();
 
@@ -508,7 +590,12 @@ async function defaultStreamRunner(
     options.signal?.addEventListener('abort', onAbort, { once: true });
     const timer = setTimeout(() => {
       child.kill('SIGTERM');
-      fail(new Error(`本地 CLI agent 超时（${options.timeoutMs}ms）。`));
+      fail(
+        new ModelTimeoutError(
+          options.timeoutMs,
+          `本地 CLI agent 超时（${options.timeoutMs}ms）。`
+        )
+      );
     }, options.timeoutMs);
     timer.unref?.();
 
@@ -656,10 +743,24 @@ export class CliAgentClient implements StreamingModelClient {
       : AGENT_CONFIG[this.provider.agent];
     const command = this.provider.command?.trim() || this.provider.agent;
     const prompt = native ? buildNativePrompt(request, request.cwd!) : buildPrompt(request);
-    const args = buildAgentArgs(this.provider, config.args, {
-      ...(request.webTools ? { webTools: true } : {}),
-      ...(native ? { nativeTools: true, cwd: request.cwd! } : {})
-    });
+    const images = collectImages(request);
+    const noTools = request.noTools === true;
+    const args = addImageArgs(
+      this.provider.agent,
+      buildAgentArgs(this.provider, config.args, {
+        ...(request.webTools && !noTools ? { webTools: true } : {}),
+        ...(native ? { nativeTools: true, cwd: request.cwd! } : {}),
+        ...(noTools ? { noTools: true } : {})
+      }),
+      images
+    );
+    let input = config.stdin ? prompt : '';
+    if (images.length > 0 && this.provider.agent === 'claude') {
+      // Claude reads a stream-json user message from stdin when it carries
+      // images; there must be no positional prompt in this mode.
+      args.push('--input-format', 'stream-json');
+      input = buildClaudeStreamJsonInput(prompt, await encodeImages(images));
+    }
     if (!config.stdin) {
       if (config.promptFlag) args.push(config.promptFlag, prompt);
       else args.push(prompt);
@@ -668,10 +769,10 @@ export class CliAgentClient implements StreamingModelClient {
     const result = await (this.options.runner ?? defaultRunner)(
       command,
       args,
-      config.stdin ? prompt : '',
+      input,
       {
         cwd: native ? request.cwd! : (this.options.cwd ?? tmpdir()),
-        timeoutMs: this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        timeoutMs: this.resolveTimeoutMs(request),
         ...(request.signal ? { signal: request.signal } : {})
       }
     );
@@ -710,6 +811,10 @@ export class CliAgentClient implements StreamingModelClient {
     return this.provider.nativeTools === true && Boolean(request.cwd);
   }
 
+  private resolveTimeoutMs(request: ModelRequest): number {
+    return request.timeoutMs ?? this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  }
+
   async stream(
     request: ModelRequest,
     onEvent: (event: ModelStreamEvent) => void
@@ -721,7 +826,11 @@ export class CliAgentClient implements StreamingModelClient {
     if (
       !config.streamArgs ||
       (native &&
-        (this.provider.agent === 'opencode' || this.provider.agent === 'zcode'))
+        (this.provider.agent === 'opencode' || this.provider.agent === 'zcode')) ||
+      // Images travel through the one-shot stdin payload; the text-output path
+      // already reads that shape and tells the caller clearly when the
+      // provider cannot read images at all.
+      collectImages(request).length > 0
     ) {
       const result = await this.complete(request);
       if (result.text.trim()) onEvent({ type: 'text', text: result.text.trim() });
@@ -730,9 +839,11 @@ export class CliAgentClient implements StreamingModelClient {
 
     const command = this.provider.command?.trim() || this.provider.agent;
     const prompt = native ? buildNativePrompt(request, request.cwd!) : buildPrompt(request);
+    const noTools = request.noTools === true;
     const args = buildAgentArgs(this.provider, config.streamArgs, {
-      ...(request.webTools ? { webTools: true } : {}),
-      ...(native ? { nativeTools: true, cwd: request.cwd! } : {})
+      ...(request.webTools && !noTools ? { webTools: true } : {}),
+      ...(native ? { nativeTools: true, cwd: request.cwd! } : {}),
+      ...(noTools ? { noTools: true } : {})
     });
     if (!config.stdin) {
       if (config.promptFlag) args.push(config.promptFlag, prompt);
@@ -775,7 +886,7 @@ export class CliAgentClient implements StreamingModelClient {
       config.stdin ? prompt : '',
       {
         cwd: native ? request.cwd! : (this.options.cwd ?? tmpdir()),
-        timeoutMs: this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        timeoutMs: this.resolveTimeoutMs(request),
         ...(request.signal ? { signal: request.signal } : {})
       },
       handleLine
