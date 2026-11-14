@@ -2,25 +2,26 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { StudyCoachApi } from '../../src/shared/ipc';
-import type { VideoNotesResult } from '../../src/shared/video-notes';
+import type { VideoJob } from '../../src/shared/video-notes';
 import { VideoNotesDialog } from '../../src/renderer/shell/VideoNotesDialog';
 
-const RESULT: VideoNotesResult = {
+const JOB: VideoJob = {
+  id: 'job-1',
+  mode: 'deck',
+  videoPaths: ['C:\\课程\\01-集合.mp4'],
   outputDir: 'C:\\课程\\笔记',
-  indexPath: 'C:\\课程\\笔记\\index.html',
+  language: 'auto',
+  status: 'queued',
+  createdAt: '2026-11-15T03:00:00.000Z',
   lessons: [
     {
-      sourcePath: 'C:\\课程\\01-集合.mp4',
-      lessonDir: 'C:\\课程\\笔记\\01-集合',
-      title: '01-集合',
-      durationSeconds: 600,
-      transcriptChars: 3000,
-      noteChars: 900,
-      notesPath: 'C:\\课程\\笔记\\01-集合\\notes.md',
-      htmlPath: 'C:\\课程\\笔记\\01-集合\\notes.html'
+      videoPath: 'C:\\课程\\01-集合.mp4',
+      status: 'pending',
+      usage: { inputTokens: 0, outputTokens: 0 }
     }
   ],
-  failures: []
+  estimate: { tokens: 500_000, minutes: 30 },
+  usage: { inputTokens: 0, outputTokens: 0 }
 };
 
 function installApi(overrides: Partial<StudyCoachApi> = {}) {
@@ -31,17 +32,15 @@ function installApi(overrides: Partial<StudyCoachApi> = {}) {
       hasApiKey: true
     })),
     pickVideoFiles: vi.fn(async () => ['C:\\课程\\01-集合.mp4']),
+    pickVideoFolder: vi.fn(async () => 'C:\\课程\\全部'),
     pickOutputDirectory: vi.fn(async () => 'C:\\课程\\笔记'),
-    generateVideoNotes: vi.fn(async (_input, onProgress) => {
-      onProgress({
-        videoIndex: 0,
-        videoCount: 1,
-        videoPath: 'C:\\课程\\01-集合.mp4',
-        stage: 'notes',
-        message: '正在生成笔记…'
-      });
-      return RESULT;
-    }),
+    estimateVideoNotes: vi.fn(async () => ({
+      lessons: 1,
+      durationSeconds: 600,
+      tokens: 500_000,
+      minutes: 30
+    })),
+    enqueueVideoNotes: vi.fn(async () => JOB),
     openPath: vi.fn(async () => ''),
     ...overrides
   } as unknown as StudyCoachApi;
@@ -53,39 +52,58 @@ afterEach(() => {
   delete window.studyCoach;
 });
 
-test('picks videos, generates notes, and opens the result', async () => {
+test('defaults to the deck mode, estimates usage and submits a background job', async () => {
   const api = installApi();
-  const onClose = vi.fn();
-  render(<VideoNotesDialog open onClose={onClose} />);
+  const onOpenJobs = vi.fn();
+  render(<VideoNotesDialog open onClose={() => {}} onOpenJobs={onOpenJobs} />);
   await waitFor(() => expect(api.getTranscriptionConfig).toHaveBeenCalled());
+
+  expect(screen.getByRole('button', { name: '完整课件（预览）' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  );
 
   await userEvent.click(screen.getByRole('button', { name: /选择视频/ }));
   expect(await screen.findByText('01-集合.mp4')).toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole('button', { name: '生成笔记' }));
+  expect(await screen.findByText(/预计 1 讲/)).toBeInTheDocument();
+  expect(screen.getByText(/50.0 万 tokens/)).toBeInTheDocument();
 
-  await waitFor(() => expect(api.generateVideoNotes).toHaveBeenCalled());
-  expect(api.generateVideoNotes).toHaveBeenCalledWith(
-    { videoPaths: ['C:\\课程\\01-集合.mp4'], language: 'auto' },
-    expect.any(Function)
-  );
+  await userEvent.click(screen.getByRole('button', { name: '提交后台任务' }));
+  await waitFor(() => expect(api.enqueueVideoNotes).toHaveBeenCalled());
+  expect(api.enqueueVideoNotes).toHaveBeenCalledWith({
+    mode: 'deck',
+    videoPaths: ['C:\\课程\\01-集合.mp4'],
+    language: 'auto'
+  });
 
-  expect(await screen.findByText('已生成 1 讲')).toBeInTheDocument();
-  expect(screen.getByText(/3,000 字转录/)).toBeInTheDocument();
-
-  await userEvent.click(screen.getByRole('button', { name: '打开课程索引' }));
-  expect(api.openPath).toHaveBeenCalledWith(RESULT.indexPath);
-
-  await userEvent.click(screen.getByRole('button', { name: '打开笔记' }));
-  expect(api.openPath).toHaveBeenCalledWith(RESULT.lessons[0]!.htmlPath);
-  expect(onClose).not.toHaveBeenCalled();
+  expect(await screen.findByText('已提交后台任务：完整课件（预览） · 1 讲')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: '查看视频任务' }));
+  expect(onOpenJobs).toHaveBeenCalled();
 });
 
-test('sends the chosen output folder and language', async () => {
+test('selects a whole folder instead of individual files', async () => {
   const api = installApi();
   render(<VideoNotesDialog open onClose={() => {}} />);
   await waitFor(() => expect(api.getTranscriptionConfig).toHaveBeenCalled());
 
+  await userEvent.click(screen.getByRole('button', { name: /选择文件夹/ }));
+  expect(await screen.findByText('C:\\课程\\全部')).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: '提交后台任务' }));
+  await waitFor(() =>
+    expect(api.enqueueVideoNotes).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'deck', folder: 'C:\\课程\\全部' })
+    )
+  );
+});
+
+test('sends the chosen output folder and language in quick mode', async () => {
+  const api = installApi();
+  render(<VideoNotesDialog open onClose={() => {}} />);
+  await waitFor(() => expect(api.getTranscriptionConfig).toHaveBeenCalled());
+
+  await userEvent.click(screen.getByRole('button', { name: '快速笔记' }));
   await userEvent.click(screen.getByRole('button', { name: /选择视频/ }));
   await screen.findByText('01-集合.mp4');
   await userEvent.click(screen.getByRole('button', { name: '选择…' }));
@@ -93,15 +111,15 @@ test('sends the chosen output folder and language', async () => {
   await waitFor(() => expect(api.pickOutputDirectory).toHaveBeenCalled());
   expect(await screen.findByDisplayValue('C:\\课程\\笔记')).toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole('button', { name: '生成笔记' }));
+  await userEvent.click(screen.getByRole('button', { name: '提交后台任务' }));
   await waitFor(() =>
-    expect(api.generateVideoNotes).toHaveBeenCalledWith(
+    expect(api.enqueueVideoNotes).toHaveBeenCalledWith(
       expect.objectContaining({
+        mode: 'quick',
         videoPaths: ['C:\\课程\\01-集合.mp4'],
         outputDir: 'C:\\课程\\笔记',
         language: 'auto'
-      }),
-      expect.any(Function)
+      })
     )
   );
 });
@@ -126,22 +144,13 @@ test('shows a settings shortcut when the ASR key is missing', async () => {
   expect(onOpenSettings).toHaveBeenCalled();
 });
 
-test('does not close while a run is in progress', async () => {
-  let resolveRun!: (value: VideoNotesResult) => void;
+test('can be closed once the job is queued and reports duplicate submissions', async () => {
+  let resolveEnqueue!: (value: VideoJob) => void;
   const api = installApi({
-    generateVideoNotes: vi.fn(
-      (_input: unknown, onProgress: (progress: unknown) => void) =>
-        new Promise<VideoNotesResult>((resolve) => {
-          resolveRun = resolve;
-          onProgress({
-            videoIndex: 0,
-            videoCount: 1,
-            videoPath: 'C:\\课程\\01-集合.mp4',
-            stage: 'transcribe',
-            message: '正在转写音频（1/2）…',
-            current: 1,
-            total: 2
-          });
+    enqueueVideoNotes: vi.fn(
+      () =>
+        new Promise<VideoJob>((resolve) => {
+          resolveEnqueue = resolve;
         })
     )
   });
@@ -151,33 +160,27 @@ test('does not close while a run is in progress', async () => {
 
   await userEvent.click(screen.getByRole('button', { name: /选择视频/ }));
   await screen.findByText('01-集合.mp4');
-  await userEvent.click(screen.getByRole('button', { name: '生成笔记' }));
+  await userEvent.click(screen.getByRole('button', { name: '提交后台任务' }));
 
-  expect(await screen.findByText(/正在转写音频（1\/2）/)).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '关闭' })).toBeDisabled();
-  await userEvent.keyboard('{Escape}');
-  expect(onClose).not.toHaveBeenCalled();
+  // The dialog stays open while the job is starting, but closing is allowed.
+  expect(screen.getByRole('button', { name: '关闭' })).not.toBeDisabled();
 
-  resolveRun(RESULT);
-  await screen.findByText('已生成 1 讲');
+  resolveEnqueue(JOB);
+  expect(await screen.findByText(/已提交后台任务/)).toBeInTheDocument();
   await userEvent.click(screen.getByRole('button', { name: '关闭' }));
   expect(onClose).toHaveBeenCalled();
 });
 
-test('surfaces failures without discarding successful lessons', async () => {
+test('shows the queue duplicate error', async () => {
   installApi({
-    generateVideoNotes: vi.fn(async () => ({
-      ...RESULT,
-      failures: [{ videoPath: 'C:\\课程\\02-函数.mp4', message: '没有识别到有效语音内容。' }]
-    })) as never
+    enqueueVideoNotes: vi.fn(async () => {
+      throw new Error('已在队列中：01-集合.mp4');
+    })
   });
   render(<VideoNotesDialog open onClose={() => {}} />);
-
   await userEvent.click(screen.getByRole('button', { name: /选择视频/ }));
   await screen.findByText('01-集合.mp4');
-  await userEvent.click(screen.getByRole('button', { name: '生成笔记' }));
+  await userEvent.click(screen.getByRole('button', { name: '提交后台任务' }));
 
-  expect(await screen.findByText('有 1 个文件失败')).toBeInTheDocument();
-  expect(screen.getByText(/没有识别到有效语音内容/)).toBeInTheDocument();
-  expect(screen.getByText('已生成 1 讲')).toBeInTheDocument();
+  expect(await screen.findByText(/已在队列中/)).toBeInTheDocument();
 });

@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { friendlyErrorMessage } from '../../shared/errors';
 import type {
+  VideoJob,
+  VideoNotesEnqueueInput,
+  VideoNotesEstimate,
   VideoNotesLanguage,
-  VideoNotesProgress,
-  VideoNotesResult,
-  VideoNotesStage
+  VideoNotesMode
 } from '../../shared/video-notes';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
 import { FolderIcon, PlayIcon } from '../ui/icons';
-import { Progress } from '../ui/Progress';
 import { Select } from '../ui/Select';
 
 type VideoNotesDialogProps = {
@@ -17,21 +17,18 @@ type VideoNotesDialogProps = {
   onClose: () => void;
   /** Navigates to Settings so the ASR key can be configured. */
   onOpenSettings?: () => void;
+  /** Opens the background job list after a successful submit. */
+  onOpenJobs?: () => void;
 };
 
-const FILE_LIMIT = 50;
+const FILE_LIMIT = 200;
 
 const inputClass =
   'h-10 w-full rounded-xl border-0 bg-[#f5f5f7] px-3 text-[14px] text-gray-800 outline-none transition-all duration-200 focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#f5f5f7]';
 
-const STAGE_LABELS: Record<VideoNotesStage, string> = {
-  probe: '读取视频信息',
-  audio: '提取音频',
-  transcribe: '语音转写',
-  notes: '整理笔记',
-  html: '生成 HTML',
-  done: '完成',
-  error: '失败'
+const MODE_LABELS: Record<VideoNotesMode, string> = {
+  quick: '快速笔记',
+  deck: '完整课件（预览）'
 };
 
 function fileName(path: string): string {
@@ -39,46 +36,29 @@ function fileName(path: string): string {
   return index >= 0 ? path.slice(index + 1) : path;
 }
 
-function stageFraction(progress: VideoNotesProgress): number {
-  switch (progress.stage) {
-    case 'probe':
-      return 0.02;
-    case 'audio':
-      return 0.08;
-    case 'transcribe': {
-      const ratio =
-        progress.current !== undefined && progress.total !== undefined && progress.total > 0
-          ? progress.current / progress.total
-          : 0;
-      return 0.1 + ratio * 0.6;
-    }
-    case 'notes':
-      return 0.75;
-    case 'html':
-      return 0.95;
-    default:
-      return 1;
-  }
-}
-
-function overallPercent(progress: VideoNotesProgress): number {
-  const count = Math.max(1, progress.videoCount);
-  const value = (progress.videoIndex + stageFraction(progress)) / count;
-  return Math.round(Math.min(1, Math.max(0, value)) * 100);
+function formatTokens(tokens: number): string {
+  if (tokens >= 10_000) return `${(tokens / 10_000).toFixed(1)} 万`;
+  return tokens.toLocaleString('zh-CN');
 }
 
 /**
- * A small utility dialog on the Knowledge page: pick local course videos, run
- * ASR + note generation, and open the generated HTML when it finishes.
+ * A small utility dialog on the Knowledge page: pick local course videos,
+ * submit a background job, then close the dialog while the queue works.
  */
-export function VideoNotesDialog({ open, onClose, onOpenSettings }: VideoNotesDialogProps) {
+export function VideoNotesDialog({
+  open,
+  onClose,
+  onOpenSettings,
+  onOpenJobs
+}: VideoNotesDialogProps) {
+  const [mode, setMode] = useState<VideoNotesMode>('deck');
   const [videoPaths, setVideoPaths] = useState<string[]>([]);
+  const [folder, setFolder] = useState<string | null>(null);
   const [outputDir, setOutputDir] = useState('');
   const [language, setLanguage] = useState<VideoNotesLanguage>('auto');
-  const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState<VideoNotesProgress | null>(null);
-  const [result, setResult] = useState<VideoNotesResult | null>(null);
-  const [failures, setFailures] = useState<{ path: string; message: string }[]>([]);
+  const [estimate, setEstimate] = useState<VideoNotesEstimate | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState<VideoJob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
   const [bridgeMissing, setBridgeMissing] = useState(false);
@@ -87,6 +67,8 @@ export function VideoNotesDialog({ open, onClose, onOpenSettings }: VideoNotesDi
     if (!open) return;
     let cancelled = false;
     setError(null);
+    setSubmitted(null);
+    setEstimate(null);
     const api = window.studyCoach;
     if (!api) {
       setBridgeMissing(true);
@@ -107,14 +89,46 @@ export function VideoNotesDialog({ open, onClose, onOpenSettings }: VideoNotesDi
     };
   }, [open]);
 
-  const totalChars = useMemo(
-    () => (result ? result.lessons.reduce((sum, lesson) => sum + lesson.transcriptChars, 0) : 0),
-    [result]
-  );
+  // Estimating probes durations, so debounce typing/selection churn.
+  useEffect(() => {
+    if (!open) return;
+    const api = window.studyCoach;
+    if (!api || typeof api.estimateVideoNotes !== 'function') return;
+    if (videoPaths.length === 0 && folder === null) {
+      setEstimate(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void api
+        .estimateVideoNotes!({
+          mode,
+          ...(videoPaths.length > 0 ? { videoPaths } : {}),
+          ...(folder !== null ? { folder } : {}),
+          ...(outputDir.trim() ? { outputDir: outputDir.trim() } : {}),
+          language
+        })
+        .then((value) => {
+          if (!cancelled) setEstimate(value);
+        })
+        .catch(() => {
+          if (!cancelled) setEstimate(null);
+        });
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [open, mode, videoPaths, folder, outputDir, language]);
+
   const unavailable = bridgeMissing || Boolean(window.studyCoachPrototype);
+  const hasSelection = videoPaths.length > 0 || folder !== null;
+  const selectionLabel = useMemo(() => {
+    if (folder !== null) return `整个文件夹：${fileName(folder)}`;
+    return `${videoPaths.length}/${FILE_LIMIT} 个视频`;
+  }, [folder, videoPaths.length]);
 
   function close() {
-    if (running) return;
     onClose();
   }
 
@@ -125,6 +139,7 @@ export function VideoNotesDialog({ open, onClose, onOpenSettings }: VideoNotesDi
     try {
       const picked = await api.pickVideoFiles();
       if (!picked || picked.length === 0) return;
+      setFolder(null);
       setVideoPaths((current) => {
         const merged = [...current];
         for (const path of picked) {
@@ -134,6 +149,20 @@ export function VideoNotesDialog({ open, onClose, onOpenSettings }: VideoNotesDi
       });
     } catch (cause) {
       setError(friendlyErrorMessage(cause, '选择视频失败，请重试。'));
+    }
+  }
+
+  async function pickFolder() {
+    const api = window.studyCoach;
+    if (!api || typeof api.pickVideoFolder !== 'function') return;
+    setError(null);
+    try {
+      const picked = await api.pickVideoFolder();
+      if (!picked) return;
+      setFolder(picked);
+      setVideoPaths([]);
+    } catch (cause) {
+      setError(friendlyErrorMessage(cause, '选择文件夹失败，请重试。'));
     }
   }
 
@@ -149,51 +178,33 @@ export function VideoNotesDialog({ open, onClose, onOpenSettings }: VideoNotesDi
     }
   }
 
-  async function openGenerated(path: string) {
+  async function submit() {
     const api = window.studyCoach;
-    if (!api) return;
-    try {
-      const message = await api.openPath(path);
-      if (message) setError(message);
-    } catch (cause) {
-      setError(friendlyErrorMessage(cause, '无法打开文件。'));
-    }
-  }
-
-  async function generate() {
-    const api = window.studyCoach;
-    if (!api) {
-      setError('当前环境不支持生成视频笔记。');
+    if (!api || typeof api.enqueueVideoNotes !== 'function') {
+      setError('当前环境不支持后台视频任务。');
       return;
     }
-    if (videoPaths.length === 0) {
-      setError('请先选择课程视频。');
+    if (!hasSelection) {
+      setError('请先选择课程视频或文件夹。');
       return;
     }
-    setRunning(true);
+    setSubmitting(true);
     setError(null);
-    setResult(null);
-    setFailures([]);
-    setProgress(null);
+    setSubmitted(null);
+    const input: VideoNotesEnqueueInput = {
+      mode,
+      ...(videoPaths.length > 0 ? { videoPaths } : {}),
+      ...(folder !== null ? { folder } : {}),
+      ...(outputDir.trim() ? { outputDir: outputDir.trim() } : {}),
+      language
+    };
     try {
-      const next = await api.generateVideoNotes(
-        {
-          videoPaths,
-          ...(outputDir.trim() ? { outputDir: outputDir.trim() } : {}),
-          language
-        },
-        setProgress
-      );
-      setResult(next);
-      setFailures(next.failures.map((failure) => ({ path: failure.videoPath, message: failure.message })));
-      if (next.failures.length > 0 && next.lessons.length === 0) {
-        setError('这次没有生成任何笔记，请检查下面的错误信息。');
-      }
+      const job = await api.enqueueVideoNotes(input);
+      setSubmitted(job);
     } catch (cause) {
-      setError(friendlyErrorMessage(cause, '生成失败，请重试。'));
+      setError(friendlyErrorMessage(cause, '提交任务失败，请重试。'));
     } finally {
-      setRunning(false);
-      setProgress(null);
+      setSubmitting(false);
     }
   }
 
@@ -206,18 +217,18 @@ export function VideoNotesDialog({ open, onClose, onOpenSettings }: VideoNotesDi
       footer={
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
-            文件保存在你指定的文件夹，不会写入知识库。
+            提交后在后台排队；关闭这个窗口不会中断任务。
           </p>
           <div className="flex items-center gap-2">
-            <Button variant="secondary" size="sm" onClick={close} disabled={running}>
+            <Button variant="secondary" size="sm" onClick={close}>
               关闭
             </Button>
             <Button
               size="sm"
-              onClick={() => void generate()}
-              disabled={running || unavailable || videoPaths.length === 0}
+              onClick={() => void submit()}
+              disabled={submitting || unavailable || !hasSelection}
             >
-              {running ? '生成中…' : '生成笔记'}
+              {submitting ? '提交中…' : '提交后台任务'}
             </Button>
           </div>
         </div>
@@ -225,8 +236,8 @@ export function VideoNotesDialog({ open, onClose, onOpenSettings }: VideoNotesDi
     >
       <div className="space-y-5">
         <p className="text-[13px] leading-6 text-gray-500 dark:text-[#8e8e93]">
-          选几讲网课视频，先用语音识别转成文字，再用模型整理成知识点笔记。
-          每讲会生成一个 Markdown、一个可翻页的幻灯片式 HTML，以及整门课的索引页。
+          选几讲网课视频，先用语音识别转成文字，再整理成知识点笔记。任务会在后台排队，
+          可以关掉这个窗口，也可以在「视频任务」里取消或继续。
         </p>
 
         {bridgeMissing || window.studyCoachPrototype ? (
@@ -242,7 +253,6 @@ export function VideoNotesDialog({ open, onClose, onOpenSettings }: VideoNotesDi
               <button
                 type="button"
                 onClick={() => {
-                  if (running) return;
                   onClose();
                   onOpenSettings();
                 }}
@@ -254,25 +264,83 @@ export function VideoNotesDialog({ open, onClose, onOpenSettings }: VideoNotesDi
           </div>
         ) : null}
 
-        <section aria-label="视频文件" className="space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-[12px] font-medium text-gray-500 dark:text-[#8e8e93]">
-              课程视频（{videoPaths.length}/{FILE_LIMIT}）
-            </p>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => void pickFiles()}
-              disabled={running || unavailable}
-            >
-              <FolderIcon className="h-4 w-4" />
-              选择视频…
-            </Button>
+        <section aria-label="生成模式" className="space-y-2">
+          <p className="text-[12px] font-medium text-gray-500 dark:text-[#8e8e93]">生成模式</p>
+          <div
+            role="group"
+            aria-label="生成模式"
+            className="flex rounded-[9px] bg-[#f5f5f7] p-0.5 dark:bg-white/[0.08]"
+          >
+            {(['quick', 'deck'] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={mode === value}
+                onClick={() => setMode(value)}
+                disabled={submitting}
+                className={`flex-1 rounded-[7px] px-2.5 py-1.5 text-[12px] font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 disabled:opacity-50 ${
+                  mode === value
+                    ? 'bg-white text-gray-900 shadow-sm dark:bg-white/[0.14] dark:text-[#f5f5f7]'
+                    : 'text-gray-500 hover:text-gray-800 dark:text-[#8e8e93] dark:hover:text-[#f5f5f7]'
+                }`}
+              >
+                {MODE_LABELS[value]}
+              </button>
+            ))}
           </div>
-          {videoPaths.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-gray-300 px-4 py-6 text-center text-[13px] text-gray-500 dark:border-white/15 dark:text-[#8e8e93]">
-              还没有选择视频。支持 mp4、mkv、mov、webm 等常见格式。
+          {mode === 'deck' ? (
+            <p className="text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
+              完整课件会读屏并分页；当前预览版先按快速笔记生成，读屏与分页在后续版本启用。
             </p>
+          ) : null}
+        </section>
+
+        <section aria-label="视频文件" className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-[12px] font-medium text-gray-500 dark:text-[#8e8e93]">
+              {selectionLabel}
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void pickFiles()}
+                disabled={submitting || unavailable}
+              >
+                <PlayIcon className="h-4 w-4" />
+                选择视频…
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void pickFolder()}
+                disabled={submitting || unavailable}
+              >
+                <FolderIcon className="h-4 w-4" />
+                选择文件夹…
+              </Button>
+            </div>
+          </div>
+          {!hasSelection ? (
+            <p className="rounded-xl border border-dashed border-gray-300 px-4 py-6 text-center text-[13px] text-gray-500 dark:border-white/15 dark:text-[#8e8e93]">
+              还没有选择视频。可以选多个文件，也可以选整个文件夹；支持 mp4、mkv、mov、webm
+              等常见格式，一个任务最多 200 个文件。
+            </p>
+          ) : folder !== null ? (
+            <div className="flex items-center gap-2 rounded-xl bg-[#f5f5f7] px-3 py-2 text-[13px] text-gray-700 dark:bg-[#242426] dark:text-[#a1a1a6]">
+              <FolderIcon className="h-4 w-4 shrink-0 text-[#0071e3] dark:text-[#4da3ff]" />
+              <span className="min-w-0 flex-1 truncate" title={folder}>
+                {folder}
+              </span>
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => setFolder(null)}
+                className="shrink-0 rounded-md px-2 py-0.5 text-[12px] text-gray-500 transition-colors hover:bg-black/[0.05] hover:text-gray-800 disabled:opacity-40 dark:text-[#8e8e93] dark:hover:bg-white/[0.08] dark:hover:text-[#f5f5f7]"
+              >
+                移除
+              </button>
+            </div>
           ) : (
             <ul className="max-h-44 space-y-1 overflow-y-auto rounded-xl bg-[#f5f5f7] p-2 dark:bg-[#242426]">
               {videoPaths.map((path) => (
@@ -287,7 +355,7 @@ export function VideoNotesDialog({ open, onClose, onOpenSettings }: VideoNotesDi
                   <button
                     type="button"
                     aria-label={`移除 ${fileName(path)}`}
-                    disabled={running}
+                    disabled={submitting}
                     onClick={() =>
                       setVideoPaths((current) => current.filter((entry) => entry !== path))
                     }
@@ -310,7 +378,7 @@ export function VideoNotesDialog({ open, onClose, onOpenSettings }: VideoNotesDi
               <input
                 value={outputDir}
                 onChange={(event) => setOutputDir(event.target.value)}
-                disabled={running}
+                disabled={submitting}
                 placeholder="默认：第一个视频旁的「笔记」文件夹"
                 aria-label="输出文件夹"
                 className={inputClass}
@@ -319,7 +387,7 @@ export function VideoNotesDialog({ open, onClose, onOpenSettings }: VideoNotesDi
                 variant="secondary"
                 size="sm"
                 onClick={() => void pickOutput()}
-                disabled={running || unavailable}
+                disabled={submitting || unavailable}
                 className="shrink-0"
               >
                 选择…
@@ -334,7 +402,7 @@ export function VideoNotesDialog({ open, onClose, onOpenSettings }: VideoNotesDi
               size="field"
               value={language}
               onChange={(event) => setLanguage(event.target.value as VideoNotesLanguage)}
-              disabled={running}
+              disabled={submitting}
             >
               <option value="auto">自动识别</option>
               <option value="zh">中文</option>
@@ -343,21 +411,18 @@ export function VideoNotesDialog({ open, onClose, onOpenSettings }: VideoNotesDi
           </label>
         </section>
 
-        {running ? (
-          <section aria-live="polite" aria-label="生成进度" className="space-y-2">
-            <p className="text-[13px] text-gray-600 dark:text-[#a1a1a6]">
-              {progress
-                ? `第 ${progress.videoIndex + 1}/${progress.videoCount} 讲 · ${STAGE_LABELS[progress.stage]}：${progress.message}`
-                : '正在启动…'}
-            </p>
-            <Progress value={progress ? overallPercent(progress) : 0} max={100} ariaLabel="生成进度" />
+        {estimate ? (
+          <section
+            aria-label="用量预估"
+            className="rounded-xl bg-[#f5f5f7] px-4 py-3 text-[12px] leading-6 text-gray-600 dark:bg-white/[0.06] dark:text-[#a1a1a6]"
+          >
+            预计 {estimate.lessons} 讲 · 视频{' '}
+            {Math.max(1, Math.round(estimate.durationSeconds / 60))} 分钟 · 约{' '}
+            {formatTokens(estimate.tokens)} tokens · 约 {estimate.minutes} 分钟
+            <span className="mt-1 block text-gray-500 dark:text-[#8e8e93]">
+              只是估算；视频任务不检查每日预算，由你决定是否运行。
+            </span>
           </section>
-        ) : null}
-
-        {running ? (
-          <p className="text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
-            长视频可能需要十几分钟；中途关闭窗口会终止任务，已完成的音频转写会缓存下来。
-          </p>
         ) : null}
 
         {error ? (
@@ -366,64 +431,30 @@ export function VideoNotesDialog({ open, onClose, onOpenSettings }: VideoNotesDi
           </p>
         ) : null}
 
-        {failures.length > 0 ? (
-          <section aria-label="失败的文件" className="space-y-1">
-            <p className="text-[12px] font-medium text-[#ff3b30]">有 {failures.length} 个文件失败</p>
-            <ul className="space-y-1 rounded-xl bg-[#ff3b30]/[0.06] p-3">
-              {failures.map((failure) => (
-                <li key={failure.path} className="text-[12px] leading-5 text-gray-600 dark:text-[#a1a1a6]">
-                  <span className="font-medium text-gray-800 dark:text-[#f5f5f7]">
-                    {fileName(failure.path)}
-                  </span>
-                  ：{failure.message}
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
-
-        {result ? (
-          <section aria-label="生成结果" className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <p
-                  role="status"
-                  className="text-[13px] font-medium text-gray-800 dark:text-[#f5f5f7]"
-                >
-                  已生成 {result.lessons.length} 讲
-                </p>
-                <p className="text-[12px] text-gray-500 dark:text-[#8e8e93]">
-                  共 {totalChars.toLocaleString('zh-CN')} 字转录 · {result.outputDir}
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="secondary" size="sm" onClick={() => void openGenerated(result.outputDir)}>
-                  打开文件夹
-                </Button>
-                <Button size="sm" onClick={() => void openGenerated(result.indexPath)}>
-                  打开课程索引
-                </Button>
-              </div>
-            </div>
-            <ul className="max-h-52 space-y-1 overflow-y-auto">
-              {result.lessons.map((lesson) => (
-                <li
-                  key={lesson.lessonDir}
-                  className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[13px] hover:bg-black/[0.03] dark:hover:bg-white/[0.05]"
-                >
-                  <span className="min-w-0 flex-1 truncate text-gray-700 dark:text-[#a1a1a6]" title={lesson.title}>
-                    {lesson.title}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => void openGenerated(lesson.htmlPath)}
-                    className="shrink-0 text-[12px] font-medium text-[#0071e3] hover:underline dark:text-[#4da3ff]"
-                  >
-                    打开笔记
-                  </button>
-                </li>
-              ))}
-            </ul>
+        {submitted ? (
+          <section
+            aria-label="已提交"
+            role="status"
+            className="rounded-xl bg-[#34c759]/10 px-4 py-3 text-[13px] leading-6 text-gray-700 dark:text-[#a1a1a6]"
+          >
+            <p className="font-medium text-gray-800 dark:text-[#f5f5f7]">
+              已提交后台任务：{MODE_LABELS[submitted.mode]} · {submitted.lessons.length} 讲
+            </p>
+            <p className="mt-1 text-[12px] text-gray-500 dark:text-[#8e8e93]">
+              输出到 {submitted.outputDir}
+            </p>
+            {onOpenJobs ? (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenJobs();
+                }}
+                className="mt-2 font-medium text-[#0071e3] hover:underline dark:text-[#4da3ff]"
+              >
+                查看视频任务
+              </button>
+            ) : null}
           </section>
         ) : null}
       </div>

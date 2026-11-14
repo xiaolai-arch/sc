@@ -1,3 +1,4 @@
+import type { UsageEntry } from '../../shared/usage';
 import {
   supportsStreaming,
   type ModelClient,
@@ -11,6 +12,8 @@ import {
 export interface RecordingModelMeta {
   provider: string;
   model: string;
+  /** Tagged calls are split out of the proactive-token budget. */
+  feature?: UsageEntry['feature'];
 }
 
 export interface RecordedUsage extends ModelUsage, RecordingModelMeta {}
@@ -32,6 +35,7 @@ export function createRecordingModelClient(
       await record({
         provider: meta.provider,
         model: meta.model,
+        ...(meta.feature ? { feature: meta.feature } : {}),
         inputTokens: usage?.inputTokens ?? 0,
         outputTokens: usage?.outputTokens ?? 0
       });

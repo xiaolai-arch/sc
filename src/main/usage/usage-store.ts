@@ -12,7 +12,7 @@ export interface UsageStoreOptions {
 export type UsageRecordInput = Pick<
   UsageEntry,
   'provider' | 'model' | 'inputTokens' | 'outputTokens'
->;
+> & { feature?: UsageEntry['feature'] };
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -36,6 +36,7 @@ function normalizeEntry(value: unknown): UsageEntry | null {
     date,
     provider,
     model,
+    ...(value['feature'] === 'video-notes' ? { feature: 'video-notes' as const } : {}),
     inputTokens: nonNegativeInteger(value['inputTokens']),
     outputTokens: nonNegativeInteger(value['outputTokens']),
     calls: nonNegativeInteger(value['calls'])
@@ -88,7 +89,8 @@ export class UsageStore {
         (entry) =>
           entry.date === date &&
           entry.provider === input.provider &&
-          entry.model === input.model
+          entry.model === input.model &&
+          entry.feature === input.feature
       );
       const inputTokens = nonNegativeInteger(input.inputTokens);
       const outputTokens = nonNegativeInteger(input.outputTokens);
@@ -102,6 +104,7 @@ export class UsageStore {
           date,
           provider: input.provider,
           model: input.model,
+          ...(input.feature ? { feature: input.feature } : {}),
           inputTokens,
           outputTokens,
           calls: 1

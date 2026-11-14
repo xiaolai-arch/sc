@@ -48,6 +48,46 @@ test('merges calls for the same date, provider and model', async () => {
   }
 });
 
+test('keeps video-note usage in its own row for the same provider and model', async () => {
+  const dir = await tempDir();
+  try {
+    const store = new UsageStore(join(dir, 'usage.json'), {
+      now: () => new Date(2026, 10, 1, 10, 0, 0)
+    });
+
+    await store.record({ provider: 'anthropic', model: 'claude', inputTokens: 10, outputTokens: 5 });
+    await store.record({
+      provider: 'anthropic',
+      model: 'claude',
+      feature: 'video-notes',
+      inputTokens: 100,
+      outputTokens: 50
+    });
+    await store.record({
+      provider: 'anthropic',
+      model: 'claude',
+      feature: 'video-notes',
+      inputTokens: 1,
+      outputTokens: 1
+    });
+
+    const entries = await store.list();
+    expect(entries).toHaveLength(2);
+    expect(entries.find((entry) => entry.feature !== 'video-notes')).toMatchObject({
+      inputTokens: 10,
+      outputTokens: 5,
+      calls: 1
+    });
+    expect(entries.find((entry) => entry.feature === 'video-notes')).toMatchObject({
+      inputTokens: 101,
+      outputTokens: 51,
+      calls: 2
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('prunes entries older than maxDays', async () => {
   const dir = await tempDir();
   try {

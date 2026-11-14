@@ -74,13 +74,15 @@ test('registers every channel exactly once', async () => {
     }
   });
 
-  expect(registered.size).toBe(Object.keys(IPC_CHANNELS).length + 3);
+  expect(registered.size).toBe(Object.keys(IPC_CHANNELS).length + 10);
   for (const channel of Object.values(IPC_CHANNELS)) {
     expect(registered.has(channel)).toBe(true);
   }
   expect(registered.has(BUTLER_STREAM_CHANNELS.stream)).toBe(true);
   expect(registered.has(BUTLER_STREAM_CHANNELS.cancel)).toBe(true);
   expect(registered.has(VIDEO_NOTES_CHANNELS.generate)).toBe(true);
+  expect(registered.has(VIDEO_NOTES_CHANNELS.enqueue)).toBe(true);
+  expect(registered.has(VIDEO_NOTES_CHANNELS.listJobs)).toBe(true);
 });
 
 test('routes every channel to the matching api method', async () => {
