@@ -8,6 +8,7 @@ import type { WorkspacePlanner } from '../shared/planning';
 import type { PracticeService } from '../shared/practice';
 import type { SearchService } from '../shared/search';
 import type { AppSettings, ProviderConfig } from '../shared/types';
+import type { VideoNotesProgress } from '../shared/video-notes';
 import { estimateUsageCost, summarizeUsage } from '../shared/usage';
 import type { ButlerService, SendMessageInput, WorkspaceService } from '../shared/workspace';
 import { scanLocalClis } from './agent/local-cli-discovery';
@@ -26,6 +27,10 @@ import { InMemorySecretStore, SafeStorageSecretStore, type SecretStore } from '.
 import { SettingsService } from './settings/settings-service';
 import { JsonStateStore, type AppState } from './state-store';
 import { createVideoNotesService, type VideoNotesService } from './video-notes';
+import {
+  createVideoJobsService,
+  type VideoJobsService
+} from './video-notes/jobs';
 import { createRecordingModelClient } from './usage/recording-model-client';
 import { UsageStore } from './usage/usage-store';
 import { createWorkspaceService } from './workspace/create-workspace-service';
@@ -105,6 +110,7 @@ export interface AppContext {
   secrets: SecretStore;
   transcriptionSecrets: SecretStore;
   videoNotes: VideoNotesService;
+  videoJobs: VideoJobsService;
   conversationStore: ConversationStore;
   usage: UsageStore;
   readonly workspace: WorkspaceService;
@@ -128,6 +134,9 @@ interface ActiveServices {
   providerSignature: string;
   /** The active model client (already wrapped for usage recording). */
   modelClient: ModelClient | null;
+  /** Separate client so video-note usage is tagged and split out of the budget. */
+  videoModelClient: ModelClient | null;
+  videoModelName: string;
   workspace: WorkspaceService;
   butler: ButlerService;
   practice: PracticeService;
@@ -203,7 +212,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     const date = today();
     const entries = await usageStore.list();
     return entries
-      .filter((entry) => entry.date === date)
+      .filter((entry) => entry.date === date && entry.feature !== 'video-notes')
       .reduce((sum, entry) => sum + entry.inputTokens + entry.outputTokens, 0);
   }
 
@@ -320,6 +329,18 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       nextSettings.provider,
       nextSettings.provider.model ?? ''
     );
+    const videoModel = nextSettings.provider.model ?? '';
+    const videoResolved =
+      options.modelClient !== undefined
+        ? options.modelClient
+        : resolveModelClient(nextSettings.provider, apiKey);
+    const videoModelClient = videoResolved
+      ? createRecordingModelClient(
+          videoResolved,
+          (entry) => usageStore.record(entry),
+          { provider: providerLabel, model: videoModel, feature: 'video-notes' }
+        )
+      : null;
     const modelClientCache = new Map<string, ModelClient | null>();
     function modelClientFor(model: string): ModelClient | null {
       const trimmed = model.trim();
@@ -367,6 +388,8 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       vaultPath: nextSettings.vaultPath,
       providerSignature: JSON.stringify(nextSettings.provider),
       modelClient,
+      videoModelClient,
+      videoModelName: videoModel,
       workspace,
       butler,
       practice: createPractice(nextSettings.vaultPath),
@@ -448,9 +471,20 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
           apiKey: await transcriptionSecrets.getApiKey()
         };
       },
-      getModelClient: async () => (await getServices()).modelClient,
+      getModelClient: async () => (await getServices()).videoModelClient,
+      getModelName: async () => (await getServices()).videoModelName,
       now
     });
+
+  const videoJobs: VideoJobsService = createVideoJobsService({
+    filePath: join(options.userDataPath, 'video-notes-jobs.json'),
+    now,
+    runLesson: (input) => videoNotes.runLesson(input),
+    estimate: (input) => videoNotes.estimate(input),
+    refreshIndex: async (outputDir, videoPaths) => {
+      await videoNotes.refreshIndex(outputDir, videoPaths);
+    }
+  });
 
   async function readReviews(input: ListReviewsInput = {}): Promise<ReviewRecord[]> {
     const services = await getServices();
@@ -588,6 +622,9 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     async pickVideoFiles() {
       return null;
     },
+    async pickVideoFolder() {
+      return null;
+    },
     async pickOutputDirectory() {
       return null;
     },
@@ -595,7 +632,81 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       throw new Error('打开文件需要在桌面应用中使用。');
     },
     async generateVideoNotes(input, onProgress) {
-      return videoNotes.generate(input, onProgress);
+      // Legacy blocking call: enqueue a quick job, stream its progress and
+      // resolve with the course that the job produced.
+      const job = await videoJobs.enqueue({
+        mode: 'quick',
+        videoPaths: input.videoPaths,
+        ...(input.outputDir !== undefined ? { outputDir: input.outputDir } : {}),
+        ...(input.language !== undefined ? { language: input.language } : {})
+      });
+      const unsubscribe = videoJobs.onChanged((jobs) => {
+        const current = jobs.find((entry) => entry.id === job.id);
+        if (!current || current.status !== 'running') return;
+        const index = current.lessons.findIndex((lesson) => lesson.status === 'running');
+        if (index < 0) return;
+        const lesson = current.lessons[index]!;
+        const message = lesson.message ?? '';
+        const stage: VideoNotesProgress['stage'] =
+          lesson.step === 'probe'
+            ? 'probe'
+            : lesson.step === 'transcribe'
+              ? 'transcribe'
+              : lesson.step === 'done'
+                ? 'done'
+                : message.includes('写入')
+                  ? 'html'
+                  : 'notes';
+        onProgress?.({
+          videoIndex: index,
+          videoCount: current.lessons.length,
+          videoPath: lesson.videoPath,
+          stage,
+          message
+        });
+      });
+      try {
+        const settled = await videoJobs.settled(job.id);
+        if (settled.status === 'cancelled') throw new Error('任务已取消。');
+        const course = await videoNotes.refreshIndex(settled.outputDir, settled.videoPaths);
+        return {
+          outputDir: settled.outputDir,
+          indexPath: course.indexPath,
+          lessons: course.lessons,
+          failures: settled.lessons
+            .filter((lesson) => lesson.status === 'failed')
+            .map((lesson) => ({
+              videoPath: lesson.videoPath,
+              message: lesson.message ?? '生成失败。'
+            }))
+        };
+      } finally {
+        unsubscribe();
+      }
+    },
+    async enqueueVideoNotes(input) {
+      return videoJobs.enqueue(input);
+    },
+    async estimateVideoNotes(input) {
+      return videoJobs.estimate(input);
+    },
+    async listVideoJobs() {
+      return videoJobs.list();
+    },
+    async cancelVideoJob(id) {
+      return videoJobs.cancel(id);
+    },
+    async resumeVideoJob(id) {
+      return videoJobs.resume(id);
+    },
+    async retryVideoLesson(input) {
+      return videoJobs.retryLesson(input.jobId, input.videoPath);
+    },
+    async removeVideoJob(id) {
+      await videoJobs.remove(id);
+    },
+    onVideoJobsChanged(listener) {
+      return videoJobs.onChanged(listener);
     },
 
     async listWorkspaces() {
@@ -906,6 +1017,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     secrets,
     transcriptionSecrets,
     videoNotes,
+    videoJobs,
     conversationStore,
     usage: usageStore,
     get workspace() {
@@ -948,6 +1060,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       await rebuildServices(await settings.get());
     },
     async dispose() {
+      videoJobs.dispose();
       if (!active) return;
       const current = active;
       active = null;

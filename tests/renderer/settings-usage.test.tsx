@@ -77,8 +77,44 @@ test('shows today tokens against the daily budget and flags an overrun', async (
   expect(await screen.findByText('用量与成本')).toBeInTheDocument();
   const card = document.getElementById('settings-usage')!;
   expect(
-    await within(card).findByText('每日 token：1500 / 1000（预算已用完，主动检查会暂停）')
+    await within(card).findByText('每日 token（对话）：1500 / 1000（预算已用完，主动检查会暂停）')
   ).toBeInTheDocument();
+});
+
+test('video-note usage is shown separately and never pauses the budget', async () => {
+  window.studyCoach = apiStub({
+    getSettings: vi.fn().mockResolvedValue({
+      ...baseSettings,
+      budget: { ...baseSettings.budget, dailyTokens: 1000 }
+    }),
+    getUsageSummary: vi.fn().mockResolvedValue({
+      days: [
+        {
+          date: today,
+          inputTokens: 1500,
+          outputTokens: 0,
+          calls: 2,
+          conversation: { inputTokens: 500, outputTokens: 0, calls: 1 },
+          videoNotes: { inputTokens: 1000, outputTokens: 0, calls: 1 }
+        }
+      ],
+      totals: { inputTokens: 1500, outputTokens: 0, calls: 2 },
+      conversation: { inputTokens: 500, outputTokens: 0, calls: 1 },
+      videoNotes: { inputTokens: 1000, outputTokens: 0, calls: 1 },
+      estimatedCost: null
+    })
+  }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  expect(await screen.findByText('用量与成本')).toBeInTheDocument();
+  const card = document.getElementById('settings-usage')!;
+  expect(within(card).getByText('视频笔记')).toBeInTheDocument();
+  expect(
+    within(card).getByText('每日 token（对话）：500 / 1000')
+  ).toBeInTheDocument();
+  expect(
+    within(card).queryByText(/预算已用完/)
+  ).not.toBeInTheDocument();
 });
 
 test('prompts to configure prices when none are set', async () => {

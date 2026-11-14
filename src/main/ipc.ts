@@ -1,3 +1,4 @@
+import { isAbsolute } from 'node:path';
 import { isLocalDateTime } from '../shared/date';
 import { isTaskRepeat } from '../shared/recurrence';
 import type { AppSettings } from '../shared/types';
@@ -62,11 +63,16 @@ import type {
 } from '../shared/plans';
 import type {
   SaveTranscriptionConfigInput,
+  VideoJob,
+  VideoNotesEnqueueInput,
+  VideoNotesEstimate,
   VideoNotesInput,
   VideoNotesLanguage,
+  VideoNotesMode,
   VideoNotesProgress,
   VideoNotesResult
 } from '../shared/video-notes';
+import { isSupportedMedia } from '../shared/video-notes';
 
 /** Every IPC channel exposed to the preload bridge. */
 export const IPC_CHANNELS = {
@@ -179,7 +185,16 @@ export const APP_IPC_CHANNELS = {
 /** Video-note generation streams progress on its own event channel. */
 export const VIDEO_NOTES_CHANNELS = {
   generate: 'study-coach:video-notes:generate',
-  progress: 'study-coach:video-notes:progress'
+  progress: 'study-coach:video-notes:progress',
+  enqueue: 'study-coach:video-notes:enqueue',
+  estimate: 'study-coach:video-notes:estimate',
+  listJobs: 'study-coach:video-notes:list-jobs',
+  cancelJob: 'study-coach:video-notes:cancel-job',
+  resumeJob: 'study-coach:video-notes:resume-job',
+  retryLesson: 'study-coach:video-notes:retry-lesson',
+  removeJob: 'study-coach:video-notes:remove-job',
+  pickVideoFolder: 'study-coach:video-notes:pick-video-folder',
+  jobsChanged: 'study-coach:video-notes:jobs-changed'
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
@@ -931,7 +946,17 @@ function requireLongPlanItemDone(value: unknown): UpdateLongPlanItemInput {
 }
 
 const VIDEO_NOTES_LANGUAGES: readonly VideoNotesLanguage[] = ['auto', 'zh', 'en'];
-const MAX_VIDEO_FILES = 50;
+const VIDEO_NOTES_MODES: readonly VideoNotesMode[] = ['quick', 'deck'];
+const MAX_VIDEO_FILES = 200;
+
+function absolutePath(value: unknown, label: string): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`${label}无效。`);
+  }
+  const trimmed = value.trim();
+  if (!isAbsolute(trimmed)) throw new Error(`${label}必须是绝对路径。`);
+  return trimmed;
+}
 
 function requireVideoNotesInput(value: unknown): VideoNotesInput {
   const input = requireObject(value, '生成视频笔记');
@@ -969,6 +994,73 @@ function requireVideoNotesInput(value: unknown): VideoNotesInput {
     ...(outputDir !== undefined ? { outputDir } : {}),
     language
   };
+}
+
+function requireVideoNotesEnqueueInput(value: unknown): VideoNotesEnqueueInput {
+  const input = requireObject(value, '提交视频任务');
+  let mode: VideoNotesMode = 'quick';
+  if (input.mode !== undefined) {
+    if (
+      typeof input.mode !== 'string' ||
+      !(VIDEO_NOTES_MODES as readonly string[]).includes(input.mode)
+    ) {
+      throw new Error('生成模式无效。');
+    }
+    mode = input.mode as VideoNotesMode;
+  }
+  const videoPaths: string[] = [];
+  if (input.videoPaths !== undefined) {
+    if (!Array.isArray(input.videoPaths)) throw new Error('视频路径无效。');
+    if (input.videoPaths.length > MAX_VIDEO_FILES) {
+      throw new Error(`一次最多处理 ${MAX_VIDEO_FILES} 个文件。`);
+    }
+    for (const entry of input.videoPaths) {
+      const path = absolutePath(entry, '视频路径');
+      if (!isSupportedMedia(path)) {
+        throw new Error('不支持的媒体格式。');
+      }
+      videoPaths.push(path);
+    }
+  }
+  let folder: string | undefined;
+  if (input.folder !== undefined) {
+    folder = absolutePath(input.folder, '文件夹路径');
+  }
+  if (videoPaths.length === 0 && folder === undefined) {
+    throw new Error('请先选择视频文件或文件夹。');
+  }
+  let outputDir: string | undefined;
+  if (input.outputDir !== undefined) {
+    if (typeof input.outputDir !== 'string') throw new Error('输出文件夹无效。');
+    const trimmed = input.outputDir.trim();
+    if (trimmed.length > 0) outputDir = absolutePath(trimmed, '输出文件夹');
+  }
+  let language: VideoNotesLanguage = 'auto';
+  if (input.language !== undefined) {
+    if (
+      typeof input.language !== 'string' ||
+      !(VIDEO_NOTES_LANGUAGES as readonly string[]).includes(input.language)
+    ) {
+      throw new Error('转写语言无效。');
+    }
+    language = input.language as VideoNotesLanguage;
+  }
+  return {
+    mode,
+    ...(videoPaths.length > 0 ? { videoPaths } : {}),
+    ...(folder !== undefined ? { folder } : {}),
+    ...(outputDir !== undefined ? { outputDir } : {}),
+    language
+  };
+}
+
+function requireRetryLesson(value: unknown): { jobId: string; videoPath: string } {
+  const input = requireObject(value, '重试视频任务');
+  const jobId = requireString(input.jobId, '任务 ID').trim();
+  const videoPath = requireString(input.videoPath, '视频路径').trim();
+  if (jobId.length === 0) throw new Error('任务 ID 无效。');
+  if (videoPath.length === 0) throw new Error('视频路径无效。');
+  return { jobId, videoPath };
 }
 
 function requireSaveTranscriptionConfig(value: unknown): SaveTranscriptionConfigInput {
@@ -1317,6 +1409,39 @@ export function createVideoNotesHandler(api: StudyCoachApi) {
   };
 }
 
+/**
+ * Job-queue channels. Every argument is validated here, and errors are
+ * sanitized so a provider message can never leak into the renderer verbatim.
+ */
+export function createVideoJobHandlers(api: StudyCoachApi) {
+  const run = async <T>(fn: () => Promise<T>): Promise<T> => {
+    try {
+      return await fn();
+    } catch (error) {
+      throw toSafeError(error);
+    }
+  };
+
+  return {
+    enqueue: (value: unknown): Promise<VideoJob> =>
+      run(() => api.enqueueVideoNotes!(requireVideoNotesEnqueueInput(value))),
+    estimate: (value: unknown): Promise<VideoNotesEstimate> =>
+      run(() => api.estimateVideoNotes!(requireVideoNotesEnqueueInput(value))),
+    listJobs: (): Promise<VideoJob[]> => run(() => api.listVideoJobs!()),
+    cancelJob: (value: unknown): Promise<VideoJob> =>
+      run(() => api.cancelVideoJob!(requireString(value, '任务 ID'))),
+    resumeJob: (value: unknown): Promise<VideoJob> =>
+      run(() => api.resumeVideoJob!(requireString(value, '任务 ID'))),
+    retryLesson: (value: unknown): Promise<VideoJob> =>
+      run(async () => {
+        const input = requireRetryLesson(value);
+        return api.retryVideoLesson!(input);
+      }),
+    removeJob: (value: unknown): Promise<void> =>
+      run(() => api.removeVideoJob!(requireString(value, '任务 ID')))
+  };
+}
+
 /** Registers every channel; Electron's ipcMain is injected for testability. */
 export function registerIpcHandlers(api: StudyCoachApi, ipcMain: IpcMainLike): void {
   const handlers = createIpcHandlers(api);
@@ -1335,6 +1460,26 @@ export function registerIpcHandlers(api: StudyCoachApi, ipcMain: IpcMainLike): v
   const videoNotesHandler = createVideoNotesHandler(api);
   ipcMain.handle(VIDEO_NOTES_CHANNELS.generate, (event, ...args) =>
     videoNotesHandler(event as IpcEventLike, args[0])
+  );
+  const jobHandlers = createVideoJobHandlers(api);
+  ipcMain.handle(VIDEO_NOTES_CHANNELS.enqueue, (_event, ...args) =>
+    jobHandlers.enqueue(args[0])
+  );
+  ipcMain.handle(VIDEO_NOTES_CHANNELS.estimate, (_event, ...args) =>
+    jobHandlers.estimate(args[0])
+  );
+  ipcMain.handle(VIDEO_NOTES_CHANNELS.listJobs, () => jobHandlers.listJobs());
+  ipcMain.handle(VIDEO_NOTES_CHANNELS.cancelJob, (_event, ...args) =>
+    jobHandlers.cancelJob(args[0])
+  );
+  ipcMain.handle(VIDEO_NOTES_CHANNELS.resumeJob, (_event, ...args) =>
+    jobHandlers.resumeJob(args[0])
+  );
+  ipcMain.handle(VIDEO_NOTES_CHANNELS.retryLesson, (_event, ...args) =>
+    jobHandlers.retryLesson(args[0])
+  );
+  ipcMain.handle(VIDEO_NOTES_CHANNELS.removeJob, (_event, ...args) =>
+    jobHandlers.removeJob(args[0])
   );
 }
 
@@ -1445,6 +1590,7 @@ export function createStudyCoachBridge(
     restoreBackup: () => call<RestoreResult | null>(APP_IPC_CHANNELS.restoreBackup),
     restartApp: () => call<void>(APP_IPC_CHANNELS.restartApp),
     pickVideoFiles: () => call<string[] | null>(APP_IPC_CHANNELS.pickVideoFiles),
+    pickVideoFolder: () => call<string | null>(VIDEO_NOTES_CHANNELS.pickVideoFolder),
     pickOutputDirectory: () =>
       call<string | null>(APP_IPC_CHANNELS.pickOutputDirectory),
     openPath: (path) => call<string>(APP_IPC_CHANNELS.openPath, path),
@@ -1465,6 +1611,21 @@ export function createStudyCoachBridge(
       } finally {
         unsubscribe?.();
       }
+    },
+    enqueueVideoNotes: (input) => call<VideoJob>(VIDEO_NOTES_CHANNELS.enqueue, input),
+    estimateVideoNotes: (input) =>
+      call<VideoNotesEstimate>(VIDEO_NOTES_CHANNELS.estimate, input),
+    listVideoJobs: () => call<VideoJob[]>(VIDEO_NOTES_CHANNELS.listJobs),
+    cancelVideoJob: (id) => call<VideoJob>(VIDEO_NOTES_CHANNELS.cancelJob, id),
+    resumeVideoJob: (id) => call<VideoJob>(VIDEO_NOTES_CHANNELS.resumeJob, id),
+    retryVideoLesson: (input) =>
+      call<VideoJob>(VIDEO_NOTES_CHANNELS.retryLesson, input),
+    removeVideoJob: (id) => call<void>(VIDEO_NOTES_CHANNELS.removeJob, id),
+    onVideoJobsChanged(listener) {
+      if (!subscribe) return () => undefined;
+      return subscribe(VIDEO_NOTES_CHANNELS.jobsChanged, (payload) => {
+        if (Array.isArray(payload)) listener(payload as VideoJob[]);
+      });
     },
     send: (input) => call(IPC_CHANNELS.send, input),
     searchAll: (input) => call(IPC_CHANNELS.searchAll, input),

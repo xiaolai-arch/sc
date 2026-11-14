@@ -1,11 +1,16 @@
 import { formatLocalDate, parseLocalDate } from './date';
 
-/** One aggregated usage row for a local day, provider and model. */
+/** Usage source. Missing means a conversation turn (older records). */
+export type UsageFeature = 'video-notes';
+
+/** One aggregated usage row for a local day, provider, model and feature. */
 export interface UsageEntry {
   /** Local calendar date (`YYYY-MM-DD`). */
   date: string;
   provider: string;
   model: string;
+  /** `video-notes` is excluded from the proactive-check-in budget. */
+  feature?: UsageFeature;
   inputTokens: number;
   outputTokens: number;
   calls: number;
@@ -16,6 +21,9 @@ export interface UsageDay {
   inputTokens: number;
   outputTokens: number;
   calls: number;
+  /** Split totals; older callers may omit them (all conversation). */
+  conversation?: UsageTotals;
+  videoNotes?: UsageTotals;
 }
 
 export interface UsageTotals {
@@ -28,6 +36,9 @@ export interface UsageSummary {
   /** Newest first; only dates with recorded usage. */
   days: UsageDay[];
   totals: UsageTotals;
+  /** Split totals; video-notes usage never counts toward the proactive budget. */
+  conversation?: UsageTotals;
+  videoNotes?: UsageTotals;
   /** Filled by the caller from configured prices; null when none are set. */
   estimatedCost: number | null;
 }
@@ -43,8 +54,16 @@ export function summarizeUsage(
   today: string
 ): UsageSummary {
   const totals = emptyTotals();
+  const conversation = emptyTotals();
+  const videoNotes = emptyTotals();
   if (!Number.isFinite(days) || days <= 0) {
-    return { days: [], totals, estimatedCost: null };
+    return {
+      days: [],
+      totals,
+      conversation,
+      videoNotes,
+      estimatedCost: null
+    };
   }
 
   const start = parseLocalDate(today);
@@ -55,20 +74,37 @@ export function summarizeUsage(
   for (const entry of entries) {
     if (entry.date < cutoff || entry.date > today) continue;
     const day =
-      byDate.get(entry.date) ??
-      { date: entry.date, inputTokens: 0, outputTokens: 0, calls: 0 };
+      byDate.get(entry.date) ?? {
+        date: entry.date,
+        inputTokens: 0,
+        outputTokens: 0,
+        calls: 0,
+        conversation: emptyTotals(),
+        videoNotes: emptyTotals()
+      };
+    const bucket = entry.feature === 'video-notes' ? videoNotes : conversation;
     day.inputTokens += entry.inputTokens;
     day.outputTokens += entry.outputTokens;
     day.calls += entry.calls;
+    const dayBucket =
+      entry.feature === 'video-notes' ? day.videoNotes! : day.conversation!;
+    dayBucket.inputTokens += entry.inputTokens;
+    dayBucket.outputTokens += entry.outputTokens;
+    dayBucket.calls += entry.calls;
     byDate.set(entry.date, day);
     totals.inputTokens += entry.inputTokens;
     totals.outputTokens += entry.outputTokens;
     totals.calls += entry.calls;
+    bucket.inputTokens += entry.inputTokens;
+    bucket.outputTokens += entry.outputTokens;
+    bucket.calls += entry.calls;
   }
 
   return {
     days: [...byDate.values()].sort((a, b) => b.date.localeCompare(a.date)),
     totals,
+    conversation,
+    videoNotes,
     estimatedCost: null
   };
 }

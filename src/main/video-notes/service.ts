@@ -1,18 +1,21 @@
 import { createHash } from 'node:crypto';
 import type { Dirent } from 'node:fs';
-import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, stat } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { formatLocalDate } from '../../shared/date';
-import type { ModelClient } from '../agent/model-client';
+import type { ModelClient, ModelUsage } from '../agent/model-client';
 import type {
+  VideoNotesEstimate,
   VideoNotesFailure,
   VideoNotesInput,
   VideoNotesLanguage,
   VideoNotesLesson,
+  VideoNotesMode,
   VideoNotesProgress,
   VideoNotesResult,
   VideoNotesStage
 } from '../../shared/video-notes';
+import { writeFileAtomic } from '../workspace/fs-utils';
 import { formatDuration, renderIndexHtml, renderLessonHtml, type IndexLesson } from './html';
 import { assertMediaTools, extractMp3Chunk, isSupportedMedia, probeDuration } from './media';
 import {
@@ -22,6 +25,7 @@ import {
   type Transcript
 } from './mimo';
 import { generateNoteBody } from './notes';
+import { readCheckpoint, runStep, writeCheckpoint, fingerprintOf } from './checkpoint';
 
 export interface AsrConfig {
   baseURL: string;
@@ -35,31 +39,89 @@ export interface VideoNotesServiceOptions {
   cacheRoot: string;
   getAsrConfig: () => Promise<AsrConfig>;
   getModelClient: () => Promise<ModelClient | null>;
+  /** Model name used in checkpoint fingerprints; empty when unknown. */
+  getModelName?: () => Promise<string>;
   now?: () => Date;
   /** Test seams; production uses the ffmpeg-backed implementations. */
   ensureTools?: () => Promise<void>;
-  probe?: (source: string) => Promise<number>;
+  probe?: (source: string, signal?: AbortSignal) => Promise<number>;
   extract?: (
     source: string,
     destination: string,
     startSeconds: number,
-    durationSeconds: number
+    durationSeconds: number,
+    signal?: AbortSignal
   ) => Promise<void>;
   createAsr?: (config: MimoAsrConfig) => (audio: Buffer, language: VideoNotesLanguage) => Promise<string>;
 }
 
+export interface VideoLessonRunInput {
+  mode: VideoNotesMode;
+  videoPath: string;
+  outputDir: string;
+  language: VideoNotesLanguage;
+  signal: AbortSignal;
+  /** Folder names already claimed by the running job. */
+  usedNames?: Set<string>;
+  /** A lesson folder the job already created; ignored when outside outputDir. */
+  lessonDir?: string;
+  /** Re-runs this step and every later one (retry from a failed step). */
+  fromStep?: string;
+  onStage?: (
+    stage: VideoNotesStage,
+    message: string,
+    extra?: Pick<VideoNotesProgress, 'current' | 'total'>
+  ) => void;
+}
+
+export interface VideoLessonRunOutput {
+  lessonDir: string;
+  title: string;
+  durationSeconds: number;
+  transcriptChars: number;
+  noteChars: number;
+  notesPath: string;
+  htmlPath: string;
+  slidesPath: string | null;
+  pdfPath: string | null;
+  reportPath: string | null;
+  usage: ModelUsage;
+}
+
 export interface VideoNotesService {
+  /** Legacy batch call: keeps the pre-queue behaviour for its tests. */
   generate(
     input: VideoNotesInput,
     onProgress?: (progress: VideoNotesProgress) => void
   ): Promise<VideoNotesResult>;
+  /** Runs one lesson with checkpoint skip/resume; used by the job queue. */
+  runLesson(input: VideoLessonRunInput): Promise<VideoLessonRunOutput>;
+  /** Rewrites index.html from every lesson folder that carries a meta.json. */
+  refreshIndex(
+    outputDir: string,
+    videoPaths?: string[]
+  ): Promise<{ indexPath: string; lessons: VideoNotesLesson[] }>;
+  estimate(input: {
+    mode: VideoNotesMode;
+    videoPaths: string[];
+    language?: VideoNotesLanguage;
+  }): Promise<VideoNotesEstimate>;
 }
 
-const META_VERSION = 1;
-const MAX_FOLDER_ATTEMPTS = 500;
+/** Ordered quick-mode pipeline (see design 4.1 steps 1, 2, 10). */
+export const VIDEO_NOTES_STEPS = ['probe', 'transcribe', 'render'] as const;
+export type VideoNotesStep = (typeof VIDEO_NOTES_STEPS)[number];
 
-interface LessonMeta {
-  version: typeof META_VERSION;
+/** Bump when the note prompt or its options change, to invalidate checkpoints. */
+export const NOTE_PROMPT_VERSION = 1;
+
+const MAX_FOLDER_ATTEMPTS = 500;
+const QUICK_TOKENS_PER_LESSON = 50_000;
+const DECK_TOKENS_PER_MINUTE = 11_000;
+/** Fallback when ffprobe cannot report a duration. */
+const FALLBACK_LESSON_MINUTES = 30;
+
+interface LessonMetaBase {
   sourcePath: string;
   folder: string;
   title: string;
@@ -69,6 +131,58 @@ interface LessonMeta {
   transcriptModel: string;
   generatedAt: string;
   summary: string;
+}
+
+interface LessonMeta extends LessonMetaBase {
+  version: 1 | 2;
+  mode?: VideoNotesMode;
+  slidesPath?: string | null;
+  pdfPath?: string | null;
+  reportPath?: string | null;
+  slideCount?: number;
+}
+
+const MODES: readonly VideoNotesMode[] = ['quick', 'deck'];
+
+function isMode(value: unknown): value is VideoNotesMode {
+  return typeof value === 'string' && (MODES as readonly string[]).includes(value);
+}
+
+export function abortError(): Error {
+  const error = new Error('任务已取消。');
+  error.name = 'AbortError';
+  return error;
+}
+
+export function isAbortError(error: unknown): boolean {
+  if (error instanceof Error) {
+    if (error.name === 'AbortError') return true;
+    if ((error as { code?: unknown }).code === 'ABORT_ERR') return true;
+    return /aborted|abort/i.test(error.message);
+  }
+  return false;
+}
+
+export function throwIfAborted(signal: AbortSignal): void {
+  if (signal.aborted) throw abortError();
+}
+
+function stepIndex(step: string | undefined): number {
+  return step === undefined ? -1 : (VIDEO_NOTES_STEPS as readonly string[]).indexOf(step);
+}
+
+function shouldForce(step: VideoNotesStep, fromStep: string | undefined): boolean {
+  const from = stepIndex(fromStep);
+  return from >= 0 && stepIndex(step) >= from;
+}
+
+/** Injects the job signal into every model request (prompts own the client). */
+function withAbortSignal(client: ModelClient, signal: AbortSignal): ModelClient {
+  return {
+    complete(request) {
+      return client.complete({ ...request, signal: request.signal ?? signal });
+    }
+  };
 }
 
 function report(
@@ -108,12 +222,17 @@ export function lessonTitleFor(sourcePath: string): string {
   return name.length > 0 ? name : '未命名课程';
 }
 
+function nullableString(value: unknown): value is string | null | undefined {
+  return value === undefined || value === null || typeof value === 'string';
+}
+
+/** Reads both meta versions; v1 folders must keep being reused by the index. */
 async function readMeta(dir: string): Promise<LessonMeta | null> {
   try {
     const raw = await readFile(join(dir, 'meta.json'), 'utf8');
     const parsed = JSON.parse(raw) as Partial<LessonMeta>;
+    if (parsed.version !== 1 && parsed.version !== 2) return null;
     if (
-      parsed.version !== META_VERSION ||
       typeof parsed.sourcePath !== 'string' ||
       typeof parsed.folder !== 'string' ||
       typeof parsed.title !== 'string' ||
@@ -123,6 +242,14 @@ async function readMeta(dir: string): Promise<LessonMeta | null> {
       typeof parsed.transcriptModel !== 'string' ||
       typeof parsed.generatedAt !== 'string' ||
       typeof parsed.summary !== 'string'
+    ) {
+      return null;
+    }
+    if (parsed.version === 2 && !isMode(parsed.mode)) return null;
+    if (
+      !nullableString(parsed.slidesPath) ||
+      !nullableString(parsed.pdfPath) ||
+      !nullableString(parsed.reportPath)
     ) {
       return null;
     }
@@ -314,7 +441,7 @@ async function rebuildIndex(
       noteChars: meta.noteChars,
       summary: meta.summary
     }));
-    await writeFile(indexPath, renderIndexHtml({ title, generatedAt, lessons }), 'utf8');
+    await writeFileAtomic(indexPath, renderIndexHtml({ title, generatedAt, lessons }));
   }
   return {
     indexPath,
@@ -334,6 +461,69 @@ async function rebuildIndex(
   };
 }
 
+interface RenderStepOutput {
+  title: string;
+  folder: string;
+  lessonDir: string;
+  durationSeconds: number;
+  transcriptChars: number;
+  noteChars: number;
+  transcriptModel: string;
+  generatedAt: string;
+  summary: string;
+  notesPath: string;
+  htmlPath: string;
+  slidesPath: string | null;
+  pdfPath: string | null;
+  reportPath: string | null;
+  slideCount: number;
+}
+
+function renderOutputComplete(output: RenderStepOutput | undefined): output is RenderStepOutput {
+  return (
+    output !== undefined &&
+    output !== null &&
+    typeof output.lessonDir === 'string' &&
+    typeof output.title === 'string' &&
+    typeof output.notesPath === 'string' &&
+    typeof output.htmlPath === 'string'
+  );
+}
+
+function renderOutputMatches(
+  output: RenderStepOutput | undefined,
+  videoPath: string
+): Promise<boolean> {
+  if (!renderOutputComplete(output)) return Promise.resolve(false);
+  return readMeta(output.lessonDir).then(
+    (meta) => meta !== null && meta.version === 2 && samePath(meta.sourcePath, videoPath)
+  );
+}
+
+export function estimateFromDuration(
+  mode: VideoNotesMode,
+  lessons: number,
+  durationSeconds: number
+): VideoNotesEstimate {
+  const knownMinutes = durationSeconds > 0 ? durationSeconds / 60 : 0;
+  const minutesPerLesson = knownMinutes > 0 ? knownMinutes / Math.max(1, lessons) : FALLBACK_LESSON_MINUTES;
+  const totalMinutes = knownMinutes > 0 ? knownMinutes : minutesPerLesson * lessons;
+  const tokens =
+    mode === 'deck'
+      ? Math.round(totalMinutes * DECK_TOKENS_PER_MINUTE)
+      : Math.max(1, lessons) * QUICK_TOKENS_PER_LESSON;
+  const estimateMinutes =
+    mode === 'deck'
+      ? Math.max(1, Math.round(totalMinutes * 1.5))
+      : Math.max(1, Math.round(totalMinutes * 0.5));
+  return {
+    lessons: Math.max(0, lessons),
+    durationSeconds: Math.max(0, Math.round(durationSeconds)),
+    tokens,
+    minutes: estimateMinutes
+  };
+}
+
 export function createVideoNotesService(options: VideoNotesServiceOptions): VideoNotesService {
   const now = options.now ?? (() => new Date());
   const ensureTools = options.ensureTools ?? assertMediaTools;
@@ -341,6 +531,313 @@ export function createVideoNotesService(options: VideoNotesServiceOptions): Vide
   const extract = options.extract ?? extractMp3Chunk;
   const createAsr = options.createAsr ?? ((config) => createMimoAsrClient(config));
   let busy = false;
+  let toolsReady: Promise<void> | null = null;
+
+  /** ffmpeg is checked once per process; a failed check is retried next time. */
+  function ensureToolsOnce(): Promise<void> {
+    if (toolsReady === null) {
+      toolsReady = ensureTools().catch((error: unknown) => {
+        toolsReady = null;
+        throw error;
+      });
+    }
+    return toolsReady;
+  }
+
+  async function resolveLessonDir(
+    outputDir: string,
+    videoPath: string,
+    usedNames: Set<string>,
+    preferred: string | undefined
+  ): Promise<{ dir: string; folder: string }> {
+    if (preferred) {
+      const dir = resolve(preferred);
+      const root = resolve(outputDir);
+      const prefix = root.endsWith(sep) ? root : `${root}${sep}`;
+      if (dir !== root && dir.startsWith(prefix)) {
+        const folder = basename(dir);
+        usedNames.add(folder.toLowerCase());
+        return { dir, folder };
+      }
+      // Otherwise ignore a stale or tampered directory outside the output root.
+    }
+    const allocated = await allocateLessonDir(outputDir, videoPath, usedNames);
+    return allocated;
+  }
+
+  async function runLesson(input: VideoLessonRunInput): Promise<VideoLessonRunOutput> {
+    const { signal } = input;
+    throwIfAborted(signal);
+    const videoPath = resolve(input.videoPath);
+    if (!isSupportedMedia(videoPath)) {
+      throw new Error(`不支持的媒体格式：${basename(videoPath)}`);
+    }
+    const language: VideoNotesLanguage = input.language ?? 'auto';
+    if (language !== 'auto' && language !== 'zh' && language !== 'en') {
+      throw new Error('转写语言无效。');
+    }
+    const mode: VideoNotesMode = input.mode ?? 'quick';
+    if (!isMode(mode)) throw new Error('生成模式无效。');
+    const outputDir = resolve(input.outputDir);
+
+    const [asrConfig, modelClient, modelName] = await Promise.all([
+      options.getAsrConfig(),
+      options.getModelClient(),
+      options.getModelName ? options.getModelName() : Promise.resolve('')
+    ]);
+    if (!asrConfig.apiKey) {
+      throw new Error('请先在设置中配置语音转写 API key。');
+    }
+    if (modelClient === null) {
+      throw new Error('生成笔记需要一个可用的模型 provider，请先到设置中配置。');
+    }
+    await ensureToolsOnce();
+    throwIfAborted(signal);
+
+    await mkdir(outputDir, { recursive: true });
+    await mkdir(options.cacheRoot, { recursive: true });
+    const usedNames = input.usedNames ?? new Set<string>();
+    const { dir: lessonDir, folder } = await resolveLessonDir(
+      outputDir,
+      videoPath,
+      usedNames,
+      input.lessonDir
+    );
+    await mkdir(lessonDir, { recursive: true });
+
+    const emit = (
+      stage: VideoNotesStage,
+      message: string,
+      extra?: Pick<VideoNotesProgress, 'current' | 'total'>
+    ) => {
+      try {
+        input.onStage?.(stage, message, extra);
+      } catch {
+        // Progress reporting must never abort the pipeline.
+      }
+    };
+    const fromStep = input.fromStep;
+
+    const sourceInfo = await stat(videoPath).catch(() => null);
+
+    // Step 1: probe ---------------------------------------------------------
+    emit('probe', '正在读取视频信息…');
+    const durationStep = await runStep<{ durationSeconds: number }>({
+      lessonDir,
+      step: 'probe',
+      force: shouldForce('probe', fromStep),
+      fingerprint: fingerprintOf({
+        step: 'probe',
+        source: videoPath,
+        size: sourceInfo?.size ?? 0,
+        mtimeMs: sourceInfo?.mtimeMs ?? 0
+      }),
+      run: async () => {
+        const durationSeconds = await probe(videoPath, signal);
+        return { output: { durationSeconds } };
+      },
+      now
+    });
+    const durationSeconds = durationStep.output.durationSeconds;
+    if (!(durationSeconds > 0)) {
+      throw new Error('无法读取视频时长，文件可能损坏或不是有效的媒体文件。');
+    }
+    throwIfAborted(signal);
+
+    // Step 2: transcribe ----------------------------------------------------
+    emit('audio', '正在提取音频…');
+    const cacheDir = await transcriptCacheDir(
+      options.cacheRoot,
+      videoPath,
+      language,
+      asrConfig.model
+    );
+    const asr = createAsr({
+      baseURL: asrConfig.baseURL,
+      model: asrConfig.model,
+      apiKey: asrConfig.apiKey,
+      signal
+    });
+    const transcriptStep = await runStep<Transcript>({
+      lessonDir,
+      step: 'transcribe',
+      force: shouldForce('transcribe', fromStep),
+      fingerprint: fingerprintOf({
+        step: 'transcribe',
+        upstream: durationStep.output,
+        source: videoPath,
+        size: sourceInfo?.size ?? 0,
+        mtimeMs: sourceInfo?.mtimeMs ?? 0,
+        language,
+        asrModel: asrConfig.model
+      }),
+      run: async () => {
+        const transcript = await transcribeMedia(videoPath, {
+          durationSeconds,
+          cacheDir,
+          encode: (destination, start, duration) =>
+            extract(videoPath, destination, start, duration, signal),
+          asr,
+          language,
+          model: asrConfig.model,
+          signal,
+          onProgress: (current, total) =>
+            emit('transcribe', `正在转写音频（${current}/${total}）…`, { current, total })
+        });
+        if (transcript.chars === 0 || transcript.text.trim().length === 0) {
+          throw new Error('没有识别到有效语音内容。');
+        }
+        return { output: transcript };
+      },
+      now
+    });
+    const transcript = transcriptStep.output;
+    throwIfAborted(signal);
+
+    // Step 10: render (quick notes) ----------------------------------------
+    const title = lessonTitleFor(videoPath);
+    const renderFingerprint = fingerprintOf({
+      step: 'render',
+      upstream: { probe: durationStep.output, transcriptSignature: fingerprintOf(transcript) },
+      promptVersion: NOTE_PROMPT_VERSION,
+      model: modelName,
+      options: { mode, temperature: 0.2, maxTokens: 12_000 }
+    });
+    const existingRender = shouldForce('render', fromStep)
+      ? null
+      : await readCheckpoint<RenderStepOutput>(lessonDir, 'render');
+    let rendered: RenderStepOutput | null = null;
+    let renderUsage: ModelUsage = { inputTokens: 0, outputTokens: 0 };
+    if (
+      existingRender !== null &&
+      existingRender.fingerprint === renderFingerprint &&
+      (await renderOutputMatches(existingRender.output, videoPath))
+    ) {
+      rendered = existingRender.output;
+      renderUsage = existingRender.usage;
+      emit('html', '本讲已完成，跳过。');
+    } else {
+      emit('notes', '正在生成笔记…（这一步可能需要几分钟）');
+      throwIfAborted(signal);
+      const generated = await generateNoteBody(withAbortSignal(modelClient, signal), {
+        title,
+        sourcePath: videoPath,
+        durationSeconds,
+        transcript
+      });
+      throwIfAborted(signal);
+      if (generated.body.trim().length === 0) {
+        throw new Error('模型没有返回笔记内容。');
+      }
+
+      emit('html', '正在写入笔记和 HTML…');
+      const generatedAt = formatLocalDate(now());
+      const notesPath = join(lessonDir, 'notes.md');
+      const htmlPath = join(lessonDir, 'notes.html');
+      const markdown = buildNotesMarkdown({
+        title,
+        sourcePath: videoPath,
+        durationSeconds,
+        transcript,
+        body: generated.body,
+        generatedAt
+      });
+      const summary = summarizeNote(generated.body);
+      const meta: LessonMeta = {
+        version: 2,
+        mode,
+        sourcePath: videoPath,
+        folder,
+        title,
+        durationSeconds,
+        transcriptChars: transcript.chars,
+        noteChars: generated.body.length,
+        transcriptModel: transcript.model,
+        generatedAt,
+        summary,
+        // Phase 0 only ships quick notes; the deck pipeline fills these later.
+        slidesPath: null,
+        pdfPath: null,
+        reportPath: null,
+        slideCount: 0
+      };
+
+      await writeFileAtomic(
+        join(lessonDir, 'transcript.json'),
+        `${JSON.stringify(transcript, null, 2)}\n`
+      );
+      await writeFileAtomic(notesPath, markdown);
+      await writeFileAtomic(
+        htmlPath,
+        renderLessonHtml({
+          title,
+          sourcePath: videoPath,
+          durationSeconds,
+          transcriptChars: transcript.chars,
+          transcriptModel: transcript.model,
+          generatedAt,
+          markdown: generated.body
+        })
+      );
+      // Written last: a half-written lesson must not be picked up by the index.
+      await writeFileAtomic(join(lessonDir, 'meta.json'), `${JSON.stringify(meta, null, 2)}\n`);
+
+      rendered = {
+        title,
+        folder,
+        lessonDir,
+        durationSeconds,
+        transcriptChars: transcript.chars,
+        noteChars: generated.body.length,
+        transcriptModel: transcript.model,
+        generatedAt,
+        summary,
+        notesPath,
+        htmlPath,
+        slidesPath: null,
+        pdfPath: null,
+        reportPath: null,
+        slideCount: 0
+      };
+      renderUsage = generated.usage;
+      await writeCheckpoint(lessonDir, 'render', {
+        version: 1,
+        step: 'render',
+        fingerprint: renderFingerprint,
+        output: rendered,
+        usage: renderUsage,
+        finishedAt: now().toISOString()
+      });
+    }
+
+    emit('done', '本讲笔记已生成。');
+    return {
+      lessonDir: rendered.lessonDir,
+      title: rendered.title,
+      durationSeconds: rendered.durationSeconds,
+      transcriptChars: rendered.transcriptChars,
+      noteChars: rendered.noteChars,
+      notesPath: rendered.notesPath,
+      htmlPath: rendered.htmlPath,
+      slidesPath: rendered.slidesPath,
+      pdfPath: rendered.pdfPath,
+      reportPath: rendered.reportPath,
+      usage: {
+        inputTokens: renderUsage.inputTokens,
+        outputTokens: renderUsage.outputTokens
+      }
+    };
+  }
+
+  async function refreshIndex(
+    outputDir: string,
+    videoPaths?: string[]
+  ): Promise<{ indexPath: string; lessons: VideoNotesLesson[] }> {
+    const root = resolve(outputDir);
+    const title =
+      videoPaths && videoPaths.length > 0 ? courseTitle(videoPaths, root) : basename(root);
+    return rebuildIndex(root, title, formatLocalDate(now()));
+  }
 
   async function run(
     input: VideoNotesInput,
@@ -371,7 +868,8 @@ export function createVideoNotesService(options: VideoNotesServiceOptions): Vide
         ? input.outputDir
         : join(dirname(videoPaths[0]!), '笔记')
     );
-
+    // Preflight once so a missing key/provider rejects the whole batch before
+    // a lesson folder is created (the queue path reports it per lesson).
     const [asrConfig, modelClient] = await Promise.all([
       options.getAsrConfig(),
       options.getModelClient()
@@ -382,163 +880,49 @@ export function createVideoNotesService(options: VideoNotesServiceOptions): Vide
     if (modelClient === null) {
       throw new Error('生成笔记需要一个可用的模型 provider，请先到设置中配置。');
     }
-    await ensureTools();
-
-    await mkdir(outputDir, { recursive: true });
-    await mkdir(options.cacheRoot, { recursive: true });
-
-    const asr = createAsr({
-      baseURL: asrConfig.baseURL,
-      model: asrConfig.model,
-      apiKey: asrConfig.apiKey
-    });
+    await ensureToolsOnce();
+    const controller = new AbortController();
     const usedNames = new Set<string>();
-    const lessons: VideoNotesLesson[] = [];
     const failures: VideoNotesFailure[] = [];
 
     for (let videoIndex = 0; videoIndex < videoPaths.length; videoIndex += 1) {
       const videoPath = videoPaths[videoIndex]!;
-      const emit = (
-        stage: VideoNotesStage,
-        message: string,
-        extra: Pick<VideoNotesProgress, 'current' | 'total'> = {}
-      ) =>
+      try {
+        await runLesson({
+          mode: 'quick',
+          videoPath,
+          outputDir,
+          language,
+          signal: controller.signal,
+          usedNames,
+          onStage: (stage, message, extra) =>
+            report(onProgress, {
+              videoIndex,
+              videoCount: videoPaths.length,
+              videoPath,
+              stage,
+              message,
+              ...extra
+            })
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        failures.push({ videoPath, message });
         report(onProgress, {
           videoIndex,
           videoCount: videoPaths.length,
           videoPath,
-          stage,
-          message,
-          ...extra
+          stage: 'error',
+          message
         });
-
-      try {
-        emit('probe', '正在读取视频信息…');
-        const durationSeconds = await probe(videoPath);
-        if (!(durationSeconds > 0)) {
-          throw new Error('无法读取视频时长，文件可能损坏或不是有效的媒体文件。');
-        }
-
-        emit('audio', '正在提取音频…');
-        const cacheDir = await transcriptCacheDir(
-          options.cacheRoot,
-          videoPath,
-          language,
-          asrConfig.model
-        );
-        const transcript = await transcribeMedia(videoPath, {
-          durationSeconds,
-          cacheDir,
-          encode: (destination, start, duration) =>
-            extract(videoPath, destination, start, duration),
-          asr,
-          language,
-          model: asrConfig.model,
-          onProgress: (current, total) =>
-            emit('transcribe', `正在转写音频（${current}/${total}）…`, { current, total })
-        });
-        if (transcript.chars === 0 || transcript.text.trim().length === 0) {
-          throw new Error('没有识别到有效语音内容。');
-        }
-
-        emit('notes', '正在生成笔记…（这一步可能需要几分钟）');
-        const title = lessonTitleFor(videoPath);
-        const generated = await generateNoteBody(modelClient, {
-          title,
-          sourcePath: videoPath,
-          durationSeconds,
-          transcript
-        });
-        if (generated.body.trim().length === 0) {
-          throw new Error('模型没有返回笔记内容。');
-        }
-
-        emit('html', '正在写入笔记和 HTML…');
-        const { dir: lessonDir, folder } = await allocateLessonDir(
-          outputDir,
-          videoPath,
-          usedNames
-        );
-        await mkdir(lessonDir, { recursive: true });
-        const generatedAt = formatLocalDate(now());
-        const notesPath = join(lessonDir, 'notes.md');
-        const htmlPath = join(lessonDir, 'notes.html');
-        const markdown = buildNotesMarkdown({
-          title,
-          sourcePath: videoPath,
-          durationSeconds,
-          transcript,
-          body: generated.body,
-          generatedAt
-        });
-        const meta: LessonMeta = {
-          version: META_VERSION,
-          sourcePath: videoPath,
-          folder,
-          title,
-          durationSeconds,
-          transcriptChars: transcript.chars,
-          noteChars: generated.body.length,
-          transcriptModel: transcript.model,
-          generatedAt,
-          summary: summarizeNote(generated.body)
-        };
-
-        await writeFile(
-          join(lessonDir, 'transcript.json'),
-          `${JSON.stringify(transcript, null, 2)}\n`,
-          'utf8'
-        );
-        await writeFile(notesPath, markdown, 'utf8');
-        await writeFile(
-          htmlPath,
-          renderLessonHtml({
-            title,
-            sourcePath: videoPath,
-            durationSeconds,
-            transcriptChars: transcript.chars,
-            transcriptModel: transcript.model,
-            generatedAt,
-            markdown: generated.body
-          }),
-          'utf8'
-        );
-        // Written last: a half-written lesson must not be picked up by the index.
-        await writeFile(
-          join(lessonDir, 'meta.json'),
-          `${JSON.stringify(meta, null, 2)}\n`,
-          'utf8'
-        );
-
-        lessons.push({
-          sourcePath: videoPath,
-          lessonDir,
-          title,
-          durationSeconds,
-          transcriptChars: transcript.chars,
-          noteChars: generated.body.length,
-          notesPath,
-          htmlPath
-        });
-        emit('done', '本讲笔记已生成。');
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        failures.push({ videoPath, message });
-        emit('error', message);
       }
     }
 
-    const generatedAt = formatLocalDate(now());
-    const index = await rebuildIndex(
-      outputDir,
-      courseTitle(videoPaths, outputDir),
-      generatedAt
-    );
-
+    const index = await refreshIndex(outputDir, videoPaths);
     return {
       outputDir,
       indexPath: index.indexPath,
-      lessons: index.lessons.length > 0 ? index.lessons : lessons,
+      lessons: index.lessons,
       failures
     };
   }
@@ -552,6 +936,16 @@ export function createVideoNotesService(options: VideoNotesServiceOptions): Vide
       } finally {
         busy = false;
       }
+    },
+    runLesson,
+    refreshIndex,
+    async estimate(input) {
+      let durationSeconds = 0;
+      for (const path of input.videoPaths) {
+        const duration = await probe(path).catch(() => 0);
+        durationSeconds += duration > 0 ? duration : 0;
+      }
+      return estimateFromDuration(input.mode, input.videoPaths.length, durationSeconds);
     }
   };
 }

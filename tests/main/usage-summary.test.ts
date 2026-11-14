@@ -36,20 +36,44 @@ test('aggregates the last N days, newest first', () => {
     date: '2026-11-01',
     inputTokens: 11,
     outputTokens: 6,
-    calls: 3
+    calls: 3,
+    conversation: { inputTokens: 11, outputTokens: 6, calls: 3 },
+    videoNotes: { inputTokens: 0, outputTokens: 0, calls: 0 }
   });
   expect(summary.totals).toEqual({
     inputTokens: 1110,
     outputTokens: 1055,
     calls: 15
   });
+  expect(summary.conversation).toEqual(summary.totals);
+  expect(summary.videoNotes).toEqual({ inputTokens: 0, outputTokens: 0, calls: 0 });
   expect(summary.estimatedCost).toBeNull();
+});
+
+test('splits video-note usage from conversation usage', () => {
+  const entries: UsageEntry[] = [
+    entry('2026-11-01', 10, 5, 1),
+    { ...entry('2026-11-01', 100, 50, 2), feature: 'video-notes' }
+  ];
+
+  const summary = summarizeUsage(entries, 7, '2026-11-01');
+
+  expect(summary.totals).toEqual({ inputTokens: 110, outputTokens: 55, calls: 3 });
+  expect(summary.conversation).toEqual({ inputTokens: 10, outputTokens: 5, calls: 1 });
+  expect(summary.videoNotes).toEqual({ inputTokens: 100, outputTokens: 50, calls: 2 });
+  expect(summary.days[0]?.conversation).toEqual({
+    inputTokens: 10,
+    outputTokens: 5,
+    calls: 1
+  });
 });
 
 test('returns an empty summary when there is nothing in the window', () => {
   expect(summarizeUsage([], 7, '2026-11-01')).toEqual({
     days: [],
     totals: { inputTokens: 0, outputTokens: 0, calls: 0 },
+    conversation: { inputTokens: 0, outputTokens: 0, calls: 0 },
+    videoNotes: { inputTokens: 0, outputTokens: 0, calls: 0 },
     estimatedCost: null
   });
   expect(summarizeUsage([entry('2026-01-01', 5, 5)], 7, '2026-11-01').days).toEqual([]);

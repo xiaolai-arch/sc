@@ -1,9 +1,11 @@
 import type { StudyCoachApi } from '../../src/shared/ipc';
+import type { VideoJob } from '../../src/shared/video-notes';
 import {
   APP_IPC_CHANNELS,
   VIDEO_NOTES_CHANNELS,
   createIpcHandlers,
   createStudyCoachBridge,
+  createVideoJobHandlers,
   createVideoNotesHandler,
   type IpcEventLike
 } from '../../src/main/ipc';
@@ -271,5 +273,150 @@ describe('transcription IPC handlers', () => {
     await expect(
       handlers.saveTranscriptionConfig({ baseURL: 'https://host', model: 'm', apiKey: 1 })
     ).rejects.toThrow(/API key/);
+  });
+});
+
+const JOB = {
+  id: 'job-1',
+  mode: 'deck',
+  videoPaths: ['C:\\a.mp4'],
+  outputDir: 'C:\\out',
+  language: 'auto',
+  status: 'queued',
+  createdAt: '2026-11-15T03:00:00.000Z',
+  lessons: [],
+  estimate: { tokens: 1, minutes: 1 },
+  usage: { inputTokens: 0, outputTokens: 0 }
+} as VideoJob;
+
+describe('video job IPC handlers', () => {
+  test('validates the enqueue payload and forwards it to the api', async () => {
+    const calls: unknown[] = [];
+    const api = {
+      async enqueueVideoNotes(input: unknown) {
+        calls.push(input);
+        return JOB;
+      },
+      async estimateVideoNotes() {
+        return { lessons: 1, durationSeconds: 60, tokens: 1, minutes: 1 };
+      }
+    } as unknown as StudyCoachApi;
+    const handlers = createVideoJobHandlers(api);
+
+    await expect(
+      handlers.enqueue({ mode: 'deck', videoPaths: ['C:\\a.mp4'], language: 'zh' })
+    ).resolves.toEqual(JOB);
+    expect(calls).toEqual([
+      { mode: 'deck', videoPaths: ['C:\\a.mp4'], language: 'zh' }
+    ]);
+
+    await expect(handlers.enqueue({ mode: 'fr', videoPaths: ['C:\\a.mp4'] })).rejects.toThrow(
+      /生成模式/
+    );
+    await expect(handlers.enqueue({ mode: 'quick', videoPaths: ['rel.mp4'] })).rejects.toThrow(
+      /绝对路径/
+    );
+    await expect(
+      handlers.enqueue({ mode: 'quick', videoPaths: ['C:\\a.txt'] })
+    ).rejects.toThrow(/媒体格式/);
+    await expect(handlers.enqueue({ mode: 'quick' })).rejects.toThrow(/视频文件或文件夹/);
+    await expect(handlers.enqueue({ mode: 'quick', folder: 'rel' })).rejects.toThrow(
+      /绝对路径/
+    );
+    await expect(handlers.estimate({ mode: 'quick', folder: 'C:\\course' })).resolves.toMatchObject({
+      lessons: 1
+    });
+  });
+
+  test('routes job ids and retry payloads', async () => {
+    const calls: unknown[] = [];
+    const api = {
+      async listVideoJobs() {
+        return [JOB];
+      },
+      async cancelVideoJob(id: string) {
+        calls.push(['cancel', id]);
+        return JOB;
+      },
+      async resumeVideoJob(id: string) {
+        calls.push(['resume', id]);
+        return JOB;
+      },
+      async retryVideoLesson(input: unknown) {
+        calls.push(['retry', input]);
+        return JOB;
+      },
+      async removeVideoJob(id: string) {
+        calls.push(['remove', id]);
+      }
+    } as unknown as StudyCoachApi;
+    const handlers = createVideoJobHandlers(api);
+
+    await expect(handlers.listJobs()).resolves.toEqual([JOB]);
+    await handlers.cancelJob('job-1');
+    await handlers.resumeJob('job-1');
+    await handlers.retryLesson({ jobId: 'job-1', videoPath: 'C:\\a.mp4' });
+    await handlers.removeJob('job-1');
+
+    expect(calls).toEqual([
+      ['cancel', 'job-1'],
+      ['resume', 'job-1'],
+      ['retry', { jobId: 'job-1', videoPath: 'C:\\a.mp4' }],
+      ['remove', 'job-1']
+    ]);
+
+    await expect(handlers.cancelJob('')).rejects.toThrow(/任务 ID/);
+    await expect(handlers.retryLesson({ jobId: 'job-1' })).rejects.toThrow(/视频路径/);
+  });
+});
+
+describe('video job bridge', () => {
+  test('exposes queue calls and subscribes to job snapshots', async () => {
+    const calls: Array<{ channel: string; args: unknown[] }> = [];
+    const listeners = new Map<string, (payload: unknown) => void>();
+    const bridge = createStudyCoachBridge(
+      async (channel, ...args) => {
+        calls.push({ channel, args });
+        if (channel === VIDEO_NOTES_CHANNELS.pickVideoFolder) return 'C:\\course';
+        if (channel === VIDEO_NOTES_CHANNELS.listJobs) return [JOB];
+        if (channel === VIDEO_NOTES_CHANNELS.removeJob) return undefined;
+        if (channel === VIDEO_NOTES_CHANNELS.estimate) {
+          return { lessons: 1, durationSeconds: 60, tokens: 1, minutes: 1 };
+        }
+        return JOB;
+      },
+      (channel, listener) => {
+        listeners.set(channel, listener);
+        return () => undefined;
+      }
+    );
+
+    await expect(bridge.pickVideoFolder?.()).resolves.toBe('C:\\course');
+    await expect(
+      bridge.enqueueVideoNotes?.({ mode: 'deck', videoPaths: ['C:\\a.mp4'] })
+    ).resolves.toEqual(JOB);
+    await bridge.estimateVideoNotes?.({ mode: 'quick', folder: 'C:\\course' });
+    await expect(bridge.listVideoJobs?.()).resolves.toEqual([JOB]);
+    await bridge.cancelVideoJob?.('job-1');
+    await bridge.resumeVideoJob?.('job-1');
+    await bridge.retryVideoLesson?.({ jobId: 'job-1', videoPath: 'C:\\a.mp4' });
+    await bridge.removeVideoJob?.('job-1');
+
+    const received: VideoJob[][] = [];
+    bridge.onVideoJobsChanged?.((jobs) => received.push(jobs));
+    listeners.get(VIDEO_NOTES_CHANNELS.jobsChanged)?.([JOB]);
+    listeners.get(VIDEO_NOTES_CHANNELS.jobsChanged)?.('not-an-array');
+    expect(received).toEqual([[JOB]]);
+
+    expect(calls.map((entry) => entry.channel)).toEqual([
+      VIDEO_NOTES_CHANNELS.pickVideoFolder,
+      VIDEO_NOTES_CHANNELS.enqueue,
+      VIDEO_NOTES_CHANNELS.estimate,
+      VIDEO_NOTES_CHANNELS.listJobs,
+      VIDEO_NOTES_CHANNELS.cancelJob,
+      VIDEO_NOTES_CHANNELS.resumeJob,
+      VIDEO_NOTES_CHANNELS.retryLesson,
+      VIDEO_NOTES_CHANNELS.removeJob
+    ]);
   });
 });

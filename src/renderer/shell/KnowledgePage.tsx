@@ -11,12 +11,14 @@ import type {
   UpdateKnowledgeTopicInput
 } from '../../shared/knowledge';
 import type { Workspace } from '../../shared/workspace';
+import type { VideoJob } from '../../shared/video-notes';
 import { Dialog } from '../ui/Dialog';
 import { PlayIcon, PlusIcon } from '../ui/icons';
 import { Select } from '../ui/Select';
 import { KnowledgeGraph } from './KnowledgeGraph';
 import { KnowledgeNotePane } from './KnowledgeNotePane';
 import { PageFrame } from './PageFrame';
+import { VideoJobList } from './VideoJobList';
 import { VideoNotesDialog } from './VideoNotesDialog';
 import {
   STATUS_DOT_CLASS,
@@ -161,6 +163,8 @@ export function KnowledgePage({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [videoNotesOpen, setVideoNotesOpen] = useState(false);
+  const [videoJobsOpen, setVideoJobsOpen] = useState(false);
+  const [activeVideoJobs, setActiveVideoJobs] = useState(0);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergeTargetId, setMergeTargetId] = useState('');
   const [merging, setMerging] = useState(false);
@@ -202,6 +206,25 @@ export function KnowledgePage({
     setSelectedId(focusTopicId);
     setMobilePane('note');
   }, [focusTopicId]);
+
+  // Show how many video jobs are queued/running next to the dialog entry.
+  useEffect(() => {
+    const api = window.studyCoach;
+    if (!api) return;
+    const countActive = (jobs: VideoJob[]) =>
+      jobs.filter((job) => job.status === 'queued' || job.status === 'running').length;
+    let unsubscribe: (() => void) | undefined;
+    if (typeof api.listVideoJobs === 'function') {
+      void api
+        .listVideoJobs()
+        .then((jobs) => setActiveVideoJobs(countActive(jobs)))
+        .catch(() => undefined);
+    }
+    if (typeof api.onVideoJobsChanged === 'function') {
+      unsubscribe = api.onVideoJobsChanged((jobs) => setActiveVideoJobs(countActive(jobs)));
+    }
+    return () => unsubscribe?.();
+  }, []);
 
   function selectTopic(topicId: string) {
     setSelectedId(topicId);
@@ -365,6 +388,20 @@ export function KnowledgePage({
           >
             <PlayIcon className="h-4 w-4" />
             <span className="hidden md:inline">视频笔记</span>
+          </button>
+          <button
+            type="button"
+            aria-label={`视频任务${activeVideoJobs > 0 ? `（${activeVideoJobs} 个进行中）` : ''}`}
+            title="查看后台视频任务"
+            onClick={() => setVideoJobsOpen(true)}
+            className="relative flex h-9 items-center gap-1.5 rounded-xl bg-[#f5f5f7] px-2.5 text-[13px] font-medium text-gray-700 transition-colors duration-200 hover:bg-black/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 md:px-3 dark:bg-white/[0.08] dark:text-[#a1a1a6] dark:hover:bg-white/[0.12]"
+          >
+            <span className="hidden md:inline">视频任务</span>
+            {activeVideoJobs > 0 ? (
+              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[#0071e3] px-1 text-[11px] font-semibold text-white">
+                {activeVideoJobs}
+              </span>
+            ) : null}
           </button>
           <button
             type="button"
@@ -658,8 +695,11 @@ export function KnowledgePage({
       <VideoNotesDialog
         open={videoNotesOpen}
         onClose={() => setVideoNotesOpen(false)}
+        onOpenJobs={() => setVideoJobsOpen(true)}
         {...(onOpenSettings ? { onOpenSettings } : {})}
       />
+
+      <VideoJobList open={videoJobsOpen} onClose={() => setVideoJobsOpen(false)} />
     </PageFrame>
   );
 }

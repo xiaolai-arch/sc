@@ -23,6 +23,8 @@ export interface MimoAsrConfig {
   baseURL: string;
   apiKey: string;
   model: string;
+  /** Cancels the in-flight HTTP request when a job is cancelled. */
+  signal?: AbortSignal;
 }
 
 /** 180 seconds keeps the model from truncating long audio (measured). */
@@ -49,6 +51,16 @@ export function chatCompletionsUrl(baseURL: string): string {
 
 type FetchLike = typeof fetch;
 
+function abortError(): Error {
+  const error = new Error('任务已取消。');
+  error.name = 'AbortError';
+  return error;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw abortError();
+}
+
 function contentText(value: unknown): string {
   if (typeof value === 'string') return value;
   if (Array.isArray(value)) {
@@ -74,10 +86,13 @@ export function createMimoAsrClient(
 ): (audio: Buffer, language: VideoNotesLanguage) => Promise<string> {
   const endpoint = chatCompletionsUrl(config.baseURL);
   return async (audio, language) => {
+    if (config.signal?.aborted) throw abortError();
     const data = audio.toString('base64');
     if (data.length > MAX_BASE64_BYTES) {
       throw new Error('音频分片过大，无法上传到语音识别接口。');
     }
+    const timeout = AbortSignal.timeout(ASR_TIMEOUT_MS);
+    const signal = config.signal ? AbortSignal.any([config.signal, timeout]) : timeout;
     const response = await fetchImpl(endpoint, {
       method: 'POST',
       headers: {
@@ -99,7 +114,7 @@ export function createMimoAsrClient(
         ],
         asr_options: { language }
       }),
-      signal: AbortSignal.timeout(ASR_TIMEOUT_MS)
+      signal
     });
     if (!response.ok) {
       const body = await response.text().catch(() => '');
@@ -159,6 +174,7 @@ export interface TranscribeMediaOptions {
   model: string;
   onProgress?: (completed: number, total: number) => void;
   chunkSeconds?: number;
+  signal?: AbortSignal;
 }
 
 interface WindowPiece {
@@ -180,16 +196,20 @@ export async function transcribeMedia(
   if (!(options.durationSeconds > 0)) {
     throw new Error('无法确定媒体时长，不能开始转写。');
   }
+  throwIfAborted(options.signal);
   await mkdir(options.cacheDir, { recursive: true });
   const temp = await mkdtemp(join(tmpdir(), 'asaki-video-notes-'));
   const cacheTag = (tag: string) => join(options.cacheDir, `${tag}.txt`);
 
   async function windowText(start: number, duration: number, tag: string): Promise<string> {
+    throwIfAborted(options.signal);
     const cached = await readFile(cacheTag(tag), 'utf8').catch(() => null);
     if (cached !== null) return cached.trim();
     const mp3 = join(temp, `${tag}.mp3`);
+    throwIfAborted(options.signal);
     await options.encode(mp3, start, duration);
     try {
+      throwIfAborted(options.signal);
       const audio = await readFile(mp3);
       const text = (await options.asr(audio, options.language)).trim();
       await writeFile(cacheTag(tag), text, 'utf8');
@@ -230,6 +250,7 @@ export async function transcribeMedia(
 
     const pieces: WindowPiece[] = [];
     for (let index = 0; index < windows.length; index += 1) {
+      throwIfAborted(options.signal);
       const [start, duration] = windows[index]!;
       pieces.push(...(await runWindow(start, duration, `w${String(index).padStart(4, '0')}`)));
       options.onProgress?.(index + 1, windows.length);

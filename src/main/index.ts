@@ -6,6 +6,7 @@ import {
   APP_EVENT_CHANNELS,
   APP_IPC_CHANNELS,
   CONVERSATION_EVENT_CHANNELS,
+  VIDEO_NOTES_CHANNELS,
   registerIpcHandlers,
   serializeError
 } from './ipc';
@@ -305,6 +306,33 @@ app.whenReady().then(async () => {
     }
   });
 
+  ipcMain.handle(VIDEO_NOTES_CHANNELS.pickVideoFolder, async () => {
+    try {
+      const options = {
+        title: '选择课程视频文件夹',
+        properties: ['openDirectory'] as const
+      };
+      const selection = mainWindow
+        ? await dialog.showOpenDialog(mainWindow, {
+            ...options,
+            properties: [...options.properties]
+          })
+        : await dialog.showOpenDialog({ ...options, properties: [...options.properties] });
+      return selection.canceled ? null : (selection.filePaths[0] ?? null);
+    } catch (error) {
+      throw new Error(serializeError(error).message);
+    }
+  });
+
+  // Push throttled queue snapshots to every open window.
+  const unsubscribeJobs = context.videoJobs.onChanged((jobs) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(VIDEO_NOTES_CHANNELS.jobsChanged, jobs);
+      }
+    }
+  });
+
   ipcMain.handle(APP_IPC_CHANNELS.openPath, async (_event, value: unknown) => {
     if (typeof value !== 'string' || value.trim().length === 0 || value.length > 4096) {
       throw new Error('路径无效。');
@@ -319,7 +347,6 @@ app.whenReady().then(async () => {
     console.warn(`ASAKI shortcut unavailable: ${accelerator}`);
   }
   app.on('will-quit', () => shortcuts.dispose());
-
   let scheduler: ReturnType<typeof createContextScheduler> | null = null;
   let trayController: { destroy(): void } | null = null;
 
@@ -390,6 +417,10 @@ app.whenReady().then(async () => {
     trayController?.destroy();
     scheduler = null;
     trayController = null;
+    unsubscribeJobs();
+    // Abort the running video job and persist it as interrupted before the
+    // process goes away; the job list offers "继续" on the next launch.
+    void context.videoJobs.interruptRunning().catch(() => undefined);
     // Stops the vault search watcher; the app is already quitting, so this is
     // fire-and-forget (the resources are released with the process anyway).
     void context.dispose().catch(() => undefined);

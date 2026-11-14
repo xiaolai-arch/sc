@@ -13,7 +13,7 @@ import type {
   LocalCliFeature,
   LocalCliScanResult
 } from '../../shared/local-cli';
-import type { UsageSummary } from '../../shared/usage';
+import type { UsageDay, UsageSummary } from '../../shared/usage';
 import {
   loadThemePreference,
   setThemePreference,
@@ -603,13 +603,25 @@ export function SettingsPage({
       ? (cliScan?.entries.find((entry) => entry.agent === cliAgent)?.models ?? [])
       : [];
   const today = formatLocalDate(new Date());
-  const todayUsage = usage?.days.find((day) => day.date === today) ?? {
+  const todayUsage: UsageDay = usage?.days.find((day) => day.date === today) ?? {
+    date: today,
+    inputTokens: 0,
+    outputTokens: 0,
+    calls: 0
+  };
+  const conversationToday = todayUsage.conversation ?? {
+    inputTokens: todayUsage.inputTokens,
+    outputTokens: todayUsage.outputTokens,
+    calls: todayUsage.calls
+  };
+  const videoNotesToday = todayUsage.videoNotes ?? {
     inputTokens: 0,
     outputTokens: 0,
     calls: 0
   };
   const tokenLimit = Number.parseInt(tokens, 10);
-  const todayTokens = todayUsage.inputTokens + todayUsage.outputTokens;
+  // Video-note usage never pauses proactive check-ins (design 4.7/Q10).
+  const todayTokens = conversationToday.inputTokens + conversationToday.outputTokens;
   const budgetExhausted =
     Number.isInteger(tokenLimit) && tokenLimit >= 0 && todayTokens >= tokenLimit;
 
@@ -1162,9 +1174,19 @@ export function SettingsPage({
                 <div className="mt-6 grid gap-5 md:grid-cols-2">
                   <div>
                     <p className="text-sm font-medium text-gray-500 dark:text-[#a1a1a6]">今日</p>
-                    <p className="mt-1 text-sm text-black dark:text-[#f5f5f7]">
-                      输入 {todayUsage.inputTokens} · 输出 {todayUsage.outputTokens} · 调用{' '}
-                      {todayUsage.calls}
+                    <p className="mt-1 text-[12px] font-medium text-gray-500 dark:text-[#a1a1a6]">
+                      对话
+                    </p>
+                    <p className="text-sm text-black dark:text-[#f5f5f7]">
+                      输入 {conversationToday.inputTokens} · 输出{' '}
+                      {conversationToday.outputTokens} · 调用 {conversationToday.calls}
+                    </p>
+                    <p className="mt-1 text-[12px] font-medium text-gray-500 dark:text-[#a1a1a6]">
+                      视频笔记
+                    </p>
+                    <p className="text-sm text-black dark:text-[#f5f5f7]">
+                      输入 {videoNotesToday.inputTokens} · 输出 {videoNotesToday.outputTokens} · 调用{' '}
+                      {videoNotesToday.calls}
                     </p>
                     <p
                       className={
@@ -1173,8 +1195,12 @@ export function SettingsPage({
                           : 'mt-1 text-sm text-gray-500 dark:text-[#a1a1a6]'
                       }
                     >
-                      每日 token：{todayTokens} / {Number.isInteger(tokenLimit) ? tokenLimit : '不限'}
+                      每日 token（对话）：{todayTokens} /{' '}
+                      {Number.isInteger(tokenLimit) ? tokenLimit : '不限'}
                       {budgetExhausted ? '（预算已用完，主动检查会暂停）' : ''}
+                    </p>
+                    <p className="mt-1 text-[12px] text-gray-500 dark:text-[#a1a1a6]">
+                      视频笔记用量不计入主动提醒的预算。
                     </p>
                   </div>
                   <div>

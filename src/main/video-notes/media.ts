@@ -1,40 +1,15 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import {
+  AUDIO_EXTENSIONS,
+  MEDIA_EXTENSIONS,
+  VIDEO_EXTENSIONS,
+  isSupportedMedia
+} from '../../shared/video-notes';
+
+export { AUDIO_EXTENSIONS, MEDIA_EXTENSIONS, VIDEO_EXTENSIONS, isSupportedMedia };
 
 const run = promisify(execFile);
-
-export const VIDEO_EXTENSIONS = [
-  '.mp4',
-  '.mkv',
-  '.mov',
-  '.avi',
-  '.webm',
-  '.flv',
-  '.ts',
-  '.m4v',
-  '.wmv',
-  '.mpg',
-  '.mpeg',
-  '.rmvb'
-] as const;
-
-export const AUDIO_EXTENSIONS = [
-  '.mp3',
-  '.wav',
-  '.m4a',
-  '.aac',
-  '.flac',
-  '.ogg',
-  '.opus',
-  '.wma'
-] as const;
-
-export const MEDIA_EXTENSIONS = [...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS] as const;
-
-export function isSupportedMedia(path: string): boolean {
-  const lower = path.toLowerCase();
-  return MEDIA_EXTENSIONS.some((extension) => lower.endsWith(extension));
-}
 
 function ffmpegBinary(): string {
   return process.env.ASAKI_FFMPEG_PATH?.trim() || 'ffmpeg';
@@ -67,7 +42,7 @@ export async function assertMediaTools(): Promise<void> {
 }
 
 /** Returns 0 when the container does not expose a duration. */
-export async function probeDuration(source: string): Promise<number> {
+export async function probeDuration(source: string, signal?: AbortSignal): Promise<number> {
   const { stdout } = await run(
     ffprobeBinary(),
     [
@@ -79,18 +54,27 @@ export async function probeDuration(source: string): Promise<number> {
       'default=nw=1:nk=1',
       source
     ],
-    { windowsHide: true, timeout: 30_000, maxBuffer: 1024 * 1024 }
+    {
+      windowsHide: true,
+      timeout: 30_000,
+      maxBuffer: 1024 * 1024,
+      ...(signal ? { signal } : {})
+    }
   );
   const value = Number.parseFloat(stdout.trim());
   return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
-/** Extracts one mono 16 kHz mp3 window, skipping the video stream. */
+/**
+ * Extracts one mono 16 kHz mp3 window, skipping the video stream. The optional
+ * signal kills the ffmpeg child as soon as the job is cancelled.
+ */
 export async function extractMp3Chunk(
   source: string,
   destination: string,
   startSeconds: number,
-  durationSeconds: number
+  durationSeconds: number,
+  signal?: AbortSignal
 ): Promise<void> {
   await run(
     ffmpegBinary(),
@@ -116,6 +100,11 @@ export async function extractMp3Chunk(
       'mp3',
       destination
     ],
-    { windowsHide: true, timeout: 10 * 60 * 1000, maxBuffer: 4 * 1024 * 1024 }
+    {
+      windowsHide: true,
+      timeout: 10 * 60 * 1000,
+      maxBuffer: 4 * 1024 * 1024,
+      ...(signal ? { signal } : {})
+    }
   );
 }
