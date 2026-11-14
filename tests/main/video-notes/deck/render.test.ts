@@ -192,6 +192,42 @@ describe('deck renderer', () => {
     expect(html.match(/class="slide /g)).toHaveLength(SLIDE_TYPES.length);
   });
 
+  test('divides compare into equal columns for two or three columns', () => {
+    for (const count of [2, 3]) {
+      const deck = parseDeck({
+        version: 1,
+        title: '对比',
+        sourcePath,
+        durationSeconds: 100,
+        chapters: [
+          {
+            title: '一、对比',
+            start: 0,
+            slides: [
+              {
+                type: 'compare',
+                id: 'compare',
+                title: '两种说法',
+                sources: [{ kind: 'infer' }],
+                columns: Array.from({ length: count }, (_, index) => ({
+                  heading: `第 ${index + 1} 栏`,
+                  items: [`条目 ${index + 1}`]
+                }))
+              }
+            ]
+          }
+        ]
+      });
+      const html = renderDeck(deck, { sourcePath, frames });
+
+      expect(html).toContain(`class="compare" style="--compare-cols:${count}"`);
+      expect(html.match(/class="compare-col"/g)).toHaveLength(count);
+      expect(html).toContain(
+        'grid-template-columns:repeat(var(--compare-cols,2),minmax(0,1fr))'
+      );
+    }
+  });
+
   test('emits the exact CSP and no network references', () => {
     const html = render();
 

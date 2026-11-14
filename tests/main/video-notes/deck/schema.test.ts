@@ -83,6 +83,19 @@ function figureDeckJson(): any {
   };
 }
 
+function compareSlideJson(columnCount: number): any {
+  return {
+    type: 'compare',
+    id: 'compare',
+    title: '两种说法',
+    sources: [{ kind: 'infer' }],
+    columns: Array.from({ length: columnCount }, (_, index) => ({
+      heading: `第 ${index + 1} 栏`,
+      items: [`条目 ${index + 1}`]
+    }))
+  };
+}
+
 describe('deck schema', () => {
   test('parses a valid deck', () => {
     const deck = parseDeck(validDeckJson());
@@ -90,6 +103,30 @@ describe('deck schema', () => {
     expect(deck.title).toBe('第一讲 集合');
     expect(deck.chapters).toHaveLength(2);
     expect(deck.chapters[1]?.slides[0]?.type).toBe('quiz');
+  });
+
+  test('accepts two or three compare columns', () => {
+    for (const count of [2, 3]) {
+      const json = validDeckJson();
+      json.chapters[0].slides[1] = compareSlideJson(count);
+
+      const slide = parseDeck(json).chapters[0]?.slides[1];
+
+      expect(slide?.type).toBe('compare');
+      if (slide?.type === 'compare') expect(slide.columns).toHaveLength(count);
+    }
+  });
+
+  test('rejects compare slides outside two to three columns', () => {
+    const single = validDeckJson();
+    single.chapters[0].slides[1] = compareSlideJson(1);
+    expect(() => parseDeck(single)).toThrow(
+      'chapters[0].slides[1].columns: needs at least two columns'
+    );
+
+    const four = validDeckJson();
+    four.chapters[0].slides[1] = compareSlideJson(4);
+    expect(() => parseDeck(four)).toThrow('chapters[0].slides[1].columns: too big');
   });
 
   test('reports a source time beyond the video duration with its path', () => {

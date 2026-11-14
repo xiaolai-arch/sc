@@ -190,7 +190,7 @@ ${captions}
     }
     case 'compare':
       return `<h2 class="slide-title">${renderInlineText(slide.title)}</h2>
-<div class="compare">${slide.columns
+<div class="compare" style="--compare-cols:${slide.columns.length}">${slide.columns
         .map(
           (column) =>
             `<div class="compare-col"><h3 class="compare-heading">${renderInlineText(column.heading)}</h3><ul class="compare-items">${column.items
@@ -342,7 +342,7 @@ body{overflow:hidden}
 .figure-caption{position:relative;padding-left:14px}
 .figure-caption::before{content:"";position:absolute;left:0;top:.62em;width:5px;height:5px;border-radius:50%;background:var(--teal)}
 
-.compare{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+.compare{display:grid;grid-template-columns:repeat(var(--compare-cols,2),minmax(0,1fr));gap:24px}
 .compare-col{padding:20px 24px;border:1px solid var(--line);border-radius:14px;background:var(--surface-muted)}
 .compare-heading{margin-bottom:10px;color:var(--teal-strong);font-size:var(--font-body);font-weight:700}
 .compare-col:nth-child(2) .compare-heading{color:var(--orange-strong)}
