@@ -15,7 +15,7 @@ import { registerAppShortcuts } from './shortcuts';
 import { createContextScheduler, planFirstEmptyWorkspace } from './scheduler';
 import { DEFAULT_VAULT_DIRECTORY } from './settings/defaults';
 import { createElectronNotificationSink, createElectronTray, isTaskForDay } from './tray';
-import { MEDIA_EXTENSIONS } from './video-notes/media';
+import { VIDEO_EXTENSIONS } from './video-notes/media';
 import { formatLocalDate } from '../shared/date';
 import {
   DEFAULT_WINDOW_STATE,
@@ -270,8 +270,8 @@ app.whenReady().then(async () => {
         properties: ['openFile', 'multiSelections'] as const,
         filters: [
           {
-            name: '视频/音频',
-            extensions: MEDIA_EXTENSIONS.map((extension) => extension.slice(1))
+            name: '视频',
+            extensions: VIDEO_EXTENSIONS.map((extension) => extension.slice(1))
           },
           { name: '所有文件', extensions: ['*'] }
         ]

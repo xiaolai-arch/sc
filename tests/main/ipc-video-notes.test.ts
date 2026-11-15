@@ -40,8 +40,7 @@ describe('createVideoNotesHandler', () => {
         onProgress: (progress: unknown) => void
       ) {
         expect(input).toMatchObject({
-          videoPaths: ['C:\\a.mp4'],
-          language: 'zh'
+          videoPaths: ['C:\\a.mp4']
         });
         onProgress({
           videoIndex: 0,
@@ -59,7 +58,7 @@ describe('createVideoNotesHandler', () => {
     await expect(
       handler(event, {
         requestId: 'req-1',
-        input: { videoPaths: ['C:\\a.mp4'], language: 'zh' }
+        input: { videoPaths: ['C:\\a.mp4'] }
       })
     ).resolves.toEqual(RESULT);
 
@@ -127,9 +126,9 @@ describe('createVideoNotesHandler', () => {
     await expect(
       handler(event, {
         requestId: 'r',
-        input: { videoPaths: ['C:\\a.mp4'], language: 'fr' }
+        input: { videoPaths: ['C:\\a.mp4'], outputDir: 42 }
       })
-    ).rejects.toThrow(/转写语言/);
+    ).rejects.toThrow(/输出文件夹/);
     expect(sent).toHaveLength(0);
   });
 
@@ -198,7 +197,7 @@ describe('video notes bridge', () => {
 
     await expect(
       bridge.generateVideoNotes(
-        { videoPaths: ['C:\\a.mp4'], outputDir: 'C:\\out', language: 'zh' },
+        { videoPaths: ['C:\\a.mp4'], outputDir: 'C:\\out' },
         (progress) => updates.push(progress)
       )
     ).resolves.toEqual(RESULT);
@@ -216,8 +215,7 @@ describe('video notes bridge', () => {
     expect(calls[0]!.args[0]).toMatchObject({
       input: {
         videoPaths: ['C:\\a.mp4'],
-        outputDir: 'C:\\out',
-        language: 'zh'
+        outputDir: 'C:\\out'
       }
     });
     expect(unsubscribed).toBe(true);
@@ -245,43 +243,10 @@ describe('video notes bridge', () => {
   });
 });
 
-describe('transcription IPC handlers', () => {
-  test('validates and forwards the transcription settings', async () => {
-    const calls: unknown[] = [];
-    const api = {
-      async getTranscriptionConfig() {
-        return { baseURL: 'https://host/v1', model: 'm', hasApiKey: true };
-      },
-      async saveTranscriptionConfig(input: unknown) {
-        calls.push(input);
-        return { baseURL: 'https://host/v1', model: 'm', hasApiKey: true };
-      }
-    } as unknown as StudyCoachApi;
-    const handlers = createIpcHandlers(api);
-
-    await expect(handlers.getTranscriptionConfig()).resolves.toMatchObject({ hasApiKey: true });
-    await handlers.saveTranscriptionConfig({
-      baseURL: ' https://host/v1 ',
-      model: ' m ',
-      apiKey: 'key'
-    });
-    expect(calls).toEqual([{ baseURL: 'https://host/v1', model: 'm', apiKey: 'key' }]);
-
-    await expect(
-      handlers.saveTranscriptionConfig({ baseURL: 'ftp://host', model: 'm' })
-    ).rejects.toThrow(/http/);
-    await expect(
-      handlers.saveTranscriptionConfig({ baseURL: 'https://host', model: 'm', apiKey: 1 })
-    ).rejects.toThrow(/API key/);
-  });
-});
-
 const JOB = {
   id: 'job-1',
-  mode: 'deck',
   videoPaths: ['C:\\a.mp4'],
   outputDir: 'C:\\out',
-  language: 'auto',
   status: 'queued',
   createdAt: '2026-11-15T03:00:00.000Z',
   lessons: [],
@@ -303,27 +268,14 @@ describe('video job IPC handlers', () => {
     } as unknown as StudyCoachApi;
     const handlers = createVideoJobHandlers(api);
 
-    await expect(
-      handlers.enqueue({ mode: 'deck', videoPaths: ['C:\\a.mp4'], language: 'zh' })
-    ).resolves.toEqual(JOB);
-    expect(calls).toEqual([
-      { mode: 'deck', videoPaths: ['C:\\a.mp4'], language: 'zh' }
-    ]);
+    await expect(handlers.enqueue({ videoPaths: ['C:\\a.mp4'] })).resolves.toEqual(JOB);
+    expect(calls).toEqual([{ videoPaths: ['C:\\a.mp4'] }]);
 
-    await expect(handlers.enqueue({ mode: 'fr', videoPaths: ['C:\\a.mp4'] })).rejects.toThrow(
-      /生成模式/
-    );
-    await expect(handlers.enqueue({ mode: 'quick', videoPaths: ['rel.mp4'] })).rejects.toThrow(
-      /绝对路径/
-    );
-    await expect(
-      handlers.enqueue({ mode: 'quick', videoPaths: ['C:\\a.txt'] })
-    ).rejects.toThrow(/媒体格式/);
-    await expect(handlers.enqueue({ mode: 'quick' })).rejects.toThrow(/视频文件或文件夹/);
-    await expect(handlers.enqueue({ mode: 'quick', folder: 'rel' })).rejects.toThrow(
-      /绝对路径/
-    );
-    await expect(handlers.estimate({ mode: 'quick', folder: 'C:\\course' })).resolves.toMatchObject({
+    await expect(handlers.enqueue({ videoPaths: ['rel.mp4'] })).rejects.toThrow(/绝对路径/);
+    await expect(handlers.enqueue({ videoPaths: ['C:\\a.txt'] })).rejects.toThrow(/媒体格式/);
+    await expect(handlers.enqueue({})).rejects.toThrow(/视频文件或文件夹/);
+    await expect(handlers.enqueue({ folder: 'rel' })).rejects.toThrow(/绝对路径/);
+    await expect(handlers.estimate({ folder: 'C:\\course' })).resolves.toMatchObject({
       lessons: 1
     });
   });
@@ -393,9 +345,9 @@ describe('video job bridge', () => {
 
     await expect(bridge.pickVideoFolder?.()).resolves.toBe('C:\\course');
     await expect(
-      bridge.enqueueVideoNotes?.({ mode: 'deck', videoPaths: ['C:\\a.mp4'] })
+      bridge.enqueueVideoNotes?.({ videoPaths: ['C:\\a.mp4'] })
     ).resolves.toEqual(JOB);
-    await bridge.estimateVideoNotes?.({ mode: 'quick', folder: 'C:\\course' });
+    await bridge.estimateVideoNotes?.({ folder: 'C:\\course' });
     await expect(bridge.listVideoJobs?.()).resolves.toEqual([JOB]);
     await bridge.cancelVideoJob?.('job-1');
     await bridge.resumeVideoJob?.('job-1');

@@ -9,7 +9,7 @@ import {
 } from '../../../../src/main/video-notes/deck/factcheck';
 import { DeckStepError } from '../../../../src/main/video-notes/deck/prompts';
 import type { Deck } from '../../../../src/main/video-notes/deck/schema';
-import type { Transcript } from '../../../../src/main/video-notes/mimo';
+import type { ScreenRead } from '../../../../src/main/video-notes/screen-read';
 
 function notesWith(titles: readonly string[] = ['第一章', '第二章']): DeckNotes {
   return {
@@ -17,7 +17,7 @@ function notesWith(titles: readonly string[] = ['第一章', '第二章']): Deck
       title,
       start: index * 600,
       blocks: [
-        { t: index * 600, text: `${title}的讲解`, source: 'video' },
+        { t: index * 600, text: `${title}的讲解`, source: 'screen' },
         { t: index * 600 + 30, text: `${title}的板书`, source: 'screen' }
       ],
       keyPoints: [`${title}要点`]
@@ -37,16 +37,17 @@ function card(chapter: string, title: string): EnrichCard {
   };
 }
 
-function transcriptOf(): Transcript {
-  return {
-    source: 'lesson.mp4',
-    duration: 3600,
-    language: 'zh',
-    model: 'mimo',
-    chars: 12,
-    text: '第一章讲解。',
-    chunks: [{ start: 0, text: '第一章讲解。' }]
-  };
+function screenReads(): ScreenRead[] {
+  return [
+    {
+      frame: 'frames/0.jpg',
+      t: 0,
+      kind: 'slide',
+      text: '第一章讲解',
+      occluded: false,
+      keepImage: false
+    }
+  ];
 }
 
 function issue(overrides: Partial<FactIssue> = {}): FactIssue {
@@ -54,7 +55,7 @@ function issue(overrides: Partial<FactIssue> = {}): FactIssue {
     target: 'notes',
     ref: '第一章/1',
     claim: '被质疑的说法',
-    problem: '转写原文是「第一章讲解」，与这句矛盾',
+    problem: '画面文字是「第一章讲解」，与这句矛盾',
     severity: 'error',
     ...overrides
   };
@@ -75,8 +76,8 @@ function deckWith(ids: readonly string[]): Deck {
           type: 'points' as const,
           id,
           title: `页 ${id}`,
-          sources: [{ kind: 'video' as const, t: 10 }],
-          points: [{ text: '要点', source: { kind: 'video' as const, t: 10 } }]
+          sources: [{ kind: 'screen' as const, t: 10 }],
+          points: [{ text: '要点', source: { kind: 'screen' as const, t: 10 } }]
         }))
       }
     ]
@@ -84,7 +85,7 @@ function deckWith(ids: readonly string[]): Deck {
 }
 
 describe('checkMaterial', () => {
-  it('parses issues and asks for transcript evidence', async () => {
+  it('parses issues and asks for screen-text evidence', async () => {
     const client = new FakeModelClient([
       JSON.stringify({
         issues: [
@@ -99,14 +100,14 @@ describe('checkMaterial', () => {
       client,
       notes: notesWith(),
       cards: [card('第一章', '某张卡片')],
-      transcript: transcriptOf()
+      screenReads: screenReads()
     });
 
     expect(result.issues).toHaveLength(2);
     expect(result.issues.map((item) => item.target)).toEqual(['notes', 'card']);
     expect(result.issues[1].severity).toBe('warn');
     const prompt = client.calls[0].messages[0].content;
-    expect(prompt).toContain('引用转写的原文');
+    expect(prompt).toContain('引用画面文字的原文片段');
     expect(prompt).toContain('宁可漏报，也不要编造错误');
     expect(prompt).toContain('章节标题/段落序号');
     expect(client.calls[0].noTools).toBe(true);
@@ -119,7 +120,7 @@ describe('checkMaterial', () => {
       client,
       notes: notesWith(['第一章']),
       cards: [],
-      transcript: transcriptOf()
+      screenReads: screenReads()
     });
 
     expect(client.calls[0].messages).toHaveLength(1);
@@ -131,7 +132,7 @@ describe('reviseMaterial', () => {
   it('returns validated notes and cards, listing the issues in the prompt', async () => {
     const notes = notesWith();
     const revisedNotes = notesWith();
-    revisedNotes.chapters[0].blocks[0].text = '按转写改正后的说法';
+    revisedNotes.chapters[0].blocks[0].text = '按画面文字改正后的说法';
     const revisedCards = [card('第一章', '修订后的卡片')];
     const client = new FakeModelClient([
       JSON.stringify({ notes: revisedNotes, cards: revisedCards })
@@ -142,10 +143,10 @@ describe('reviseMaterial', () => {
       notes,
       cards: [card('第一章', '原卡片')],
       issues: [issue({ ref: '第一章/1' })],
-      transcript: transcriptOf()
+      screenReads: screenReads()
     });
 
-    expect(result.notes.chapters[0].blocks[0].text).toBe('按转写改正后的说法');
+    expect(result.notes.chapters[0].blocks[0].text).toBe('按画面文字改正后的说法');
     expect(result.cards.map((item) => item.title)).toEqual(['修订后的卡片']);
     expect(client.calls[0].messages[0].content).toContain('第一章/1');
   });
@@ -163,7 +164,7 @@ describe('reviseMaterial', () => {
         notes: notesWith(),
         cards: [],
         issues: [issue()],
-        transcript: transcriptOf()
+        screenReads: screenReads()
       })
     ).rejects.toBeInstanceOf(DeckStepError);
     expect(client.calls).toHaveLength(2);
@@ -182,7 +183,7 @@ describe('reviseMaterial', () => {
       notes: notesWith(),
       cards: [],
       issues: [issue()],
-      transcript: transcriptOf()
+      screenReads: screenReads()
     });
 
     expect(result.notes.chapters.map((chapter) => chapter.title)).toEqual(['第一章', '第二章']);
@@ -222,7 +223,7 @@ describe('checkDeck', () => {
     expect(client.calls[1].messages[0].content).toContain('上一次的回答无法使用');
   });
 
-  it('checks slides against the notes, not the transcript', async () => {
+  it('checks slides against the notes only', async () => {
     const client = new FakeModelClient([
       JSON.stringify({ issues: [], deck: deckWith(['a']) })
     ]);

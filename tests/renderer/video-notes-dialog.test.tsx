@@ -7,10 +7,8 @@ import { VideoNotesDialog } from '../../src/renderer/shell/VideoNotesDialog';
 
 const JOB: VideoJob = {
   id: 'job-1',
-  mode: 'deck',
   videoPaths: ['C:\\课程\\01-集合.mp4'],
   outputDir: 'C:\\课程\\笔记',
-  language: 'auto',
   status: 'queued',
   createdAt: '2026-11-15T03:00:00.000Z',
   lessons: [
@@ -26,11 +24,6 @@ const JOB: VideoJob = {
 
 function installApi(overrides: Partial<StudyCoachApi> = {}) {
   const api = {
-    getTranscriptionConfig: vi.fn(async () => ({
-      baseURL: 'https://host/v1',
-      model: 'mimo-v2.5-asr',
-      hasApiKey: true
-    })),
     pickVideoFiles: vi.fn(async () => ['C:\\课程\\01-集合.mp4']),
     pickVideoFolder: vi.fn(async () => 'C:\\课程\\全部'),
     pickOutputDirectory: vi.fn(async () => 'C:\\课程\\笔记'),
@@ -52,16 +45,12 @@ afterEach(() => {
   delete window.studyCoach;
 });
 
-test('defaults to the deck mode, estimates usage and submits a background job', async () => {
+test('estimates usage and submits a background deck job', async () => {
   const api = installApi();
   const onOpenJobs = vi.fn();
   render(<VideoNotesDialog open onClose={() => {}} onOpenJobs={onOpenJobs} />);
-  await waitFor(() => expect(api.getTranscriptionConfig).toHaveBeenCalled());
 
-  expect(screen.getByRole('button', { name: '完整课件（预览）' })).toHaveAttribute(
-    'aria-pressed',
-    'true'
-  );
+  expect(screen.getByRole('dialog', { name: '视频转课件' })).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole('button', { name: /选择视频/ }));
   expect(await screen.findByText('01-集合.mp4')).toBeInTheDocument();
@@ -72,12 +61,10 @@ test('defaults to the deck mode, estimates usage and submits a background job', 
   await userEvent.click(screen.getByRole('button', { name: '提交后台任务' }));
   await waitFor(() => expect(api.enqueueVideoNotes).toHaveBeenCalled());
   expect(api.enqueueVideoNotes).toHaveBeenCalledWith({
-    mode: 'deck',
-    videoPaths: ['C:\\课程\\01-集合.mp4'],
-    language: 'auto'
+    videoPaths: ['C:\\课程\\01-集合.mp4']
   });
 
-  expect(await screen.findByText('已提交后台任务：完整课件（预览） · 1 讲')).toBeInTheDocument();
+  expect(await screen.findByText('已提交后台任务：视频转课件 · 1 讲')).toBeInTheDocument();
   await userEvent.click(screen.getByRole('button', { name: '查看视频任务' }));
   expect(onOpenJobs).toHaveBeenCalled();
 });
@@ -85,7 +72,6 @@ test('defaults to the deck mode, estimates usage and submits a background job', 
 test('selects a whole folder instead of individual files', async () => {
   const api = installApi();
   render(<VideoNotesDialog open onClose={() => {}} />);
-  await waitFor(() => expect(api.getTranscriptionConfig).toHaveBeenCalled());
 
   await userEvent.click(screen.getByRole('button', { name: /选择文件夹/ }));
   expect(await screen.findByText('C:\\课程\\全部')).toBeInTheDocument();
@@ -93,17 +79,15 @@ test('selects a whole folder instead of individual files', async () => {
   await userEvent.click(screen.getByRole('button', { name: '提交后台任务' }));
   await waitFor(() =>
     expect(api.enqueueVideoNotes).toHaveBeenCalledWith(
-      expect.objectContaining({ mode: 'deck', folder: 'C:\\课程\\全部' })
+      expect.objectContaining({ folder: 'C:\\课程\\全部' })
     )
   );
 });
 
-test('sends the chosen output folder and language in quick mode', async () => {
+test('sends the chosen output folder', async () => {
   const api = installApi();
   render(<VideoNotesDialog open onClose={() => {}} />);
-  await waitFor(() => expect(api.getTranscriptionConfig).toHaveBeenCalled());
 
-  await userEvent.click(screen.getByRole('button', { name: '快速笔记' }));
   await userEvent.click(screen.getByRole('button', { name: /选择视频/ }));
   await screen.findByText('01-集合.mp4');
   await userEvent.click(screen.getByRole('button', { name: '选择…' }));
@@ -115,38 +99,16 @@ test('sends the chosen output folder and language in quick mode', async () => {
   await waitFor(() =>
     expect(api.enqueueVideoNotes).toHaveBeenCalledWith(
       expect.objectContaining({
-        mode: 'quick',
         videoPaths: ['C:\\课程\\01-集合.mp4'],
-        outputDir: 'C:\\课程\\笔记',
-        language: 'auto'
+        outputDir: 'C:\\课程\\笔记'
       })
     )
   );
 });
 
-test('shows a settings shortcut when the ASR key is missing', async () => {
-  installApi({
-    getTranscriptionConfig: vi.fn(async () => ({
-      baseURL: 'https://host/v1',
-      model: 'mimo-v2.5-asr',
-      hasApiKey: false
-    })),
-    pickVideoFiles: vi.fn(async () => null)
-  });
-  const onOpenSettings = vi.fn();
-  const onClose = vi.fn();
-  render(<VideoNotesDialog open onClose={onClose} onOpenSettings={onOpenSettings} />);
-
-  await screen.findByText(/还没有保存语音转写 API key/);
-  await userEvent.click(screen.getByRole('button', { name: '去设置里配置' }));
-
-  expect(onClose).toHaveBeenCalled();
-  expect(onOpenSettings).toHaveBeenCalled();
-});
-
 test('can be closed once the job is queued and reports duplicate submissions', async () => {
   let resolveEnqueue!: (value: VideoJob) => void;
-  const api = installApi({
+  installApi({
     enqueueVideoNotes: vi.fn(
       () =>
         new Promise<VideoJob>((resolve) => {
@@ -156,7 +118,6 @@ test('can be closed once the job is queued and reports duplicate submissions', a
   });
   const onClose = vi.fn();
   render(<VideoNotesDialog open onClose={onClose} />);
-  await waitFor(() => expect(api.getTranscriptionConfig).toHaveBeenCalled());
 
   await userEvent.click(screen.getByRole('button', { name: /选择视频/ }));
   await screen.findByText('01-集合.mp4');

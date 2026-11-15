@@ -157,13 +157,13 @@ function directory() {
   return within(screen.getByLabelText('知识目录'));
 }
 
-test('opens the video notes tool from the page action', async () => {
+test('opens the video-to-deck tool from the page action', async () => {
   renderPage();
   await screen.findByRole('textbox', { name: '知识笔记' });
 
-  await userEvent.click(screen.getByRole('button', { name: '视频笔记' }));
+  await userEvent.click(screen.getByRole('button', { name: '视频转课件' }));
 
-  expect(screen.getByRole('dialog', { name: '视频生成笔记' })).toBeInTheDocument();
+  expect(screen.getByRole('dialog', { name: '视频转课件' })).toBeInTheDocument();
   expect(screen.getByText(/需要在本机桌面应用中使用/)).toBeInTheDocument();
 });
 

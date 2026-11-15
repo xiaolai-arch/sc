@@ -1,6 +1,5 @@
 export { createVideoNotesService, estimateFromDuration } from './service';
 export type {
-  AsrConfig,
   VideoLessonRunInput,
   VideoLessonRunOutput,
   VideoNotesService,
@@ -8,9 +7,7 @@ export type {
   VideoNotesStep
 } from './service';
 export { VIDEO_NOTES_STEPS } from './service';
-export { chatCompletionsUrl, createMimoAsrClient, transcribeMedia } from './mimo';
-export type { MimoAsrConfig, Transcript, TranscriptChunk } from './mimo';
-export { renderIndexHtml, renderLessonHtml } from './html';
+export { renderIndexHtml } from './html';
 export {
   createVideoJobsService,
   scanVideoFolder,

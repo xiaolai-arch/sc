@@ -1,5 +1,5 @@
 import { FakeModelClient } from '../../../../src/main/agent/model-client';
-import type { Transcript } from '../../../../src/main/video-notes/mimo';
+import type { Keyframe } from '../../../../src/main/video-notes/keyframes';
 import type { ScreenRead } from '../../../../src/main/video-notes/screen-read';
 import {
   buildOutline,
@@ -8,18 +8,12 @@ import {
 } from '../../../../src/main/video-notes/deck/outline';
 import { DeckStepError } from '../../../../src/main/video-notes/deck/prompts';
 
-function transcriptWith(
-  chunks: Array<{ start: number; text: string }>,
-  duration: number
-): Transcript {
+function keyframeAt(t: number): Keyframe {
   return {
-    source: 'C:\\courses\\01.mp4',
-    duration,
-    language: 'zh',
-    model: 'test-asr',
-    chars: chunks.reduce((total, chunk) => total + chunk.text.length, 0),
-    text: chunks.map((chunk) => chunk.text).join(''),
-    chunks
+    t,
+    path: `frames/${Math.round(t * 1000)}.jpg`,
+    sharpness: 10,
+    scene: false
   };
 }
 
@@ -42,45 +36,49 @@ function validAnswer(): string {
 }
 
 describe('buildOutlinePrompt', () => {
-  it('includes timestamped transcript chunks and the screen digest', () => {
-    const transcript = transcriptWith(
-      [
-        { start: 0, text: '我们先看集合的定义。' },
-        { start: 65, text: '元素有三个性质。' }
-      ],
-      600
+  it('includes timestamped screen text and the frame count', () => {
+    const prompt = buildOutlinePrompt(
+      600,
+      [keyframeAt(0), keyframeAt(65)],
+      [readAt(0, '集合的定义'), readAt(65, '元素有三个性质'), readAt(65, '集合与元素')]
     );
 
-    const prompt = buildOutlinePrompt(transcript, [readAt(70, '集合与元素')]);
-
-    expect(prompt).toContain('[00:00] 我们先看集合的定义。');
-    expect(prompt).toContain('[01:05] 元素有三个性质。');
+    expect(prompt).toContain('[00:00] 集合的定义');
+    expect(prompt).toContain('[01:05] 元素有三个性质');
     expect(prompt).toContain('集合与元素');
+    expect(prompt).toContain('关键帧：2 张');
     expect(prompt).toContain('3–12');
     expect(prompt).toContain('视频时长：10:00');
+    // No speech material exists, so the prompt forbids attributing anything to it.
+    expect(prompt).toContain('没有语音转写');
+    expect(prompt).toContain('老师说');
   });
 
   it('notes missing screen reads instead of leaving a blank section', () => {
-    const prompt = buildOutlinePrompt(
-      transcriptWith([{ start: 0, text: '一句话。' }], 60)
-    );
+    const prompt = buildOutlinePrompt(60, [keyframeAt(0)]);
 
-    expect(prompt).toContain('（没有读屏结果。）');
+    expect(prompt).toContain('（没有可用的画面文字。）');
   });
 
-  it('samples a long transcript down to roughly the budget', () => {
-    const chunks = Array.from({ length: 200 }, (_, index) => ({
-      start: index * 20,
-      text: `第 ${index} 段讲解内容`.padEnd(400, '。')
-    }));
-    const transcript = transcriptWith(chunks, 4_000);
+  it('caps a dense screen digest at roughly the budget', () => {
+    const reads = Array.from({ length: 200 }, (_unused, index) =>
+      readAt(index * 20, `第 ${index} 段画面文字${'。'.repeat(400)}`)
+    );
 
-    const prompt = buildOutlinePrompt(transcript);
+    const prompt = buildOutlinePrompt(4_000, [keyframeAt(0)], reads);
 
-    expect(prompt.length).toBeLessThan(20_000);
-    // The first and last chunks always survive the sampling.
+    expect(prompt.length).toBeLessThan(15_000);
+    // The digest is truncated, but it starts from the earliest frame.
     expect(prompt).toContain('第 0 段');
-    expect(prompt).toContain('第 199 段');
+  });
+
+  it('deduplicates identical screen text', () => {
+    const prompt = buildOutlinePrompt(600, [], [
+      readAt(10, '同一句画面文字'),
+      readAt(20, '同一句画面文字')
+    ]);
+
+    expect(prompt.split('同一句画面文字')).toHaveLength(2);
   });
 });
 
@@ -99,7 +97,9 @@ describe('buildOutline', () => {
 
     const outline = await buildOutline({
       client,
-      transcript: transcriptWith([{ start: 0, text: '内容' }], duration)
+      durationSeconds: duration,
+      keyframes: [keyframeAt(0)],
+      screenReads: [readAt(0, '内容')]
     });
 
     expect(outline.chapters.map((chapter) => chapter.title)).toEqual(['第一章', '第二章']);
@@ -122,7 +122,9 @@ describe('buildOutline', () => {
 
     const outline = await buildOutline({
       client,
-      transcript: transcriptWith([{ start: 0, text: '内容' }], 800)
+      durationSeconds: 800,
+      keyframes: [],
+      screenReads: [readAt(0, '内容')]
     });
 
     expect(outline.chapters).toEqual([
@@ -136,7 +138,9 @@ describe('buildOutline', () => {
 
     const outline = await buildOutline({
       client,
-      transcript: transcriptWith([{ start: 0, text: '内容' }], 600)
+      durationSeconds: 600,
+      keyframes: [],
+      screenReads: [readAt(0, '内容')]
     });
 
     expect(outline.chapters[0]?.title).toBe('开场与概念');
@@ -147,7 +151,9 @@ describe('buildOutline', () => {
 
     const outline = await buildOutline({
       client,
-      transcript: transcriptWith([{ start: 0, text: '内容' }], 600)
+      durationSeconds: 600,
+      keyframes: [],
+      screenReads: [readAt(0, '内容')]
     });
 
     expect(outline.chapters).toHaveLength(1);
@@ -162,13 +168,15 @@ describe('buildOutline', () => {
     await expect(
       buildOutline({
         client,
-        transcript: transcriptWith([{ start: 0, text: '内容' }], 600)
+        durationSeconds: 600,
+        keyframes: [],
+        screenReads: [readAt(0, '内容')]
       })
     ).rejects.toBeInstanceOf(DeckStepError);
     expect(client.calls).toHaveLength(2);
   });
 
-  it('exposes prompt version 1', () => {
-    expect(OUTLINE_PROMPT_VERSION).toBe(1);
+  it('exposes prompt version 2', () => {
+    expect(OUTLINE_PROMPT_VERSION).toBe(2);
   });
 });

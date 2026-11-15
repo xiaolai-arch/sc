@@ -30,7 +30,7 @@ function composeOptions(
       title: CHAPTER.title,
       start: 0,
       blocks: [
-        { t: 10, text: '集合是一组确定的对象的整体。', source: 'video' },
+        { t: 10, text: '集合是一组确定的对象的整体。', source: 'screen' },
         { t: 20, text: '集合与元素', source: 'screen' }
       ],
       keyPoints: ['元素互不相同']
@@ -50,8 +50,8 @@ function pointsSlide(overrides: Record<string, unknown> = {}): Record<string, un
     type: 'points',
     id: 'points',
     title: '元素互不相同',
-    sources: [{ kind: 'video', t: 10 }],
-    points: [{ text: '元素互不相同', source: { kind: 'video', t: 10 } }],
+    sources: [{ kind: 'screen', t: 10 }],
+    points: [{ text: '元素互不相同', source: { kind: 'screen', t: 10 } }],
     ...overrides
   };
 }
@@ -122,20 +122,20 @@ describe('composeChapter', () => {
           type: 'cover',
           id: 'c',
           title: '封面',
-          sources: [{ kind: 'video', t: 0 }]
+          sources: [{ kind: 'infer' }]
         },
         {
           type: 'agenda',
           id: 'a',
           title: '目录',
-          sources: [{ kind: 'video', t: 0 }],
+          sources: [{ kind: 'infer' }],
           items: ['一、集合与元素']
         },
         {
           type: 'summary',
           id: 's',
           title: '小结',
-          sources: [{ kind: 'video', t: 0 }],
+          sources: [{ kind: 'infer' }],
           points: ['记住定义']
         },
         pointsSlide({ id: 'model-id' }),
@@ -199,8 +199,8 @@ describe('composeChapter', () => {
       JSON.stringify([
         pointsSlide({
           sources: [
-            { kind: 'video', t: 9_999 },
-            { kind: 'screen', t: 9_999 }
+            { kind: 'screen', t: 9_999 },
+            { kind: 'infer' }
           ],
           t: 9_999
         })
@@ -209,10 +209,7 @@ describe('composeChapter', () => {
 
     const slides = await composeChapter(composeOptions(client));
 
-    expect(slides[0]?.sources).toEqual([
-      { kind: 'video', t: 600 },
-      { kind: 'screen', t: 600 }
-    ]);
+    expect(slides[0]?.sources).toEqual([{ kind: 'screen', t: 600 }, { kind: 'infer' }]);
     expect(slides[0]?.t).toBe(600);
   });
 
@@ -223,7 +220,7 @@ describe('composeChapter', () => {
           type: 'cover',
           id: 'c',
           title: '封面',
-          sources: [{ kind: 'video', t: 0 }]
+          sources: [{ kind: 'infer' }]
         }
       ])
     ]);
@@ -233,8 +230,37 @@ describe('composeChapter', () => {
     );
   });
 
-  it('exposes prompt version 1', () => {
-    expect(COMPOSE_PROMPT_VERSION).toBe(1);
+  it('strips video sources and drops slides that only cite speech', async () => {
+    const client = new FakeModelClient([
+      JSON.stringify([
+        pointsSlide({ id: 'speech', sources: [{ kind: 'video', t: 5 }] }),
+        quoteSlide('kept'),
+        { ...quoteSlide('mixed'), sources: [{ kind: 'video', t: 1 }, { kind: 'infer' }] }
+      ])
+    ]);
+
+    const slides = await composeChapter(composeOptions(client));
+
+    expect(slides.map((slide) => slide.id)).toEqual(['1-1', '1-2']);
+    expect(slides[0]).toMatchObject({ type: 'quote', sources: [{ kind: 'infer' }] });
+    for (const slide of slides) {
+      expect(slide.sources.some((source) => source.kind === 'video')).toBe(false);
+    }
+  });
+
+  it('forbids speech sources in the prompt', async () => {
+    const client = new FakeModelClient([JSON.stringify([pointsSlide()])]);
+
+    await composeChapter(composeOptions(client));
+
+    const prompt = client.calls[0]?.messages[0]?.content ?? '';
+    expect(prompt).toContain('老师说');
+    expect(prompt).toContain('infer');
+    expect(prompt).toContain('ext');
+  });
+
+  it('exposes prompt version 2', () => {
+    expect(COMPOSE_PROMPT_VERSION).toBe(2);
   });
 });
 
@@ -260,8 +286,8 @@ describe('assembleDeck', () => {
           type: 'points',
           id: `${index + 1}-1`,
           title: `${chapter.title}的结论`,
-          sources: [{ kind: 'video', t: chapter.start }],
-          points: [{ text: '要点', source: { kind: 'video', t: chapter.start } }]
+          sources: [{ kind: 'screen', t: chapter.start }],
+          points: [{ text: '要点', source: { kind: 'screen', t: chapter.start } }]
         } as Slide
       ]
     }));
@@ -279,7 +305,7 @@ describe('assembleDeck', () => {
       type: 'cover',
       id: 'cover',
       subtitle: '共 10 章',
-      sources: [{ kind: 'video', t: 0 }]
+      sources: [{ kind: 'infer' }]
     });
     const agenda = deck.chapters[0]?.slides[1];
     expect(agenda?.type).toBe('agenda');
@@ -290,7 +316,7 @@ describe('assembleDeck', () => {
     expect(summary?.type).toBe('summary');
     if (summary?.type === 'summary') {
       expect(summary.points).toEqual(['要点一', '要点二', '要点三']);
-      expect(summary.sources).toEqual([{ kind: 'video', t: 540 }]);
+      expect(summary.sources).toEqual([{ kind: 'infer' }]);
     }
 
     expect(() => validateDeck(deck)).not.toThrow();
@@ -306,8 +332,8 @@ describe('assembleDeck', () => {
           type: 'points',
           id: `${index + 1}-1`,
           title: `${chapter.title}的结论`,
-          sources: [{ kind: 'video', t: chapter.start }],
-          points: [{ text: '要点', source: { kind: 'video', t: chapter.start } }]
+          sources: [{ kind: 'screen', t: chapter.start }],
+          points: [{ text: '要点', source: { kind: 'screen', t: chapter.start } }]
         } as Slide
       ],
       ...(index === 1 ? { keyPoints: ['最后的重点'] } : {})

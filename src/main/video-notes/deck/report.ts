@@ -21,12 +21,11 @@ export interface LayoutOverflowLike {
 export interface QualityReportInput {
   title: string;
   durationSeconds: number;
-  mode: 'quick' | 'deck';
-  transcriptChars: number;
-  chunkCount: number;
   keyframeCount: number;
   screenReadCount: number;
-  deck?: Deck;
+  /** Always true for now: the deck is built from frames and screen text only. */
+  screenOnly: boolean;
+  deck: Deck;
   overflow: LayoutOverflowLike[];
   issuesA: FactIssue[];
   issuesB: FactIssue[];
@@ -109,29 +108,22 @@ export function buildQualityReport(input: QualityReportInput): string {
 
   // Overview -----------------------------------------------------------------
   lines.push('## 概览', '');
-  lines.push(`- 模式：${input.mode === 'deck' ? '完整课件' : '快速笔记'}`);
   lines.push(`- 时长：${mmss(input.durationSeconds)}`);
-  lines.push(
-    `- 转写：${thousands(input.transcriptChars)} 字，${thousands(input.chunkCount)} 段`
-  );
   lines.push(`- 关键帧：${thousands(input.keyframeCount)} 张`);
-  lines.push(`- 读屏：${thousands(input.screenReadCount)} 条`);
-  lines.push(
-    input.deck === undefined
-      ? '- 课件页数：—'
-      : `- 课件页数：${thousands(slideCount(input.deck))} 页`
-  );
+  lines.push(`- 画面文字：${thousands(input.screenReadCount)} 条`);
+  lines.push(`- 课件页数：${thousands(slideCount(input.deck))} 页`);
   lines.push(`- 耗时：${mmss(input.elapsedMs / 1000)}`);
   lines.push(
     `- tokens：输入 ${thousands(input.usage.inputTokens)}，输出 ${thousands(input.usage.outputTokens)}，合计 ${thousands(totalTokens)}`
   );
+  if (input.screenOnly) {
+    lines.push('- 依据：只有画面文字，没有语音转写');
+  }
   lines.push('');
 
   // Deck ---------------------------------------------------------------------
   lines.push('## 课件', '');
-  if (input.deck === undefined) {
-    lines.push('快速笔记模式，没有课件。', '');
-  } else {
+  {
     const deck = input.deck;
     const total = slideCount(deck);
     const counts = new Map<SlideType, number>();
@@ -199,10 +191,10 @@ export function buildQualityReport(input: QualityReportInput): string {
 
   // Limits -------------------------------------------------------------------
   lines.push('## 限制', '');
-  lines.push('- 画面读取依赖模型，个别文字可能抄错。');
+  lines.push('- 课件只依据画面文字，纯口头内容与未停留的画面可能缺失。');
   lines.push('- 被老师或遮挡物挡住的地方可能缺字。');
-  lines.push('- 扩展内容来自模型的知识，需要自行判断。');
-  lines.push('- 回看链接（file://#t=）依赖本机浏览器支持。');
+  lines.push('- 回看链接（file://#t=）依赖本机浏览器支持媒体片段。');
+  lines.push('- 字体随机器变化，换一台机器打开时排版可能略有不同。');
 
   return `${lines.join('\n')}\n`;
 }

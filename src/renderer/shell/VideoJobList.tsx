@@ -4,8 +4,7 @@ import type {
   VideoJob,
   VideoJobLesson,
   VideoJobStatus,
-  VideoLessonStatus,
-  VideoNotesMode
+  VideoLessonStatus
 } from '../../shared/video-notes';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
@@ -32,16 +31,8 @@ const LESSON_LABELS: Record<VideoLessonStatus, string> = {
   skipped: '跳过'
 };
 
-const QUICK_STEP_LABELS: Record<string, string> = {
+const STEP_LABELS: Record<string, string> = {
   probe: '读取视频信息',
-  transcribe: '语音转写',
-  render: '整理笔记',
-  done: '完成'
-};
-
-const DECK_STEP_LABELS: Record<string, string> = {
-  probe: '读取视频信息',
-  transcribe: '语音转写',
   keyframes: '关键帧',
   'screen-read': '读屏',
   outline: '大纲',
@@ -57,15 +48,9 @@ const DECK_STEP_LABELS: Record<string, string> = {
   done: '完成'
 };
 
-function stepLabel(step: string, mode: VideoNotesMode): string {
-  const labels = mode === 'deck' ? DECK_STEP_LABELS : QUICK_STEP_LABELS;
-  return labels[step] ?? step;
+function stepLabel(step: string): string {
+  return STEP_LABELS[step] ?? step;
 }
-
-const MODE_LABELS: Record<VideoNotesMode, string> = {
-  quick: '快速笔记',
-  deck: '完整课件（预览）'
-};
 
 function fileName(path: string): string {
   const index = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
@@ -188,11 +173,15 @@ export function VideoJobList({ open, onClose }: VideoJobListProps) {
         )
       );
     }
-    if (job.mode === 'quick' && lesson.htmlPath) {
+    // Legacy quick lessons kept a notes.html; nothing writes it any more.
+    if (lesson.htmlPath) {
       actions.push(lessonAction('打开笔记', () => void openPath(lesson.htmlPath!)));
     }
     if (lesson.slidesPath) {
       actions.push(lessonAction('打开课件', () => void openPath(lesson.slidesPath!)));
+    }
+    if (lesson.pdfPath) {
+      actions.push(lessonAction('打开 PDF', () => void openPath(lesson.pdfPath!)));
     }
     if (lesson.reportPath) {
       actions.push(lessonAction('打开报告', () => void openPath(lesson.reportPath!)));
@@ -236,7 +225,7 @@ export function VideoJobList({ open, onClose }: VideoJobListProps) {
 
         {!loading && jobs.length === 0 ? (
           <p className="rounded-xl border border-dashed border-gray-300 px-4 py-8 text-center text-[13px] text-gray-500 dark:border-white/15 dark:text-[#8e8e93]">
-            还没有视频任务。在「视频笔记」里选好视频后提交，就会在这里排队。
+            还没有视频任务。在「视频转课件」里选好视频后提交，就会在这里排队。
           </p>
         ) : null}
 
@@ -252,7 +241,7 @@ export function VideoJobList({ open, onClose }: VideoJobListProps) {
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-[13px] font-medium text-gray-800 dark:text-[#f5f5f7]">
-                    {MODE_LABELS[job.mode]} · {job.lessons.length} 讲
+                    视频转课件 · {job.lessons.length} 讲
                     <span className={`ml-2 text-[12px] font-normal ${statusClass(job.status)}`}>
                       {STATUS_LABELS[job.status]}
                     </span>
@@ -333,10 +322,10 @@ export function VideoJobList({ open, onClose }: VideoJobListProps) {
                         <span className={lessonClass(lesson.status)}>
                           {LESSON_LABELS[lesson.status]}
                           {lesson.status === 'running' && lesson.step
-                            ? ` · ${stepLabel(lesson.step, job.mode)}`
+                            ? ` · ${stepLabel(lesson.step)}`
                             : ''}
                         </span>
-                        {job.mode === 'quick' && lesson.status === 'done' ? (
+                        {lesson.status === 'done' ? (
                           <span className="text-gray-500 dark:text-[#8e8e93]">
                             {(lesson.usage.inputTokens + lesson.usage.outputTokens).toLocaleString(
                               'zh-CN'

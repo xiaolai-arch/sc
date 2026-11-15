@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { ModelClient } from '../../agent/model-client';
-import type { Transcript, TranscriptChunk } from '../mimo';
+import type { Keyframe } from '../keyframes';
 import type { ScreenRead } from '../screen-read';
 import { outlineSchema, type Outline, type OutlineChapter } from './content';
 import {
@@ -10,26 +10,24 @@ import {
 } from './prompts';
 
 /**
- * Step 5: chapter outline. One model call turns the transcript (plus the
- * on-screen text) into 3–12 chapters covering the whole video. The answer is
- * normalized first — sorted, clamped to the video, and with the first chapter
- * pinned to 0 and the last to the duration — and only then validated, so a
- * model that returns a usable outline in a slightly scrambled order still
- * produces a valid one.
+ * Step 5: chapter outline. One model call turns the sequence of screen reads
+ * into 3–12 chapters covering the whole video. Chapters follow visible content
+ * changes, not speech: there is no transcript. The answer is normalized first
+ * — sorted, clamped to the video, and with the first chapter pinned to 0 and
+ * the last to the duration — and only then validated, so a model that returns
+ * a usable outline in a slightly scrambled order still produces a valid one.
  */
 
 /** Bump when the prompt's instructions change; feeds checkpoint fingerprints. */
-export const OUTLINE_PROMPT_VERSION = 1;
+export const OUTLINE_PROMPT_VERSION = 2;
 
-/** The transcript is sampled down to about this many characters for the prompt. */
-export const OUTLINE_TRANSCRIPT_CHARS = 12_000;
-
-/** On-screen text is much denser per character, so it gets a smaller budget. */
-const OUTLINE_SCREEN_CHARS = 3_000;
+/** On-screen text is the only material now, so the prompt gets a real budget. */
+export const OUTLINE_SCREEN_CHARS = 12_000;
 
 export interface BuildOutlineOptions {
   client: ModelClient;
-  transcript: Transcript;
+  durationSeconds: number;
+  keyframes: Keyframe[];
   screenReads?: ScreenRead[];
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -56,24 +54,6 @@ interface TimedLine {
   line: string;
 }
 
-/** Evenly spaced indices, always including the first and the last item. */
-function evenIndices(count: number, keep: number): number[] {
-  if (keep <= 0 || count <= 0) return [];
-  if (keep >= count) return Array.from({ length: count }, (_, index) => index);
-  if (keep === 1) return [0];
-  const indices: number[] = [];
-  for (let i = 0; i < keep; i += 1) {
-    const index = Math.round((i * (count - 1)) / (keep - 1));
-    if (indices[indices.length - 1] !== index) indices.push(index);
-  }
-  return indices;
-}
-
-function lineChars(lines: readonly TimedLine[]): number {
-  return lines.reduce((total, entry) => total + entry.line.length + 1, 0);
-}
-
-/** Keeps the budget by cutting the tail of the last line that does not fit. */
 function fitLines(lines: readonly TimedLine[], limit: number): string[] {
   if (lines.length === 0) return [];
   const out: string[] = [];
@@ -91,60 +71,15 @@ function fitLines(lines: readonly TimedLine[], limit: number): string[] {
   return out.length > 0 ? out : [lines[0].line.slice(0, Math.max(1, limit))];
 }
 
-function chunkLines(chunks: TranscriptChunk[]): TimedLine[] {
-  const lines: TimedLine[] = [];
-  for (const chunk of chunks) {
-    const text = chunk.text.trim();
-    if (text.length === 0) continue;
-    const start = Number.isFinite(chunk.start) ? Math.max(0, chunk.start) : 0;
-    lines.push({ start, line: `[${clock(start)}] ${text}` });
-  }
-  return lines.sort((a, b) => a.start - b.start);
-}
-
 /**
- * Samples a long transcript down to the prompt budget. Every minute keeps its
- * first and last chunk, which preserves the minute's opening and its
- * conclusion; if that is still too long, whole minutes are dropped evenly.
+ * A compact digest of what the frames say, in time order. Identical text is
+ * shown once; a frame that needs a screenshot is marked so the outline knows a
+ * figure exists. This digest is the only evidence the outline has.
  */
-function sampleTranscript(lines: TimedLine[], limit = OUTLINE_TRANSCRIPT_CHARS): string[] {
-  if (lines.length === 0) return [];
-  if (lineChars(lines) <= limit) return lines.map((entry) => entry.line);
-
-  const byMinute = new Map<number, TimedLine[]>();
-  for (const entry of lines) {
-    const minute = Math.floor(entry.start / 60);
-    const bucket = byMinute.get(minute);
-    if (bucket) bucket.push(entry);
-    else byMinute.set(minute, [entry]);
-  }
-  const minutes = [...byMinute.keys()].sort((a, b) => a - b);
-
-  const picked: TimedLine[] = [];
-  for (const minute of minutes) {
-    const bucket = byMinute.get(minute) ?? [];
-    picked.push(bucket[0]);
-    if (bucket.length > 1) picked.push(bucket[bucket.length - 1]);
-  }
-  if (lineChars(picked) <= limit) return picked.map((entry) => entry.line);
-
-  // Still over budget: keep the first and last minutes and sample the rest.
-  const perMinute = lineChars(picked) / minutes.length;
-  const keep = clamp(Math.floor(limit / Math.max(1, perMinute)), 2, minutes.length);
-  const selected: TimedLine[] = [];
-  for (const index of evenIndices(minutes.length, keep)) {
-    const bucket = byMinute.get(minutes[index]) ?? [];
-    selected.push(bucket[0]);
-    if (bucket.length > 1) selected.push(bucket[bucket.length - 1]);
-  }
-  return fitLines(selected, limit);
-}
-
-/**
- * A compact digest of what the frames say. Identical text is shown once; a
- * frame that needs a screenshot is marked so the outline knows a figure exists.
- */
-function screenDigest(reads: readonly ScreenRead[], limit: number): string[] {
+function screenDigest(
+  reads: readonly ScreenRead[],
+  limit = OUTLINE_SCREEN_CHARS
+): string[] {
   const ordered = [...reads].sort((a, b) => a.t - b.t);
   const seen = new Set<string>();
   const lines: TimedLine[] = [];
@@ -164,30 +99,30 @@ function screenDigest(reads: readonly ScreenRead[], limit: number): string[] {
  * the output rules. Exported so tests can assert on the prompt without a call.
  */
 export function buildOutlinePrompt(
-  transcript: Transcript,
-  screenReads: ScreenRead[] = []
+  durationSeconds: number,
+  keyframes: readonly Keyframe[],
+  screenReads: readonly ScreenRead[] = []
 ): string {
-  const duration = normalizedDuration(transcript.duration);
-  const transcriptLines = sampleTranscript(chunkLines(transcript.chunks));
-  const screenLines = screenDigest(screenReads, OUTLINE_SCREEN_CHARS);
+  const duration = normalizedDuration(durationSeconds);
+  const screenLines = screenDigest(screenReads);
 
   return [
-    '你在为一段讲课视频划分章节大纲。只根据下面给出的材料，不要补充材料以外的知识。',
+    '你在为一段讲课视频划分章节大纲。材料是视频里的关键帧和每帧画面上的文字，没有语音转写。只根据下面给出的画面文字，不要补充材料以外的知识。',
     '',
     `视频时长：${clock(duration)}（${Math.round(duration)} 秒）`,
+    `关键帧：${keyframes.length} 张`,
     '',
-    '【带时间戳的转写】',
-    ...(transcriptLines.length > 0 ? transcriptLines : ['（没有可用的转写。）']),
-    '',
-    '【屏幕文字摘要】',
-    ...(screenLines.length > 0 ? screenLines : ['（没有读屏结果。）']),
+    '【带时间戳的画面文字】',
+    ...(screenLines.length > 0 ? screenLines : ['（没有可用的画面文字。）']),
     '',
     '要求：',
-    '1. 把全片分成 3–12 个章节，按时间顺序覆盖整个视频：第一章从 0 秒开始，最后一章到视频结束。',
+    '1. 按画面内容的变化把全片分成 3–12 个章节，按时间顺序覆盖整个视频：第一章从 0 秒开始，最后一章到视频结束。',
     '2. 章节首尾相接，不重叠、不留空档；start 和 end 都是秒数，end 必须大于 start。',
-    '3. title 用中文写出这一章的内容结论，不超过 24 个字；不要写「第一部分」「本章」这类空标题。',
-    '4. points 是 1–6 条本章知识点，每条一句短句，只写材料里出现的内容。',
-    '5. 时间只能取自上面材料里出现的时间，不许编造。',
+    '3. 每章的 start 和 end 要夹住这一章包含的画面时间；完全没有画面文字的章节可以省略，但整片仍要有章节覆盖。',
+    '4. title 用中文写出这一章的内容结论，不超过 24 个字；不要写「第一部分」「本章」这类空标题。',
+    '5. points 是 1–6 条本章知识点，每条一句短句，只能取自屏幕文字里出现的内容。',
+    '6. 时间只能取自上面材料里出现的时间，不许编造。',
+    '7. 不要写「老师说」「视频里讲」这类话：材料里没有语音，你不知道老师说了什么。',
     '',
     '输出 JSON：',
     '{"chapters":[{"title":"...","start":0,"end":180,"points":["...","..."]}]}',
@@ -241,8 +176,15 @@ function normalizeOutlineAnswer(value: unknown, durationSeconds: number): unknow
  * validation error and a second failure raises `DeckStepError`.
  */
 export async function buildOutline(options: BuildOutlineOptions): Promise<Outline> {
-  const { client, transcript, screenReads = [], signal, timeoutMs } = options;
-  const duration = normalizedDuration(transcript.duration);
+  const {
+    client,
+    durationSeconds,
+    keyframes,
+    screenReads = [],
+    signal,
+    timeoutMs
+  } = options;
+  const duration = normalizedDuration(durationSeconds);
 
   const schema = z.preprocess(
     (value) => normalizeOutlineAnswer(value, duration),
@@ -252,7 +194,9 @@ export async function buildOutline(options: BuildOutlineOptions): Promise<Outlin
   return requestValidatedJson({
     client,
     request: {
-      messages: [{ role: 'user', content: buildOutlinePrompt(transcript, screenReads) }],
+      messages: [
+        { role: 'user', content: buildOutlinePrompt(duration, keyframes, screenReads) }
+      ],
       temperature: 0.2,
       maxTokens: 4_000,
       noTools: true,

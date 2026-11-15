@@ -24,10 +24,14 @@ import {
  * turned into slides, then the shell slides (cover, agenda, summary) are added
  * deterministically. The layout step later asks {@link refitSlide} to split a
  * page that overflowed the 720px stage.
+ *
+ * Every source must come from the frames: `screen` for what is visible,
+ * `infer` for structure derived from it, `ext` for outside knowledge. Nothing
+ * may be attributed to the teacher, so a `video` source is stripped.
  */
 
 /** Bump when the prompt's instructions change; feeds checkpoint fingerprints. */
-export const COMPOSE_PROMPT_VERSION = 1;
+export const COMPOSE_PROMPT_VERSION = 2;
 
 /** Slide types the shell owns; the model is told never to emit them. */
 const SHELL_TYPES = ['cover', 'agenda', 'summary'] as const;
@@ -146,6 +150,22 @@ function unwrapSlides(value: unknown): unknown {
   return Array.isArray(slides) ? slides : value;
 }
 
+/**
+ * The deck has no speech evidence: a `video` source is not allowed to survive
+ * the model answer. Drops those sources; a `points` item whose own source was
+ * video borrows the page's first remaining source. A page left without any
+ * source is dropped (null) rather than shown with a fabricated one.
+ */
+function withoutVideoSources(slide: Slide): Slide | null {
+  const sources = slide.sources.filter((source) => source.kind !== 'video');
+  if (sources.length === 0) return null;
+  if (slide.type !== 'points') return { ...slide, sources } as Slide;
+  const points = slide.points.map((point) =>
+    point.source.kind === 'video' ? { ...point, source: sources[0]! } : point
+  );
+  return { ...slide, sources, points } as Slide;
+}
+
 /** Accepts either `{ slides: [...] }` or a bare array for the refit answer. */
 function wrapSlides(value: unknown): unknown {
   return Array.isArray(value) ? { slides: value } : value;
@@ -170,7 +190,8 @@ const SLIDE_TYPE_REFERENCE = [
 function sourceReference(): string {
   return [
     '公共字段：id（字符串）、title（结论式标题）、sources（1–6 个来源，至少一个）、t?（回看秒数）、status?（只写 "contested"）、tip?（一行复习提示）。',
-    '来源对象：{"kind":"video","t":秒}、{"kind":"screen","t":秒}、{"kind":"infer"}、{"kind":"ext","title"?:"书名","page"?:"页码"}。'
+    '来源对象：{"kind":"screen","t":秒}（画面上的内容）、{"kind":"infer"}（由画面内容直接推出的结构）、{"kind":"ext","title"?:"书名","page"?:"页码"}（画面以外的知识）。',
+    '这段视频没有语音材料：不要使用 {"kind":"video"}，也不要写「老师说」「视频里讲」这类话。'
   ].join('\n');
 }
 
@@ -222,11 +243,9 @@ export function buildComposePrompt(options: Omit<ComposeChapterOptions, 'client'
     `时间范围：${clock(chapter.start)}–${clock(chapter.end)}（${Math.round(chapter.start)}–${Math.round(chapter.end)} 秒）`,
     `本章知识点：${chapter.points.join('；')}`,
     '',
-    '【老师讲的内容（笔记）】',
+    '【画面笔记】',
     ...(notes.blocks.length > 0
-      ? notes.blocks.map(
-          (block) => `[${clock(block.t)}] ${block.source === 'screen' ? '〔画面〕' : ''}${block.text}`
-        )
+      ? notes.blocks.map((block) => `[${clock(block.t)}] 〔画面〕${block.text}`)
       : ['（本章没有笔记。）']),
     '',
     '【本章要点】',
@@ -251,8 +270,9 @@ export function buildComposePrompt(options: Omit<ComposeChapterOptions, 'client'
     '要求：',
     '1. 每页 title 是结论式短句（不超过 40 字），不要用「知识点」「例题」这类空标题。',
     '2. 每页 sources 至少一个，只能使用本章材料里出现的事实；不足一页时宁可少写，也不要编造。',
-    '3. video 和 screen 来源的 t 只能取上面材料里出现的时间，不许编造；t 不能超过视频时长',
-    `   （${Math.round(limit)} 秒）。由材料直接推出的内容用 {"kind":"infer"}；视频以外的知识用 {"kind":"ext"} 并写清出处。`,
+    '3. 内容来自画面文字，来源用 {"kind":"screen","t":秒}，t 只能取上面材料里出现的时间，不许编造，也不能超过视频时长',
+    `   （${Math.round(limit)} 秒）。由材料直接推出的结构用 {"kind":"infer"}；画面以外的知识用 {"kind":"ext"} 并写清出处。`,
+    '   不要使用 {"kind":"video"}，也不要写「老师说」「视频里讲」这类话：这段视频没有语音材料。',
     '4. figure 只能引用「可用的截图」里列出的 frames/*.jpg，并且必须写 "keepImage": true；不要自己编帧名。',
     '5. 题干、选项、范文等屏幕原文用 passage 页，逐字照抄，被挡住的地方保留〔遮挡〕。',
     '6. 不要生成 cover、agenda、summary：封面、目录和结尾小结由程序统一生成。',
@@ -260,7 +280,7 @@ export function buildComposePrompt(options: Omit<ComposeChapterOptions, 'client'
     '8. 可选 t 字段写这一页的回看时间，优先取对应画面时间。',
     '',
     '只输出一个 JSON 数组，每个元素是一页：',
-    '[{"type":"points","id":"p1","title":"...","sources":[{"kind":"video","t":65}],"points":[{"text":"...","source":{"kind":"video","t":65}}]}]',
+    '[{"type":"points","id":"p1","title":"...","sources":[{"kind":"screen","t":65}],"points":[{"text":"...","source":{"kind":"screen","t":65}}]}]',
     '',
     jsonOutputRules()
   ].join('\n');
@@ -284,7 +304,7 @@ function buildRefitPrompt(options: {
     '2. 保留原来的全部事实和每一条来源，不要新增材料以外的内容，也不要删掉要点。',
     '3. 两页之间不要重复同一句话；第二页可以用「（续）」继续同一个主题。',
     '4. 页面类型沿用原来的 type；不要生成 cover、agenda、summary。',
-    '5. 每页 sources 至少一个，id 保持原样即可，程序会统一处理。',
+    '5. 每页 sources 至少一个，只能用 screen、infer 或 ext；id 保持原样即可，程序会统一处理。',
     '',
     '只输出一个 JSON 对象，字段 slides 是 1–2 页：',
     '{"slides":[{...}]}',
@@ -352,11 +372,14 @@ export async function composeChapter(options: ComposeChapterOptions): Promise<Sl
   });
 
   const allowed = figureFrames(keyframes, screenReads);
-  const kept = slides.filter((slide) => {
-    if (isShellSlide(slide)) return false;
-    if (slide.type === 'figure' && !allowed.has(slide.frame)) return false;
-    return true;
-  });
+  const kept: Slide[] = [];
+  for (const slide of slides) {
+    if (isShellSlide(slide)) continue;
+    const stripped = withoutVideoSources(slide);
+    if (stripped === null) continue;
+    if (stripped.type === 'figure' && !allowed.has(stripped.frame)) continue;
+    kept.push(stripped);
+  }
 
   if (kept.length === 0) {
     throw new DeckStepError('compose', `第 ${chapterIndex + 1} 章没有可用的课件页。`);
@@ -411,14 +434,15 @@ export function assembleDeck(options: AssembleDeckOptions): Deck {
     id: 'cover',
     title,
     subtitle: `共 ${outline.chapters.length} 章`,
-    sources: [{ kind: 'video', t: 0 }]
+    // Program-generated structure: nothing here was said or shown on screen.
+    sources: [{ kind: 'infer' }]
   };
   const agenda: Slide = {
     type: 'agenda',
     id: 'agenda',
     title: '本讲内容',
     items: outline.chapters.slice(0, 8).map((chapter) => chapter.title),
-    sources: [{ kind: 'video', t: 0 }]
+    sources: [{ kind: 'infer' }]
   };
 
   const assembled = chapters.map((chapter) => ({
@@ -433,7 +457,7 @@ export function assembleDeck(options: AssembleDeckOptions): Deck {
     id: 'summary',
     title: '本讲小结',
     points: summaryPointList(summaryPoints, last.keyPoints ?? [], last.title),
-    sources: [{ kind: 'video', t: clamp(last.start, 0, Math.max(0, durationSeconds)) }]
+    sources: [{ kind: 'infer' }]
   };
   lastContent.slides.push(summary);
 
@@ -499,7 +523,12 @@ export async function refitSlide(options: RefitSlideOptions): Promise<Slide[]> {
     signal
   });
 
-  const kept = answer.slides.filter((candidate) => !isShellSlide(candidate));
+  const kept: Slide[] = [];
+  for (const candidate of answer.slides) {
+    if (isShellSlide(candidate)) continue;
+    const stripped = withoutVideoSources(candidate);
+    if (stripped !== null) kept.push(stripped);
+  }
   if (kept.length === 0) {
     throw new DeckStepError('refit', '重排后没有可用的页面。');
   }

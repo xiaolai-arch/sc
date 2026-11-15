@@ -2,9 +2,12 @@ import { z } from 'zod';
 import { sourceSchema } from './schema';
 
 /**
- * Intermediate content produced between the transcript and `deck.json`:
+ * Intermediate content produced between the screen reads and `deck.json`:
  * outline → notes → enrich → factcheck. Each step's model output is validated
  * here so a bad answer fails the step instead of leaking into the deck.
+ *
+ * Everything is derived from the on-screen text. Nothing here may represent
+ * what the teacher said: there is no transcript any more.
  */
 
 const boundedText = (max: number) =>
@@ -43,11 +46,11 @@ export type Outline = z.infer<typeof outlineSchema>;
 // ---------------------------------------------------------------------------
 
 export const noteBlockSchema = z.object({
-  /** Seconds into the lesson video. */
+  /** Seconds into the lesson video; always a time the frame was read at. */
   t: z.number().finite().min(0, { message: 'negative time' }),
   text: boundedText(600),
-  /** `video` is what the teacher said; `screen` is what the frame shows. */
-  source: z.enum(['video', 'screen'])
+  /** Every note block quotes what the frame shows. */
+  source: z.literal('screen')
 });
 
 export type NoteBlock = z.infer<typeof noteBlockSchema>;
@@ -102,8 +105,7 @@ export const enrichCardSchema = z.object({
   sources: z
     .array(sourceSchema)
     .min(1, { message: 'needs a source' })
-    .max(4, { message: 'too big' })
-});
+    .max(4, { message: 'too big' })});
 
 export type EnrichCard = z.infer<typeof enrichCardSchema>;
 

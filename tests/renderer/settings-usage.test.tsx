@@ -81,7 +81,7 @@ test('shows today tokens against the daily budget and flags an overrun', async (
   ).toBeInTheDocument();
 });
 
-test('video-note usage is shown separately and never pauses the budget', async () => {
+test('video-deck usage is shown separately and never pauses the budget', async () => {
   window.studyCoach = apiStub({
     getSettings: vi.fn().mockResolvedValue({
       ...baseSettings,
@@ -108,7 +108,7 @@ test('video-note usage is shown separately and never pauses the budget', async (
 
   expect(await screen.findByText('用量与成本')).toBeInTheDocument();
   const card = document.getElementById('settings-usage')!;
-  expect(within(card).getByText('视频笔记')).toBeInTheDocument();
+  expect(within(card).getByText('视频课件')).toBeInTheDocument();
   expect(
     within(card).getByText('每日 token（对话）：500 / 1000')
   ).toBeInTheDocument();

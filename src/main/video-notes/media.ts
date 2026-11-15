@@ -1,13 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import {
-  AUDIO_EXTENSIONS,
-  MEDIA_EXTENSIONS,
-  VIDEO_EXTENSIONS,
-  isSupportedMedia
-} from '../../shared/video-notes';
+import { VIDEO_EXTENSIONS, isSupportedMedia } from '../../shared/video-notes';
 
-export { AUDIO_EXTENSIONS, MEDIA_EXTENSIONS, VIDEO_EXTENSIONS, isSupportedMedia };
+export { VIDEO_EXTENSIONS, isSupportedMedia };
 
 const run = promisify(execFile);
 
@@ -63,48 +58,4 @@ export async function probeDuration(source: string, signal?: AbortSignal): Promi
   );
   const value = Number.parseFloat(stdout.trim());
   return Number.isFinite(value) && value > 0 ? value : 0;
-}
-
-/**
- * Extracts one mono 16 kHz mp3 window, skipping the video stream. The optional
- * signal kills the ffmpeg child as soon as the job is cancelled.
- */
-export async function extractMp3Chunk(
-  source: string,
-  destination: string,
-  startSeconds: number,
-  durationSeconds: number,
-  signal?: AbortSignal
-): Promise<void> {
-  await run(
-    ffmpegBinary(),
-    [
-      '-hide_banner',
-      '-loglevel',
-      'error',
-      '-y',
-      '-ss',
-      startSeconds.toFixed(3),
-      '-i',
-      source,
-      '-t',
-      durationSeconds.toFixed(3),
-      '-vn',
-      '-ac',
-      '1',
-      '-ar',
-      '16000',
-      '-b:a',
-      '64k',
-      '-f',
-      'mp3',
-      destination
-    ],
-    {
-      windowsHide: true,
-      timeout: 10 * 60 * 1000,
-      maxBuffer: 4 * 1024 * 1024,
-      ...(signal ? { signal } : {})
-    }
-  );
 }

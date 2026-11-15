@@ -1,29 +1,15 @@
 import { FakeModelClient } from '../../../../src/main/agent/model-client';
-import type { Transcript } from '../../../../src/main/video-notes/mimo';
 import type { ScreenRead } from '../../../../src/main/video-notes/screen-read';
 import {
   buildNotes,
+  splitNoteText,
   renderNotesMarkdown,
-  NOTES_PROMPT_VERSION,
-  NOTES_SPLIT_THRESHOLD_CHARS
+  NOTES_MAX_BLOCK_CHARS,
+  NOTES_MAX_BLOCKS_PER_CHAPTER,
+  NOTES_PROMPT_VERSION
 } from '../../../../src/main/video-notes/deck/notes';
 import { DeckStepError } from '../../../../src/main/video-notes/deck/prompts';
 import type { DeckNotes, Outline } from '../../../../src/main/video-notes/deck/content';
-
-function transcriptWith(
-  chunks: Array<{ start: number; text: string }>,
-  duration: number
-): Transcript {
-  return {
-    source: 'C:\\courses\\01.mp4',
-    duration,
-    language: 'zh',
-    model: 'test-asr',
-    chars: chunks.reduce((total, chunk) => total + chunk.text.length, 0),
-    text: chunks.map((chunk) => chunk.text).join(''),
-    chunks
-  };
-}
 
 function twoChapterOutline(): Outline {
   return {
@@ -45,127 +31,175 @@ function readAt(t: number, text: string): ScreenRead {
   };
 }
 
-const SHORT_TRANSCRIPT = transcriptWith(
-  [
-    { start: 0, text: '先讲集合的定义。' },
-    { start: 120, text: '集合有三个性质。' },
-    { start: 320, text: '再看元素的互异性。' }
-  ],
-  600
-);
+const SCREEN_READS = [
+  readAt(60, '集合与元素'),
+  readAt(120, '集合有三个性质'),
+  readAt(320, '再看元素的互异性')
+];
+
+/** The model only owns key points; blocks are filled from the screen reads. */
+function keyPointsAnswer(): string {
+  return JSON.stringify({
+    chapters: [
+      { title: '模型自己起的标题一', start: 0, keyPoints: ['记住定义'] },
+      { title: '模型自己起的标题二', start: 999, keyPoints: ['记住性质'] }
+    ]
+  });
+}
 
 describe('buildNotes', () => {
-  it('uses one call for a short transcript and keeps outline order and titles', async () => {
-    const client = new FakeModelClient([
-      JSON.stringify({
-        chapters: [
-          {
-            title: '模型自己起的标题一',
-            start: 0,
-            blocks: [
-              { t: 120, text: '集合有三个性质。', source: 'video' },
-              { t: 60, text: '集合与元素', source: 'screen' }
-            ],
-            keyPoints: ['记住定义']
-          },
-          {
-            title: '模型自己起的标题二',
-            start: 999,
-            blocks: [{ t: 320, text: '元素互不相同。', source: 'video' }],
-            keyPoints: ['记住性质']
-          }
-        ]
-      })
-    ]);
+  it('keeps outline order and titles and copies the screen text verbatim', async () => {
+    const client = new FakeModelClient([keyPointsAnswer()]);
 
     const notes = await buildNotes({
       client,
-      transcript: SHORT_TRANSCRIPT,
       outline: twoChapterOutline(),
-      screenReads: [readAt(60, '集合与元素')]
+      screenReads: SCREEN_READS
     });
 
     expect(client.calls).toHaveLength(1);
     expect(notes.chapters.map((chapter) => chapter.title)).toEqual(['大纲一', '大纲二']);
     expect(notes.chapters[1]?.start).toBe(300);
-    expect(notes.chapters[0]?.blocks.map((block) => block.t)).toEqual([60, 120]);
+    expect(notes.chapters[0]?.blocks).toEqual([
+      { t: 60, text: '集合与元素', source: 'screen' },
+      { t: 120, text: '集合有三个性质', source: 'screen' }
+    ]);
+    expect(notes.chapters[1]?.blocks).toEqual([
+      { t: 320, text: '再看元素的互异性', source: 'screen' }
+    ]);
+    expect(notes.chapters[0]?.keyPoints).toEqual(['记住定义']);
 
     const prompt = client.calls[0]?.messages[0]?.content ?? '';
-    expect(prompt).toContain('先讲集合的定义。');
-    expect(prompt).toContain('〔画面〕集合与元素');
+    expect(prompt).toContain('〔画面 01:00〕集合与元素');
+    expect(prompt).toContain('没有语音转写');
+    expect(prompt).toContain('老师说');
   });
 
-  it('splits a long transcript into one call per chapter with only that chapter material', async () => {
-    const longTranscript = transcriptWith(
-      [
-        { start: 0, text: `甲${'A'.repeat(70_000)}` },
-        { start: 300, text: `乙${'B'.repeat(70_000)}` }
-      ],
-      600
-    );
-    expect(longTranscript.text.length).toBeGreaterThan(NOTES_SPLIT_THRESHOLD_CHARS);
-
-    const client = new FakeModelClient([
-      JSON.stringify({
-        title: '模型标题一',
-        start: 0,
-        blocks: [{ t: 0, text: '甲章内容', source: 'video' }],
-        keyPoints: ['甲']
-      }),
-      JSON.stringify({
-        title: '模型标题二',
-        start: 0,
-        blocks: [{ t: 300, text: '乙章内容', source: 'video' }],
-        keyPoints: ['乙']
-      })
-    ]);
-
-    const notes = await buildNotes({
-      client,
-      transcript: longTranscript,
-      outline: twoChapterOutline(),
-      screenReads: []
-    });
-
-    expect(client.calls).toHaveLength(2);
-    expect(client.calls[0]?.messages[0]?.content).toContain('AAAA');
-    expect(client.calls[0]?.messages[0]?.content).not.toContain('BBBB');
-    expect(client.calls[1]?.messages[0]?.content).toContain('BBBB');
-    expect(client.calls[1]?.messages[0]?.content).not.toContain('AAAA');
-
-    expect(notes.chapters.map((chapter) => chapter.title)).toEqual(['大纲一', '大纲二']);
-    expect(notes.chapters.map((chapter) => chapter.start)).toEqual([0, 300]);
-    expect(notes.chapters[0]?.blocks[0]?.text).toBe('甲章内容');
-    expect(notes.chapters[1]?.blocks[0]?.text).toBe('乙章内容');
-  });
-
-  it('fails when the model skips a chapter', async () => {
+  it('does not carry any model-written block text into the notes', async () => {
     const client = new FakeModelClient([
       JSON.stringify({
         chapters: [
           {
             title: '大纲一',
             start: 0,
-            blocks: [{ t: 0, text: '只有一章', source: 'video' }],
-            keyPoints: ['要点']
+            blocks: [{ t: 0, text: '老师说过的话。', source: 'video' }],
+            keyPoints: ['一']
+          },
+          {
+            title: '大纲二',
+            start: 300,
+            blocks: [{ t: 300, text: '另一句。', source: 'video' }],
+            keyPoints: ['二']
           }
         ]
+      })
+    ]);
+
+    const notes = await buildNotes({
+      client,
+      outline: twoChapterOutline(),
+      screenReads: SCREEN_READS
+    });
+
+    const everything = notes.chapters.flatMap((chapter) =>
+      chapter.blocks.map((block) => `${block.source}:${block.text}`)
+    );
+    expect(everything).toEqual([
+      'screen:集合与元素',
+      'screen:集合有三个性质',
+      'screen:再看元素的互异性'
+    ]);
+  });
+
+  it('uses the nearest read when a chapter window holds no frame', async () => {
+    const client = new FakeModelClient([keyPointsAnswer()]);
+
+    const notes = await buildNotes({
+      client,
+      outline: twoChapterOutline(),
+      screenReads: [readAt(60, '只有第一章的文字')]
+    });
+
+    expect(notes.chapters[1]?.blocks).toHaveLength(1);
+    expect(notes.chapters[1]?.blocks[0]?.text).toBe('只有第一章的文字');
+  });
+
+  it('splits a very long screen read into schema-sized blocks', async () => {
+    const client = new FakeModelClient([keyPointsAnswer()]);
+    const long = `${'甲'.repeat(700)}。${'乙'.repeat(700)}`;
+
+    const notes = await buildNotes({
+      client,
+      outline: twoChapterOutline(),
+      screenReads: [readAt(10, long)]
+    });
+
+    const blocks = notes.chapters[0]?.blocks ?? [];
+    expect(blocks.length).toBeGreaterThan(1);
+    for (const block of blocks) {
+      expect(block.text.length).toBeLessThanOrEqual(NOTES_MAX_BLOCK_CHARS);
+    }
+    expect(blocks.map((block) => block.text).join('')).toContain('甲');
+  });
+
+  it('caps a dense chapter by sampling its blocks evenly', async () => {
+    const client = new FakeModelClient([keyPointsAnswer()]);
+    const reads = Array.from({ length: 100 }, (_unused, index) => readAt(index, `第 ${index} 条`));
+
+    const notes = await buildNotes({
+      client,
+      outline: twoChapterOutline(),
+      screenReads: reads
+    });
+
+    const blocks = notes.chapters[0]?.blocks ?? [];
+    expect(blocks).toHaveLength(NOTES_MAX_BLOCKS_PER_CHAPTER);
+    expect(blocks[0]?.text).toBe('第 0 条');
+    expect(blocks.at(-1)?.text).toBe('第 99 条');
+  });
+
+  it('fails when the model skips a chapter', async () => {
+    const client = new FakeModelClient([
+      JSON.stringify({
+        chapters: [{ title: '大纲一', start: 0, keyPoints: ['要点'] }]
       })
     ]);
 
     await expect(
       buildNotes({
         client,
-        transcript: SHORT_TRANSCRIPT,
         outline: twoChapterOutline(),
-        screenReads: []
+        screenReads: SCREEN_READS
       })
     ).rejects.toBeInstanceOf(DeckStepError);
   });
 
-  it('exposes the prompt version and split threshold', () => {
-    expect(NOTES_PROMPT_VERSION).toBe(1);
-    expect(NOTES_SPLIT_THRESHOLD_CHARS).toBe(120_000);
+  it('fails when no frame carried readable text', async () => {
+    const client = new FakeModelClient([keyPointsAnswer()]);
+
+    await expect(
+      buildNotes({
+        client,
+        outline: twoChapterOutline(),
+        screenReads: [readAt(10, '   ')]
+      })
+    ).rejects.toBeInstanceOf(DeckStepError);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('exposes the prompt version and block limits', () => {
+    expect(NOTES_PROMPT_VERSION).toBe(2);
+    expect(NOTES_MAX_BLOCK_CHARS).toBe(600);
+    expect(NOTES_MAX_BLOCKS_PER_CHAPTER).toBe(60);
+  });
+});
+
+describe('splitNoteText', () => {
+  it('keeps short text whole and cuts long text at a sentence end', () => {
+    expect(splitNoteText('一句话')).toEqual(['一句话']);
+    const pieces = splitNoteText(`${'甲'.repeat(500)}。${'乙'.repeat(500)}`);
+    expect(pieces).toHaveLength(2);
+    expect(pieces[0]?.endsWith('。')).toBe(true);
   });
 });
 
@@ -177,7 +211,7 @@ describe('renderNotesMarkdown', () => {
           title: '一、集合',
           start: 0,
           blocks: [
-            { t: 65, text: '老师讲的集合定义。', source: 'video' },
+            { t: 65, text: '集合的定义', source: 'screen' },
             { t: 90, text: '题干：下列说法正确的是？', source: 'screen' }
           ],
           keyPoints: ['集合的元素互不相同', '元素没有顺序']
@@ -194,7 +228,7 @@ describe('renderNotesMarkdown', () => {
     expect(markdown).toContain('# 第一讲 集合');
     expect(markdown).toContain('- 时长：62:05');
     expect(markdown).toContain('## 一、集合');
-    expect(markdown).toContain('[01:05] 老师讲的集合定义。');
+    expect(markdown).toContain('[01:05] 〔画面〕集合的定义');
     expect(markdown).toContain('[01:30] 〔画面〕题干：下列说法正确的是？');
     expect(markdown).toContain('**要点**');
     expect(markdown).toContain('- 集合的元素互不相同');
