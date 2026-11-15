@@ -71,7 +71,8 @@ function stageForStep(step: string | undefined): VideoNotesProgress['stage'] {
   }
 }
 
-/** Dependencies handed to an injected butler factory (tests/observability). */export interface ButlerFactoryDependencies {
+/** Dependencies handed to an injected butler factory (tests/observability). */
+export interface ButlerFactoryDependencies {
   workspaceService: WorkspaceService;
   provider: ProviderConfig;
   apiKey: string | null;
