@@ -1,17 +1,17 @@
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, dirname, extname, join } from 'node:path';
-import { FakeModelClient } from '../../../src/main/agent/model-client';
-import { createVideoJobsService, scanVideoFolder } from '../../../src/main/video-notes/jobs';
+import { basename, extname, join } from 'node:path';
 import {
-  createVideoNotesService,
+  createVideoJobsService,
+  LEGACY_QUICK_MESSAGE,
+  scanVideoFolder
+} from '../../../src/main/video-notes/jobs';
+import {
   estimateFromDuration,
   type VideoLessonRunInput,
   type VideoLessonRunOutput
 } from '../../../src/main/video-notes/service';
 import type { VideoNotesStage } from '../../../src/shared/video-notes';
-
-const NOW = () => new Date(2026, 10, 15, 12, 0, 0);
 
 function outputFor(input: VideoLessonRunInput): VideoLessonRunOutput {
   const lessonDir =
@@ -20,13 +20,12 @@ function outputFor(input: VideoLessonRunInput): VideoLessonRunOutput {
     lessonDir,
     title: basename(input.videoPath, extname(input.videoPath)),
     durationSeconds: 600,
-    transcriptChars: 100,
+    screenReadCount: 12,
     noteChars: 50,
     notesPath: join(lessonDir, 'notes.md'),
-    htmlPath: join(lessonDir, 'notes.html'),
-    slidesPath: null,
-    pdfPath: null,
-    reportPath: null,
+    slidesPath: join(lessonDir, 'slides.html'),
+    pdfPath: join(lessonDir, 'slides.pdf'),
+    reportPath: join(lessonDir, 'report.md'),
     usage: { inputTokens: 10, outputTokens: 5 }
   };
 }
@@ -38,33 +37,6 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 3000): Promise<vo
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function variedText(length: number): string {
-  let text = '';
-  for (let index = 0; index < length; index += 1) {
-    text += String.fromCharCode(0x4e00 + ((index * 97 + 13) % 2000));
-  }
-  return text;
-}
-
-const NOTE = [
-  '## 一句话总览',
-  '',
-  '本讲讲集合的定义、元素与子集。',
-  '',
-  '## 一、集合的定义 [00:00]',
-  '',
-  '集合是一些确定对象的整体。'
-].join('\n');
 
 describe('video job queue', () => {
   let root: string;
@@ -87,8 +59,7 @@ describe('video job queue', () => {
       randomId: () => `${++counter}`,
       emitIntervalMs: 0,
       runLesson: async (input) => outputFor(input),
-      estimate: async ({ mode, videoPaths }) =>
-        estimateFromDuration(mode, videoPaths.length, 600),
+      estimate: async ({ videoPaths }) => estimateFromDuration(videoPaths.length, 600),
       refreshIndex: async () => undefined,
       ...overrides
     });
@@ -110,8 +81,8 @@ describe('video job queue', () => {
       }
     });
 
-    const jobA = await jobs.enqueue({ mode: 'quick', videoPaths: [first] });
-    const jobB = await jobs.enqueue({ mode: 'quick', videoPaths: [second] });
+    const jobA = await jobs.enqueue({ videoPaths: [first] });
+    const jobB = await jobs.enqueue({ videoPaths: [second] });
     await waitUntil(() => calls.length === 1);
 
     let list = await jobs.list();
@@ -144,10 +115,8 @@ describe('video job queue', () => {
       }
     });
 
-    const job = await jobs.enqueue({ mode: 'quick', videoPaths: [video] });
-    await expect(
-      jobs.enqueue({ mode: 'quick', videoPaths: [video] })
-    ).rejects.toThrow(/已在队列中/);
+    const job = await jobs.enqueue({ videoPaths: [video] });
+    await expect(jobs.enqueue({ videoPaths: [video] })).rejects.toThrow(/已在队列中/);
     release();
     await jobs.settled(job.id);
     jobs.dispose();
@@ -168,7 +137,7 @@ describe('video job queue', () => {
         })
     });
 
-    const job = await jobs.enqueue({ mode: 'quick', videoPaths: [video] });
+    const job = await jobs.enqueue({ videoPaths: [video] });
     await waitUntil(() => seen !== null);
     const cancelled = await jobs.cancel(job.id);
     expect(cancelled.status).toBe('cancelled');
@@ -187,24 +156,24 @@ describe('video job queue', () => {
       runLesson: async (input) => {
         calls.push(input);
         if (calls.length === 1) {
-          input.onStage?.('transcribe', '正在转写音频…');
-          throw new Error('转写失败。');
+          input.onStage?.('outline', '正在划分章节大纲…');
+          throw new Error('大纲失败。');
         }
         return outputFor(input);
       }
     });
 
-    const job = await jobs.enqueue({ mode: 'quick', videoPaths: [video] });
+    const job = await jobs.enqueue({ videoPaths: [video] });
     const failed = await jobs.settled(job.id);
     expect(failed.status).toBe('failed');
     expect(failed.lessons[0]!.status).toBe('failed');
-    expect(failed.lessons[0]!.step).toBe('transcribe');
+    expect(failed.lessons[0]!.step).toBe('outline');
 
     await jobs.retryLesson(job.id, video);
     const done = await jobs.settled(job.id);
     expect(done.status).toBe('done');
     expect(calls).toHaveLength(2);
-    expect(calls[1]!.fromStep).toBe('transcribe');
+    expect(calls[1]!.fromStep).toBe('outline');
 
     jobs.dispose();
   });
@@ -244,7 +213,7 @@ describe('video job queue', () => {
     ]);
     const jobs = makeJobs();
 
-    const job = await jobs.enqueue({ mode: 'quick', folder: media });
+    const job = await jobs.enqueue({ folder: media });
     expect(job.videoPaths).toEqual([join(media, '2.mp4'), join(media, '10.mp4')]);
     expect(job.lessons).toHaveLength(2);
 
@@ -258,7 +227,7 @@ describe('video job queue', () => {
     jobs.dispose();
   });
 
-  test('maps deck stages onto their pipeline steps', async () => {
+  test('maps stages onto their pipeline steps', async () => {
     const cases: Array<[VideoNotesStage, string]> = [
       ['keyframes', 'keyframes'],
       ['screen', 'screen-read'],
@@ -282,7 +251,7 @@ describe('video job queue', () => {
           throw new Error('步骤失败。');
         }
       });
-      const job = await jobs.enqueue({ mode: 'deck', videoPaths: [video] });
+      const job = await jobs.enqueue({ videoPaths: [video] });
       const failed = await jobs.settled(job.id);
       expect(failed.lessons[0]!.step).toBe(expected);
       jobs.dispose();
@@ -296,11 +265,11 @@ describe('video job queue', () => {
       now: () => new Date(Date.UTC(2026, 10, 15, 3, 0, tick++))
     });
 
-    const first = await jobs.enqueue({ mode: 'quick', videoPaths: [join(root, '1.mp4')] });
+    const first = await jobs.enqueue({ videoPaths: [join(root, '1.mp4')] });
     await jobs.settled(first.id);
-    const second = await jobs.enqueue({ mode: 'quick', videoPaths: [join(root, '2.mp4')] });
+    const second = await jobs.enqueue({ videoPaths: [join(root, '2.mp4')] });
     await jobs.settled(second.id);
-    const third = await jobs.enqueue({ mode: 'quick', videoPaths: [join(root, '3.mp4')] });
+    const third = await jobs.enqueue({ videoPaths: [join(root, '3.mp4')] });
     await jobs.settled(third.id);
 
     const list = await jobs.list();
@@ -328,7 +297,7 @@ describe('video job queue', () => {
         })
     });
 
-    const job = await jobs.enqueue({ mode: 'quick', videoPaths: [video] });
+    const job = await jobs.enqueue({ videoPaths: [video] });
     await waitUntil(() => started);
     await jobs.interruptRunning();
     expect((await jobs.settled(job.id)).status).toBe('interrupted');
@@ -340,70 +309,35 @@ describe('video job queue', () => {
     reloaded.dispose();
   });
 
-  test('reuses a version-1 lesson folder instead of creating a duplicate', async () => {
-    const source = join(root, 'lesson-v1.mp4');
-    await writeFile(source, 'video');
-    const outputDir = join(root, 'out');
-    const lessonDir = join(outputDir, 'lesson-v1');
-    await mkdir(lessonDir, { recursive: true });
-    await writeFile(
-      join(lessonDir, 'meta.json'),
-      `${JSON.stringify(
-        {
-          version: 1,
-          sourcePath: source,
-          folder: 'lesson-v1',
-          title: 'lesson-v1',
-          durationSeconds: 600,
-          transcriptChars: 10,
-          noteChars: 10,
-          transcriptModel: 'mimo',
-          generatedAt: '2026-11-01',
-          summary: '旧版笔记'
-        },
-        null,
-        2
-      )}\n`,
-      'utf8'
-    );
-
-    const service = createVideoNotesService({
-      cacheRoot: join(root, 'cache'),
-      getAsrConfig: async () => ({
-        baseURL: 'https://host/v1',
-        model: 'mimo-v2.5-asr',
-        apiKey: 'test-key'
-      }),
-      getModelClient: async () => new FakeModelClient([NOTE]),
-      getModelName: async () => 'fake-model',
-      ensureTools: async () => undefined,
-      probe: async () => 600,
-      extract: async (_source, destination) => {
-        await writeFile(destination, 'audio', 'utf8');
-      },
-      createAsr: () => async () => variedText(1000),
-      now: NOW
-    });
-
-    const jobs = makeJobs({
-      runLesson: (input) => service.runLesson(input),
-      estimate: (input) =>
-        service.estimate({ mode: input.mode, videoPaths: input.videoPaths })
-    });
-
-    const job = await jobs.enqueue({ mode: 'quick', videoPaths: [source], outputDir });
-    const settled = await jobs.settled(job.id);
-    expect(settled.status).toBe('done');
-    expect(settled.lessons[0]!.lessonDir).toBe(lessonDir);
-    expect(await exists(join(outputDir, 'lesson-v1-2'))).toBe(false);
-
-    const meta = JSON.parse(await readFile(join(lessonDir, 'meta.json'), 'utf8')) as {
-      version: number;
-      mode: string;
-      sourcePath: string;
+  test('loads a legacy quick-mode job as failed with a migration message', async () => {
+    const video = join(root, 'old.mp4');
+    await writeFile(video, 'video');
+    const legacyJob = {
+      id: 'job-old',
+      mode: 'quick',
+      language: 'zh',
+      videoPaths: [video],
+      outputDir: join(root, 'out'),
+      status: 'queued',
+      createdAt: '2026-11-01T00:00:00.000Z',
+      lessons: [{ videoPath: video, status: 'running', usage: { inputTokens: 1, outputTokens: 1 } }],
+      estimate: { tokens: 50_000, minutes: 10 },
+      usage: { inputTokens: 0, outputTokens: 0 }
     };
-    expect(meta).toMatchObject({ version: 2, mode: 'quick', sourcePath: source });
+    await writeFile(join(root, 'jobs.json'), JSON.stringify({ version: 1, jobs: [legacyJob] }));
 
+    const jobs = makeJobs();
+    const [job] = await jobs.list();
+    expect(job).toBeDefined();
+    expect(job!.status).toBe('failed');
+    expect(job!.lessons[0]!.status).toBe('failed');
+    expect(job!.lessons[0]!.message).toBe(LEGACY_QUICK_MESSAGE);
+    // The removed `mode`/`language` fields are dropped on the rewrite.
+    const stored = JSON.parse(await readFile(join(root, 'jobs.json'), 'utf8')) as {
+      jobs: Array<Record<string, unknown>>;
+    };
+    expect(stored.jobs[0]).not.toHaveProperty('mode');
+    expect(stored.jobs[0]).not.toHaveProperty('language');
     jobs.dispose();
   });
 });

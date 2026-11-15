@@ -478,3 +478,26 @@ type VideoJob = {
 - **回看链接依赖浏览器。** `file://...#t=` 需要浏览器支持媒体片段，Chrome 和 Edge 可以。默认浏览器是其他浏览器时，可能只打开视频、不跳到对应时间。
 - **字体随机器变化。** 版面检查和 PDF 在同一台机器上生成，两者一致。换一台没有 Microsoft YaHei 的机器打开 HTML，排版可能略有不同。
 - **MiMo key 还没配置。** 开始验收前要在设置里填好。
+
+## 8. 变更记录（2026-11-15）
+
+### 8.1 删除语音转写与快速笔记
+
+- 删除 MiMo ASR 接入（`src/main/video-notes/mimo.ts`）、旧的快速笔记生成（`src/main/video-notes/notes.ts`，`summarizeNote` 移入 `service.ts`）、`renderLessonHtml` 与课程页的笔记样式。
+- 删除 `TranscriptionSettings`、密钥存储与 IPC 通道（`getTranscriptionConfig`/`saveTranscriptionConfig`），设置页的「语音转写」整块内容随之去掉。
+- 删除 `VideoNotesMode`、`language` 字段与 `AUDIO_EXTENSIONS`；任务队列、预估、界面、测试里不再出现模式或语言选项。
+- 已保存的旧任务如果是快速笔记模式，加载时标为失败并提示「快速笔记已移除，请重新生成课件」；旧课的 `notes.html` 只在历史记录里保留打开入口。
+
+### 8.2 只看画面
+
+- 课件内容只来自关键帧和读屏结果：大纲 `{kind:'infer'}`、屏幕文字 `{kind:'screen',t}`、外部知识 `{kind:'ext'}`，任何产物里都不再出现 `{kind:'video'}`（schema 保留该分支仅为兼容旧存档）。
+- 笔记正文逐字复制读屏结果（保留〔遮挡〕），`source` 固定为 `'screen'`；要点只概括画面上的内容，提示词明确禁止「老师说」这类说法。
+- 补全卡片过滤掉语音来源，没有来源的卡片直接丢弃；成品课件和核查提示词同样禁止引用讲话内容。
+- 所有提示词版本号升到 2。流水线步骤固定为 probe → keyframes → screen-read → outline → notes → enrich → factcheck-a → compose → render → layout → factcheck-b → export → report。
+
+### 8.3 产物与报告
+
+- `meta.json` 升到 v3：新增 `screenReadCount`、`keyframeCount`、`slideCount`、`slidesPath`、`pdfPath`、`reportPath`、`noteChars`，不再记录转写字数与分段；读取时仍兼容 v1/v2。
+- 课程索引对 v3 课显示「N 条画面文字」，只有旧课才显示「字转录」。
+- `report.md` 去掉转写字数和分段数，改为「画面文字 N 条」和「依据：只有画面文字，没有语音转写」；限制一节写明不覆盖语音内容、可能漏页和抄错。
+- 预估只保留课件用量：每分钟视频 11,000 tokens，生成时间按视频时长的 1.5 倍估算（最少 1 分钟）；时长未知时按每讲 30 分钟视频估算。

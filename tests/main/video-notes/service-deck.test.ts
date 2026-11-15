@@ -33,21 +33,8 @@ const OUTLINE = JSON.stringify({
 
 const NOTES = JSON.stringify({
   chapters: [
-    {
-      title: '集合的定义',
-      start: 0,
-      blocks: [
-        { t: 0, text: '集合是一些确定对象的整体。', source: 'video' },
-        { t: 120, text: '集合 A = {1, 2, 3}', source: 'screen' }
-      ],
-      keyPoints: ['集合由确定的元素组成']
-    },
-    {
-      title: '子集',
-      start: 300,
-      blocks: [{ t: 360, text: '子集的每个元素都属于原集合。', source: 'video' }],
-      keyPoints: ['子集关系要逐个元素判断']
-    }
+    { title: '集合的定义', start: 0, keyPoints: ['集合由确定的元素组成'] },
+    { title: '子集', start: 300, keyPoints: ['子集关系要逐个元素判断'] }
   ]
 });
 
@@ -75,7 +62,7 @@ const CARDS = JSON.stringify({
       ],
       pitfall: '只看元素个数判断子集关系。',
       transfer: '换一个新集合，逐元素检查归属。',
-      sources: [{ kind: 'video', t: 360 }]
+      sources: [{ kind: 'screen', t: 480 }]
     }
   ]
 });
@@ -85,8 +72,8 @@ const COMPOSE = JSON.stringify([
     type: 'points',
     id: 'p1',
     title: '集合由确定的元素组成',
-    sources: [{ kind: 'video', t: 0 }],
-    points: [{ text: '元素必须确定', source: { kind: 'video', t: 0 } }]
+    sources: [{ kind: 'screen', t: 120 }],
+    points: [{ text: '元素必须确定', source: { kind: 'screen', t: 120 } }]
   }
 ]);
 
@@ -96,19 +83,11 @@ const REFIT = JSON.stringify({
       type: 'points',
       id: 'p1',
       title: '重排后的页面',
-      sources: [{ kind: 'video', t: 0 }],
-      points: [{ text: '拆开后的要点', source: { kind: 'video', t: 0 } }]
+      sources: [{ kind: 'screen', t: 120 }],
+      points: [{ text: '拆开后的要点', source: { kind: 'screen', t: 120 } }]
     }
   ]
 });
-
-function variedText(length: number): string {
-  let text = '';
-  for (let index = 0; index < length; index += 1) {
-    text += String.fromCharCode(0x4e00 + ((index * 97 + 13) % 2000));
-  }
-  return text;
-}
 
 function promptOf(request: ModelRequest): string {
   return request.messages.map((message) => message.content).join('\n');
@@ -258,16 +237,10 @@ function makeService(
         Array.from({ length: countSlides(html) }, (_unused, index) => ({ index, bottom: 500 }))
       ));
   const service = createVideoNotesService({
-    cacheRoot: join(fixtureData.root, 'cache'),
-    getAsrConfig: async () => ({ baseURL: 'https://host/v1', model: 'mimo-asr', apiKey: 'key' }),
     getModelClient: async () => client,
     getModelName: async () => 'fake-model',
     ensureTools: async () => undefined,
     probe: async () => DURATION_SECONDS,
-    extract: async (_source, destination) => {
-      await writeFile(destination, 'audio', 'utf8');
-    },
-    createAsr: () => async () => variedText(1000),
     extractFrames: async ({ outDir }) => {
       await mkdir(outDir, { recursive: true });
       const frames = [
@@ -304,10 +277,8 @@ function runDeck(
   extra: { signal?: AbortSignal; lessonDir?: string; onStage?: Parameters<typeof service.runLesson>[0]['onStage'] } = {}
 ): Promise<VideoLessonRunOutput> {
   return service.runLesson({
-    mode: 'deck',
     videoPath: data.video,
     outputDir: data.outputDir,
-    language: 'zh',
     signal: extra.signal ?? new AbortController().signal,
     ...(extra.lessonDir === undefined ? {} : { lessonDir: extra.lessonDir }),
     ...(extra.onStage === undefined ? {} : { onStage: extra.onStage })
@@ -316,7 +287,6 @@ function runDeck(
 
 const EXPECTED_STEPS = [
   'probe',
-  'transcribe',
   'keyframes',
   'screen-read',
   'outline',
@@ -338,7 +308,7 @@ describe('video notes deck pipeline', () => {
     await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
 
-  test('writes every deck artifact and a v2 meta with the deck mode', async () => {
+  test('writes every deck artifact and a v3 screen-only meta', async () => {
     const data = await fixture();
     root = data.root;
     const { client } = scriptedClient();
@@ -350,17 +320,17 @@ describe('video notes deck pipeline', () => {
     expect(result.slidesPath).toBe(join(lessonDir, 'slides.html'));
     expect(result.pdfPath).toBe(join(lessonDir, 'slides.pdf'));
     expect(result.reportPath).toBe(join(lessonDir, 'report.md'));
-    expect(result.htmlPath).toBe('');
+    expect(result.screenReadCount).toBe(2);
 
-    expect(await exists(join(lessonDir, 'transcript.json'))).toBe(true);
     expect(await exists(join(lessonDir, 'notes.md'))).toBe(true);
-    expect(await exists(result.slidesPath!)).toBe(true);
-    expect(await exists(result.pdfPath!)).toBe(true);
-    expect(await exists(result.reportPath!)).toBe(true);
-    // Deck mode never writes the quick-mode HTML page.
+    expect(await exists(result.slidesPath)).toBe(true);
+    expect(await exists(result.pdfPath)).toBe(true);
+    expect(await exists(result.reportPath)).toBe(true);
+    // Nothing writes a transcript or a quick-mode HTML page any more.
+    expect(await exists(join(lessonDir, 'transcript.json'))).toBe(false);
     expect(await exists(join(lessonDir, 'notes.html'))).toBe(false);
 
-    const slidesHtml = await readFile(result.slidesPath!, 'utf8');
+    const slidesHtml = await readFile(result.slidesPath, 'utf8');
     const notes = await readFile(join(lessonDir, 'notes.md'), 'utf8');
     expect(notes).toContain('## 集合的定义');
     expect(notes).toContain('〔画面〕集合 A = {1, 2, 3}');
@@ -368,15 +338,17 @@ describe('video notes deck pipeline', () => {
 
     const meta = JSON.parse(await readFile(join(lessonDir, 'meta.json'), 'utf8')) as {
       version: number;
-      mode: string;
+      screenReadCount: number;
+      keyframeCount: number;
       slidesPath: string;
       pdfPath: string;
       reportPath: string;
       slideCount: number;
       summary: string;
     };
-    expect(meta.version).toBe(2);
-    expect(meta.mode).toBe('deck');
+    expect(meta.version).toBe(3);
+    expect(meta.screenReadCount).toBe(2);
+    expect(meta.keyframeCount).toBe(2);
     expect(meta.slidesPath).toBe(result.slidesPath);
     expect(meta.pdfPath).toBe(result.pdfPath);
     expect(meta.reportPath).toBe(result.reportPath);
@@ -385,10 +357,11 @@ describe('video notes deck pipeline', () => {
     expect(meta.slideCount).toBe(countSlides(slidesHtml));
     expect(meta.summary).toContain('集合');
 
-    const report = await readFile(result.reportPath!, 'utf8');
+    const report = await readFile(result.reportPath, 'utf8');
     expect(report).toContain('# 质量报告');
-    expect(report).toContain('完整课件');
+    expect(report).toContain('依据：只有画面文字，没有语音转写');
     expect(report).toContain('课件页数：5 页');
+    expect(report).toContain('画面文字：2 条');
 
     // 8 model calls (screen, outline, notes, enrich, check-a, 2× compose, check-b).
     expect(result.usage).toEqual({ inputTokens: 800, outputTokens: 400 });
@@ -425,8 +398,6 @@ describe('video notes deck pipeline', () => {
 
     expect(stages).toEqual([
       'probe',
-      'audio',
-      'transcribe',
       'keyframes',
       'screen',
       'outline',
@@ -476,7 +447,7 @@ describe('video notes deck pipeline', () => {
     await expect(runDeck(service, data)).rejects.toThrow(/compose|课件步骤/);
 
     const lessonDir = join(data.outputDir, '01-集合');
-    for (const step of ['probe', 'transcribe', 'keyframes', 'screen-read', 'outline', 'notes', 'enrich', 'factcheck-a']) {
+    for (const step of ['probe', 'keyframes', 'screen-read', 'outline', 'notes', 'enrich', 'factcheck-a']) {
       expect(await exists(join(lessonDir, 'work', `${step}.json`))).toBe(true);
     }
     expect(await exists(join(lessonDir, 'work', 'compose.json'))).toBe(false);
@@ -503,7 +474,7 @@ describe('video notes deck pipeline', () => {
     });
 
     const lessonDir = join(data.outputDir, '01-集合');
-    for (const step of ['probe', 'transcribe', 'keyframes', 'screen-read']) {
+    for (const step of ['probe', 'keyframes', 'screen-read']) {
       expect(await exists(join(lessonDir, 'work', `${step}.json`))).toBe(true);
     }
     expect(await exists(join(lessonDir, 'work', 'outline.json'))).toBe(false);

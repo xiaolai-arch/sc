@@ -56,7 +56,7 @@ describe('video-note checkpoints', () => {
     const first = await runStep({
       lessonDir: root,
       step: 'render',
-      fingerprint: fingerprintOf({ transcript: 'a' }),
+      fingerprint: fingerprintOf({ screenReads: 'a' }),
       run,
       now: NOW
     });
@@ -66,7 +66,7 @@ describe('video-note checkpoints', () => {
     const second = await runStep({
       lessonDir: root,
       step: 'render',
-      fingerprint: fingerprintOf({ transcript: 'a' }),
+      fingerprint: fingerprintOf({ screenReads: 'a' }),
       run,
       now: NOW
     });
@@ -78,7 +78,7 @@ describe('video-note checkpoints', () => {
     const third = await runStep({
       lessonDir: root,
       step: 'render',
-      fingerprint: fingerprintOf({ transcript: 'b' }),
+      fingerprint: fingerprintOf({ screenReads: 'b' }),
       run,
       now: NOW
     });
@@ -130,7 +130,7 @@ describe('video-note checkpoints', () => {
       usage: { inputTokens: 0, outputTokens: 0 },
       finishedAt: NOW().toISOString()
     });
-    await expect(readCheckpoint(root, 'transcribe')).resolves.toBeNull();
+    await expect(readCheckpoint(root, 'keyframes')).resolves.toBeNull();
 
     await writeFile(
       join(root, 'work', 'probe.json'),

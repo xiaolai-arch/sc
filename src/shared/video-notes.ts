@@ -1,13 +1,10 @@
 /**
- * The local "video notes" utility: turn a course video into a Markdown note
- * (plus a self-contained HTML page) using MiMo ASR and the configured model.
- * Everything runs on this machine; the only network calls are the ASR endpoint
- * and the user's configured model provider.
+ * The local "video to deck" utility: turn a course video into a paged deck
+ * built from keyframes and the text visible on screen. Everything runs on this
+ * machine; the only network calls go to the configured model provider.
  */
 
-export type VideoNotesLanguage = 'auto' | 'zh' | 'en';
-
-/** Media formats the video-note pipeline can probe and transcribe. */
+/** Video formats the pipeline can probe and read frames from. */
 export const VIDEO_EXTENSIONS = [
   '.mp4',
   '.mkv',
@@ -23,48 +20,28 @@ export const VIDEO_EXTENSIONS = [
   '.rmvb'
 ] as const;
 
-export const AUDIO_EXTENSIONS = [
-  '.mp3',
-  '.wav',
-  '.m4a',
-  '.aac',
-  '.flac',
-  '.ogg',
-  '.opus',
-  '.wma'
-] as const;
-
-export const MEDIA_EXTENSIONS = [...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS] as const;
-
 export function isSupportedMedia(path: string): boolean {
   const lower = path.toLowerCase();
-  return MEDIA_EXTENSIONS.some((extension) => lower.endsWith(extension));
+  return VIDEO_EXTENSIONS.some((extension) => lower.endsWith(extension));
 }
 
-/** Quick notes (existing behaviour) or the full deck pipeline (preview). */
-export type VideoNotesMode = 'quick' | 'deck';
-
 export interface VideoNotesInput {
-  /** Absolute paths to local video/audio files. */
+  /** Absolute paths to local video files. */
   videoPaths: string[];
   /**
-   * Destination root. Lesson folders, transcript JSON and course index live
-   * here. Defaults to a `笔记` folder next to the first video.
+   * Destination root. Lesson folders and the course index live here. Defaults
+   * to a `笔记` folder next to the first video.
    */
   outputDir?: string;
-  /** ASR language hint; defaults to auto. */
-  language?: VideoNotesLanguage;
 }
 
 /** Queue input: files and/or a folder scanned recursively by the main process. */
 export interface VideoNotesEnqueueInput {
-  mode?: VideoNotesMode;
-  /** Absolute paths to local video/audio files. */
+  /** Absolute paths to local video files. */
   videoPaths?: string[];
-  /** Absolute folder path; scanned recursively for supported media files. */
+  /** Absolute folder path; scanned recursively for supported video files. */
   folder?: string;
   outputDir?: string;
-  language?: VideoNotesLanguage;
 }
 
 export interface VideoNotesEstimate {
@@ -76,13 +53,10 @@ export interface VideoNotesEstimate {
 
 export type VideoNotesStage =
   | 'probe'
-  | 'audio'
-  | 'transcribe'
-  | 'notes'
-  | 'html'
   | 'keyframes'
   | 'screen'
   | 'outline'
+  | 'notes'
   | 'enrich'
   | 'factcheck'
   | 'compose'
@@ -100,7 +74,7 @@ export interface VideoNotesProgress {
   videoPath: string;
   stage: VideoNotesStage;
   message: string;
-  /** Progress within the current stage (e.g. ASR chunks). */
+  /** Progress within the current stage (e.g. screen-read batches). */
   current?: number;
   total?: number;
 }
@@ -110,9 +84,11 @@ export interface VideoNotesLesson {
   lessonDir: string;
   title: string;
   durationSeconds: number;
+  /** Legacy v1/v2 lessons only; new decks count screen reads instead. */
   transcriptChars: number;
   noteChars: number;
   notesPath: string;
+  /** Legacy quick lessons only; empty for deck lessons. */
   htmlPath: string;
 }
 
@@ -154,6 +130,7 @@ export interface VideoJobLesson {
   lessonDir?: string;
   title?: string;
   notesPath?: string;
+  /** Legacy quick lessons kept a notes.html; nothing writes it any more. */
   htmlPath?: string;
   slidesPath?: string | null;
   pdfPath?: string | null;
@@ -163,29 +140,13 @@ export interface VideoJobLesson {
 
 export interface VideoJob {
   id: string;
-  mode: VideoNotesMode;
   videoPaths: string[];
   outputDir: string;
-  language: VideoNotesLanguage;
   status: VideoJobStatus;
   createdAt: string;
   lessons: VideoJobLesson[];
   estimate: { tokens: number; minutes: number };
   usage: VideoNotesUsage;
-}
-
-/** Renderer-facing transcription endpoint, including whether a key is saved. */
-export interface TranscriptionConfigView {
-  baseURL: string;
-  model: string;
-  hasApiKey: boolean;
-}
-
-export interface SaveTranscriptionConfigInput {
-  baseURL: string;
-  model: string;
-  /** `undefined` keeps the saved key; an empty string clears it. */
-  apiKey?: string;
 }
 
 export interface VideoNotesApi {
@@ -199,8 +160,8 @@ export interface VideoNotesApi {
   /** Opens the native folder picker; null means the user cancelled. */
   pickOutputDirectory(): Promise<string | null>;
   /**
-   * Legacy blocking call. Kept for older renderers; it now enqueues a quick
-   * job and resolves with its result once the job settles.
+   * Legacy blocking call. Kept for older renderers; it now enqueues a deck job
+   * and resolves with its result once the job settles.
    */
   generateVideoNotes(
     input: VideoNotesInput,

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { ModelClient, ModelRequest } from '../../agent/model-client';
 import { createAbortError } from '../frames';
-import type { Transcript } from '../mimo';
+import { formatScreenLabel, type ScreenRead } from '../screen-read';
 import {
   deckNotesSchema,
   enrichCardSchema,
@@ -22,12 +22,12 @@ import { deckSchema, validateDeck, DeckValidationError, type Deck } from './sche
 
 /**
  * Independent fact-check calls. Step 8 checks the notes and cards against the
- * transcript and then revises them; step 12 checks every slide against the
+ * on-screen text and then revises them; step 12 checks every slide against the
  * already verified notes. Each call uses a fresh conversation (no writer
  * history) and is expected to prefer missing a problem over inventing one.
  */
 
-export const FACTCHECK_PROMPT_VERSION = 1;
+export const FACTCHECK_PROMPT_VERSION = 2;
 
 // ---------------------------------------------------------------------------
 // Prompt material
@@ -39,12 +39,14 @@ function formatClock(seconds: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }
 
-function formatTranscript(transcript: Transcript): string {
-  if (transcript.chunks.length === 0) {
-    return transcript.text.trim() || '（没有转写。）';
-  }
-  return transcript.chunks
-    .map((chunk) => `- [${formatClock(chunk.start)}] ${chunk.text}`)
+/** The evidence: what the frames actually show, in time order. */
+function formatScreenReads(reads: readonly ScreenRead[]): string {
+  const ordered = [...reads]
+    .filter((read) => read.text.trim().length > 0)
+    .sort((a, b) => a.t - b.t);
+  if (ordered.length === 0) return '（没有画面文字。）';
+  return ordered
+    .map((read) => `- ${formatScreenLabel(read.t)}${read.text}`)
     .join('\n');
 }
 
@@ -54,8 +56,7 @@ function formatNotes(notes: DeckNotes): string {
   for (const chapter of notes.chapters) {
     lines.push(`### ${chapter.title}`);
     chapter.blocks.forEach((block, index) => {
-      const tag = block.source === 'screen' ? '画面' : '视频';
-      lines.push(`- ${chapter.title}/${index + 1} [${formatClock(block.t)}][${tag}] ${block.text}`);
+      lines.push(`- ${chapter.title}/${index + 1} [${formatClock(block.t)}][画面] ${block.text}`);
     });
     lines.push(`要点：${chapter.keyPoints.join('；')}`);
   }
@@ -98,10 +99,14 @@ function formatCards(cards: readonly EnrichCard[]): string {
 }
 
 /** The material listing for step 8, shared by the check and revision prompts. */
-function materialSections(notes: DeckNotes, cards: readonly EnrichCard[], transcript: Transcript): string {
+function materialSections(
+  notes: DeckNotes,
+  cards: readonly EnrichCard[],
+  screenReads: readonly ScreenRead[]
+): string {
   return [
-    '## 转写',
-    formatTranscript(transcript),
+    '## 画面文字（唯一的证据）',
+    formatScreenReads(screenReads),
     '',
     '## 笔记',
     formatNotes(notes),
@@ -115,30 +120,31 @@ function materialSections(notes: DeckNotes, cards: readonly EnrichCard[], transc
 export function buildMaterialCheckPrompt(
   notes: DeckNotes,
   cards: readonly EnrichCard[],
-  transcript: Transcript
+  screenReads: readonly ScreenRead[]
 ): string {
   return [
-    '你是讲课视频课件的独立核查员。下面给出转写、笔记和补充卡片。笔记和卡片是另一个模型写的，写作时没有看过转写。',
-    '你的任务：找出笔记和卡片里与转写矛盾、或者转写里根本没有依据的说法。',
+    '你是讲课视频课件的独立核查员。下面给出画面文字、笔记和补充卡片。笔记和卡片是另一个模型写的，写作时只看到了画面文字。',
+    '这段视频没有语音材料：课件只依据画面内容，任何声称「老师讲过」的说法都没有依据。',
+    '你的任务：找出笔记和卡片里与画面文字矛盾、或者画面文字里根本没有依据的说法。',
     '',
     '核查规则：',
-    '1. 只挑真正的问题。转写没有明确反驳、只是没有讲到的内容，只有在它被当成视频内容陈述时才记问题。',
-    '2. problem 里必须引用转写的原文片段作为证据（照抄原句），并说明为什么它是问题。',
+    '1. 只挑真正的问题。画面文字没有明确反驳、只是没有出现的内容，只有在它被当成画面内容陈述时才记问题。',
+    '2. problem 里必须引用画面文字的原文片段作为证据（照抄原句），并说明为什么它是问题。',
     '3. 宁可漏报，也不要编造错误：没有把握就不报，不要为了凑数硬找问题。',
-    '4. 与转写直接矛盾的，severity 用 "error"；说得太绝对、缺少限定、转写只是部分支持的，用 "warn"。',
+    '4. 与画面文字直接矛盾的，severity 用 "error"；具体细节在画面上找不到依据、说得太绝对的，用 "warn"。',
     '5. 每条问题的字段：',
     '   - target：笔记的问题用 "notes"，补充卡片的问题用 "card"；',
     '   - ref：笔记用「章节标题/段落序号」，段落序号从 1 开始；卡片用卡片标题；',
     '   - claim：被质疑的那句话，照抄原文；',
-    '   - problem：错在哪里，并引用转写原文作为证据；',
+    '   - problem：错在哪里，并引用画面文字原文作为证据；',
     '   - severity："error" 或 "warn"。',
     '6. 没有问题就输出 {"issues":[]}。',
     '',
     jsonOutputRules(),
     '',
-    '输出格式：{"issues":[{"target":"notes","ref":"章节标题/1","claim":"原文","problem":"转写原文是……，与这句矛盾","severity":"error"}]}',
+    '输出格式：{"issues":[{"target":"notes","ref":"章节标题/1","claim":"原文","problem":"画面文字是……，与这句矛盾","severity":"error"}]}',
     '',
-    materialSections(notes, cards, transcript)
+    materialSections(notes, cards, screenReads)
   ].join('\n');
 }
 
@@ -147,30 +153,32 @@ export function buildRevisionPrompt(
   notes: DeckNotes,
   cards: readonly EnrichCard[],
   issues: readonly FactIssue[],
-  transcript: Transcript
+  screenReads: readonly ScreenRead[]
 ): string {
   const issueLines = issues.map(
     (issue) =>
       `- [${issue.severity}][${issue.target}] ${issue.ref}：${issue.claim} —— ${issue.problem}`
   );
   return [
-    '你是课件的内容编辑。下面给出转写、笔记、补充卡片和核查发现的问题。请逐条处理这些问题，输出修订后的笔记和补充卡片。',
+    '你是课件的内容编辑。下面给出画面文字、笔记、补充卡片和核查发现的问题。请逐条处理这些问题，输出修订后的笔记和补充卡片。',
     '',
     '修改规则：',
-    '1. error：必须改正或删除。能依据转写改正的，按转写改；转写里没有依据的，删掉那句话或整条卡片。',
+    '1. error：必须改正或删除。能依据画面文字改正的，按画面文字改；画面文字里没有依据的，删掉那句话或整条卡片。',
     '2. warn：收紧表述，补上限定条件，删掉绝对化的说法。',
     '3. 不要改动章节标题和章节顺序：notes.chapters 的 title 必须和输入完全一致。',
-    '4. 不要新增转写里没有的事实；确实要保留的外部知识，来源必须标成扩展（ext）。',
-    '5. 没有问题的内容原样保留，不要顺手改写。',
+    '4. 不要新增画面文字里没有的事实；确实要保留的外部知识，来源必须标成扩展（ext）。',
+    '5. 笔记的 blocks 逐字沿用画面文字，source 一律写 "screen"；不要写「老师说」「视频里讲」这类话。',
+    '6. 补充卡片的 sources 只能用 screen、infer 或 ext，不能用 video。',
+    '7. 没有问题的内容原样保留，不要顺手改写。',
     '',
     jsonOutputRules(),
     '',
-    '输出格式：{"notes":{"chapters":[...]},"cards":[{"chapter":"章节标题","title":"结论","principle":"原理","examples":[{"right":"例子"}],"pitfall":"易错点","transfer":"迁移","sources":[{"kind":"video","t":10}]}]}',
+    '输出格式：{"notes":{"chapters":[...]},"cards":[{"chapter":"章节标题","title":"结论","principle":"原理","examples":[{"right":"例子"}],"pitfall":"易错点","transfer":"迁移","sources":[{"kind":"screen","t":10}]}]}',
     '',
     '## 核查问题',
     issueLines.length > 0 ? issueLines.join('\n') : '（没有需要处理的问题，原样返回。）',
     '',
-    materialSections(notes, cards, transcript)
+    materialSections(notes, cards, screenReads)
   ].join('\n');
 }
 
@@ -181,12 +189,13 @@ export function buildDeckCheckPrompt(deck: Deck, notes: DeckNotes): string {
     '请逐页核对课件的说法是否有笔记依据，并在必要时给出修订后的完整课件。',
     '',
     '核查规则：',
-    '1. 来源标为 video 或 screen 的页，内容必须能在笔记里找到依据；与笔记矛盾、或笔记里没有依据的，记为问题。',
-    '2. 内容来自视频以外时，来源必须标 ext；由视频内容直接推出的，标 infer。用 ext 或 infer 的页里不能出现「老师说」「视频里讲」这类话。',
-    '3. 有问题的页：能改的，在 deck 里改正说法、补上或改正来源，或直接删掉无法确认的页。',
-    '4. issues 只列修订后仍然无法解决的问题；已经改好的不要再列。每条写 target "deck"、ref 用页的 id、claim 照抄原句、problem 写清依据（引用笔记原文）、severity 用 "error" 或 "warn"。',
-    '5. 输出完整的 deck：保持 version、title、sourcePath、durationSeconds、各章标题和页 id 不变，只改必要的地方；不能确认的页保留内容，并把 status 设为 "contested"。',
-    '6. 没有问题就原样返回 deck，issues 输出空数组。',
+    '1. 来源标为 screen 的页，内容必须能在笔记里找到依据；与笔记矛盾、或笔记里没有依据的，记为问题。',
+    '2. 由画面内容直接推出的，标 infer；画面以外的知识，标 ext，并写清出处。任何页都不能标 video：这段视频没有语音材料。',
+    '3. 用 ext 或 infer 的页里不能出现「老师说」「视频里讲」这类话。',
+    '4. 有问题的页：能改的，在 deck 里改正说法、补上或改正来源，或直接删掉无法确认的页。',
+    '5. issues 只列修订后仍然无法解决的问题；已经改好的不要再列。每条写 target "deck"、ref 用页的 id、claim 照抄原句、problem 写清依据（引用笔记原文）、severity 用 "error" 或 "warn"。',
+    '6. 输出完整的 deck：保持 version、title、sourcePath、durationSeconds、各章标题和页 id 不变，只改必要的地方；不能确认的页保留内容，并把 status 设为 "contested"。',
+    '7. 没有问题就原样返回 deck，issues 输出空数组。',
     '',
     jsonOutputRules(),
     '',
@@ -208,20 +217,22 @@ export interface CheckMaterialOptions {
   client: ModelClient;
   notes: DeckNotes;
   cards: EnrichCard[];
-  transcript: Transcript;
+  screenReads: ScreenRead[];
   signal?: AbortSignal;
   timeoutMs?: number;
 }
 
 /**
  * Finds claims in the notes and cards that contradict or are unsupported by
- * the transcript. Issues whose target is not `notes` or `card` belong to a
+ * the on-screen text. Issues whose target is not `notes` or `card` belong to a
  * different step and are dropped here.
  */
 export async function checkMaterial(options: CheckMaterialOptions): Promise<FactcheckResult> {
-  const { client, notes, cards, transcript, signal, timeoutMs = DECK_MODEL_TIMEOUT_MS } = options;
+  const { client, notes, cards, screenReads, signal, timeoutMs = DECK_MODEL_TIMEOUT_MS } = options;
   const request: ModelRequest = {
-    messages: [{ role: 'user', content: buildMaterialCheckPrompt(notes, cards, transcript) }],
+    messages: [
+      { role: 'user', content: buildMaterialCheckPrompt(notes, cards, screenReads) }
+    ],
     noTools: true,
     timeoutMs,
     signal
@@ -260,7 +271,7 @@ export interface ReviseMaterialOptions {
   notes: DeckNotes;
   cards: EnrichCard[];
   issues: FactIssue[];
-  transcript: Transcript;
+  screenReads: ScreenRead[];
   signal?: AbortSignal;
   timeoutMs?: number;
 }
@@ -276,9 +287,12 @@ export interface RevisedMaterial {
  * answer fails the step.
  */
 export async function reviseMaterial(options: ReviseMaterialOptions): Promise<RevisedMaterial> {
-  const { client, notes, cards, issues, transcript, signal, timeoutMs = DECK_MODEL_TIMEOUT_MS } = options;
+  const { client, notes, cards, issues, screenReads, signal, timeoutMs = DECK_MODEL_TIMEOUT_MS } =
+    options;
   const request: ModelRequest = {
-    messages: [{ role: 'user', content: buildRevisionPrompt(notes, cards, issues, transcript) }],
+    messages: [
+      { role: 'user', content: buildRevisionPrompt(notes, cards, issues, screenReads) }
+    ],
     noTools: true,
     timeoutMs,
     signal

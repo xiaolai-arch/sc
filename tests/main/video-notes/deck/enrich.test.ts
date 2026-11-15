@@ -7,7 +7,6 @@ import {
   ENRICH_SPLIT_THRESHOLD
 } from '../../../../src/main/video-notes/deck/enrich';
 import { DECK_MODEL_TIMEOUT_MS, DeckStepError } from '../../../../src/main/video-notes/deck/prompts';
-import type { Transcript } from '../../../../src/main/video-notes/mimo';
 
 /** Notes and outline share their chapter titles; the enrich step keys on them. */
 function outlineWith(titles: readonly string[]): Outline {
@@ -26,24 +25,9 @@ function notesWith(titles: readonly string[]): DeckNotes {
     chapters: titles.map((title, index) => ({
       title,
       start: index * 600,
-      blocks: [{ t: index * 600, text: `${title}的讲解内容`, source: 'video' }],
+      blocks: [{ t: index * 600, text: `${title}的讲解内容`, source: 'screen' }],
       keyPoints: [`${title}要点`]
     }))
-  };
-}
-
-function transcriptOf(): Transcript {
-  return {
-    source: 'lesson.mp4',
-    duration: 3600,
-    language: 'zh',
-    model: 'mimo',
-    chars: 28,
-    text: '第一章开场。第二章讲解。',
-    chunks: [
-      { start: 0, text: '第一章开场。' },
-      { start: 600, text: '第二章讲解。' }
-    ]
   };
 }
 
@@ -67,8 +51,7 @@ function options(client: FakeModelClient, titles: readonly string[]) {
   return {
     client,
     notes: notesWith(titles),
-    outline: outlineWith(titles),
-    transcript: transcriptOf()
+    outline: outlineWith(titles)
   };
 }
 
@@ -91,6 +74,27 @@ describe('buildEnrichment', () => {
     expect(prompt).toContain('易错点');
     expect(prompt).toContain('迁移');
     expect(prompt).toContain('扩展');
+    // The cards explain visible material; nothing may be attributed to speech.
+    expect(prompt).toContain('没有语音');
+    expect(prompt).toContain('老师说');
+    expect(prompt).toContain('不要使用 {"kind":"video"}');
+  });
+
+  it('strips video sources and drops cards left without any source', async () => {
+    const withVideo: EnrichCard = {
+      ...card('第一章', '带视频来源'),
+      sources: [{ kind: 'video', t: 10 }, { kind: 'screen', t: 20 }]
+    };
+    const withoutSource: EnrichCard = {
+      ...card('第一章', '只有视频来源'),
+      sources: [{ kind: 'video', t: 30 }]
+    };
+    const client = new FakeModelClient([answer([withVideo, withoutSource])]);
+
+    const result = await buildEnrichment(options(client, ['第一章', '第二章']));
+
+    expect(result.cards.map((item) => item.title)).toEqual(['带视频来源']);
+    expect(result.cards[0]?.sources).toEqual([{ kind: 'screen', t: 20 }]);
   });
 
   it('splits into two calls above the chapter threshold and merges the cards', async () => {

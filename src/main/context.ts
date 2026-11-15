@@ -38,8 +38,40 @@ import { listDirectories, listMarkdownFiles, readFileOrNull } from './workspace/
 import { assertSafeSegment, reviewsDir, workspacesDir } from './workspace/paths';
 import { parseReviewFile } from './workspace/records/reviews';
 
-/** Dependencies handed to an injected butler factory (tests/observability). */
-export interface ButlerFactoryDependencies {
+/** Maps a queued lesson's checkpoint step back to the progress stage. */
+function stageForStep(step: string | undefined): VideoNotesProgress['stage'] {
+  switch (step) {
+    case 'keyframes':
+      return 'keyframes';
+    case 'screen-read':
+      return 'screen';
+    case 'outline':
+      return 'outline';
+    case 'notes':
+      return 'notes';
+    case 'enrich':
+      return 'enrich';
+    case 'factcheck-a':
+    case 'factcheck-b':
+      return 'factcheck';
+    case 'compose':
+      return 'compose';
+    case 'render':
+      return 'render';
+    case 'layout':
+      return 'layout';
+    case 'export':
+      return 'pdf';
+    case 'report':
+      return 'report';
+    case 'done':
+      return 'done';
+    default:
+      return 'probe';
+  }
+}
+
+/** Dependencies handed to an injected butler factory (tests/observability). */export interface ButlerFactoryDependencies {
   workspaceService: WorkspaceService;
   provider: ProviderConfig;
   apiKey: string | null;
@@ -90,8 +122,6 @@ export interface CreateAppContextOptions {
   /** Offline model seam used by integration tests. Never used for network here. */
   modelClient?: ModelClient | null;
   secretStore?: SecretStore;
-  /** Separate credential file for the ASR endpoint; never exposed to the renderer. */
-  transcriptionSecretStore?: SecretStore;
   /** Test seam for the whole video-notes pipeline. */
   videoNotesService?: VideoNotesService;
   /**
@@ -108,7 +138,6 @@ export interface AppContext {
   state: JsonStateStore;
   settings: SettingsService;
   secrets: SecretStore;
-  transcriptionSecrets: SecretStore;
   videoNotes: VideoNotesService;
   videoJobs: VideoJobsService;
   conversationStore: ConversationStore;
@@ -200,9 +229,6 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
   const secrets =
     options.secretStore ??
     new SafeStorageSecretStore(join(options.userDataPath, 'secrets', 'api-key.bin'));
-  const transcriptionSecrets =
-    options.transcriptionSecretStore ??
-    new SafeStorageSecretStore(join(options.userDataPath, 'secrets', 'transcription-key.bin'));
   const now = options.now ?? (() => new Date());
   const today = () => formatLocalDate(now());
   const usageStore = new UsageStore(join(options.userDataPath, 'usage.json'), { now });
@@ -457,20 +483,11 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
 
   await rebuildServices(stored.settings);
 
-  // The ASR key and the note-model client are resolved per run, so a settings
-  // or credential change applies without rebuilding this service.
+  // The model client is resolved per run, so a settings or credential change
+  // applies without rebuilding this service.
   const videoNotes =
     options.videoNotesService ??
     createVideoNotesService({
-      cacheRoot: join(options.userDataPath, 'video-notes-cache'),
-      getAsrConfig: async () => {
-        const current = await settings.get();
-        return {
-          baseURL: current.transcription.baseURL,
-          model: current.transcription.model,
-          apiKey: await transcriptionSecrets.getApiKey()
-        };
-      },
       getModelClient: async () => (await getServices()).videoModelClient,
       getModelName: async () => (await getServices()).videoModelName,
       now
@@ -582,37 +599,6 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       await rebuildServices(await settings.get());
     },
 
-    async getTranscriptionConfig() {
-      const current = await settings.get();
-      return {
-        baseURL: current.transcription.baseURL,
-        model: current.transcription.model,
-        hasApiKey: await transcriptionSecrets.hasApiKey()
-      };
-    },
-
-    async saveTranscriptionConfig(input) {
-      const previous = await settings.get();
-      const normalized = (value: string) => value.trim().replace(/\/+$/, '').toLowerCase();
-      const endpointChanged =
-        normalized(previous.transcription.baseURL) !== normalized(input.baseURL);
-      const updated = await settings.update({
-        transcription: { baseURL: input.baseURL, model: input.model }
-      });
-      // A key belongs to an endpoint; switching endpoints without supplying a
-      // new key clears it instead of leaking the old credential to a new host.
-      if (input.apiKey !== undefined) {
-        await transcriptionSecrets.setApiKey(input.apiKey);
-      } else if (endpointChanged) {
-        await transcriptionSecrets.clearApiKey();
-      }
-      return {
-        baseURL: updated.transcription.baseURL,
-        model: updated.transcription.model,
-        hasApiKey: await transcriptionSecrets.hasApiKey()
-      };
-    },
-
     async scanLocalClis() {
       return scanLocalClis();
     },
@@ -632,13 +618,11 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       throw new Error('打开文件需要在桌面应用中使用。');
     },
     async generateVideoNotes(input, onProgress) {
-      // Legacy blocking call: enqueue a quick job, stream its progress and
+      // Legacy blocking call: enqueue a deck job, stream its progress and
       // resolve with the course that the job produced.
       const job = await videoJobs.enqueue({
-        mode: 'quick',
         videoPaths: input.videoPaths,
-        ...(input.outputDir !== undefined ? { outputDir: input.outputDir } : {}),
-        ...(input.language !== undefined ? { language: input.language } : {})
+        ...(input.outputDir !== undefined ? { outputDir: input.outputDir } : {})
       });
       const unsubscribe = videoJobs.onChanged((jobs) => {
         const current = jobs.find((entry) => entry.id === job.id);
@@ -646,23 +630,12 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
         const index = current.lessons.findIndex((lesson) => lesson.status === 'running');
         if (index < 0) return;
         const lesson = current.lessons[index]!;
-        const message = lesson.message ?? '';
-        const stage: VideoNotesProgress['stage'] =
-          lesson.step === 'probe'
-            ? 'probe'
-            : lesson.step === 'transcribe'
-              ? 'transcribe'
-              : lesson.step === 'done'
-                ? 'done'
-                : message.includes('写入')
-                  ? 'html'
-                  : 'notes';
         onProgress?.({
           videoIndex: index,
           videoCount: current.lessons.length,
           videoPath: lesson.videoPath,
-          stage,
-          message
+          stage: stageForStep(lesson.step),
+          message: lesson.message ?? ''
         });
       });
       try {
@@ -1015,7 +988,6 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     state,
     settings,
     secrets,
-    transcriptionSecrets,
     videoNotes,
     videoJobs,
     conversationStore,

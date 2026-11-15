@@ -1,13 +1,8 @@
+import { z } from 'zod';
 import type { ModelClient } from '../../agent/model-client';
-import type { Transcript, TranscriptChunk } from '../mimo';
-import type { ScreenRead } from '../screen-read';
-import {
-  chapterNotesSchema,
-  deckNotesSchema,
-  type ChapterNotes,
-  type DeckNotes,
-  type Outline
-} from './content';
+import type { Keyframe } from '../keyframes';
+import { formatScreenLabel, type ScreenRead } from '../screen-read';
+import type { Outline, ChapterNotes, DeckNotes, NoteBlock } from './content';
 import {
   DECK_MODEL_TIMEOUT_MS,
   DeckStepError,
@@ -16,26 +11,29 @@ import {
 } from './prompts';
 
 /**
- * Step 6: chapter notes. One call covers a normal transcript; a transcript
- * over {@link NOTES_SPLIT_THRESHOLD_CHARS} is written chapter by chapter so no
- * single request exceeds the model's comfortable context. Both paths end in
- * the same merge, which keeps the outline's order and titles: the model may
- * drift, the outline may not.
+ * Step 6: chapter notes. The visible text is the material, and the blocks are
+ * the screen reads themselves — copied verbatim, 〔遮挡〕 included — so nothing
+ * can be attributed to the teacher. The model only writes, per chapter, the
+ * key points a learner must remember from what is shown.
  */
 
 /** Bump when the prompt's instructions change; feeds checkpoint fingerprints. */
-export const NOTES_PROMPT_VERSION = 1;
+export const NOTES_PROMPT_VERSION = 2;
 
-/** Longer transcripts are written one chapter per call. */
-export const NOTES_SPLIT_THRESHOLD_CHARS = 120_000;
+/** One note block never exceeds this; a longer screen read is split. */
+export const NOTES_MAX_BLOCK_CHARS = 600;
 
-const NOTES_SCREEN_CHARS = 8_000;
+/** A chapter keeps at most this many blocks (the schema's cap). */
+export const NOTES_MAX_BLOCKS_PER_CHAPTER = 60;
+
+/** At most this much screen text per chapter goes into the key-point prompt. */
+export const NOTES_CHAPTER_CHARS = 6_000;
 
 export interface BuildNotesOptions {
   client: ModelClient;
-  transcript: Transcript;
   outline: Outline;
   screenReads: ScreenRead[];
+  keyframes?: Keyframe[];
   signal?: AbortSignal;
   timeoutMs?: number;
 }
@@ -54,132 +52,95 @@ function clock(seconds: number): string {
   return `${pad(minutes)}:${pad(total % 60)}`;
 }
 
-function transcriptLines(chunks: readonly TranscriptChunk[]): string[] {
-  return chunks
-    .filter((chunk) => chunk.text.trim().length > 0)
-    .map((chunk) => {
-      const start = Number.isFinite(chunk.start) ? Math.max(0, chunk.start) : 0;
-      return `[${clock(start)}] ${chunk.text.trim()}`;
-    });
+/** Only the answer the model actually owns: per-chapter key points. */
+const keyPointsAnswerSchema = z.object({
+  chapters: z
+    .array(
+      z.object({
+        /** Chapter title; the outline's title is stamped back on afterwards. */
+        title: z.string().trim().min(1, { message: 'empty' }).max(80, { message: 'too big' }),
+        /** Seconds; accepted but replaced by the outline's start. */
+        start: z.number().finite().min(0, { message: 'negative time' }).optional(),
+        keyPoints: z
+          .array(
+            z
+              .string()
+              .trim()
+              .min(1, { message: 'empty' })
+              .max(200, { message: 'too big' })
+          )
+          .min(1, { message: 'needs a key point' })
+          .max(8, { message: 'too big' })
+      })
+    )
+    .min(1, { message: 'needs at least one chapter' })
+    .max(40, { message: 'too big' })
+});
+
+type KeyPointsAnswer = z.infer<typeof keyPointsAnswerSchema>;
+
+function chapterHeader(chapter: Outline['chapters'][number]): string {
+  return `[${clock(chapter.start)}–${clock(chapter.end)}] ${chapter.title}（知识点：${chapter.points.join('；')}）`;
 }
 
 /** Screen text with its frame time; the marker makes the source explicit. */
-function screenLines(reads: readonly ScreenRead[], limit = NOTES_SCREEN_CHARS): string[] {
+function screenLines(reads: readonly ScreenRead[], limit = NOTES_CHAPTER_CHARS): string[] {
   const ordered = [...reads].sort((a, b) => a.t - b.t);
   const lines: string[] = [];
   let used = 0;
   for (const read of ordered) {
     const text = read.text.trim();
     if (text.length === 0) continue;
-    const line = `[${clock(read.t)}] 〔画面〕${text}`;
-    if (used + line.length + 1 > limit) break;
+    const line = `${formatScreenLabel(read.t)}${text}`;
+    if (lines.length > 0 && used + line.length + 1 > limit) {
+      lines.push('（本章画面文字较多，后面的内容没有放进这个提示词。）');
+      break;
+    }
     lines.push(line);
     used += line.length + 1;
   }
   return lines;
 }
 
-function chapterHeader(chapter: Outline['chapters'][number]): string {
-  return `[${clock(chapter.start)}–${clock(chapter.end)}] ${chapter.title}（知识点：${chapter.points.join('；')}）`;
-}
-
-/** Instructions shared by the single-call and per-chapter prompts. */
-function notesRules(chapterOnly: boolean): string[] {
-  return [
-    '要求：',
-    chapterOnly
-      ? '1. 只输出上面这一章的笔记，title 沿用上面给出的章节标题。'
-      : '1. 每个章节输出一条，数量和顺序与上面的大纲一致；title 沿用大纲标题。',
-    '2. 每章的 blocks 按时间 t 从小到大排序，至少 1 条；材料足够时写 4–12 条。',
-    '3. 老师讲的内容 source 为 "video"，t 取这句话所在转写分片的开始秒数，只能取材料里出现的 [mm:ss]。',
-    '4. 屏幕上的文字 source 为 "screen"，t 取画面时间，也只能取材料里出现的画面时间；text 逐字照抄，被挡住的地方保留〔遮挡〕。',
-    '5. 同一章尽量同时包含 "video" 和 "screen" 两种来源，除非材料里确实没有对应内容。',
-    '6. keyPoints 写 1–5 条这一章必须记住的结论，每条一句短句。',
-    '7. 只写材料里的内容，不补充外部知识，不猜测；英文术语和例句保留原文。'
-  ];
-}
-
-function buildNotesPrompt(
-  transcript: Transcript,
+/** One prompt carries every chapter with only the frames inside its window. */
+export function buildNotesPrompt(
   outline: Outline,
-  screenReads: readonly ScreenRead[]
+  screenReads: readonly ScreenRead[],
+  keyframes: readonly Keyframe[] = []
 ): string {
-  const duration = Number.isFinite(transcript.duration) ? Math.max(0, transcript.duration) : 0;
+  const sections: string[] = [];
+  for (const [index, chapter] of outline.chapters.entries()) {
+    const reads = readsForChapter(screenReads, chapter.start, chapter.end);
+    sections.push(
+      `### ${index + 1}. ${chapterHeader(chapter)}`,
+      ...(reads.length > 0 ? screenLines(reads) : ['（本章没有画面文字。）']),
+      ''
+    );
+  }
+
   return [
-    '你在整理一段讲课视频的分章笔记。笔记要能让学生不重看视频就理解知识点。',
+    '你在整理一段讲课视频的分章笔记。材料只有视频关键帧上的画面文字，没有语音转写。',
+    '笔记的正文由程序逐字采用画面文字，你只负责写每一章要记住的要点。',
     '',
-    `视频时长：${clock(duration)}（${Math.round(duration)} 秒）`,
+    `关键帧：${keyframes.length > 0 ? `${keyframes.length} 张` : '若干张'}`,
     '',
-    '【章节大纲】',
-    ...outline.chapters.map((chapter, index) => `${index + 1}. ${chapterHeader(chapter)}`),
-    '',
-    '【带时间戳的转写】',
-    ...(transcript.chunks.length > 0
-      ? transcriptLines(transcript.chunks)
-      : ['（没有可用的转写。）']),
-    '',
-    '【屏幕上的文字】',
-    ...(screenReads.length > 0 ? screenLines(screenReads) : ['（没有读屏结果。）']),
-    '',
-    ...notesRules(false),
+    '【章节与画面文字】',
+    ...sections,
+    '要求：',
+    '1. 每个章节输出一条，数量和顺序与上面的大纲一致；title 沿用大纲标题，一字不差。',
+    '2. keyPoints 写 1–5 条这一章必须记住的结论，每条一句短句，只能根据画面文字得出。',
+    '3. 只写画面上出现的内容，不补充外部知识，不猜测；英文术语和例句保留原文。',
+    '4. 不要写「老师说」「视频里讲」这类话：材料里没有语音，你不知道老师说了什么。',
+    '5. 画面文字里的〔遮挡〕是原样保留的标记，不要试图补全被挡住的内容。',
     '',
     '输出 JSON：',
-    '{"chapters":[{"title":"...","start":0,"blocks":[{"t":65,"text":"...","source":"video"}],"keyPoints":["..."]}]}',
+    '{"chapters":[{"title":"章节标题","start":0,"keyPoints":["...","..."]}]}',
     '',
     jsonOutputRules()
   ].join('\n');
 }
 
-function buildChapterNotesPrompt(
-  transcript: Transcript,
-  outline: Outline,
-  chapter: Outline['chapters'][number],
-  chunks: readonly TranscriptChunk[],
-  reads: readonly ScreenRead[]
-): string {
-  const duration = Number.isFinite(transcript.duration) ? Math.max(0, transcript.duration) : 0;
-  return [
-    `你在整理一段讲课视频中一章的笔记：${chapter.title}`,
-    '',
-    `视频时长：${clock(duration)}（${Math.round(duration)} 秒）`,
-    `本章范围：${clock(chapter.start)}–${clock(chapter.end)}（${Math.round(chapter.start)}–${Math.round(chapter.end)} 秒）`,
-    `本章知识点：${chapter.points.join('；')}`,
-    '',
-    '【本章带时间戳的转写】',
-    ...(chunks.length > 0 ? transcriptLines(chunks) : ['（本章没有转写，只根据屏幕文字整理。）']),
-    '',
-    '【本章屏幕上的文字】',
-    ...(reads.length > 0 ? screenLines(reads) : ['（本章没有读屏结果。）']),
-    '',
-    ...notesRules(true),
-    '',
-    '只输出这一章的 JSON 对象（不要数组，不要外面的 chapters 字段）：',
-    `{"title":"${chapter.title}","start":${chapter.start},"blocks":[{"t":65,"text":"...","source":"video"}],"keyPoints":["..."]}`,
-    '',
-    jsonOutputRules()
-  ].join('\n');
-}
-
-/** Chunks that belong to `[start, end)`; a gap falls back to the nearest one. */
-function chunksForChapter(
-  chunks: readonly TranscriptChunk[],
-  start: number,
-  end: number
-): TranscriptChunk[] {
-  const inRange = chunks.filter((chunk) => chunk.start >= start && chunk.start < end);
-  if (inRange.length > 0) return inRange;
-  let nearest: TranscriptChunk | null = null;
-  let nearestDistance = Number.POSITIVE_INFINITY;
-  for (const chunk of chunks) {
-    const distance = chunk.start < start ? start - chunk.start : chunk.start - end;
-    if (distance < nearestDistance) {
-      nearest = chunk;
-      nearestDistance = distance;
-    }
-  }
-  return nearest ? [nearest] : [];
-}
-
+/** Reads that belong to `[start, end)`; a chapter window may be empty. */
 function readsForChapter(
   reads: readonly ScreenRead[],
   start: number,
@@ -188,112 +149,165 @@ function readsForChapter(
   return reads.filter((read) => read.t >= start && read.t < end);
 }
 
+/** The nearest read outside an empty chapter window, so a chapter still has text. */
+function nearestRead(reads: readonly ScreenRead[], start: number, end: number): ScreenRead | null {
+  let nearest: ScreenRead | null = null;
+  let distance = Number.POSITIVE_INFINITY;
+  for (const read of reads) {
+    const current = read.t < start ? start - read.t : read.t - end;
+    if (current < distance) {
+      nearest = read;
+      distance = current;
+    }
+  }
+  return nearest;
+}
+
 /**
- * Puts the model's chapters back into outline order and stamps the outline's
+ * Splits one verbatim screen read into blocks the schema accepts. The cut
+ * prefers a newline or a sentence end so a block rarely starts mid-phrase.
+ */
+export function splitNoteText(text: string, limit = NOTES_MAX_BLOCK_CHARS): string[] {
+  const trimmed = text.trim();
+  if (trimmed.length <= limit) return trimmed.length > 0 ? [trimmed] : [];
+  const out: string[] = [];
+  let rest = trimmed;
+  while (rest.length > limit) {
+    const window = rest.slice(0, limit);
+    const cut = Math.max(
+      window.lastIndexOf('\n'),
+      window.lastIndexOf('。'),
+      window.lastIndexOf('；'),
+      window.lastIndexOf(' ')
+    );
+    const take = cut > limit * 0.5 ? cut + 1 : limit;
+    const piece = rest.slice(0, take).trim();
+    if (piece.length > 0) out.push(piece);
+    rest = rest.slice(take).trim();
+  }
+  if (rest.length > 0) out.push(rest);
+  return out;
+}
+
+/** Every block of one chapter: verbatim reads in time order, then capped. */
+function blocksForChapter(reads: readonly ScreenRead[]): NoteBlock[] {
+  const ordered = [...reads].sort((a, b) => a.t - b.t);
+  const blocks: NoteBlock[] = [];
+  for (const read of ordered) {
+    for (const text of splitNoteText(read.text)) {
+      blocks.push({ t: Math.max(0, read.t), text, source: 'screen' });
+    }
+  }
+  if (blocks.length <= NOTES_MAX_BLOCKS_PER_CHAPTER) return blocks;
+  // Sample evenly instead of dropping the end of a very dense chapter.
+  const kept: NoteBlock[] = [];
+  for (let index = 0; index < NOTES_MAX_BLOCKS_PER_CHAPTER; index += 1) {
+    const source = Math.round(
+      (index * (blocks.length - 1)) / (NOTES_MAX_BLOCKS_PER_CHAPTER - 1)
+    );
+    kept.push(blocks[source]!);
+  }
+  return kept;
+}
+
+/**
+ * Puts the model's key points back into outline order and stamps the outline's
  * titles and starts onto them. A chapter the model skipped is a failure: notes
  * with a silent hole are worse than a retried step.
  */
-function mergeNotes(outline: Outline, notes: DeckNotes): DeckNotes {
+function mergeKeyPoints(outline: Outline, answer: KeyPointsAnswer): ChapterNotes[] {
   const used = new Set<number>();
   const chapters: ChapterNotes[] = [];
 
   for (const [index, outlineChapter] of outline.chapters.entries()) {
     let sourceIndex = -1;
     // Prefer a matching title (the model may reorder), then the same position.
-    const byTitle = notes.chapters.findIndex(
+    const byTitle = answer.chapters.findIndex(
       (chapter, chapterIndex) =>
         !used.has(chapterIndex) && chapter.title.trim() === outlineChapter.title.trim()
     );
     if (byTitle !== -1) {
       sourceIndex = byTitle;
-    } else if (!used.has(index) && notes.chapters[index] !== undefined) {
+    } else if (!used.has(index) && answer.chapters[index] !== undefined) {
       sourceIndex = index;
     }
     if (sourceIndex === -1) {
-      throw new DeckStepError('notes', `缺少章节「${outlineChapter.title}」的笔记。`);
+      throw new DeckStepError('notes', `缺少章节「${outlineChapter.title}」的要点。`);
     }
     used.add(sourceIndex);
-    const source = notes.chapters[sourceIndex];
     chapters.push({
       title: outlineChapter.title,
       start: outlineChapter.start,
-      blocks: [...source.blocks].sort((a, b) => a.t - b.t),
-      keyPoints: [...source.keyPoints]
+      // Blocks are filled by the caller from the chapter's own screen reads.
+      blocks: [],
+      keyPoints: [...answer.chapters[sourceIndex]!.keyPoints]
     });
   }
 
-  return { chapters };
+  return chapters;
 }
 
 /**
- * Writes the notes for every chapter. A transcript at or under
- * {@link NOTES_SPLIT_THRESHOLD_CHARS} goes in one call; a longer one is split
- * chapter by chapter, each request carrying only that chapter's material.
+ * Writes the notes for every chapter: blocks come verbatim from that chapter's
+ * screen reads, key points come from one model call covering the whole outline.
  */
 export async function buildNotes(options: BuildNotesOptions): Promise<DeckNotes> {
   const {
     client,
-    transcript,
     outline,
     screenReads,
+    keyframes = [],
     signal,
     timeoutMs = DECK_MODEL_TIMEOUT_MS
   } = options;
 
-  if (transcript.text.length <= NOTES_SPLIT_THRESHOLD_CHARS) {
-    const notes = await requestValidatedJson({
-      client,
-      request: {
-        messages: [
-          { role: 'user', content: buildNotesPrompt(transcript, outline, screenReads) }
-        ],
-        temperature: 0.2,
-        maxTokens: 12_000,
-        noTools: true,
-        timeoutMs
-      },
-      schema: deckNotesSchema,
-      step: 'notes',
-      signal
-    });
-    return mergeNotes(outline, notes);
+  const usable = screenReads.filter((read) => read.text.trim().length > 0);
+  if (usable.length === 0) {
+    throw new DeckStepError('notes', '没有读到任何画面文字，无法整理课件笔记。');
   }
 
-  const chapters: ChapterNotes[] = [];
-  for (const chapter of outline.chapters) {
-    const chunks = chunksForChapter(transcript.chunks, chapter.start, chapter.end);
-    const reads = readsForChapter(screenReads, chapter.start, chapter.end);
-    if (chunks.length === 0 && reads.length === 0) {
-      throw new DeckStepError('notes', `第「${chapter.title}」章没有可用素材。`);
-    }
-    const notes = await requestValidatedJson({
-      client,
-      request: {
-        messages: [
-          {
-            role: 'user',
-            content: buildChapterNotesPrompt(transcript, outline, chapter, chunks, reads)
-          }
-        ],
-        temperature: 0.2,
-        maxTokens: 6_000,
-        noTools: true,
-        timeoutMs
-      },
-      schema: chapterNotesSchema,
-      step: 'notes',
-      signal
-    });
-    chapters.push(notes);
-  }
+  const answer = await requestValidatedJson({
+    client,
+    request: {
+      messages: [
+        { role: 'user', content: buildNotesPrompt(outline, usable, keyframes) }
+      ],
+      temperature: 0.2,
+      maxTokens: 8_000,
+      noTools: true,
+      timeoutMs
+    },
+    schema: keyPointsAnswerSchema,
+    step: 'notes',
+    signal
+  });
 
-  return mergeNotes(outline, { chapters });
+  const merged = mergeKeyPoints(outline, answer);
+  return {
+    chapters: merged.map((chapter, index) => {
+      const outlineChapter = outline.chapters[index]!;
+      const inWindow = readsForChapter(
+        usable,
+        outlineChapter.start,
+        outlineChapter.end
+      );
+      const fallback = inWindow.length === 0
+        ? nearestRead(usable, outlineChapter.start, outlineChapter.end)
+        : null;
+      const reads = inWindow.length > 0 ? inWindow : fallback ? [fallback] : [];
+      const blocks = blocksForChapter(reads);
+      if (blocks.length === 0) {
+        throw new DeckStepError('notes', `第「${chapter.title}」章没有可用画面文字。`);
+      }
+      return { ...chapter, blocks };
+    })
+  };
 }
 
 /**
  * Renders the `notes.md` artifact: one section per chapter, every block
- * prefixed with its `[mm:ss]` time, on-screen text additionally marked
- * `〔画面〕`, and a `要点` list at the end of every chapter.
+ * prefixed with its `[mm:ss]` time and marked `〔画面〕`, and a `要点` list at
+ * the end of every chapter.
  */
 export function renderNotesMarkdown(notes: DeckNotes, meta: NotesMarkdownMeta): string {
   const lines: string[] = [];

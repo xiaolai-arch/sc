@@ -29,20 +29,10 @@ import type {
 import type { LongPlanApi } from './plans';
 import type { PlanWorkspaceInput, WorkspacePlan } from './planning';
 import type { SearchResult } from './search';
-import type {
-  AppSettings,
-  NotificationSettings,
-  ProviderConfig,
-  ReviewAnswers,
-  TranscriptionSettings
-} from './types';
+import type { AppSettings, NotificationSettings, ProviderConfig, ReviewAnswers } from './types';
 import type { LocalCliScanResult } from './local-cli';
 import type { UsageSummary } from './usage';
-import type {
-  SaveTranscriptionConfigInput,
-  TranscriptionConfigView,
-  VideoNotesApi
-} from './video-notes';
+import type { VideoNotesApi } from './video-notes';
 import type {
   ButlerService,
   WorkspaceOnboardingInput,
@@ -167,7 +157,6 @@ export interface SettingsPatch {
   provider?: ProviderConfig;
   notifications?: Partial<NotificationSettings>;
   budget?: Partial<AppSettings['budget']>;
-  transcription?: Partial<TranscriptionSettings>;
   launchAtLogin?: boolean;
 }
 
@@ -219,8 +208,6 @@ export interface StudyCoachApi
   getSettings(): Promise<AppSettings>;
   updateSettings(patch: SettingsPatch): Promise<AppSettings>;
   setApiKey(key: string): Promise<void>;
-  getTranscriptionConfig(): Promise<TranscriptionConfigView>;
-  saveTranscriptionConfig(input: SaveTranscriptionConfigInput): Promise<TranscriptionConfigView>;
   /** Reads persisted review entries (newest first). */
   listReviews(input?: ListReviewsInput): Promise<ReviewRecord[]>;
   /** Discovers installed local CLI agents, their login state and capabilities. */

@@ -1,5 +1,4 @@
 import type { ModelClient, ModelRequest } from '../../agent/model-client';
-import type { Transcript, TranscriptChunk } from '../mimo';
 import { formatScreenLabel, type ScreenRead } from '../screen-read';
 import {
   enrichResultSchema,
@@ -17,14 +16,17 @@ import {
 } from './prompts';
 
 /**
- * Step 7: supplementary cards. The notes restate the lesson; this step adds
- * the material a learner actually needs for review — mistakes, transfer rules
- * and outside knowledge — as `insight` slides later. Cards are generated per
- * half of the outline once a lesson has more than six chapters, so one prompt
- * never has to hold a whole long lesson.
+ * Step 7: supplementary cards. The notes restate what is on screen; this step
+ * adds the material a learner actually needs for review — mistakes, transfer
+ * rules and outside knowledge — as `insight` slides later. Cards may explain,
+ * contrast or extend the visible material, but they must never claim the
+ * teacher said anything. Cards are generated per half of the outline once a
+ * lesson has more than six chapters, so one prompt never has to hold a whole
+ * long lesson.
  */
 
-export const ENRICH_PROMPT_VERSION = 1;
+/** Bump when the prompt's instructions change; feeds checkpoint fingerprints. */
+export const ENRICH_PROMPT_VERSION = 2;
 
 /** The prompt asks for 6–12 cards; the schema and the cap agree. */
 export const ENRICH_MIN_CARDS = 6;
@@ -33,20 +35,16 @@ export const ENRICH_MAX_CARDS = 12;
 /** Chapters above this count are split into two model calls. */
 export const ENRICH_SPLIT_THRESHOLD = 6;
 
-/** One prompt keeps at most this much transcript; a lesson transcript can be huge. */
-const MAX_TRANSCRIPT_CHARS = 30_000;
-
 /** At most this many screen reads go into one prompt. */
 const MAX_SCREEN_READS = 40;
 
-/** Seconds of transcript kept before a chapter window for context. */
-const TRANSCRIPT_LEAD_SECONDS = 180;
+/** Seconds of screen material kept before a chapter window for context. */
+const SCREEN_LEAD_SECONDS = 180;
 
 export interface BuildEnrichmentOptions {
   client: ModelClient;
   notes: DeckNotes;
   outline: Outline;
-  transcript: Transcript;
   screenReads?: readonly ScreenRead[];
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -79,49 +77,16 @@ function formatNotes(notes: DeckNotes, allowed: ReadonlySet<string>): string {
     blocks.push(`### ${chapter.title}（起 ${formatClock(chapter.start)}）`);
     blocks.push(`要点：${chapter.keyPoints.join('；')}`);
     for (const note of chapter.blocks) {
-      const tag = note.source === 'screen' ? '画面' : '视频';
-      blocks.push(`- [${formatClock(note.t)}][${tag}] ${note.text}`);
+      blocks.push(`- [${formatClock(note.t)}][画面] ${note.text}`);
     }
   }
   return blocks.length > 0 ? blocks.join('\n') : '（没有笔记。）';
 }
 
-/** A window of transcript around the chapters in one call, capped by size. */
-function formatTranscript(transcript: Transcript, start: number, end: number): string {
-  const chunks = transcript.chunks;
-  if (chunks.length === 0) {
-    const text = transcript.text.trim();
-    if (text === '') return '（没有转写。）';
-    return text.length > MAX_TRANSCRIPT_CHARS
-      ? `${text.slice(0, MAX_TRANSCRIPT_CHARS)}\n（转写较长，已截取前 ${MAX_TRANSCRIPT_CHARS} 字。）`
-      : text;
-  }
-
-  const lower = Math.max(0, start - TRANSCRIPT_LEAD_SECONDS);
-  const picked: TranscriptChunk[] = [];
-  let chars = 0;
-  for (const chunk of chunks) {
-    if (chunk.start < lower) continue;
-    if (chunk.start > end && picked.length > 0) break;
-    if (chars > 0 && chars + chunk.text.length > MAX_TRANSCRIPT_CHARS) break;
-    picked.push(chunk);
-    chars += chunk.text.length;
-    if (chars >= MAX_TRANSCRIPT_CHARS) break;
-  }
-  if (picked.length === 0) {
-    return '（这段时间没有转写。）';
-  }
-  const lines = picked.map((chunk) => `- [${formatClock(chunk.start)}] ${chunk.text}`);
-  if (chars >= MAX_TRANSCRIPT_CHARS) {
-    lines.push(`（转写较长，只截取了前 ${MAX_TRANSCRIPT_CHARS} 字。）`);
-  }
-  return lines.join('\n');
-}
-
 function formatScreenReads(reads: readonly ScreenRead[], start: number, end: number): string {
   const visible = reads
     .filter((read) => read.kind !== 'speaker-only')
-    .filter((read) => read.t >= start - TRANSCRIPT_LEAD_SECONDS && read.t <= end)
+    .filter((read) => read.t >= start - SCREEN_LEAD_SECONDS && read.t <= end)
     .slice(0, MAX_SCREEN_READS);
   if (visible.length === 0) return '（没有可用的画面文字。）';
   return visible
@@ -150,7 +115,6 @@ function chapterWindow(chapters: readonly OutlineChapter[]): { start: number; en
 export interface EnrichPromptInput {
   notes: DeckNotes;
   chapters: readonly OutlineChapter[];
-  transcript: Transcript;
   screenReads?: readonly ScreenRead[];
 }
 
@@ -159,27 +123,29 @@ export interface EnrichPromptInput {
  * only those titles are valid `chapter` values.
  */
 export function buildEnrichPrompt(input: EnrichPromptInput): string {
-  const { notes, chapters, transcript, screenReads = [] } = input;
+  const { notes, chapters, screenReads = [] } = input;
   const titles = chapters.map((chapter) => chapter.title);
   const allowed = new Set(titles);
   const window = chapterWindow(chapters);
 
   return [
-    '你在为讲课视频的「完整课件」编写补充卡片（渲染成 insight 页）。补充卡片不是复述笔记，而是补上笔记里没有展开、但对复习真正有用的内容。',
+    '你在为讲课视频的「完整课件」编写补充卡片（渲染成 insight 页）。课件只有画面内容（关键帧上抄下来的文字），没有语音；补充卡片不是复述笔记，而是补上笔记里没有展开、但对复习真正有用的内容。',
     '',
     '内容要求：',
     '1. 一共写 6～12 张卡片，每张只讲一个结论，标题就是结论本身。',
     '2. 优先写三类内容：',
     '   - 易错点：学生常混、常错的判断，说清错在哪里、怎么避免；',
-    '   - 迁移：换一道题或换一个场景，怎么用同一条规则判断；',
-    '   - 扩展知识：与本章相关、但视频里没有讲到的背景、对比或延伸，注明依据。',
+    '   - 迁移：换一道题或换一个场景，怎么用屏幕上同一条规则判断；',
+    '   - 扩展知识：与本章相关、但画面上没有出现的背景、对比或延伸，注明依据。',
     '3. 不要照抄笔记里的句子，也不要把笔记换一种说法。',
-    `4. chapter 必须严格等于下面列出的某个章节标题，一字不差：${titles.map((title) => `「${title}」`).join('、')}。`,
-    '5. sources 的写法：',
-    '   - 老师确实讲过的内容，用 {"kind":"video","t":秒数}，t 取视频里的秒数；',
-    '   - 由视频内容直接推出的，用 {"kind":"infer"}；',
-    '   - 视频以外的知识，用 {"kind":"ext","title":"依据的标题","page":页码}，页码可省略。',
-    '6. examples 至少 2 条，可以写 {wrong, right} 对照；pitfall 写最容易踩的坑；transfer 写怎么迁移到新题。',
+    '4. 卡片只解释、对比或扩展画面上的内容；绝不能声称是老师说过的话，也不要写「老师说」「视频里讲」这类表述。',
+    `5. chapter 必须严格等于下面列出的某个章节标题，一字不差：${titles.map((title) => `「${title}」`).join('、')}。`,
+    '6. sources 的写法：',
+    '   - 画面上的内容，用 {"kind":"screen","t":秒数}，t 必须取自下面列出的画面时间；',
+    '   - 由画面内容直接推出的，用 {"kind":"infer"}；',
+    '   - 画面以外的知识，用 {"kind":"ext","title":"依据的标题","page":页码}，页码可省略。',
+    '   - 不要使用 {"kind":"video"}：材料里没有语音。',
+    '7. examples 至少 2 条，可以写 {wrong, right} 对照；pitfall 写最容易踩的坑；transfer 写怎么迁移到新题。',
     '',
     '每张卡片的字段：',
     '- chapter：章节标题，必须是上面列出的标题之一；',
@@ -188,10 +154,10 @@ export function buildEnrichPrompt(input: EnrichPromptInput): string {
     '- examples：2～3 条例子，每条有 right，可选 wrong；',
     '- pitfall：易错点；',
     '- transfer：迁移方法；',
-    '- sources：至少一个来源。',
+    '- sources：至少一个来源，只能用 screen、infer 或 ext。',
     '',
     '输出格式：',
-    '{"cards":[{"chapter":"章节标题","title":"一句话结论","principle":"原理","examples":[{"wrong":"错误说法","right":"正确说法"}],"pitfall":"易错点","transfer":"迁移方法","sources":[{"kind":"video","t":120}]}]}',
+    '{"cards":[{"chapter":"章节标题","title":"一句话结论","principle":"原理","examples":[{"wrong":"错误说法","right":"正确说法"}],"pitfall":"易错点","transfer":"迁移方法","sources":[{"kind":"screen","t":120}]}]}',
     '',
     jsonOutputRules(),
     '',
@@ -200,9 +166,6 @@ export function buildEnrichPrompt(input: EnrichPromptInput): string {
     '',
     '## 笔记',
     formatNotes(notes, allowed),
-    '',
-    '## 转写摘录',
-    formatTranscript(transcript, window.start, window.end),
     '',
     '## 画面文字摘录',
     formatScreenReads(screenReads, window.start, window.end)
@@ -214,18 +177,21 @@ export function buildEnrichPrompt(input: EnrichPromptInput): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Drops cards whose chapter is not an allowed title, deduplicates by
- * normalized title (first one wins), and caps the list at 12.
+ * Drops cards whose chapter is not an allowed title, strips `video` sources
+ * (the deck has no speech evidence), drops cards left without a source,
+ * deduplicates by normalized title (first one wins), and caps at 12.
  */
 function selectCards(cards: readonly EnrichCard[], allowed: ReadonlySet<string>): EnrichCard[] {
   const seen = new Set<string>();
   const selected: EnrichCard[] = [];
   for (const card of cards) {
     if (!allowed.has(card.chapter)) continue;
+    const sources = card.sources.filter((source) => source.kind !== 'video');
+    if (sources.length === 0) continue;
     const key = normalizeTitle(card.title);
     if (key === '' || seen.has(key)) continue;
     seen.add(key);
-    selected.push(card);
+    selected.push({ ...card, sources });
     if (selected.length >= ENRICH_MAX_CARDS) break;
   }
   return selected;
@@ -244,17 +210,16 @@ interface RequestCardsOptions {
   client: ModelClient;
   notes: DeckNotes;
   chapters: readonly OutlineChapter[];
-  transcript: Transcript;
   screenReads: readonly ScreenRead[];
   timeoutMs: number;
   signal?: AbortSignal;
   hint?: string;
 }
 
-/** One model call; returns the cards that survive chapter and title filtering. */
+/** One model call; returns the cards that survive chapter and source filtering. */
 async function requestCards(options: RequestCardsOptions): Promise<EnrichCard[]> {
-  const { client, notes, chapters, transcript, screenReads, timeoutMs, signal, hint } = options;
-  const prompt = buildEnrichPrompt({ notes, chapters, transcript, screenReads });
+  const { client, notes, chapters, screenReads, timeoutMs, signal, hint } = options;
+  const prompt = buildEnrichPrompt({ notes, chapters, screenReads });
   const content = hint === undefined ? prompt : `${prompt}\n\n${hint}`;
   const request: ModelRequest = {
     messages: [{ role: 'user', content }],
@@ -284,7 +249,6 @@ export async function buildEnrichment(options: BuildEnrichmentOptions): Promise<
     client,
     notes,
     outline,
-    transcript,
     screenReads = [],
     signal,
     timeoutMs = DECK_MODEL_TIMEOUT_MS
@@ -303,7 +267,6 @@ export async function buildEnrichment(options: BuildEnrichmentOptions): Promise<
       client,
       notes,
       chapters: group,
-      transcript,
       screenReads,
       timeoutMs,
       signal
@@ -313,7 +276,6 @@ export async function buildEnrichment(options: BuildEnrichmentOptions): Promise<
         client,
         notes,
         chapters: group,
-        transcript,
         screenReads,
         timeoutMs,
         signal,

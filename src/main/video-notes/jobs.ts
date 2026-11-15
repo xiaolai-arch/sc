@@ -7,8 +7,6 @@ import type {
   VideoJobStatus,
   VideoNotesEnqueueInput,
   VideoNotesEstimate,
-  VideoNotesLanguage,
-  VideoNotesMode,
   VideoNotesUsage
 } from '../../shared/video-notes';
 import { readFileOrNull, writeFileAtomic, createMutex } from '../workspace/fs-utils';
@@ -30,11 +28,7 @@ const MAX_SCAN_DEPTH = 12;
 export interface VideoJobsOptions {
   filePath: string;
   runLesson: (input: VideoLessonRunInput) => Promise<VideoLessonRunOutput>;
-  estimate: (input: {
-    mode: VideoNotesMode;
-    videoPaths: string[];
-    language?: VideoNotesLanguage;
-  }) => Promise<VideoNotesEstimate>;
+  estimate: (input: { videoPaths: string[] }) => Promise<VideoNotesEstimate>;
   /** Rewrites index.html after a job settles. */
   refreshIndex?: (outputDir: string, videoPaths: string[]) => Promise<void>;
   /** Test seam; production scans the filesystem. */
@@ -81,8 +75,8 @@ const JOB_STATUSES: readonly VideoJobStatus[] = [
 
 const LESSON_STATUSES = ['pending', 'running', 'done', 'failed', 'skipped'] as const;
 
-const LANGUAGES: readonly VideoNotesLanguage[] = ['auto', 'zh', 'en'];
-const MODES: readonly VideoNotesMode[] = ['quick', 'deck'];
+/** Persisted jobs from before the screen-only rewrite say why they cannot run. */
+export const LEGACY_QUICK_MESSAGE = '快速笔记已移除，请重新生成课件。';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -186,13 +180,9 @@ function normalizeLesson(value: unknown): VideoJobLesson | null {
 
 function normalizeJob(value: unknown): VideoJob | null {
   if (!isRecord(value)) return null;
-  const { id, mode, outputDir, language, status, createdAt } = value;
+  const { id, outputDir, status, createdAt } = value;
   if (typeof id !== 'string' || id.length === 0) return null;
-  if (typeof mode !== 'string' || !(MODES as readonly string[]).includes(mode)) return null;
   if (typeof outputDir !== 'string' || outputDir.length === 0) return null;
-  if (typeof language !== 'string' || !(LANGUAGES as readonly string[]).includes(language)) {
-    return null;
-  }
   if (typeof status !== 'string' || !(JOB_STATUSES as readonly string[]).includes(status)) {
     return null;
   }
@@ -214,13 +204,20 @@ function normalizeJob(value: unknown): VideoJob | null {
           typeof value['estimate']['minutes'] === 'number' ? value['estimate']['minutes'] : 0
       }
     : { tokens: 0, minutes: 0 };
+  // Quick-note jobs cannot run any more: the queue keeps them visible as failed
+  // so the user can remove them, but it never resumes them.
+  const legacyQuick = value['mode'] === 'quick';
+  if (legacyQuick) {
+    for (const lesson of lessons) {
+      lesson.status = 'failed';
+      lesson.message = LEGACY_QUICK_MESSAGE;
+    }
+  }
   return {
     id,
-    mode: mode as VideoNotesMode,
     videoPaths,
     outputDir,
-    language: language as VideoNotesLanguage,
-    status: status as VideoJobStatus,
+    status: legacyQuick ? 'failed' : (status as VideoJobStatus),
     createdAt,
     lessons,
     estimate,
@@ -228,37 +225,15 @@ function normalizeJob(value: unknown): VideoJob | null {
   };
 }
 
-function stageToStep(stage: string, mode: VideoNotesMode): string {
+/** Maps a progress stage to the checkpoint step it belongs to. */
+function stageToStep(stage: string): string {
   switch (stage) {
-    case 'probe':
-      return 'probe';
-    case 'audio':
-    case 'transcribe':
-      return 'transcribe';
-    case 'keyframes':
-      return 'keyframes';
     case 'screen':
       return 'screen-read';
-    case 'outline':
-      return 'outline';
-    case 'notes':
-      // Quick notes are written by the render step; deck notes are their own step.
-      return mode === 'deck' ? 'notes' : 'render';
-    case 'enrich':
-      return 'enrich';
     case 'factcheck':
       return 'factcheck-a';
-    case 'compose':
-      return 'compose';
-    case 'render':
-    case 'html':
-      return 'render';
-    case 'layout':
-      return 'layout';
     case 'pdf':
       return 'export';
-    case 'report':
-      return 'report';
     case 'done':
       return 'done';
     default:
@@ -390,16 +365,14 @@ export function createVideoJobsService(options: VideoJobsOptions): VideoJobsServ
 
         try {
           const output = await options.runLesson({
-            mode: job.mode,
             videoPath: lesson.videoPath,
             outputDir: job.outputDir,
-            language: job.language,
             signal: controller.signal,
             usedNames,
             ...(lesson.lessonDir ? { lessonDir: lesson.lessonDir } : {}),
             ...(fromStep ? { fromStep } : {}),
             onStage: (stage, message) => {
-              lesson.step = stageToStep(stage, job.mode);
+              lesson.step = stageToStep(stage);
               lesson.message = message;
               schedulePersist();
               scheduleEmit();
@@ -411,7 +384,6 @@ export function createVideoJobsService(options: VideoJobsOptions): VideoJobsServ
           lesson.lessonDir = output.lessonDir;
           lesson.title = output.title;
           lesson.notesPath = output.notesPath;
-          lesson.htmlPath = output.htmlPath;
           lesson.slidesPath = output.slidesPath;
           lesson.pdfPath = output.pdfPath;
           lesson.reportPath = output.reportPath;
@@ -521,7 +493,8 @@ export function createVideoJobsService(options: VideoJobsOptions): VideoJobsServ
     const restored = entries
       .map(normalizeJob)
       .filter((job): job is VideoJob => job !== null);
-    let changed = false;
+    // Rewriting drops the removed `mode`/`language` fields from old entries.
+    let changed = entries.some((entry) => isRecord(entry) && entry['mode'] === 'quick');
     for (const job of restored) {
       // A job cannot still be running after a restart; the user resumes it.
       if (job.status === 'running' || job.status === 'queued') {
@@ -546,10 +519,6 @@ export function createVideoJobsService(options: VideoJobsOptions): VideoJobsServ
   return {
     async enqueue(input) {
       await ready();
-      const mode: VideoNotesMode = input.mode ?? 'quick';
-      if (!(MODES as readonly string[]).includes(mode)) throw new Error('生成模式无效。');
-      const language: VideoNotesLanguage = input.language ?? 'auto';
-      if (!(LANGUAGES as readonly string[]).includes(language)) throw new Error('转写语言无效。');
       const videoPaths = await resolveInputPaths(input);
 
       const active = jobs.filter((job) => job.status === 'queued' || job.status === 'running');
@@ -565,17 +534,15 @@ export function createVideoJobsService(options: VideoJobsOptions): VideoJobsServ
       );
       let estimate: VideoNotesEstimate;
       try {
-        estimate = await options.estimate({ mode, videoPaths, language });
+        estimate = await options.estimate({ videoPaths });
       } catch {
-        estimate = estimateFromDuration(mode, videoPaths.length, 0);
+        estimate = estimateFromDuration(videoPaths.length, 0);
       }
 
       const job: VideoJob = {
         id: `job-${randomId()}`,
-        mode,
         videoPaths,
         outputDir,
-        language,
         status: 'queued',
         createdAt: now().toISOString(),
         lessons: videoPaths.map((videoPath) => ({
@@ -666,10 +633,8 @@ export function createVideoJobsService(options: VideoJobsOptions): VideoJobsServ
 
     async estimate(input) {
       await ready();
-      const mode: VideoNotesMode = input.mode ?? 'quick';
-      const language: VideoNotesLanguage = input.language ?? 'auto';
       const videoPaths = await resolveInputPaths(input);
-      return options.estimate({ mode, videoPaths, language });
+      return options.estimate({ videoPaths });
     },
 
     async settled(id) {

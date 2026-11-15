@@ -62,13 +62,10 @@ import type {
   UpdateLongPlanItemInput
 } from '../shared/plans';
 import type {
-  SaveTranscriptionConfigInput,
   VideoJob,
   VideoNotesEnqueueInput,
   VideoNotesEstimate,
   VideoNotesInput,
-  VideoNotesLanguage,
-  VideoNotesMode,
   VideoNotesProgress,
   VideoNotesResult
 } from '../shared/video-notes';
@@ -81,8 +78,6 @@ export const IPC_CHANNELS = {
   getSettings: 'study-coach:settings:get',
   updateSettings: 'study-coach:settings:update',
   setApiKey: 'study-coach:settings:set-api-key',
-  getTranscriptionConfig: 'study-coach:settings:transcription:get',
-  saveTranscriptionConfig: 'study-coach:settings:transcription:save',
   listWorkspaces: 'study-coach:workspaces:list',
   createWorkspace: 'study-coach:workspaces:create',
   updateWorkspace: 'study-coach:workspaces:update',
@@ -945,8 +940,6 @@ function requireLongPlanItemDone(value: unknown): UpdateLongPlanItemInput {
   return { planId, weekId, itemId, kind: input.kind, done: input.done };
 }
 
-const VIDEO_NOTES_LANGUAGES: readonly VideoNotesLanguage[] = ['auto', 'zh', 'en'];
-const VIDEO_NOTES_MODES: readonly VideoNotesMode[] = ['quick', 'deck'];
 const MAX_VIDEO_FILES = 200;
 
 function absolutePath(value: unknown, label: string): string {
@@ -979,35 +972,14 @@ function requireVideoNotesInput(value: unknown): VideoNotesInput {
     const trimmed = input.outputDir.trim();
     if (trimmed.length > 0) outputDir = trimmed;
   }
-  let language: VideoNotesLanguage = 'auto';
-  if (input.language !== undefined) {
-    if (
-      typeof input.language !== 'string' ||
-      !(VIDEO_NOTES_LANGUAGES as readonly string[]).includes(input.language)
-    ) {
-      throw new Error('转写语言无效。');
-    }
-    language = input.language as VideoNotesLanguage;
-  }
   return {
     videoPaths,
-    ...(outputDir !== undefined ? { outputDir } : {}),
-    language
+    ...(outputDir !== undefined ? { outputDir } : {})
   };
 }
 
 function requireVideoNotesEnqueueInput(value: unknown): VideoNotesEnqueueInput {
   const input = requireObject(value, '提交视频任务');
-  let mode: VideoNotesMode = 'quick';
-  if (input.mode !== undefined) {
-    if (
-      typeof input.mode !== 'string' ||
-      !(VIDEO_NOTES_MODES as readonly string[]).includes(input.mode)
-    ) {
-      throw new Error('生成模式无效。');
-    }
-    mode = input.mode as VideoNotesMode;
-  }
   const videoPaths: string[] = [];
   if (input.videoPaths !== undefined) {
     if (!Array.isArray(input.videoPaths)) throw new Error('视频路径无效。');
@@ -1035,22 +1007,10 @@ function requireVideoNotesEnqueueInput(value: unknown): VideoNotesEnqueueInput {
     const trimmed = input.outputDir.trim();
     if (trimmed.length > 0) outputDir = absolutePath(trimmed, '输出文件夹');
   }
-  let language: VideoNotesLanguage = 'auto';
-  if (input.language !== undefined) {
-    if (
-      typeof input.language !== 'string' ||
-      !(VIDEO_NOTES_LANGUAGES as readonly string[]).includes(input.language)
-    ) {
-      throw new Error('转写语言无效。');
-    }
-    language = input.language as VideoNotesLanguage;
-  }
   return {
-    mode,
     ...(videoPaths.length > 0 ? { videoPaths } : {}),
     ...(folder !== undefined ? { folder } : {}),
-    ...(outputDir !== undefined ? { outputDir } : {}),
-    language
+    ...(outputDir !== undefined ? { outputDir } : {})
   };
 }
 
@@ -1061,23 +1021,6 @@ function requireRetryLesson(value: unknown): { jobId: string; videoPath: string 
   if (jobId.length === 0) throw new Error('任务 ID 无效。');
   if (videoPath.length === 0) throw new Error('视频路径无效。');
   return { jobId, videoPath };
-}
-
-function requireSaveTranscriptionConfig(value: unknown): SaveTranscriptionConfigInput {
-  const input = requireObject(value, '保存语音转写设置');
-  const baseURL = requireString(input.baseURL, '语音转写 Base URL').trim();
-  if (!/^https?:\/\//i.test(baseURL)) {
-    throw new Error('语音转写 Base URL 必须以 http:// 或 https:// 开头。');
-  }
-  const model = requireString(input.model, '语音转写模型').trim();
-  if (input.apiKey !== undefined && typeof input.apiKey !== 'string') {
-    throw new Error('语音转写 API key 无效。');
-  }
-  return {
-    baseURL,
-    model,
-    ...(input.apiKey !== undefined ? { apiKey: input.apiKey } : {})
-  };
 }
 
 function requireUsageDays(value: unknown): number | undefined {
@@ -1141,9 +1084,6 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
       api.updateSettings(requireObject(input, '更新设置') as SettingsPatch),
     scanLocalClis: async () => api.scanLocalClis(),
     setApiKey: async (input) => api.setApiKey(requireApiKey(input)),
-    getTranscriptionConfig: async () => api.getTranscriptionConfig(),
-    saveTranscriptionConfig: async (input) =>
-      api.saveTranscriptionConfig(requireSaveTranscriptionConfig(input)),
     listWorkspaces: async () => api.listWorkspaces(),
     createWorkspace: async (input) => api.createWorkspace(requireCreateWorkspace(input)),
     updateWorkspace: async (input) => {
@@ -1501,9 +1441,6 @@ export function createStudyCoachBridge(
     getSettings: () => call(IPC_CHANNELS.getSettings),
     updateSettings: (patch) => call(IPC_CHANNELS.updateSettings, patch),
     setApiKey: (key) => call(IPC_CHANNELS.setApiKey, key),
-    getTranscriptionConfig: () => call(IPC_CHANNELS.getTranscriptionConfig),
-    saveTranscriptionConfig: (input) =>
-      call(IPC_CHANNELS.saveTranscriptionConfig, input),
     scanLocalClis: () => call(IPC_CHANNELS.scanLocalClis),
     listWorkspaces: () => call(IPC_CHANNELS.listWorkspaces),
     createWorkspace: (input) => call(IPC_CHANNELS.createWorkspace, input),

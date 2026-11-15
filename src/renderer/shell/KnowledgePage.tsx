@@ -45,8 +45,6 @@ type KnowledgePageProps = {
   getKnowledgeNote: (topicId: string) => Promise<KnowledgeNote>;
   saveKnowledgeNote: (input: SaveKnowledgeNoteInput) => Promise<KnowledgeNote>;
   getKnowledgeBacklinks: (topicId: string) => Promise<KnowledgeBacklink[]>;
-  /** Opens Settings from the video-notes dialog. */
-  onOpenSettings?: () => void;
 };
 
 type TopicForm = {
@@ -150,8 +148,7 @@ export function KnowledgePage({
   onMergeTopic,
   getKnowledgeNote,
   saveKnowledgeNote,
-  getKnowledgeBacklinks,
-  onOpenSettings
+  getKnowledgeBacklinks
 }: KnowledgePageProps) {
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -381,13 +378,13 @@ export function KnowledgePage({
           </div>
           <button
             type="button"
-            aria-label="视频笔记"
-            title="用本地课程视频生成笔记"
+            aria-label="视频转课件"
+            title="用本地课程视频生成课件"
             onClick={() => setVideoNotesOpen(true)}
             className="flex h-9 items-center gap-1.5 rounded-xl bg-[#f5f5f7] px-2.5 text-[13px] font-medium text-gray-700 transition-colors duration-200 hover:bg-black/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 md:px-3 dark:bg-white/[0.08] dark:text-[#a1a1a6] dark:hover:bg-white/[0.12]"
           >
             <PlayIcon className="h-4 w-4" />
-            <span className="hidden md:inline">视频笔记</span>
+            <span className="hidden md:inline">视频转课件</span>
           </button>
           <button
             type="button"
@@ -696,7 +693,6 @@ export function KnowledgePage({
         open={videoNotesOpen}
         onClose={() => setVideoNotesOpen(false)}
         onOpenJobs={() => setVideoJobsOpen(true)}
-        {...(onOpenSettings ? { onOpenSettings } : {})}
       />
 
       <VideoJobList open={videoJobsOpen} onClose={() => setVideoJobsOpen(false)} />

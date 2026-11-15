@@ -10,8 +10,8 @@ function pointsSlide(id: string): Slide {
     type: 'points',
     id,
     title: `要点页 ${id}`,
-    sources: [{ kind: 'video', t: 10 }],
-    points: [{ text: '一个要点', source: { kind: 'video', t: 10 } }]
+    sources: [{ kind: 'screen', t: 10 }],
+    points: [{ text: '一个要点', source: { kind: 'screen', t: 10 } }]
   };
 }
 
@@ -51,7 +51,7 @@ function issue(overrides: Partial<FactIssue> = {}): FactIssue {
     target: 'notes',
     ref: '第一章/1',
     claim: '被质疑的说法',
-    problem: '转写原文是「……」，与这句矛盾',
+    problem: '画面文字是「……」，与这句矛盾',
     severity: 'error',
     ...overrides
   };
@@ -61,11 +61,9 @@ function input(overrides: Partial<QualityReportInput> = {}): QualityReportInput 
   return {
     title: '第一讲 名词',
     durationSeconds: 2711,
-    mode: 'deck',
-    transcriptChars: 12345,
-    chunkCount: 20,
     keyframeCount: 57,
     screenReadCount: 40,
+    screenOnly: true,
     deck: sampleDeck(),
     overflow: [],
     issuesA: [],
@@ -128,7 +126,7 @@ describe('buildQualityReport', () => {
 
     expect(report).toContain('错误（error）：1 条');
     expect(report).toContain('提醒（warn）：1 条');
-    expect(report).toContain('[notes] 第一章/1：转写原文是「……」，与这句矛盾');
+    expect(report).toContain('[notes] 第一章/1：画面文字是「……」，与这句矛盾');
     expect(report).toContain('未发现问题');
   });
 
@@ -137,9 +135,9 @@ describe('buildQualityReport', () => {
 
     expect(report).toContain('时长：45:11');
     expect(report).toContain('耗时：01:30');
-    expect(report).toContain('转写：12,345 字，20 段');
     expect(report).toContain('关键帧：57 张');
-    expect(report).toContain('读屏：40 条');
+    expect(report).toContain('画面文字：40 条');
+    expect(report).toContain('依据：只有画面文字，没有语音转写');
     expect(report).toContain('输入 1,234,567');
     expect(report).toContain('输出 34,567');
     expect(report).toContain('合计 1,269,134');
@@ -155,21 +153,13 @@ describe('buildQualityReport', () => {
     expect(report).toContain('实际：120,000 tokens');
   });
 
-  it('has no slides section content in quick mode', () => {
-    const report = buildQualityReport(input({ mode: 'quick', deck: undefined }));
-
-    expect(report).toContain('模式：快速笔记');
-    expect(report).toContain('课件页数：—');
-    expect(report).toContain('快速笔记模式，没有课件。');
-  });
-
   it('states the fixed limitations', () => {
     const report = buildQualityReport(input());
 
-    expect(report).toContain('画面读取依赖模型');
+    expect(report).toContain('纯口头内容与未停留的画面可能缺失');
     expect(report).toContain('遮挡');
-    expect(report).toContain('扩展内容');
     expect(report).toContain('file://#t=');
+    expect(report).toContain('字体随机器变化');
   });
 
   it('is deterministic for the same input', () => {
