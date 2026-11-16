@@ -60,7 +60,7 @@ test('switches across the top sections and marks the active one', async () => {
     {
       label: '知识库',
       assert: async () =>
-        expect(await screen.findByText('还没有知识主题。')).toBeInTheDocument()
+        expect(await screen.findByText('还没有知识主题')).toBeInTheDocument()
     },
     {
       label: '记忆',

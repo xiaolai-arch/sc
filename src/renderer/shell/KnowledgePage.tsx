@@ -431,7 +431,9 @@ export function KnowledgePage({
           </p>
           <nav className="mt-2 min-h-0 flex-1 overflow-y-auto pb-4">
             {topics.length === 0 ? (
-              <p className="px-1 py-6 text-[13px] leading-6 text-gray-500 dark:text-[#8e8e93]">
+              // At lg the content pane shows the full empty state; keep this
+              // guidance for the narrow layout, where the directory is alone.
+              <p className="px-1 py-6 text-[13px] leading-6 text-gray-500 lg:hidden dark:text-[#8e8e93]">
                 还没有知识主题。完成学习任务、写笔记，或对阿咲说“今天学了 X”。
               </p>
             ) : filtered.length === 0 ? (
@@ -519,9 +521,18 @@ export function KnowledgePage({
                 : {})}
               onBack={() => setMobilePane('list')}
             />
+          ) : topics.length === 0 ? (
+            <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 text-center">
+              <p className="text-[14px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
+                还没有知识主题
+              </p>
+              <p className="mt-2 max-w-[320px] text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
+                完成学习任务、写笔记，或对阿咲说“今天学了 X”。
+              </p>
+            </div>
           ) : (
             <p className="py-16 text-center text-[13px] text-gray-500 dark:text-[#8e8e93]">
-              {topics.length === 0 ? '还没有知识主题。' : '选择一个主题查看笔记。'}
+              选择一个主题查看笔记。
             </p>
           )}
         </section>
