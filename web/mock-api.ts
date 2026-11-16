@@ -94,6 +94,7 @@ import type {
 } from '../src/shared/plans';
 import { buildTemplatePlan } from '../src/shared/plan-template';
 import type { SearchResult, SearchResultKind } from '../src/shared/search';
+import { DAILY_WORKSPACE_ID } from '../src/shared/conversations';
 import type {
   CreateProfileEntryInput,
   DeleteProfileEntryInput,
@@ -343,11 +344,80 @@ function displayDate(date = new Date()) {
   return `${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
-function butlerReply(text: string) {
+/** Exam goals the prototype recognizes; a created workspace takes the matched name. */
+const EXAM_PROJECT_RE = /(考研|国考|省考|考公|公务员|法考|雅思|托福|GRE|CPA|教资)/i;
+
+type SeedTask = Omit<WorkspaceTask, 'id' | 'workspaceId'>;
+
+function examSeedTasks(): SeedTask[] {
+  return [
+    {
+      title: '极限基础',
+      subject: '数学',
+      durationMin: 45,
+      acceptance: '完成 10 题并整理错题',
+      status: 'pending'
+    },
+    {
+      title: '阅读理解',
+      subject: '英语',
+      durationMin: 30,
+      acceptance: '精读 1 篇',
+      status: 'pending'
+    },
+    {
+      title: '408 数据结构',
+      subject: '专业课',
+      durationMin: 60,
+      acceptance: '完成第一章框架',
+      status: 'pending'
+    }
+  ];
+}
+
+function civilServiceSeedTasks(_examName: string): SeedTask[] {
+  return [
+    {
+      title: '资料分析限时练',
+      subject: '行测',
+      durationMin: 30,
+      acceptance: '4 篇材料，20 题内完成并记录用时',
+      status: 'pending'
+    },
+    {
+      title: '判断推理专项',
+      subject: '行测',
+      durationMin: 30,
+      acceptance: '图推 + 逻辑判断各 10 题，整理错题',
+      status: 'pending'
+    },
+    {
+      title: '申论归纳概括',
+      subject: '申论',
+      durationMin: 45,
+      acceptance: '写 1 道小题并对照要点批改',
+      status: 'pending'
+    }
+  ];
+}
+
+function butlerReply(
+  text: string,
+  pendingTasks: Array<{ title: string; durationMin?: number }> = []
+) {
   if (/记一下|记录/.test(text)) return '记下了。可以去「记录」里查看这条随手记。';
   if (/提醒/.test(text)) return '好，我会在 21:30 提醒你复盘（原型）。';
   if (/优先级|安排|排/.test(text)) {
-    return '我先按截止时间和精力排：数学 45 分钟 → 英语 30 分钟 → 政治 30 分钟。';
+    if (pendingTasks.length === 0) {
+      return '这个工作区还没有待办任务。先说一句要学什么，我记下来之后就能帮你排今天的安排。';
+    }
+    const plan = pendingTasks
+      .slice(0, 3)
+      .map((task) =>
+        task.durationMin ? `${task.title} ${task.durationMin} 分钟` : task.title
+      )
+      .join(' → ');
+    return `我先按截止时间和精力排：${plan}。`;
   }
   if (/洛必达/.test(text)) {
     return '洛必达法则要先确认 0/0 或 ∞/∞，且导函数比值极限存在。你「错题：洛必达法则的适用条件」里正好记了这一点。';
@@ -461,6 +531,19 @@ export function createMockApi(
     return workspace;
   }
 
+  /** The workspace's open tasks, soonest deadline first — the mock schedule reply. */
+  function pendingTaskLine(workspaceId?: string) {
+    const scoped =
+      workspaceId && workspaceId !== DAILY_WORKSPACE_ID
+        ? state.tasks.filter((task) => task.workspaceId === workspaceId)
+        : state.tasks;
+    return scoped
+      .filter((task) => task.status !== 'done' && task.status !== 'skipped')
+      .sort((a, b) => (a.due ?? '9999-12-31').localeCompare(b.due ?? '9999-12-31'))
+      .slice(0, 3)
+      .map((task) => ({ title: task.title, durationMin: task.durationMin }));
+  }
+
   function createNoteInternal(input: CreateNoteInput): WorkspaceNote {
     const workspace = requireWorkspace(input.workspaceId);
     const note: WorkspaceNote = {
@@ -565,7 +648,7 @@ export function createMockApi(
     const summary =
       scoped.length === 0
         ? '还没有记忆，完成一次复盘后会开始积累。'
-        : `共 ${scoped.length} 条记忆：薄弱点 ${weaknesses.length} 条，偏好 ${preferences.length} 条，计划 ${plans.length} 条。`;
+        : `共 ${scoped.length} 条记忆：优势 ${strengths.length} 条，薄弱点 ${weaknesses.length} 条，偏好 ${preferences.length} 条，计划 ${plans.length} 条。`;
     return {
       ...(workspaceId !== undefined ? { workspaceId } : {}),
       memoryCount: scoped.length,
@@ -797,7 +880,17 @@ export function createMockApi(
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         };
-        state.workspaces = [...state.workspaces, workspace];
+        // A real fresh install is empty: onboarding creates the only workspace.
+        // The demo tour stays available by choosing 稍后再说 in the dialog.
+        state.workspaces = [workspace];
+        state.tasks = [];
+        state.notes = [];
+        state.memory = [];
+        state.profile = [];
+        state.reminders = [];
+        state.practiceSets = [];
+        state.practiceAttempts = [];
+        state.practiceMistakes = [];
       }
       state.onboarded = true;
       persist();
@@ -2206,7 +2299,7 @@ export function createMockApi(
     async send(input: SendMessageInput): Promise<SendMessageResult> {
       recordNoteIfNeeded(input);
       return {
-        text: butlerReply(input.message)
+        text: butlerReply(input.message, pendingTaskLine(input.workspaceId))
       };
     },
 
@@ -2214,8 +2307,14 @@ export function createMockApi(
       const steps: ConversationStep[] = [];
       const streamId = input.assistantMessageId ?? '';
       const isCancelled = () => streamId !== '' && cancelledStreams.has(streamId);
+      // The prototype's chat "reads" the profile: show the facts the user added
+      // most recently instead of the oldest demo rows.
       const profileReferences = state.profile
         .filter((entry) => entry.status === 'active' && entry.confidence === 'confirmed')
+        .sort(
+          (a, b) =>
+            (b.createdAt ?? '').localeCompare(a.createdAt ?? '') || b.id.localeCompare(a.id)
+        )
         .slice(0, 2)
         .map((entry) => ({
           id: entry.id,
@@ -2249,7 +2348,7 @@ export function createMockApi(
         ? state.conversations.find((entry) => entry.id === input.conversationId)
         : undefined;
       const wantsNote = /记一下|记录/.test(input.message);
-      const wantsExamProject = /我想考研/.test(input.message);
+      const wantsExamProject = EXAM_PROJECT_RE.test(input.message);
       const reasoning = wantsExamProject
         ? '先确认目标、科目和每天可用时间，再创建项目并排第一批任务。'
         : wantsNote
@@ -2267,7 +2366,10 @@ export function createMockApi(
         onEvent({ type: 'references', items: profileReferences });
       }
 
-      let reply = butlerReply(input.message);
+      let reply = butlerReply(
+        input.message,
+        pendingTaskLine(conversation?.workspaceId ?? input.workspaceId)
+      );
 
       if (wantsExamProject) {
         const label = '创建项目';
@@ -2281,13 +2383,18 @@ export function createMockApi(
         steps.push(step);
         onEvent({ type: 'tool-start', id, name: 'create_workspace', label });
         await sleep(300 * pace);
-        const existing = state.workspaces.find((workspace) => workspace.name === '考研');
+        const examName = input.message.match(EXAM_PROJECT_RE)![0];
+        const seedTasks =
+          /国考|省考|考公|公务员/.test(examName) || /国考|省考|考公|公务员/.test(input.message)
+            ? civilServiceSeedTasks(examName)
+            : examSeedTasks();
+        const existing = state.workspaces.find((workspace) => workspace.name === examName);
         const workspace =
           existing ??
           createWorkspaceInternal({
-            name: '考研',
+            name: examName,
             kind: 'exam',
-            goal: '2027 考研上岸',
+            goal: truncateConversationText(input.message, 60),
             description: '由阿咲在对话里创建'
           });
         if (conversation) {
@@ -2296,33 +2403,11 @@ export function createMockApi(
         if (!existing) {
           state.tasks = [
             ...state.tasks,
-            {
+            ...seedTasks.map((task) => ({
+              ...task,
               id: nextId('task'),
-              workspaceId: workspace.id,
-              title: '极限基础',
-              subject: '数学',
-              durationMin: 45,
-              acceptance: '完成 10 题并整理错题',
-              status: 'pending'
-            },
-            {
-              id: nextId('task'),
-              workspaceId: workspace.id,
-              title: '阅读理解',
-              subject: '英语',
-              durationMin: 30,
-              acceptance: '精读 1 篇',
-              status: 'pending'
-            },
-            {
-              id: nextId('task'),
-              workspaceId: workspace.id,
-              title: '408 数据结构',
-              subject: '专业课',
-              durationMin: 60,
-              acceptance: '完成第一章框架',
-              status: 'pending'
-            }
+              workspaceId: workspace.id
+            }))
           ];
         }
         persist();
@@ -2335,8 +2420,8 @@ export function createMockApi(
           label
         });
         reply = existing
-          ? '已找到项目「考研」，右侧项目面板可以看现有计划和记录。'
-          : '已创建项目「考研」，并放进第一批任务。右侧项目面板可以直接看计划和记录。';
+          ? `已找到项目「${workspace.name}」，右侧项目面板可以看现有计划和记录。`
+          : `已创建项目「${workspace.name}」，并放进第一批任务。右侧项目面板可以直接看计划和记录。`;
         await sleep(120 * pace);
       }
 

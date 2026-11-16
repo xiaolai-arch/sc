@@ -61,8 +61,9 @@ test('updates a workspace task and keeps settings', async () => {
     goal: 'g',
     description: ''
   });
+  const workspace = (await api.listWorkspaces())[0]!;
   const task = await api.createTask({
-    workspaceId: 'kaoyan',
+    workspaceId: workspace.id,
     title: '极限 10 题',
     subject: '数学',
     durationMin: 45,
@@ -72,6 +73,30 @@ test('updates a workspace task and keeps settings', async () => {
   expect(updated.status).toBe('done');
   const settings = await api.getSettings();
   expect(settings.budget.proactiveSessionsPerDay).toBe(4);
+});
+
+test('onboarding starts clean instead of keeping the demo tour data', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage);
+  await api.completeWorkspaceOnboarding({
+    name: '2027 国考',
+    kind: 'exam',
+    goal: '行测 75+',
+    description: ''
+  });
+  const workspaces = await api.listWorkspaces();
+  expect(workspaces.map((workspace) => workspace.name)).toEqual(['2027 国考']);
+  const snapshot = await api.getWorkspaceSnapshot(workspaces[0]!.id);
+  expect(snapshot.tasks).toEqual([]);
+  expect(await api.getMemoryProfile()).toMatchObject({ memoryCount: 0 });
+  expect(await api.getReminders()).toEqual([]);
+  expect(await api.listPracticeSets(workspaces[0]!.id)).toEqual([]);
+
+  const schedule = await api.send({
+    workspaceId: workspaces[0]!.id,
+    message: '帮我排一下今天的优先级'
+  });
+  expect(schedule.text).toContain('还没有待办任务');
 });
 
 test('creates, tracks and deletes a long-term plan in the prototype', async () => {
@@ -479,6 +504,47 @@ test('streams reasoning, a tool step and the final reply', async () => {
 
   const snapshot = await api.getWorkspaceSnapshot('kaoyan');
   expect(snapshot.notes.some((note) => note.title.includes('今天数学卡在极限'))).toBe(true);
+});
+
+test('references show the newest confirmed profile facts first', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage);
+  await api.createProfileEntry({ category: 'identity', text: '我考 2027 国考，主攻行测。' });
+
+  const events: ButlerStreamEvent[] = [];
+  await api.stream(
+    { workspaceId: 'kaoyan', message: '帮我排一下今天的优先级' },
+    (event) => events.push(event)
+  );
+  const reference = events.find((event) => event.type === 'references');
+  const items = (
+    reference as Extract<ButlerStreamEvent, { type: 'references' }> | undefined
+  )?.items;
+  expect(items?.[0]?.title).toBe('我考 2027 国考，主攻行测。');
+});
+
+test('schedules from the workspace tasks instead of canned subjects', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage);
+  const result = await api.send({
+    workspaceId: 'english',
+    message: '帮我排一下今天的优先级'
+  });
+  expect(result.text).toContain('外刊精读');
+  expect(result.text).not.toContain('政治');
+});
+
+test('creates an exam workspace from a non-考研 exam message', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage);
+  const events: ButlerStreamEvent[] = [];
+  await api.stream({ message: '我准备 2027 国考，帮我建个项目' }, (event) => events.push(event));
+  const workspaces = await api.listWorkspaces();
+  const guokao = workspaces.find((workspace) => workspace.name === '国考');
+  expect(guokao).toBeTruthy();
+  const tasks = (await api.getWorkspaceSnapshot(guokao!.id)).tasks;
+  expect(tasks.some((task) => task.subject === '行测')).toBe(true);
+  expect(tasks.some((task) => task.subject === '申论')).toBe(true);
 });
 
 test('streams a plain answer without a tool step', async () => {
