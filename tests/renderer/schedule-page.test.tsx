@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { Workspace } from '../../src/renderer/shell/Workspace';
 import { SchedulePage } from '../../src/renderer/shell/SchedulePage';
-import { buildDailySchedule } from '../../src/renderer/shell/schedule';
+import { buildDailySchedule, nextScheduledDay } from '../../src/renderer/shell/schedule';
 import type {
   UpdateWorkspaceTaskInput,
   Workspace as Project,
@@ -142,6 +142,21 @@ test('keeps a completed pinned task visible for the day', () => {
   expect(entries[0]).toMatchObject({ title: '已完成的真题', status: 'done', pinned: true });
 });
 
+test('finds the next day that already has pinned tasks', () => {
+  const now = new Date(2026, 10, 15, 21, 0); // Sunday
+  const monday = { ...task('mon', '英语诊断', 'pending', 30), startAt: '2026-11-16T20:00' };
+  const tuesday = { ...task('tue', '数学极限', 'pending', 90), startAt: '2026-11-17T20:00' };
+
+  const upcoming = nextScheduledDay([tuesday, monday], [workspace], now);
+
+  expect(upcoming?.date).toBe('2026-11-16');
+  expect(upcoming?.label).toContain('11月16日');
+  expect(upcoming?.entries.map((entry) => [entry.title, entry.time])).toEqual([
+    ['英语诊断', '20:00']
+  ]);
+  expect(nextScheduledDay([task('loose', '背单词', 'pending')], [workspace], now)).toBeNull();
+});
+
 function renderSchedule(tasks: WorkspaceTask[], onUpdateTask = vi.fn()) {
   onUpdateTask.mockImplementation(async (input: UpdateWorkspaceTaskInput) => {
     const found = tasks.find((entry) => entry.id === input.taskId);
@@ -161,6 +176,17 @@ function renderSchedule(tasks: WorkspaceTask[], onUpdateTask = vi.fn()) {
   );
   return onUpdateTask;
 }
+
+test('shows the next scheduled day when today has no tasks', () => {
+  renderSchedule([
+    { ...task('mon', '英语诊断', 'pending', 30), startAt: '2026-11-02T20:00' }
+  ]);
+
+  expect(screen.getByText('今天还没有安排')).toBeInTheDocument();
+  expect(screen.getByText(/下一份安排：11月2日 星期一/)).toBeInTheDocument();
+  expect(screen.getByText('英语诊断')).toBeInTheDocument();
+  expect(screen.getByText('20:00')).toBeInTheDocument();
+});
 
 test('completes a task from the timetable', async () => {
   const onUpdateTask = renderSchedule([task('active', '做题', 'in-progress', 45)]);
@@ -228,7 +254,9 @@ test('shows the timetable on 今日安排 and keeps it out of 日常', async () 
   await userEvent.click(nav().getByRole('button', { name: '日常' }));
   expect(await screen.findByRole('heading', { name: '日常' })).toBeInTheDocument();
   expect(screen.queryByText('今天的时间表')).not.toBeInTheDocument();
-  expect(screen.queryByText('搭首页')).not.toBeInTheDocument();
+  // The home screen now surfaces the next tasks itself; it must still not be
+  // the time-blocked 今日安排 page.
+  expect(screen.getByRole('region', { name: '接下来' })).toBeInTheDocument();
 });
 
 test('lets the butler adjust the schedule in a daily conversation', async () => {

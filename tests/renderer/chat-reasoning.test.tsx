@@ -20,16 +20,16 @@ async function waitForIdle() {
   );
 }
 
-test('shows live reasoning and collapses after the answer starts', async () => {
+test('folds the thinking chain once the answer starts, and reopens it', async () => {
   setup();
   await screen.findByText(homeGreeting('xiaolai', new Date()));
   await sendPrompt('帮我排一下今天的优先级');
 
-  const header = await screen.findByRole('button', { name: /思考/ });
-  expect(header).toHaveAttribute('aria-expanded', 'false');
+  const header = await screen.findByRole('button', { name: /思考过程/ });
   expect(
     await screen.findByText(/我先按截止时间和精力排/, {}, { timeout: 3000 })
   ).toBeInTheDocument();
+  await waitFor(() => expect(header).toHaveAttribute('aria-expanded', 'false'));
 
   await userEvent.click(header);
   expect(header).toHaveAttribute('aria-expanded', 'true');
@@ -45,7 +45,7 @@ test('shows tool steps and keeps narration out of the final answer', async () =>
   expect(await screen.findByText('写入笔记', {}, { timeout: 3000 })).toBeInTheDocument();
   expect(await screen.findByText(/记下了/, {}, { timeout: 3000 })).toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole('button', { name: /思考/ }));
+  await userEvent.click(screen.getByRole('button', { name: /思考过程/ }));
   expect(screen.getByText(/我先把这条记下来/)).toBeInTheDocument();
 
   const answer = screen.getByText(/记下了/);

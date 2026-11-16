@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { formatChineseDate, formatLocalDate } from '../../shared/date';
 import {
   DAILY_WORKSPACE_ID,
@@ -7,8 +7,17 @@ import {
 } from '../../shared/conversations';
 import type { LongPlan, LongPlanDay } from '../../shared/plans';
 import type { SendMessageInput, WorkspaceNote } from '../../shared/workspace';
+import {
+  DEFAULT_AGENT_PERMISSIONS,
+  type AgentPermissions,
+  type ChatAttachment,
+  type MessageAttachment
+} from '../../shared/attachments';
+import type { ProviderConfig } from '../../shared/types';
+import type { ButlerReference } from '../../shared/butler-stream';
 import type { PracticeMistake, PracticeSet } from '../../shared/practice';
 import type { SearchResult } from '../../shared/search';
+import { localCliModels, useLocalCliModels } from '../local-cli-models';
 import { SettingsPage } from '../settings/SettingsPage';
 import { Dialog } from '../ui/Dialog';
 import { ChatPane } from './ChatPane';
@@ -33,6 +42,8 @@ import { LongPlanPage } from './LongPlanPage';
 import { MemoryPage } from './MemoryPage';
 import { ModelPickerDialog } from './ModelPickerDialog';
 import { PracticeSetDialog } from './PracticeSetDialog';
+import { ProfilePage } from './ProfilePage';
+import { TodayOverview } from './TodayOverview';
 import {
   NavigationSidebar,
   type ChatScope,
@@ -45,6 +56,15 @@ import { QuickCaptureDialog } from './QuickCaptureDialog';
 import { RemindersPage } from './RemindersPage';
 import { ReviewPage } from './ReviewPage';
 import { SchedulePage } from './SchedulePage';
+import {
+  conversationRuns,
+  isActiveRun,
+  isLiveRun,
+  runStatus,
+  runToChatMessage,
+  useConversationRuns,
+  type ConversationRunStatus
+} from './conversation-runs';
 import { stepsToTrace } from './trace';
 import type { ChatMessage, ChatTraceItem } from './types';
 import { useConversations } from './useConversations';
@@ -78,19 +98,9 @@ function chatMessageId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-function scheduleFrame(callback: () => void): number {
-  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-    return window.requestAnimationFrame(callback);
-  }
-  return globalThis.setTimeout(callback, 16) as unknown as number;
-}
-
-function cancelFrame(id: number): void {
-  if (typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
-    window.cancelAnimationFrame(id);
-    return;
-  }
-  globalThis.clearTimeout(id);
+/** Drops the payload before it is persisted with the user's message. */
+function messageAttachmentsOf(attachments: ChatAttachment[]): MessageAttachment[] {
+  return attachments.map(({ name, mediaType, size, kind }) => ({ name, mediaType, size, kind }));
 }
 
 function WorkspaceStatus({
@@ -148,7 +158,6 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     reload,
     refreshKnowledge,
     stream,
-    cancelStream,
     submitPracticeAnswer,
     reviewPracticeMistake,
     resolvePracticeMistake,
@@ -185,6 +194,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     searchAll
   } = useWorkspaceData();
   const conversations = useConversations();
+  const runState = useConversationRuns();
   const [section, setSection] = useState<Section>('chat');
   const [chatScope, setChatScope] = useState<ChatScope>('daily');
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -199,10 +209,10 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
   const [renameSetId, setRenameSetId] = useState<string | null>(null);
   const [confirmDeleteSetId, setConfirmDeleteSetId] = useState<string | null>(null);
   const [practiceError, setPracticeError] = useState<string | null>(null);
-  const [activeAssistantId, setActiveAssistantId] = useState<string | null>(null);
-  const [typing, setTyping] = useState(false);
-  const [streamingMessage, setStreamingMessage] = useState<ChatMessage | null>(null);
   const [composerText, setComposerText] = useState('');
+  /** Files staged for the next message. */
+  const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
+  const [permissions, setPermissions] = useState<AgentPermissions>(DEFAULT_AGENT_PERMISSIONS);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [focus, setFocus] = useState<FocusSession | null>(null);
   const [focusNotice, setFocusNotice] = useState<string | null>(null);
@@ -214,7 +224,6 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [modelSaving, setModelSaving] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
-  const [streamStatus, setStreamStatus] = useState<string | null>(null);
   const [budgetPrompt, setBudgetPrompt] = useState<{ used: number; limit: number } | null>(
     null
   );
@@ -237,9 +246,16 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
   const [actionError, setActionError] = useState<string | null>(null);
   const [canRetryTurn, setCanRetryTurn] = useState(false);
   const [modelLabel, setModelLabel] = useState('模板计划');
+  const [provider, setProvider] = useState<ProviderConfig | null>(null);
+  const cliModels = useLocalCliModels();
   const [displayName, setDisplayName] = useState('xiaolai');
-  const streamGenerationRef = useRef(0);
-  const retryTurnRef = useRef<{ text: string; conversation: Conversation } | null>(null);
+  const retryTurnRef = useRef<{
+    text: string;
+    conversation: Conversation;
+    attachments: ChatAttachment[];
+  } | null>(null);
+  /** Files sent with each user message, kept in memory so regenerate can reuse them. */
+  const sentAttachmentsRef = useRef(new Map<string, ChatAttachment[]>());
   const activeConversationIdRef = useRef<string | null>(null);
   activeConversationIdRef.current = conversations.active?.id ?? null;
   /** A turn can outlive its view (navigation, test teardown); stop updating then. */
@@ -251,6 +267,45 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
       mountedRef.current = false;
     };
   }, []);
+
+  // Each conversation remembers its own permissions; a fresh draft starts from
+  // the defaults, and staged files never follow the user across threads.
+  const syncedConversationIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const id = conversations.active?.id ?? null;
+    if (syncedConversationIdRef.current === id) return;
+    syncedConversationIdRef.current = id;
+    setPendingAttachments([]);
+    setPermissions(conversations.active?.permissions ?? DEFAULT_AGENT_PERMISSIONS);
+  }, [conversations.active]);
+
+  // Pick up turns the main process saved before it quit; they show as
+  // interrupted instead of a spinner that can never finish.
+  useEffect(() => {
+    void conversationRuns.hydrate();
+  }, []);
+
+  // Stream side effects: a tool may write knowledge mid-turn, and an error
+  // must reach the banner only when its conversation is the one on screen.
+  useEffect(
+    () =>
+      conversationRuns.subscribeEvents((event, run) => {
+        if (event.type === 'tool-result') {
+          if (event.ok && KNOWLEDGE_TOOLS.has(event.name)) void refreshKnowledge();
+          return;
+        }
+        if (event.type === 'error') {
+          // The ref lags one render behind `active` right after a conversation
+          // is created, so a run with no open conversation still reaches the
+          // banner; a failure in some other conversation stays quiet.
+          const visible = activeConversationIdRef.current;
+          if (mountedRef.current && (visible === null || visible === run.conversationId)) {
+            setActionError(event.message);
+          }
+        }
+      }),
+    [refreshKnowledge]
+  );
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -328,6 +383,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     }
     try {
       const settings = await api.getSettings();
+      setProvider(settings.provider);
       setModelLabel(
         settings.provider.kind === 'local-cli'
           ? settings.provider.model ?? settings.provider.agent
@@ -343,6 +399,26 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
   useEffect(() => {
     void loadModelLabel();
   }, [loadModelLabel]);
+
+  // The chat picker offers the same models the settings page shows, so the
+  // local CLI scan is loaded once and shared through the module-level store.
+  const localCliAgent = provider?.kind === 'local-cli' ? provider.agent : null;
+  useEffect(() => {
+    if (!localCliAgent) return;
+    void localCliModels.load();
+  }, [localCliAgent]);
+  const cliModelCatalog =
+    localCliAgent !== null && cliModels.scan
+      ? (cliModels.scan.entries.find((entry) => entry.agent === localCliAgent)?.modelCatalog ??
+        null)
+      : null;
+  const globalModelLabel =
+    provider?.kind === 'local-cli'
+      ? provider.model?.trim() ||
+        (cliModelCatalog?.defaultModel
+          ? `继承 CLI 默认（${cliModelCatalog.defaultModel}）`
+          : '继承 CLI 默认')
+      : provider?.model?.trim() || modelLabel;
 
   useEffect(() => {
     if (!focus?.running) return undefined;
@@ -439,8 +515,6 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     const external = conversations.externalOpen;
     if (!external) return;
     guardSettings(() => {
-      stopActiveStreamForNavigation();
-      setStreamingMessage(null);
       setActionError(null);
       setEditingMessageId(null);
       setComposerText('');
@@ -452,8 +526,28 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     });
   }, [conversations.externalOpen, conversations.select]);
 
+  const activeConversation = conversations.active;
+  const activeRun =
+    activeConversation === null
+      ? null
+      : runState.runs.find(
+          (run) => run.conversationId === activeConversation.id && isLiveRun(run)
+        ) ?? null;
+  // A run restored from disk may already be persisted in the conversation;
+  // drawing both would show the same answer twice, so the file wins.
+  const activeRunPersisted = Boolean(
+    activeRun &&
+      activeConversation?.messages.some(
+        (message) => message.id === activeRun.assistantMessageId
+      )
+  );
+  // Only an unfinished turn owns the composer and the Stop button; a failed or
+  // interrupted run stays on screen as a partial answer with its notice.
+  const typing = activeRun !== null && isActiveRun(activeRun);
+  const typingStatus = activeRun?.statusMessage ?? null;
+
   const chatMessages: ChatMessage[] = [
-    ...(conversations.active?.messages ?? []).map((message): ChatMessage => {
+    ...(activeConversation?.messages ?? []).map((message): ChatMessage => {
       const trace =
         message.role === 'assistant'
           ? traceById[message.id] ?? stepsToTrace(message.steps)
@@ -463,11 +557,36 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
         role: message.role,
         text: message.text,
         ...(trace.length > 0 ? { trace } : {}),
+        ...(message.references && message.references.length > 0
+          ? { references: message.references }
+          : {}),
+        ...(message.attachments && message.attachments.length > 0
+          ? { attachments: message.attachments }
+          : {}),
         streaming: false
       };
     }),
-    ...(streamingMessage ? [streamingMessage] : [])
+    ...(activeRun && !activeRunPersisted ? [runToChatMessage(activeRun)] : [])
   ];
+
+  /** Per-conversation status for the sidebar dots. */
+  const runStates = useMemo(() => {
+    const priority: Record<ConversationRunStatus, number> = {
+      running: 3,
+      failed: 2,
+      interrupted: 1,
+      completed: 0
+    };
+    const statuses: Record<string, ConversationRunStatus> = {};
+    for (const run of runState.runs) {
+      const status = runStatus(run);
+      const current = statuses[run.conversationId];
+      if (current === undefined || priority[status] > priority[current]) {
+        statuses[run.conversationId] = status;
+      }
+    }
+    return statuses;
+  }, [runState]);
 
   /**
    * Manual turns keep working after the daily token budget is spent, but the
@@ -501,6 +620,10 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     setBudgetPrompt(null);
   }
 
+  /**
+   * Starts one turn. The run lives in the main process, so this returns as soon
+   * as the prompt is stored: navigating away no longer cancels the answer.
+   */
   async function runTurn(
     text: string,
     options: {
@@ -510,38 +633,38 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
       newConversation?: boolean;
       /** Overrides the chat scope for a newly created conversation. */
       workspaceId?: string | null;
+      /** Files attached to this turn only. */
+      attachments?: ChatAttachment[];
     }
   ): Promise<boolean> {
-    if (typing) return false;
+    const turnAttachments = options.attachments ?? [];
+    const starting = options.newConversation
+      ? null
+      : options.conversation ?? conversations.active;
+    // One turn per conversation; another conversation may still be generating.
+    if (starting && conversationRuns.hasActive(starting.id)) return false;
     if (!(await confirmBudget())) return false;
-    const generation = ++streamGenerationRef.current;
     retryTurnRef.current = null;
     setCanRetryTurn(false);
     setActionError(null);
-    setStreamStatus(null);
-    setTyping(true);
 
-    let conversation = options.newConversation
-      ? null
-      : options.conversation ?? conversations.active;
+    let conversation = starting;
     const creationWorkspaceId =
       options.workspaceId !== undefined
         ? options.workspaceId
         : conversation
           ? conversation.workspaceId ?? null
           : chatWorkspaceId;
-    try {
-      if (!conversation) {
+    if (!conversation) {
+      try {
         conversation = await conversations.create({
-          ...(creationWorkspaceId ? { workspaceId: creationWorkspaceId } : {})
+          ...(creationWorkspaceId ? { workspaceId: creationWorkspaceId } : {}),
+          permissions
         });
+      } catch (cause) {
+        if (mountedRef.current) setActionError(messageOf(cause));
+        return false;
       }
-    } catch (cause) {
-      if (mountedRef.current) {
-        setActionError(messageOf(cause));
-        setTyping(false);
-      }
-      return false;
     }
 
     if (options.appendUser) {
@@ -550,296 +673,120 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
         role: 'user',
         text,
         createdAt: new Date().toISOString(),
-        source: 'user'
+        source: 'user',
+        ...(turnAttachments.length > 0
+          ? { attachments: messageAttachmentsOf(turnAttachments) }
+          : {})
       };
       try {
         await conversations.append(conversation.id, userMessage);
       } catch (cause) {
-        if (mountedRef.current) {
-          setActionError(messageOf(cause));
-          setTyping(false);
-        }
+        if (mountedRef.current) setActionError(messageOf(cause));
         // The user message never reached the conversation, so the caller must
         // keep the draft instead of clearing it.
         return false;
       }
+      if (turnAttachments.length > 0) {
+        sentAttachmentsRef.current.set(userMessage.id, turnAttachments);
+      }
     }
 
+    const target = conversation;
     const assistantId = chatMessageId('a');
-    const pendingTrace: ChatTraceItem[] = [
-      {
-        kind: 'reasoning',
-        id: `trace-${assistantId}-pending`,
-        text: '',
-        streaming: true
-      }
-    ];
-    let trace: ChatTraceItem[] = pendingTrace;
-    let reasoningCount = 0;
-    setActiveAssistantId(assistantId);
-    setStreamingMessage({
-      id: assistantId,
-      role: 'assistant',
-      text: '',
-      trace: pendingTrace,
-      streaming: true
+    // Registering the run before the request goes out means the placeholder is
+    // on screen even if the user jumps to another page immediately.
+    conversationRuns.start({
+      runId: assistantId,
+      conversationId: target.id,
+      assistantMessageId: assistantId,
+      userText: text
     });
-    let pendingReasoning = '';
-    let pendingText = '';
-    let frameId: number | null = null;
-    let assistantText = '';
-    let streamError: string | null = null;
 
-    const cloneTrace = (): ChatTraceItem[] => trace.map((item) => ({ ...item }));
-
-    const updateStreaming = (updater: (message: ChatMessage) => ChatMessage) => {
-      if (!mountedRef.current) return;
-      setStreamingMessage((current) =>
-        current && current.id === assistantId ? updater(current) : current
-      );
-    };
-
-    const publishTrace = () => {
-      updateStreaming((message) => ({ ...message, trace: cloneTrace() }));
-    };
-
-    const appendReasoning = (chunk: string) => {
-      let current = trace[trace.length - 1];
-      if (!current || current.kind !== 'reasoning') {
-        reasoningCount += 1;
-        current = {
-          kind: 'reasoning',
-          id: `trace-${assistantId}-${reasoningCount}`,
-          text: '',
-          streaming: true
-        };
-        trace = [...trace, current];
+    const runtimeWorkspaceId =
+      target.workspaceId && target.workspaceId !== DAILY_WORKSPACE_ID
+        ? target.workspaceId
+        : undefined;
+    // Deliberately not awaited: the answer keeps arriving while the user
+    // navigates, and `settleRun` refreshes the views it may have touched.
+    void stream(
+      {
+        ...(runtimeWorkspaceId ? { workspaceId: runtimeWorkspaceId } : {}),
+        conversationId: target.id,
+        assistantMessageId: assistantId,
+        message: text,
+        permissions,
+        ...(turnAttachments.length > 0 ? { attachments: turnAttachments } : {})
+      } satisfies SendMessageInput,
+      (event) => {
+        conversationRuns.applyEvent(assistantId, event);
       }
-      current.text += chunk;
-      current.streaming = true;
-    };
-
-    const settleReasoning = () => {
-      for (const item of trace) {
-        if (item.kind === 'reasoning') item.streaming = false;
-      }
-    };
-
-    const settleTrace = () => {
-      trace = trace.map((item) =>
-        item.kind === 'reasoning'
-          ? { ...item, streaming: false }
-          : item.status === 'running'
-            ? { ...item, status: 'failed' }
-            : item
-      );
-    };
-
-    const flush = () => {
-      frameId = null;
-      const reasoning = pendingReasoning;
-      const text = pendingText;
-      pendingReasoning = '';
-      pendingText = '';
-      if (!reasoning && !text) return;
-      if (reasoning) appendReasoning(reasoning);
-      if (text) assistantText += text;
-      updateStreaming((message) => ({
-        ...message,
-        ...(reasoning ? { trace: cloneTrace() } : {}),
-        ...(text ? { text: `${message.text}${text}` } : {})
-      }));
-    };
-
-    const scheduleFlush = () => {
-      if (frameId !== null) return;
-      frameId = scheduleFrame(flush);
-    };
-
-    const flushNow = () => {
-      if (frameId !== null) {
-        cancelFrame(frameId);
-        frameId = null;
-      }
-      flush();
-    };
-
-    try {
-      const runtimeWorkspaceId =
-        conversation.workspaceId && conversation.workspaceId !== DAILY_WORKSPACE_ID
-          ? conversation.workspaceId
-          : undefined;
-      const result = await stream(
-        {
-          ...(runtimeWorkspaceId ? { workspaceId: runtimeWorkspaceId } : {}),
-          conversationId: conversation.id,
-          assistantMessageId: assistantId,
-          message: text
-        } satisfies SendMessageInput,
-        (event) => {
-          if (!mountedRef.current) return;
-          switch (event.type) {
-            case 'retry':
-              setStreamStatus(event.message);
-              break;
-            case 'reasoning':
-              setStreamStatus(null);
-              pendingReasoning += event.text;
-              scheduleFlush();
-              break;
-            case 'narration':
-              flushNow();
-              appendReasoning(
-                trace[trace.length - 1]?.kind === 'reasoning'
-                  ? `\n\n${event.text}`
-                  : event.text
-              );
-              publishTrace();
-              break;
-            case 'text':
-              setStreamStatus(null);
-              flushNow();
-              settleReasoning();
-              publishTrace();
-              pendingText += event.text;
-              scheduleFlush();
-              break;
-            case 'tool-start': {
-              flushNow();
-              settleReasoning();
-              trace = [
-                ...trace,
-                {
-                  kind: 'tool',
-                  id: event.id,
-                  name: event.name,
-                  label: event.label,
-                  status: 'running'
-                }
-              ];
-              publishTrace();
-              break;
-            }
-            case 'tool-result': {
-              flushNow();
-              trace = trace.map((item) =>
-                item.kind === 'tool' && item.id === event.id
-                  ? {
-                      ...item,
-                      status: event.ok ? 'done' : 'failed',
-                      ...(event.detail !== undefined ? { detail: event.detail } : {})
-                    }
-                  : item
-              );
-              publishTrace();
-              // Show tool-written knowledge immediately, even mid-turn.
-              if (event.ok && KNOWLEDGE_TOOLS.has(event.name)) {
-                void refreshKnowledge();
-              }
-              break;
-            }
-            case 'error':
-              flushNow();
-              setStreamStatus(null);
-              settleTrace();
-              publishTrace();
-              streamError = event.message;
-              setActionError(event.message);
-              break;
-            case 'done':
-              flushNow();
-              setStreamStatus(null);
-              settleTrace();
-              publishTrace();
-              assistantText = event.text || assistantText;
-              updateStreaming((message) => ({
-                ...message,
-                text: event.text || message.text,
-                streaming: false,
-                trace: cloneTrace()
-              }));
-              break;
-          }
-        }
-      );
-
-      // The view can unmount while the turn streams; skip the rest so no
-      // state update runs after the React root (or test DOM) is gone.
-      if (!mountedRef.current) return true;
-      flushNow();
-      const finalConversationId = result.conversationId ?? conversation.id;
-      if (generation !== streamGenerationRef.current) {
-        await conversations.refresh();
-        // Reopening the same conversation during a turn bumps the generation;
-        // reload it so the answer that was persisted meanwhile becomes visible.
-        if (activeConversationIdRef.current === finalConversationId) {
-          await conversations.select(finalConversationId);
-        }
-        await reload();
-        return true;
-      }
-      await conversations.select(finalConversationId);
-      await conversations.refresh();
-      await reload();
-      return true;
-    } catch (cause) {
-      if (!mountedRef.current) return false;
-      flushNow();
-      if (generation !== streamGenerationRef.current) {
-        // The user navigated away or started another turn; a cancellation is
-        // not an error worth showing in the new view.
-        await conversations.refresh().catch(() => undefined);
-        await reload().catch(() => undefined);
-        return true;
-      }
-      setActionError(streamError ?? messageOf(cause));
-      if (conversation) {
-        // Keep enough state to let the banner resend this turn instead of
-        // only refreshing lists.
-        retryTurnRef.current = { text, conversation };
-        setCanRetryTurn(true);
-      }
-      try {
-        await conversations.select(conversation.id);
-        await conversations.refresh();
-        await reload();
-      } catch {
-        // The visible error banner already explains the failure.
-      }
-      // The user message was stored before streaming, so the draft is no
-      // longer the only copy; the banner offers a retry of the answer.
-      return true;
-    } finally {
-      if (mountedRef.current) {
-        flushNow();
-        if (trace.length > 0) {
-          settleTrace();
-          setTraceById((current) => ({
-            ...current,
-            [assistantId]: trace.map((item) => ({ ...item }))
-          }));
-        }
-        // A superseded turn must not clear the state of the turn that replaced it.
-        if (generation === streamGenerationRef.current) {
-          setStreamingMessage(null);
-          setActiveAssistantId(null);
-          setStreamStatus(null);
-          setTyping(false);
-        }
-      }
-    }
+    )
+      .then(() => settleRun(assistantId, target, text, turnAttachments))
+      .catch((cause: unknown) => settleRun(assistantId, target, text, turnAttachments, cause));
+    return true;
   }
 
-  async function sendMessage(text: string) {
-    await runTurn(text, { appendUser: true });
+  /**
+   * Refreshes after a turn ends. It never selects a conversation: a turn that
+   * finishes in the background must not move the user's view.
+   */
+  async function settleRun(
+    runId: string,
+    conversation: Conversation,
+    text: string,
+    attachments: ChatAttachment[],
+    cause?: unknown
+  ): Promise<void> {
+    const run = conversationRuns.get(runId);
+    const errorReason = run?.errorReason ?? null;
+    // Settle the run before copying its trace: a copied "thinking" or "running"
+    // row would otherwise stay animated forever once the run is gone.
+    if (cause) {
+      conversationRuns.fail(runId, errorReason ?? messageOf(cause));
+    } else {
+      conversationRuns.complete(runId);
+    }
+    const settled = conversationRuns.get(runId);
+    if (settled && mountedRef.current) {
+      const trace = settled.trace.map((item) => ({ ...item }));
+      if (trace.length > 0) {
+        setTraceById((current) => ({ ...current, [runId]: trace }));
+      }
+    }
+    try {
+      await conversations.refresh();
+      if (activeConversationIdRef.current === conversation.id) {
+        await conversations.reloadActive();
+      }
+    } catch {
+      // The message list keeps the last good copy; the next refresh retries.
+    }
+    if (!cause) return;
+    const message = errorReason ?? messageOf(cause);
+    // A failed turn never reached the wrapper's reload, but tools it ran
+    // before failing may already have written data.
+    try {
+      await reload();
+    } catch {
+      // The error banner below already explains the turn's failure.
+    }
+    if (mountedRef.current && activeConversationIdRef.current === conversation.id) {
+      setActionError(message);
+      // Keep enough state for the banner to resend instead of only refreshing.
+      retryTurnRef.current = { text, conversation, attachments };
+      setCanRetryTurn(true);
+    }
   }
 
   async function submitComposer(text: string): Promise<boolean> {
     // While another conversation is loading, `active` is null; sending now
     // would create a brand-new thread instead of reaching the selected one.
-    if (typing || conversations.selecting) return false;
-    if (!(await confirmBudget())) return false;
+    if (conversations.selecting) return false;
+    if (conversations.active && conversationRuns.hasActive(conversations.active.id)) {
+      return false;
+    }
     const conversation = conversations.active;
+    if (!(await confirmBudget())) return false;
     if (editingMessageId && conversation) {
       const index = conversation.messages.findIndex(
         (message) => message.id === editingMessageId
@@ -854,13 +801,21 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
       }
     }
     setEditingMessageId(null);
-    return runTurn(text, { appendUser: true, conversation });
+    const sent = await runTurn(text, {
+      appendUser: true,
+      conversation,
+      attachments: pendingAttachments
+    });
+    // Only the turn that went out consumes the files; a failed send keeps them
+    // staged so the user can retry without picking the files again.
+    if (sent) setPendingAttachments([]);
+    return sent;
   }
 
   async function regenerateMessage(messageId: string) {
-    if (typing) return;
     const conversation = conversations.active;
     if (!conversation) return;
+    if (conversationRuns.hasActive(conversation.id)) return;
     const lastAssistant = [...conversation.messages]
       .reverse()
       .find((message) => message.role === 'assistant');
@@ -878,13 +833,18 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
       setActionError(messageOf(cause));
       return;
     }
-    await runTurn(userMessage.text, { appendUser: false, conversation });
+    const attachments = sentAttachmentsRef.current.get(userMessage.id) ?? [];
+    await runTurn(userMessage.text, {
+      appendUser: false,
+      conversation,
+      ...(attachments.length > 0 ? { attachments } : {})
+    });
   }
 
   function editLastUserMessage(messageId: string) {
-    if (typing) return;
     const conversation = conversations.active;
     if (!conversation) return;
+    if (conversationRuns.hasActive(conversation.id)) return;
     const lastUser = [...conversation.messages]
       .reverse()
       .find((message) => message.role === 'user');
@@ -950,9 +910,14 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
   }
 
   async function deleteConversation(id: string) {
+    // A running turn is stopped explicitly first; deleting underneath it would
+    // leave its events pointing at a conversation that no longer exists.
+    const run = conversationRuns.getForConversation(id);
+    if (run && run.phase === 'running') {
+      await conversationRuns.cancel(run.runId);
+    }
+    conversationRuns.clearConversation(id);
     if (conversations.active?.id === id) {
-      streamGenerationRef.current += 1;
-      setStreamingMessage(null);
       setEditingMessageId(null);
       setComposerText('');
       setModelPickerOpen(false);
@@ -969,6 +934,19 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     if (!conversations.active) return;
     setModelError(null);
     setModelPickerOpen(true);
+  }
+
+  /**
+   * Permissions are staged in the composer for the next turn and remembered
+   * with the conversation as soon as one exists.
+   */
+  function changePermissions(next: AgentPermissions) {
+    setPermissions(next);
+    const active = conversations.active;
+    if (!active) return;
+    void conversations.setPermissions(active.id, next).catch((cause: unknown) => {
+      if (mountedRef.current) setActionError(messageOf(cause));
+    });
   }
 
   async function saveConversationModel(model: string) {
@@ -1001,9 +979,13 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     }
   }
 
+  /** Stops only the turn of the conversation on screen. */
   function stopStreaming() {
-    if (activeAssistantId) {
-      void cancelStream(activeAssistantId);
+    const conversationId = activeConversationIdRef.current;
+    if (!conversationId) return;
+    const run = conversationRuns.getForConversation(conversationId);
+    if (run && run.phase === 'running') {
+      void conversationRuns.cancel(run.runId);
     }
   }
 
@@ -1058,20 +1040,8 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     guardSettings(() => applySection(next));
   }
 
-  /** Leaving a turn must not leave its Stop button bound to the new view. */
-  function stopActiveStreamForNavigation() {
-    if (typing && activeAssistantId) {
-      void cancelStream(activeAssistantId);
-    }
-    setTyping(false);
-    setActiveAssistantId(null);
-  }
-
   function resetDraftState() {
-    streamGenerationRef.current += 1;
-    stopActiveStreamForNavigation();
     conversations.startDraft();
-    setStreamingMessage(null);
     setActionError(null);
     setEditingMessageId(null);
     setComposerText('');
@@ -1082,10 +1052,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
 
   /** Leaves the open conversation but keeps a typed composer draft. */
   function leaveConversation() {
-    streamGenerationRef.current += 1;
-    stopActiveStreamForNavigation();
     conversations.startDraft();
-    setStreamingMessage(null);
     setActionError(null);
     setEditingMessageId(null);
     setModelPickerOpen(false);
@@ -1241,13 +1208,9 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
 
   function selectConversation(id: string) {
     guardSettings(() => {
-      // Reopening the streaming conversation should let it finish and reload, not
-      // cancel it; switching away cancels so Stop can never target the old turn.
-      const sameStreamingConversation =
-        typing && conversations.active?.id === id;
-      streamGenerationRef.current += 1;
-      if (!sameStreamingConversation) stopActiveStreamForNavigation();
-      setStreamingMessage(null);
+      // Opening a conversation never stops a turn: the answer keeps streaming
+      // in the background and is already visible when the user comes back.
+      conversationRuns.clearSettled(id);
       setActionError(null);
       setEditingMessageId(null);
       setComposerText('');
@@ -1323,6 +1286,9 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
       15,
       Math.min(120, Math.round((plan.weeklyHours * 60) / 7 / taskCount))
     );
+    const week = plan.phases
+      .flatMap((phase) => phase.weeks)
+      .find((entry) => entry.days.some((item) => item.id === day.id));
     await Promise.all(
       day.tasks.map((title) =>
         createTask({
@@ -1331,10 +1297,35 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
           subject: workspace.name,
           durationMin: perTask,
           acceptance: day.output,
-          due: day.date
+          due: day.date,
+          planId: plan.id,
+          ...(week ? { planWeekId: week.id } : {}),
+          planItemId: day.id
         })
       )
     );
+  }
+
+  /** "本次参考" rows open the record they came from instead of a dead label. */
+  function openReference(reference: ButlerReference) {
+    if (reference.kind === 'profile') {
+      changeSection('profile');
+      return;
+    }
+    if (reference.kind === 'knowledge-topic') {
+      changeSection('knowledge');
+      return;
+    }
+    if (reference.kind === 'plan') {
+      changeSection('plan');
+      return;
+    }
+    if (reference.kind === 'review') {
+      changeSection('review');
+      return;
+    }
+    if (reference.workspaceId) selectWorkspace(reference.workspaceId);
+    changeSection(reference.kind === 'memory' ? 'memory' : 'projects');
   }
 
   function selectProject(id: string | null) {
@@ -1389,7 +1380,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
 
   const bannerError = actionError ?? conversations.error ?? error;
   const displayModel =
-    conversations.active?.model?.trim() || (hasApiKey ? modelLabel : '模板计划');
+    conversations.active?.model?.trim() || globalModelLabel || '模板计划';
 
   return (
     <div className="flex h-screen flex-col bg-[#f5f5f7] dark:bg-[#0f0f10]">
@@ -1409,7 +1400,10 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
                 setCanRetryTurn(false);
                 void runTurn(failed.text, {
                   appendUser: false,
-                  conversation: failed.conversation
+                  conversation: failed.conversation,
+                  ...(failed.attachments.length > 0
+                    ? { attachments: failed.attachments }
+                    : {})
                 });
                 return;
               }
@@ -1440,6 +1434,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
           projects={workspaces}
           activeConversationId={conversations.active?.id ?? null}
           selectedProjectId={projectId}
+          runStates={runStates}
           onSectionChange={changeNavigation}
           onNewConversation={startDraft}
           onSelectConversation={selectConversation}
@@ -1465,7 +1460,32 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
               homeGoal={homeGoal}
               homeHint={homeHint}
               stats={chatStats}
+              homeOverview={
+                <TodayOverview
+                  compact
+                  tasks={tasks}
+                  workspaces={workspaces}
+                  reminders={reminders}
+                  longPlans={longPlans}
+                  today={today}
+                  onOpenWorkspace={(workspaceId) => {
+                    selectWorkspace(workspaceId);
+                    changeSection('projects');
+                  }}
+                  onOpenSchedule={() => changeSection('schedule')}
+                  onOpenPlan={() => changeSection('plan')}
+                  onOpenReminders={() => changeSection('reminders')}
+                  onToggleTask={(task) =>
+                    void updateTask({
+                      taskId: task.id,
+                      status: task.status === 'done' ? 'pending' : 'done'
+                    })
+                  }
+                  onPrompt={promptDaily}
+                />
+              }
               messages={chatMessages}
+              onOpenReference={openReference}
               typing={typing}
               loading={conversations.selecting}
               onSend={(text) => submitComposer(text)}
@@ -1483,7 +1503,11 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
               onEditMessage={editLastUserMessage}
               onOpenSidebar={openSidebar}
               sidebarOpen={sidebarOpen}
-              typingStatus={streamStatus}
+              typingStatus={typingStatus}
+              attachments={pendingAttachments}
+              onAttachmentsChange={setPendingAttachments}
+              permissions={permissions}
+              onPermissionsChange={changePermissions}
               {...(conversations.active ? { onOpenModelPicker: openModelPicker } : {})}
             />
           ) : null}
@@ -1590,6 +1614,35 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
               onCreateMemory={createMemory}
               onUpdateMemory={updateMemory}
               onDeleteMemory={deleteMemory}
+            />
+          ) : null}
+
+          {section === 'profile' ? (
+            <ProfilePage onOpenSidebar={openSidebar} />
+          ) : null}
+
+          {section === 'today' ? (
+            <TodayOverview
+              tasks={tasks}
+              workspaces={workspaces}
+              reminders={reminders}
+              longPlans={longPlans}
+              today={today}
+              onOpenSidebar={openSidebar}
+              onOpenWorkspace={(workspaceId) => {
+                selectWorkspace(workspaceId);
+                changeSection('projects');
+              }}
+              onOpenSchedule={() => changeSection('schedule')}
+              onOpenPlan={() => changeSection('plan')}
+              onOpenReminders={() => changeSection('reminders')}
+              onToggleTask={(task) =>
+                void updateTask({
+                  taskId: task.id,
+                  status: task.status === 'done' ? 'pending' : 'done'
+                })
+              }
+              onPrompt={promptDaily}
             />
           ) : null}
 
@@ -1891,8 +1944,9 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
 
       <ModelPickerDialog
         open={modelPickerOpen}
-        globalModel={modelLabel}
+        globalModel={globalModelLabel}
         initialModel={conversations.active?.model ?? ''}
+        options={cliModelCatalog?.options ?? []}
         saving={modelSaving}
         error={modelError}
         onClose={() => {

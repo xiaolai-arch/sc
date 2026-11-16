@@ -300,7 +300,9 @@ test('shows model and effort for opencode', async () => {
 
   render(<SettingsPage onClose={() => {}} />);
   expect(await screen.findByLabelText('CLI agent')).toHaveTextContent('OpenCode');
-  expect(screen.getByLabelText('模型名称')).toHaveValue('anthropic/claude-sonnet-5-5');
+  // Without a local scan there are no candidates, so the saved id is kept as a
+  // custom entry instead of being reset to "inherit".
+  expect(screen.getByLabelText('自定义模型 ID')).toHaveValue('anthropic/claude-sonnet-5-5');
   expect(screen.getByLabelText('推理强度')).toBeInTheDocument();
 });
 

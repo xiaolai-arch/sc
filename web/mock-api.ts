@@ -30,6 +30,7 @@ import type {
   WorkspaceTask
 } from '../src/shared/workspace';
 import type { StreamingButlerApi } from '../src/shared/butler-stream';
+import type { ConversationRunSnapshot } from '../src/shared/butler-run';
 import type {
   CreateKnowledgeTopicInput,
   KnowledgeBacklink,
@@ -55,6 +56,10 @@ import type {
   ConversationSummary,
   CreateConversationInput
 } from '../src/shared/conversations';
+import {
+  normalizePermissions,
+  type AgentPermissions
+} from '../src/shared/attachments';
 import type {
   CreatePracticeSetInput,
   DeletePracticeSetInput,
@@ -89,6 +94,12 @@ import type {
 } from '../src/shared/plans';
 import { buildTemplatePlan } from '../src/shared/plan-template';
 import type { SearchResult, SearchResultKind } from '../src/shared/search';
+import type {
+  CreateProfileEntryInput,
+  DeleteProfileEntryInput,
+  ProfileEntry,
+  UpdateProfileEntryInput
+} from '../src/shared/profile';
 import { parseLocalDate } from '../src/shared/date';
 import type { AppSettings } from '../src/shared/types';
 import type {
@@ -124,7 +135,33 @@ interface MockState {
   knowledgeTopics: KnowledgeTopic[];
   knowledgeNotes: Record<string, KnowledgeNote>;
   conversations: Conversation[];
+  profile: ProfileEntry[];
 }
+
+const demoProfile: ProfileEntry[] = [
+  {
+    id: 'profile-1',
+    category: 'constraints',
+    text: '工作日每天可用时间约 1 小时，周末 3 小时。',
+    source: 'user',
+    confidence: 'confirmed',
+    status: 'active',
+    origin: '手动添加',
+    createdAt: '2026-11-01T08:00:00.000Z',
+    updatedAt: '2026-11-01T08:00:00.000Z'
+  },
+  {
+    id: 'profile-2',
+    category: 'identity',
+    text: '正在准备 2027 考研，英语是主要短板。',
+    source: 'user',
+    confidence: 'confirmed',
+    status: 'active',
+    origin: '手动添加',
+    createdAt: '2026-11-01T08:05:00.000Z',
+    updatedAt: '2026-11-01T08:05:00.000Z'
+  }
+];
 
 const MOCK_MEMORY_KINDS = new Set<MemoryKind>([
   'weakness',
@@ -185,6 +222,7 @@ function bodyFromBlocks(blocks: NoteBlock[]) {
 function seedWorkspaceData() {
   const now = new Date().toISOString();
   return {
+    profile: structuredClone(demoProfile),
     workspaces: structuredClone(demoWorkspaces),
     tasks: structuredClone(demoTasks),
     notes: demoNotes.map((note): WorkspaceNote => ({
@@ -285,6 +323,9 @@ function readState(storage: Storage | null): MockState {
       knowledgeTopics: Array.isArray(parsed.knowledgeTopics)
         ? (parsed.knowledgeTopics as KnowledgeTopic[])
         : [],
+      profile: Array.isArray(parsed.profile)
+        ? (parsed.profile as ProfileEntry[])
+        : seeded.profile,
       knowledgeNotes:
         parsed.knowledgeNotes !== null && typeof parsed.knowledgeNotes === 'object'
           ? (parsed.knowledgeNotes as Record<string, KnowledgeNote>)
@@ -814,7 +855,33 @@ export function createMockApi(
             version: '0.166.0',
             auth: 'ready',
             authDetail: '原型演示：已登录',
-            features: ['streaming', 'reasoning', 'native-tools', 'web', 'sessions', 'sandbox']
+            features: ['streaming', 'reasoning', 'native-tools', 'web', 'sessions', 'sandbox'],
+            modelCatalog: {
+              defaultModel: 'codex/gpt-6.1-sol',
+              defaultEffort: 'high',
+              files: ['~/.codex/config.toml', '~/.codex/magpie-models.json'],
+              warnings: [],
+              options: [
+                {
+                  id: 'codex/gpt-6.1-sol',
+                  label: 'GPT-6.1 Sol',
+                  origin: 'config',
+                  source: '~/.codex/config.toml'
+                },
+                {
+                  id: 'codex/gpt-6.1-mini',
+                  label: 'GPT-6.1 Mini',
+                  origin: 'catalog',
+                  source: '~/.codex/magpie-models.json'
+                },
+                {
+                  id: 'codex/gpt-5.6-codex',
+                  label: 'GPT-5.6 Codex',
+                  origin: 'catalog',
+                  source: '~/.codex/magpie-models.json'
+                }
+              ]
+            }
           },
           {
             agent: 'claude',
@@ -825,7 +892,32 @@ export function createMockApi(
             version: '2.1.0',
             auth: 'ready',
             authDetail: '原型演示：已登录',
-            features: ['streaming', 'reasoning', 'native-tools', 'web', 'sessions', 'mcp', 'skills']
+            features: ['streaming', 'reasoning', 'native-tools', 'web', 'sessions', 'mcp', 'skills'],
+            modelCatalog: {
+              defaultModel: 'sonnet[1m]',
+              files: ['~/.claude/settings.json'],
+              warnings: [],
+              options: [
+                {
+                  id: 'sonnet[1m]',
+                  origin: 'config',
+                  source: '~/.claude/settings.json',
+                  label: '当前使用'
+                },
+                {
+                  id: 'sonnet',
+                  origin: 'alias',
+                  source: '~/.claude/settings.json',
+                  label: 'Sonnet 别名（claude-sonnet-5-5）'
+                },
+                {
+                  id: 'claude-sonnet-5-5',
+                  origin: 'mapping',
+                  source: '~/.claude/settings.json',
+                  label: 'Sonnet 别名映射'
+                }
+              ]
+            }
           },
           {
             agent: 'zcode',
@@ -846,7 +938,25 @@ export function createMockApi(
             auth: 'ready',
             authDetail: '原型演示：已登录',
             features: ['streaming', 'native-tools', 'sessions', 'mcp', 'models'],
-            models: ['anthropic/claude-sonnet-5-5', 'openai/gpt-5.6']
+            models: ['anthropic/claude-sonnet-5-5', 'openai/gpt-5.6'],
+            modelCatalog: {
+              defaultModel: 'anthropic/claude-sonnet-5-5',
+              files: ['~/.config/opencode/opencode.json'],
+              warnings: [],
+              options: [
+                {
+                  id: 'anthropic/claude-sonnet-5-5',
+                  origin: 'config',
+                  source: '~/.config/opencode/opencode.json',
+                  label: '当前使用'
+                },
+                {
+                  id: 'openai/gpt-5.6',
+                  origin: 'config',
+                  source: '~/.config/opencode/opencode.json'
+                }
+              ]
+            }
           }
         ]
       };
@@ -1400,6 +1510,62 @@ export function createMockApi(
       persist();
     },
 
+    async listProfile(): Promise<ProfileEntry[]> {
+      return structuredClone(
+        [...state.profile].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      );
+    },
+
+    async createProfileEntry(input: CreateProfileEntryInput): Promise<ProfileEntry> {
+      const text = input.text.trim();
+      if (!text) throw new Error('档案内容不能为空。');
+      const timestamp = new Date().toISOString();
+      const source = input.source ?? 'user';
+      const entry: ProfileEntry = {
+        id: nextId('profile'),
+        category: input.category,
+        text,
+        source,
+        confidence:
+          input.confidence ?? (source === 'model' ? 'candidate' : 'confirmed'),
+        status: 'active',
+        origin: input.origin ?? (source === 'user' ? '手动添加' : '对话推测'),
+        createdAt: timestamp,
+        updatedAt: timestamp
+      };
+      state.profile.push(entry);
+      persist();
+      return structuredClone(entry);
+    },
+
+    async updateProfileEntry(input: UpdateProfileEntryInput): Promise<ProfileEntry> {
+      const entry = state.profile.find((item) => item.id === input.id);
+      if (!entry) throw new Error('档案条目不存在。');
+      if (input.text !== undefined) {
+        const text = input.text.trim();
+        if (!text) throw new Error('档案内容不能为空。');
+        entry.text = text;
+        entry.source = 'user';
+        entry.confidence = 'confirmed';
+      }
+      if (input.category !== undefined) entry.category = input.category;
+      if (input.confidence !== undefined) {
+        entry.confidence = input.confidence;
+        if (input.confidence === 'confirmed') entry.source = 'user';
+      }
+      if (input.status !== undefined) entry.status = input.status;
+      entry.updatedAt = new Date().toISOString();
+      persist();
+      return structuredClone(entry);
+    },
+
+    async deleteProfileEntry(input: DeleteProfileEntryInput): Promise<void> {
+      const before = state.profile.length;
+      state.profile = state.profile.filter((entry) => entry.id !== input.id);
+      if (state.profile.length === before) throw new Error('档案条目不存在。');
+      persist();
+    },
+
     async listKnowledgeTopics(workspaceId?: string): Promise<KnowledgeTopic[]> {
       const topics =
         workspaceId === undefined
@@ -1637,6 +1803,9 @@ export function createMockApi(
       if (input.goal !== undefined) workspace.goal = input.goal;
       if (input.description !== undefined) workspace.description = input.description;
       if (input.checkIn !== undefined) workspace.checkIn = input.checkIn;
+      if (input.availableMinutes !== undefined) {
+        workspace.availableMinutes = Math.round(input.availableMinutes);
+      }
       workspace.updatedAt = new Date().toISOString();
       persist();
       return structuredClone(workspace);
@@ -1678,6 +1847,15 @@ export function createMockApi(
 
     async createTask(input: CreateTaskInput): Promise<WorkspaceTask> {
       requireWorkspace(input.workspaceId);
+      if (input.planId && input.planItemId) {
+        const duplicate = state.tasks.find(
+          (entry) =>
+            entry.planId === input.planId &&
+            entry.planItemId === input.planItemId &&
+            entry.title.trim() === input.title.trim()
+        );
+        if (duplicate) return structuredClone(duplicate);
+      }
       const task: WorkspaceTask = {
         id: nextId('task'),
         workspaceId: input.workspaceId,
@@ -1689,6 +1867,9 @@ export function createMockApi(
         due: input.due,
         ...(input.startAt ? { startAt: input.startAt } : {}),
         ...(input.repeat ? { repeat: input.repeat } : {}),
+        ...(input.planId ? { planId: input.planId } : {}),
+        ...(input.planWeekId ? { planWeekId: input.planWeekId } : {}),
+        ...(input.planItemId ? { planItemId: input.planItemId } : {}),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -1725,6 +1906,14 @@ export function createMockApi(
         task.repeat = input.repeat;
       }
       task.updatedAt = new Date().toISOString();
+      if (task.planId && task.planWeekId && task.planItemId) {
+        const plan = state.plans.find((entry) => entry.id === task.planId);
+        const week = plan?.phases
+          .flatMap((phase) => phase.weeks)
+          .find((entry) => entry.id === task.planWeekId);
+        const day = week?.days.find((entry) => entry.id === task.planItemId);
+        if (day) day.done = task.status === 'done';
+      }
 
       if (!wasDone && task.status === 'done' && task.repeat) {
         const base = task.due ?? formatLocalDate(new Date());
@@ -1873,6 +2062,7 @@ export function createMockApi(
         title: input.title?.trim() ? truncateConversationText(input.title, 24) : '新对话',
         kind: input.kind ?? 'chat',
         ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+        ...(input.permissions ? { permissions: { ...input.permissions } } : {}),
         createdAt: timestamp,
         updatedAt: timestamp,
         messages: []
@@ -1916,6 +2106,17 @@ export function createMockApi(
       return structuredClone(conversation);
     },
 
+    async setConversationPermissions(
+      id: string,
+      permissions: AgentPermissions
+    ): Promise<Conversation> {
+      const conversation = state.conversations.find((entry) => entry.id === id);
+      if (!conversation) throw new Error('对话不存在');
+      conversation.permissions = normalizePermissions(permissions);
+      persist();
+      return structuredClone(conversation);
+    },
+
     async renameConversation(id: string, title: string): Promise<Conversation> {
       const conversation = state.conversations.find((entry) => entry.id === id);
       if (!conversation) throw new Error('对话不存在');
@@ -1952,6 +2153,16 @@ export function createMockApi(
 
     async cancelStream(messageId: string): Promise<void> {
       cancelledStreams.add(messageId);
+    },
+
+    // The prototype has no main-process run registry; runs start and end in
+    // the same tab, so stopping by run id maps onto the message id.
+    async cancelRun(runId: string): Promise<void> {
+      cancelledStreams.add(runId);
+    },
+
+    async listConversationRuns(): Promise<ConversationRunSnapshot[]> {
+      return [];
     },
 
     onConversationOpened() {
@@ -2003,6 +2214,15 @@ export function createMockApi(
       const steps: ConversationStep[] = [];
       const streamId = input.assistantMessageId ?? '';
       const isCancelled = () => streamId !== '' && cancelledStreams.has(streamId);
+      const profileReferences = state.profile
+        .filter((entry) => entry.status === 'active' && entry.confidence === 'confirmed')
+        .slice(0, 2)
+        .map((entry) => ({
+          id: entry.id,
+          kind: 'profile' as const,
+          title: entry.text.length > 60 ? `${entry.text.slice(0, 60)}…` : entry.text,
+          detail: '个人档案'
+        }));
       const finishCanceled = (partial: string): SendMessageResult => {
         const text = partial.trim() || '（已停止生成）';
         if (streamId) cancelledStreams.delete(streamId);
@@ -2013,6 +2233,7 @@ export function createMockApi(
             text,
             createdAt: new Date().toISOString(),
             ...(steps.length > 0 ? { steps: steps.map((step) => ({ ...step })) } : {}),
+            ...(profileReferences.length > 0 ? { references: profileReferences } : {}),
             source: 'butler'
           });
           conversation.updatedAt = new Date().toISOString();
@@ -2041,6 +2262,10 @@ export function createMockApi(
         await sleep(80 * pace);
       }
       if (isCancelled()) return finishCanceled('');
+
+      if (profileReferences.length > 0) {
+        onEvent({ type: 'references', items: profileReferences });
+      }
 
       let reply = butlerReply(input.message);
 
@@ -2160,6 +2385,7 @@ export function createMockApi(
           text: reply,
           createdAt: new Date().toISOString(),
           ...(steps.length > 0 ? { steps: steps.map((step) => ({ ...step })) } : {}),
+          ...(profileReferences.length > 0 ? { references: profileReferences } : {}),
           source: 'butler'
         });
         conversation.updatedAt = new Date().toISOString();

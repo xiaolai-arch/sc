@@ -214,7 +214,7 @@ function CodeBlock({ language, code, blockKey }: { language: string; code: strin
 export function MarkdownText({ text, resolveWikiLink, onWikiLink }: MarkdownTextProps) {
   const blocks = parseBlocks(text);
   return (
-    <div className="text-[14px] leading-6 text-[#1d1d1f] dark:text-[#f5f5f7]">
+    <div className="min-w-0 break-words text-[14px] leading-6 text-[#1d1d1f] [overflow-wrap:anywhere] dark:text-[#f5f5f7]">
       {blocks.map((block, index) => {
         const key = `block-${index}`;
         if (block.type === 'code') {

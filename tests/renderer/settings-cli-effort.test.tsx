@@ -42,7 +42,7 @@ test('renders the effort selector with a default and explains the CLI flags', as
   window.studyCoach = apiStub() as never;
   render(<SettingsPage onClose={() => {}} />);
 
-  expect(await screen.findByLabelText('推理强度')).toHaveTextContent('默认');
+  expect(await screen.findByLabelText('推理强度')).toHaveTextContent('跟随 CLI');
   expect(
     screen.getByText(/Codex 使用 -c model_reasoning_effort，Claude 使用 --effort/)
   ).toBeInTheDocument();

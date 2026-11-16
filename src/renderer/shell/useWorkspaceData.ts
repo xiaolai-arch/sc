@@ -309,7 +309,11 @@ export function useWorkspaceData(): WorkspaceData {
 
   const createTask = useCallback(async (input: CreateTaskInput) => {
     const task = await apiOrThrow().createTask(input);
-    setState((current) => ({ ...current, tasks: [task, ...current.tasks] }));
+    setState((current) => ({
+      ...current,
+      // A deduped API response can return an existing task; never draw it twice.
+      tasks: [task, ...current.tasks.filter((entry) => entry.id !== task.id)]
+    }));
     return task;
   }, []);
 
@@ -451,6 +455,22 @@ export function useWorkspaceData(): WorkspaceData {
           ...current,
           tasks: current.tasks.map((item) => (item.id === task.id ? task : item))
         }));
+      }
+      // A plan-linked task also moves the long plan's progress.
+      if (task.planId && api.getLongPlan) {
+        try {
+          const plan = await api.getLongPlan(task.planId);
+          if (plan) {
+            setState((current) => ({
+              ...current,
+              longPlans: current.longPlans.map((entry) =>
+                entry.id === plan.id ? plan : entry
+              )
+            }));
+          }
+        } catch {
+          // Progress refresh is additive; the task update already landed.
+        }
       }
       // Completing a task appends knowledge evidence in the main process.
       if (task.status === 'done') await refreshKnowledge();

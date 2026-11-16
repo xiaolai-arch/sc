@@ -7,7 +7,7 @@ import type {
 } from '../../shared/workspace';
 import { CheckIcon } from '../ui/icons';
 import { PageFrame } from './PageFrame';
-import { buildDailySchedule, type ScheduleEntry } from './schedule';
+import { buildDailySchedule, nextScheduledDay, type ScheduleEntry } from './schedule';
 
 type SchedulePageProps = {
   today: string;
@@ -68,6 +68,10 @@ export function SchedulePage({
     8,
     new Date(`${today}T00:00:00`)
   );
+  const upcoming =
+    entries.length === 0
+      ? nextScheduledDay(tasks, workspaces, new Date(`${today}T00:00:00`))
+      : null;
   const sourceCounts = new Map<string, number>();
   for (const entry of entries) {
     sourceCounts.set(entry.tag, (sourceCounts.get(entry.tag) ?? 0) + 1);
@@ -154,7 +158,9 @@ export function SchedulePage({
           <p className="mt-2 text-[13px] leading-6 text-gray-500 dark:text-[#8e8e93]">
             {entries.length > 0
               ? '拖动左侧时间可以改时间，点圆点标记完成。'
-              : '阿咲还没有排今天的任务。'}
+              : upcoming
+                ? `今天没有安排；下一份从${upcoming.label}开始。`
+                : '阿咲还没有排今天的任务。'}
           </p>
         </div>
 
@@ -172,9 +178,37 @@ export function SchedulePage({
               <p className="text-[14px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
                 今天还没有安排
               </p>
-              <p className="mx-auto mt-2 max-w-[320px] text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
-                告诉阿咲今天想推进什么，他会结合工作区里的任务排出顺序。
-              </p>
+              {upcoming ? (
+                <>
+                  <p className="mx-auto mt-2 max-w-[360px] text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
+                    下一份安排：{upcoming.label}，共 {upcoming.entries.length} 个任务。
+                  </p>
+                  <ul className="mx-auto mt-5 max-w-[400px] space-y-2 text-left">
+                    {upcoming.entries.map((entry) => (
+                      <li
+                        key={entry.id}
+                        className="flex items-start gap-3 rounded-xl bg-[#f5f5f7] px-3 py-2 dark:bg-white/[0.06]"
+                      >
+                        <span className="w-10 shrink-0 pt-0.5 text-[12px] tabular-nums text-gray-500 dark:text-[#8e8e93]">
+                          {entry.time}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[13px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
+                            {entry.title}
+                          </p>
+                          <p className="mt-0.5 text-[11px] text-gray-500 dark:text-[#8e8e93]">
+                            {entry.detail} · {entry.tag}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <p className="mx-auto mt-2 max-w-[320px] text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
+                  告诉阿咲今天想推进什么，他会结合工作区里的任务排出顺序。
+                </p>
+              )}
               <button
                 type="button"
                 onClick={() => onPrompt(ADJUST_PROMPT)}

@@ -27,3 +27,27 @@ body {
   background: #0f0f10;
   color: #f5f5f7;
 }
+
+/*
+ * Implicit scrollbars everywhere: a faint thumb at rest so the user can see
+ * there is more to scroll, a stronger one while the pointer is over the
+ * scroller. Only the standard properties are used: when `scrollbar-color` is
+ * set, Chromium ignores the legacy `::-webkit-scrollbar` rules, so keeping both
+ * would leave one mechanism silently dead.
+ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.14) transparent;
+}
+
+*:hover {
+  scrollbar-color: rgba(0, 0, 0, 0.26) transparent;
+}
+
+.dark * {
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+
+.dark *:hover {
+  scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+}

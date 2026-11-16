@@ -341,6 +341,78 @@ export function LockIcon({ className }: IconProps) {
   );
 }
 
+export function ShieldCheckIcon({ className }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={iconClassName(className)}
+    >
+      <path d="M12 3l7 2.6v5.1c0 4.4-2.9 7.9-7 10.3-4.1-2.4-7-5.9-7-10.3V5.6L12 3z" />
+      <path d="M9 12l2 2 4-4" />
+    </svg>
+  );
+}
+
+export function ShieldPenIcon({ className }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={iconClassName(className)}
+    >
+      <path d="M12 3l7 2.6v5.1c0 4.4-2.9 7.9-7 10.3-4.1-2.4-7-5.9-7-10.3V5.6L12 3z" />
+      <path d="M9.5 14.5l4.6-4.6a1.1 1.1 0 011.6 1.6l-4.6 4.6-1.9.3.3-1.9z" />
+    </svg>
+  );
+}
+
+export function ShieldAlertIcon({ className }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={iconClassName(className)}
+    >
+      <path d="M12 3l7 2.6v5.1c0 4.4-2.9 7.9-7 10.3-4.1-2.4-7-5.9-7-10.3V5.6L12 3z" />
+      <path d="M12 8v4" />
+      <path d="M12 15.2h.01" />
+    </svg>
+  );
+}
+
+export function PaperclipIcon({ className }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={iconClassName(className)}
+    >
+      <path d="M20 11.5l-7.8 7.8a4.6 4.6 0 01-6.5-6.5l8-8a3.1 3.1 0 014.4 4.4l-8 8a1.6 1.6 0 01-2.2-2.2l7-7" />
+    </svg>
+  );
+}
+
 export function FolderIcon({ className }: IconProps) {
   return (
     <svg
@@ -409,6 +481,24 @@ export function TargetIcon({ className }: IconProps) {
       <circle cx="12" cy="12" r="8.5" />
       <circle cx="12" cy="12" r="4.5" />
       <circle cx="12" cy="12" r="1" />
+    </svg>
+  );
+}
+
+export function UserIcon({ className }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={iconClassName(className)}
+    >
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M5 20c.6-3.6 3.5-6 7-6s6.4 2.4 7 6" />
     </svg>
   );
 }

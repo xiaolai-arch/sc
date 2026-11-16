@@ -7,6 +7,7 @@ import type {
   CreateConversationInput
 } from '../../shared/conversations';
 import type { StudyCoachApi } from '../../shared/ipc';
+import type { AgentPermissions } from '../../shared/attachments';
 
 export type ConversationController = {
   summaries: ConversationSummary[];
@@ -18,12 +19,15 @@ export type ConversationController = {
   /** Set when a tray/notification opens a conversation outside the renderer. */
   externalOpen: { id: string; seq: number } | null;
   refresh: () => Promise<void>;
+  /** Re-reads the open conversation without navigating or racing a user click. */
+  reloadActive: () => Promise<void>;
   select: (id: string) => Promise<void>;
   startDraft: () => void;
   create: (input?: CreateConversationInput) => Promise<Conversation>;
   append: (id: string, message: ConversationMessage) => Promise<Conversation>;
   remove: (id: string) => Promise<void>;
   setModel: (id: string, model: string | null) => Promise<void>;
+  setPermissions: (id: string, permissions: AgentPermissions) => Promise<void>;
   rename: (id: string, title: string) => Promise<void>;
   setPinned: (id: string, pinned: boolean) => Promise<void>;
   truncate: (id: string, keepCount: number) => Promise<Conversation>;
@@ -54,6 +58,7 @@ export function useConversations(): ConversationController {
     null
   );
   const selectRequestRef = useRef(0);
+  const reloadRequestRef = useRef(0);
   const externalOpenSeqRef = useRef(0);
 
   const refresh = useCallback(async () => {
@@ -124,6 +129,28 @@ export function useConversations(): ConversationController {
     setLoading(false);
   }, []);
 
+  /**
+   * Used when a background turn finishes: refresh the messages of whatever is
+   * open, but never switch conversations and never invalidate a click that
+   * landed while the fetch was in flight.
+   */
+  const reloadActive = useCallback(async () => {
+    const current = activeRef.current;
+    if (!current) return;
+    // Two reloads of the same conversation can overlap (two turns settling);
+    // the older response must not overwrite the newer one.
+    const request = ++reloadRequestRef.current;
+    try {
+      const conversation = await apiOrThrow().getConversation(current.id);
+      if (!conversation || request !== reloadRequestRef.current) return;
+      setActive((previous) =>
+        previous && previous.id === conversation.id ? conversation : previous
+      );
+    } catch {
+      // Leave the current messages in place; the next refresh retries.
+    }
+  }, []);
+
   const create = useCallback(async (input?: CreateConversationInput) => {
     const request = ++selectRequestRef.current;
     setSelecting(false);
@@ -161,6 +188,16 @@ export function useConversations(): ConversationController {
     async (id: string, model: string | null) => {
       const api = apiOrThrow();
       const conversation = await api.setConversationModel(id, model);
+      setActive((current) => (current?.id === conversation.id ? conversation : current));
+      await refresh();
+    },
+    [refresh]
+  );
+
+  const setPermissions = useCallback(
+    async (id: string, permissions: AgentPermissions) => {
+      const api = apiOrThrow();
+      const conversation = await api.setConversationPermissions(id, permissions);
       setActive((current) => (current?.id === conversation.id ? conversation : current));
       await refresh();
     },
@@ -211,12 +248,14 @@ export function useConversations(): ConversationController {
     error,
     externalOpen,
     refresh,
+    reloadActive,
     select,
     startDraft,
     create,
     append,
     remove,
     setModel,
+    setPermissions,
     rename,
     setPinned,
     truncate,

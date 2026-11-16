@@ -1,4 +1,4 @@
-import { formatLocalDate } from '../../shared/date';
+import { formatChineseDate, formatLocalDate } from '../../shared/date';
 import type { Workspace, WorkspaceTask } from '../../shared/workspace';
 
 export type ScheduleEntry = {
@@ -18,6 +18,13 @@ export type ScheduleEntry = {
 export type DailySchedule = {
   entries: ScheduleEntry[];
   unscheduled: number;
+};
+
+/** The nearest future day that already has pinned tasks. */
+export type UpcomingDay = {
+  date: string;
+  label: string;
+  entries: ScheduleEntry[];
 };
 
 const START_MINUTES = 8 * 60;
@@ -71,6 +78,27 @@ function entryFor(
   };
 }
 
+/** Pinned, non-skipped tasks for one day, in clock order. */
+function pinnedEntriesFor(
+  tasks: WorkspaceTask[],
+  date: string,
+  workspaceById: Map<string, Workspace>
+): ScheduleEntry[] {
+  return tasks
+    .filter((task) => {
+      if (task.status === 'skipped') return false;
+      return dateOf(task.startAt) === date && startMinutes(task.startAt) !== null;
+    })
+    .sort(
+      (a, b) =>
+        (startMinutes(a.startAt) ?? 0) - (startMinutes(b.startAt) ?? 0) ||
+        a.title.localeCompare(b.title)
+    )
+    .map((task) =>
+      entryFor(task, workspaceById.get(task.workspaceId), startMinutes(task.startAt)!, true)
+    );
+}
+
 /**
  * Turns today's tasks into a deterministic time-blocked plan.
  *
@@ -89,20 +117,7 @@ export function buildDailySchedule(
   const today = formatLocalDate(now);
   const workspaceById = new Map(workspaces.map((workspace) => [workspace.id, workspace]));
 
-  const pinnedTasks = tasks
-    .filter((task) => {
-      if (task.status === 'skipped') return false;
-      return dateOf(task.startAt) === today && startMinutes(task.startAt) !== null;
-    })
-    .sort(
-      (a, b) =>
-        (startMinutes(a.startAt) ?? 0) - (startMinutes(b.startAt) ?? 0) ||
-        a.title.localeCompare(b.title)
-    );
-
-  const pinnedEntries: ScheduleEntry[] = pinnedTasks.map((task) =>
-    entryFor(task, workspaceById.get(task.workspaceId), startMinutes(task.startAt)!, true)
-  );
+  const pinnedEntries = pinnedEntriesFor(tasks, today, workspaceById);
 
   const occupied = pinnedEntries
     .map((entry) => ({
@@ -155,4 +170,35 @@ export function buildDailySchedule(
 function timeMinutes(time: string): number {
   const [hour, minute] = time.split(':').map(Number);
   return (hour ?? 0) * 60 + (minute ?? 0);
+}
+
+/**
+ * Looks ahead to the next day with pinned tasks, so an empty today can point
+ * at the plan that is actually waiting instead of saying nothing is planned.
+ */
+export function nextScheduledDay(
+  tasks: WorkspaceTask[],
+  workspaces: Workspace[],
+  now = new Date()
+): UpcomingDay | null {
+  const today = formatLocalDate(now);
+  const workspaceById = new Map(workspaces.map((workspace) => [workspace.id, workspace]));
+  const open = tasks.filter(
+    (task) =>
+      (task.status === 'pending' || task.status === 'in-progress') &&
+      startMinutes(task.startAt) !== null
+  );
+  const dates = [
+    ...new Set(
+      open
+        .map((task) => dateOf(task.startAt))
+        .filter((date): date is string => date !== null && date > today)
+    )
+  ].sort();
+  const date = dates[0];
+  if (date === undefined) return null;
+
+  const entries = pinnedEntriesFor(open, date, workspaceById);
+  if (entries.length === 0) return null;
+  return { date, label: formatChineseDate(date), entries };
 }

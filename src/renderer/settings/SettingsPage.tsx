@@ -10,7 +10,7 @@ import type {
 import type {
   LocalCliEntry,
   LocalCliFeature,
-  LocalCliScanResult
+  LocalCliModelOption
 } from '../../shared/local-cli';
 import type { UsageDay, UsageSummary } from '../../shared/usage';
 import {
@@ -24,6 +24,13 @@ import { CheckIcon } from '../ui/icons';
 import { Input } from '../ui/Input';
 import { Label } from '../ui/Label';
 import { Select } from '../ui/Select';
+import {
+  catalogOptions,
+  inheritModelLabel,
+  localCliModels,
+  optionLabel,
+  useLocalCliModels
+} from '../local-cli-models';
 
 type SettingsPageProps = {
   onClose: () => void;
@@ -64,6 +71,24 @@ const cliFeatureLabels: Record<LocalCliFeature, string> = {
   images: '图片',
   sandbox: '沙箱'
 };
+
+const cliModelOriginLabels: Record<LocalCliModelOption['origin'], string> = {
+  config: '本机配置',
+  catalog: '模型目录',
+  alias: '别名',
+  mapping: '环境映射',
+  cli: 'CLI 列表'
+};
+
+const CUSTOM_MODEL_VALUE = '__custom__';
+
+/** Four questions a settings page must answer, with a jump to each answer. */
+const SETTINGS_GROUPS: Array<{ label: string; target: string }> = [
+  { label: '本机 AI', target: 'settings-model-section' },
+  { label: '提醒与后台', target: 'settings-notifications' },
+  { label: '个人与外观', target: 'settings-profile-section' },
+  { label: '数据与备份', target: 'settings-backup' }
+];
 
 const THEME_OPTIONS: Array<{ value: ThemePreference; label: string }> = [
   { value: 'system', label: '跟随系统' },
@@ -112,9 +137,13 @@ export function SettingsPage({
   const [cliEffort, setCliEffort] = useState<LocalCliEffort | ''>('');
   const [cliIsolate, setCliIsolate] = useState(false);
   const [cliNativeTools, setCliNativeTools] = useState(false);
-  const [cliScan, setCliScan] = useState<LocalCliScanResult | null>(null);
-  const [cliScanning, setCliScanning] = useState(false);
-  const [cliScanError, setCliScanError] = useState<string | null>(null);
+  const [modelCustom, setModelCustom] = useState(false);
+  const [testingCli, setTestingCli] = useState(false);
+  // The scan is shared with the chat model picker: one source, one process spawn.
+  const cliModels = useLocalCliModels();
+  const cliScan = cliModels.scan;
+  const cliScanning = cliModels.loading;
+  const cliScanError = cliModels.error;
   const [apiKey, setApiKey] = useState('');
   const [keyConfigured, setKeyConfigured] = useState(hasApiKey);
   const [confirmClearKey, setConfirmClearKey] = useState(false);
@@ -211,21 +240,8 @@ export function SettingsPage({
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
 
-  const runCliScan = useCallback(async (auto = false) => {
-    const api = window.studyCoach;
-    if (!api || typeof api.scanLocalClis !== 'function') {
-      if (!auto) setCliScanError('当前版本不支持扫描本机 CLI。');
-      return;
-    }
-    setCliScanning(true);
-    setCliScanError(null);
-    try {
-      setCliScan(await api.scanLocalClis());
-    } catch (cause) {
-      setCliScanError(friendlyErrorMessage(cause, '扫描本机 CLI 失败。'));
-    } finally {
-      setCliScanning(false);
-    }
+  const runCliScan = useCallback(async () => {
+    await localCliModels.load(true);
   }, []);
 
   const load = useCallback(async () => {
@@ -284,9 +300,11 @@ export function SettingsPage({
   }, [load]);
 
   useEffect(() => {
-    if (!loaded || kind !== 'local-cli' || cliScan || cliScanning) return;
-    void runCliScan(true);
-  }, [loaded, kind, cliScan, cliScanning, runCliScan]);
+    if (!loaded || kind !== 'local-cli') return;
+    // The store owns caching: a scan from another bridge is discarded and
+    // replaced, so this is cheap after the first load.
+    void localCliModels.load();
+  }, [loaded, kind]);
 
   function updateKind(next: ProviderConfig['kind']) {
     if (next === kind) return;
@@ -301,14 +319,59 @@ export function SettingsPage({
     }
   }
 
+  function changeCliAgent(next: LocalCliAgent) {
+    if (next === cliAgent) return;
+    setCliAgent(next);
+    setCliCommand(next);
+    // A model override belongs to the agent it was chosen for; switching agents
+    // starts from "inherit" instead of carrying an id the new CLI cannot parse.
+    setModel('');
+    setModelCustom(false);
+  }
+
   function useCliEntry(entry: LocalCliEntry) {
     if (!entry.installed) return;
-    setCliAgent(entry.agent);
+    changeCliAgent(entry.agent);
     setCliCommand(entry.command);
     // A detected CLI is most useful as a full agent; the user can turn it off.
     setCliNativeTools(true);
-    setCliScanError(null);
     setStatus(`已选择 ${entry.label}${entry.version ? ` ${entry.version}` : ''}`);
+  }
+
+  /**
+   * Checks the selected CLI the way a turn would: it must be installed, and a
+   * missing login is reported as such instead of a generic failure.
+   */
+  async function testCliConnection() {
+    setTestingCli(true);
+    setError(null);
+    setStatus(null);
+    try {
+      await localCliModels.load();
+      const entry = localCliModels.get(cliAgent);
+      const label = cliAgentLabels[cliAgent];
+      if (!entry) {
+        setError(cliModels.error ?? '扫描结果里没有这个 CLI，请重新扫描。');
+        return;
+      }
+      if (!entry.installed) {
+        setError(`未检测到 ${label}${entry.installHint ? `，可以运行 ${entry.installHint}` : ''}。`);
+        return;
+      }
+      if (entry.auth === 'ready') {
+        setStatus(`${label} 已登录，可以开始对话。`);
+        return;
+      }
+      if (entry.auth === 'missing') {
+        setError(`${label} 已安装，但尚未登录，请先在终端完成登录。`);
+        return;
+      }
+      setStatus(`${label} 已安装，但无法确认登录状态；可以先在终端试运行一次。`);
+    } catch (cause) {
+      setError(friendlyErrorMessage(cause, '检测本机 CLI 失败。'));
+    } finally {
+      setTestingCli(false);
+    }
   }
 
   async function save() {
@@ -538,10 +601,20 @@ export function SettingsPage({
     }
   }
 
-  const detectedCliModels =
-    kind === 'local-cli'
-      ? (cliScan?.entries.find((entry) => entry.agent === cliAgent)?.models ?? [])
-      : [];
+  const cliEntry = cliScan?.entries.find((entry) => entry.agent === cliAgent) ?? null;
+  const cliCatalog = cliEntry?.modelCatalog ?? null;
+  const cliModelOptions = catalogOptions(cliCatalog);
+  const cliModelTrimmed = model.trim();
+  const cliModelKnown = cliModelOptions.some((option) => option.id === cliModelTrimmed);
+  // While the scan is still running, an unknown id may turn out to be a known
+  // one; showing the custom input now would make it flash and disappear.
+  const cliModelPending = cliScanning && cliModelTrimmed !== '' && !cliModelKnown;
+  const cliModelIsCustom =
+    modelCustom || (cliModelTrimmed !== '' && !cliModelKnown && !cliScanning);
+  const cliModelSelectValue = cliModelIsCustom
+    ? CUSTOM_MODEL_VALUE
+    : cliModelTrimmed;
+  const cliInheritLabel = inheritModelLabel(cliCatalog);
   const today = formatLocalDate(new Date());
   const todayUsage: UsageDay = usage?.days.find((day) => day.date === today) ?? {
     date: today,
@@ -632,7 +705,29 @@ export function SettingsPage({
       ) : !loaded ? (
         <p className="mt-10 text-gray-500 dark:text-[#a1a1a6]">正在加载设置…</p>
       ) : (
-        <div className="mt-8 grid gap-8">
+        <>
+          <div className="mt-8">
+          <nav
+            aria-label="设置分组"
+            className="flex flex-wrap gap-1.5 rounded-2xl border border-black/[0.06] bg-[#f5f5f7]/70 p-1.5 dark:border-white/10 dark:bg-white/[0.04]"
+          >
+            {SETTINGS_GROUPS.map((group) => (
+              <button
+                key={group.label}
+                type="button"
+                onClick={() =>
+                  document
+                    .getElementById(group.target)
+                    ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                }
+                className="rounded-full px-3 py-1.5 text-[12px] text-gray-600 transition-colors hover:bg-white hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:text-[#a1a1a6] dark:hover:bg-white/[0.08] dark:hover:text-[#f5f5f7]"
+              >
+                {group.label}
+              </button>
+            ))}
+          </nav>
+          </div>
+        <div className="mt-6 grid gap-8">
           <Card id="settings-profile-section">
             <h3 className="text-[17px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">个人</h3>
             <p className="mt-2 text-gray-500 dark:text-[#a1a1a6]">阿咲在首页和侧边栏怎么称呼你。</p>
@@ -664,22 +759,64 @@ export function SettingsPage({
                   ))}
                 </Select>
               </div>
-              {kind === 'local-cli' && cliAgent === 'zcode' ? null : (
+              {kind === 'local-cli' && cliAgent === 'zcode' ? null : kind === 'local-cli' ? (
+                <div>
+                  <Label htmlFor="settings-cli-model">模型</Label>
+                  <Select
+                    id="settings-cli-model"
+                    aria-label="模型"
+                    value={cliModelSelectValue}
+                    onChange={(event) => {
+                      const next = event.target.value;
+                      if (next === CUSTOM_MODEL_VALUE) {
+                        setModelCustom(true);
+                        return;
+                      }
+                      setModelCustom(false);
+                      setModel(next);
+                    }}
+                  >
+                    <option value="">{cliInheritLabel}</option>
+                    {cliModelPending ? (
+                      <option value={cliModelTrimmed}>{cliModelTrimmed}（读取中…）</option>
+                    ) : null}
+                    {cliModelOptions.map((option) => (
+                      <option key={`${option.origin}:${option.id}`} value={option.id}>
+                        {optionLabel(option)}（{cliModelOriginLabels[option.origin]}）
+                      </option>
+                    ))}
+                    <option value={CUSTOM_MODEL_VALUE}>自定义模型 ID…</option>
+                  </Select>
+                  {cliModelIsCustom ? (
+                    <Input
+                      className="mt-2"
+                      aria-label="自定义模型 ID"
+                      value={model}
+                      onChange={(event) => setModel(event.target.value)}
+                      placeholder="输入 CLI 支持的模型 ID"
+                    />
+                  ) : null}
+                  <p className="mt-2 text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
+                    {cliModelOptions.length > 0
+                      ? `本机读到 ${cliModelOptions.length} 个候选${
+                          cliCatalog?.files.length ? `，来源：${cliCatalog.files.join('、')}` : ''
+                        }。留空表示不传 --model，完全跟随 CLI 自己的设置。`
+                      : '本机配置里没有读到模型列表；留空表示完全跟随 CLI 自己的设置，不需要猜型号。'}
+                  </p>
+                  {cliCatalog?.warnings.length ? (
+                    <p className="mt-1 text-[12px] text-[#b25000] dark:text-[#ffa657]">
+                      {cliCatalog.warnings.join('；')}
+                    </p>
+                  ) : null}
+                </div>
+              ) : (
                 <div>
                   <Label htmlFor="settings-model">模型名称</Label>
                   <Input
                     id="settings-model"
                     value={model}
                     onChange={(event) => setModel(event.target.value)}
-                    list={detectedCliModels.length > 0 ? 'settings-cli-models' : undefined}
                   />
-                  {detectedCliModels.length > 0 ? (
-                    <datalist id="settings-cli-models">
-                      {detectedCliModels.map((value) => (
-                        <option key={value} value={value} />
-                      ))}
-                    </datalist>
-                  ) : null}
                 </div>
               )}
             </div>
@@ -694,15 +831,26 @@ export function SettingsPage({
                         扫描 PATH、Homebrew、nvm/asdf/mise 和登录 shell，检测版本、登录状态与原生能力。
                       </p>
                     </div>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => void runCliScan()}
-                      disabled={cliScanning}
-                    >
-                      {cliScanning ? '正在扫描…' : cliScan ? '重新扫描' : '扫描本机 CLI'}
-                    </Button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => void runCliScan()}
+                        disabled={cliScanning}
+                      >
+                        {cliScanning ? '正在扫描…' : cliScan ? '重新扫描' : '扫描本机 CLI'}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => void testCliConnection()}
+                        disabled={cliScanning || testingCli}
+                      >
+                        {testingCli ? '正在检测…' : '测试连接'}
+                      </Button>
+                    </div>
                   </div>
                   {cliScanError ? (
                     <p role="alert" className="mt-3 text-xs text-[#d70015] dark:text-[#ff7b72]">
@@ -754,6 +902,11 @@ export function SettingsPage({
                                   ))}
                                 </div>
                               ) : null}
+                              {entry.modelCatalog?.defaultModel ? (
+                                <p className="mt-1 truncate text-[11px] text-gray-500 dark:text-[#8e8e93]">
+                                  CLI 默认模型：{entry.modelCatalog.defaultModel}
+                                </p>
+                              ) : null}
                               {entry.models?.length ? (
                                 <p className="mt-1 text-[11px] text-gray-500 dark:text-[#8e8e93]">
                                   {entry.models.length} 个可用模型
@@ -798,11 +951,9 @@ export function SettingsPage({
                   <Select
                     id="settings-cli-agent"
                     value={cliAgent}
-                    onChange={(event) => {
-                      const next = event.target.value as LocalCliAgent;
-                      setCliAgent(next);
-                      setCliCommand(next);
-                    }}
+                    onChange={(event) =>
+                      changeCliAgent(event.target.value as LocalCliAgent)
+                    }
                   >
                     {cliAgents.map((agent) => (
                       <option key={agent} value={agent}>
@@ -810,15 +961,6 @@ export function SettingsPage({
                       </option>
                     ))}
                   </Select>
-                </div>
-                <div>
-                  <Label htmlFor="settings-cli-command">CLI 命令</Label>
-                  <Input
-                    id="settings-cli-command"
-                    value={cliCommand}
-                    onChange={(event) => setCliCommand(event.target.value)}
-                    placeholder="codex"
-                  />
                 </div>
                 {cliAgent === 'codex' || cliAgent === 'claude' || cliAgent === 'opencode' ? (
                   <div>
@@ -830,46 +972,76 @@ export function SettingsPage({
                         setCliEffort(event.target.value as LocalCliEffort | '')
                       }
                     >
-                      <option value="">默认</option>
+                      <option value="">
+                        {cliCatalog?.defaultEffort
+                          ? `跟随 CLI（配置：${cliCatalog.defaultEffort}）`
+                          : '跟随 CLI'}
+                      </option>
                       <option value="low">低</option>
                       <option value="medium">中</option>
                       <option value="high">高</option>
                     </Select>
                   </div>
                 ) : null}
-                <label className="flex items-start gap-3 rounded-xl border border-black/[0.06] p-3 text-sm text-gray-500 dark:border-white/[0.08] dark:text-[#a1a1a6] md:col-span-2">
-                  <input
-                    type="checkbox"
-                    aria-label="使用 CLI 原生工具"
-                    checked={cliNativeTools}
-                    onChange={(event) => setCliNativeTools(event.target.checked)}
-                    className="mt-0.5 h-4 w-4 rounded-[4px] accent-[#0071e3]"
-                  />
-                  <span>
-                    使用 CLI 原生工具（完整 agent 模式）
-                    <span className="mt-1 block text-xs text-gray-500 dark:text-[#8e8e93]">
-                      让 CLI 在 vault 中直接读文件、改笔记、运行命令和使用联网工具；关闭时只把它当成一次性文本模型，并在临时目录中运行。
-                    </span>
-                  </span>
-                </label>
-                {cliAgent === 'claude' ? (
-                  <label className="flex items-start gap-3 text-sm text-gray-500 dark:text-[#a1a1a6] md:col-span-2">
-                    <input
-                      type="checkbox"
-                      checked={cliIsolate}
-                      disabled={cliNativeTools}
-                      onChange={(event) => setCliIsolate(event.target.checked)}
-                      className="mt-0.5 h-4 w-4 rounded-[4px] accent-[#0071e3] disabled:opacity-40"
-                    />
-                    <span>
-                      隔离 Claude Code 全局配置（--bare）
-                      <span className="mt-1 block text-xs text-gray-500 dark:text-[#8e8e93]">
-                        跳过 hooks / skills / CLAUDE.md，思考过程不会被本机全局配置污染。需要 API Key，OAuth 登录可能不可用。
-                        {cliNativeTools ? ' 原生工具模式会忽略 --bare。' : ''}
+                <p className="text-sm leading-6 text-gray-500 dark:text-[#a1a1a6] md:col-span-2">
+                  当前使用：{cliAgentLabels[cliAgent]}
+                  {cliEntry?.installed ? '' : '（未检测到安装）'} ·{' '}
+                  {model.trim()
+                    ? `模型 ${model.trim()}`
+                    : cliCatalog?.defaultModel
+                      ? `继承 CLI 默认（${cliCatalog.defaultModel}）`
+                      : '继承 CLI 默认'}
+                  。不选模型时 ASAKI 不会传 --model，CLI 按自己的配置运行。
+                </p>
+                <details className="rounded-xl border border-black/[0.06] px-3 py-2 text-sm text-gray-500 dark:border-white/[0.08] dark:text-[#a1a1a6] md:col-span-2">
+                  <summary className="cursor-pointer select-none py-1 text-[13px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
+                    高级设置（命令路径、原生工具、隔离模式）
+                  </summary>
+                  <div className="mt-3 grid gap-4 md:grid-cols-2">
+                    <div>
+                      <Label htmlFor="settings-cli-command">CLI 命令</Label>
+                      <Input
+                        id="settings-cli-command"
+                        value={cliCommand}
+                        onChange={(event) => setCliCommand(event.target.value)}
+                        placeholder="codex"
+                      />
+                    </div>
+                    <label className="flex items-start gap-3 rounded-xl border border-black/[0.06] p-3 text-sm text-gray-500 dark:border-white/[0.08] dark:text-[#a1a1a6] md:col-span-2">
+                      <input
+                        type="checkbox"
+                        aria-label="使用 CLI 原生工具"
+                        checked={cliNativeTools}
+                        onChange={(event) => setCliNativeTools(event.target.checked)}
+                        className="mt-0.5 h-4 w-4 rounded-[4px] accent-[#0071e3]"
+                      />
+                      <span>
+                        使用 CLI 原生工具（完整 agent 模式）
+                        <span className="mt-1 block text-xs text-gray-500 dark:text-[#8e8e93]">
+                          让 CLI 在 vault 中直接读文件、改笔记、运行命令和使用联网工具；关闭时只把它当成一次性文本模型，并在临时目录中运行。
+                        </span>
                       </span>
-                    </span>
-                  </label>
-                ) : null}
+                    </label>
+                    {cliAgent === 'claude' ? (
+                      <label className="flex items-start gap-3 text-sm text-gray-500 dark:text-[#a1a1a6] md:col-span-2">
+                        <input
+                          type="checkbox"
+                          checked={cliIsolate}
+                          disabled={cliNativeTools}
+                          onChange={(event) => setCliIsolate(event.target.checked)}
+                          className="mt-0.5 h-4 w-4 rounded-[4px] accent-[#0071e3] disabled:opacity-40"
+                        />
+                        <span>
+                          隔离 Claude Code 全局配置（--bare）
+                          <span className="mt-1 block text-xs text-gray-500 dark:text-[#8e8e93]">
+                            跳过 hooks / skills / CLAUDE.md，思考过程不会被本机全局配置污染。需要 API Key，OAuth 登录可能不可用。
+                            {cliNativeTools ? ' 原生工具模式会忽略 --bare。' : ''}
+                          </span>
+                        </span>
+                      </label>
+                    ) : null}
+                  </div>
+                </details>
                 {cliAgent === 'zcode' ? (
                   <p className="text-sm text-gray-500 dark:text-[#a1a1a6] md:col-span-2">
                     zcode 的模型和推理强度在 zcode 内切换（/model），本应用不会覆盖。
@@ -1302,6 +1474,7 @@ export function SettingsPage({
           ) : null}
 
         </div>
+        </>
       )}
     </div>
   );

@@ -414,7 +414,7 @@ export function KnowledgePage({
       <div className="mx-auto flex h-full w-full max-w-[1160px] px-4 py-4 md:px-6">
         <aside
           aria-label="知识目录"
-          className={`w-full shrink-0 flex-col md:flex md:w-[260px] md:border-r md:border-gray-200/70 md:pr-4 dark:md:border-white/10 ${
+          className={`w-full shrink-0 flex-col lg:flex lg:w-[260px] lg:border-r lg:border-gray-200/70 lg:pr-4 dark:lg:border-white/10 ${
             mobilePane === 'note' ? 'hidden' : 'flex'
           }`}
         >
@@ -482,7 +482,7 @@ export function KnowledgePage({
 
         <section
           aria-label="知识内容"
-          className={`min-w-0 flex-1 flex-col overflow-y-auto pt-3 md:flex md:pl-5 md:pt-0 ${
+          className={`min-w-0 flex-1 flex-col overflow-y-auto pt-3 lg:flex lg:pl-5 lg:pt-0 ${
             mobilePane === 'note' ? 'flex' : 'hidden'
           }`}
         >
@@ -492,7 +492,7 @@ export function KnowledgePage({
                 type="button"
                 aria-label="返回目录"
                 onClick={() => setMobilePane('list')}
-                className="mb-2 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-black/[0.04] hover:text-gray-700 md:hidden dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
+                className="mb-2 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-black/[0.04] hover:text-gray-700 lg:hidden dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
               >
                 ←
               </button>

@@ -66,7 +66,7 @@ test('orders reasoning and tool rows from the stream and keeps them in memory', 
   await sendPrompt('帮我排一下今天的优先级');
   await screen.findAllByText('最终回答');
 
-  const titles = screen.getAllByText('思考');
+  const titles = screen.getAllByText('思考过程');
   const toolTitle = screen.getByText('写入笔记');
   expect(titles).toHaveLength(2);
   expect(titles[0]!.compareDocumentPosition(toolTitle)).toBe(
@@ -88,7 +88,7 @@ test('orders reasoning and tool rows from the stream and keeps them in memory', 
   await userEvent.click(
     within(sidebar).getByRole('button', { name: /帮我排一下今天的优先级/ })
   );
-  await waitFor(() => expect(screen.getAllByText('思考')).toHaveLength(2));
+  await waitFor(() => expect(screen.getAllByText('思考过程')).toHaveLength(2));
 });
 
 test('reloads the conversation when it is reopened mid-turn', async () => {

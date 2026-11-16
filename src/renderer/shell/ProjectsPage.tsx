@@ -90,9 +90,14 @@ export function ProjectsPage({
   const [savingWorkspace, setSavingWorkspace] = useState(false);
   const [deletingWorkspace, setDeletingWorkspace] = useState(false);
   const [confirmDeleteWorkspace, setConfirmDeleteWorkspace] = useState(false);
+  const [minutesDraft, setMinutesDraft] = useState('');
 
   const workspaceId = workspace?.id ?? null;
   const editingWorkspace = editingFor !== null && editingFor === workspaceId;
+
+  useEffect(() => {
+    setMinutesDraft(workspace?.availableMinutes ? String(workspace.availableMinutes) : '');
+  }, [workspace?.id, workspace?.availableMinutes]);
 
   useEffect(() => {
     if (editingFor === null || editingFor === workspaceId) return;
@@ -157,6 +162,21 @@ export function ProjectsPage({
       setWorkspaceError(friendlyErrorMessage(cause, '保存失败，请重试。'));
     } finally {
       setSavingWorkspace(false);
+    }
+  }
+
+  async function saveAvailableMinutes() {
+    if (!workspace) return;
+    const parsed = Number(minutesDraft);
+    if (!Number.isFinite(parsed) || parsed < 5 || parsed > 24 * 60) {
+      setWorkspaceError('每天可用时间需在 5 到 1440 分钟之间。');
+      return;
+    }
+    setWorkspaceError(null);
+    try {
+      await onUpdateWorkspace({ workspaceId: workspace.id, availableMinutes: Math.round(parsed) });
+    } catch (cause) {
+      setWorkspaceError(friendlyErrorMessage(cause, '保存失败，请重试。'));
     }
   }
 
@@ -317,6 +337,44 @@ export function ProjectsPage({
                   </div>
                 </div>
               </form>
+            ) : null}
+            {workspace && !editingWorkspace ? (
+              <div className="mt-4 flex items-center justify-between gap-2 border-t border-gray-100 pt-3 dark:border-white/[0.08]">
+                <label
+                  htmlFor="workspace-available-minutes"
+                  className="text-[12px] text-gray-500 dark:text-[#a1a1a6]"
+                >
+                  每天可用时间
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    id="workspace-available-minutes"
+                    aria-label="每天可用时间"
+                    type="number"
+                    min={5}
+                    max={1440}
+                    step={5}
+                    placeholder="分钟"
+                    value={minutesDraft}
+                    onChange={(event) => setMinutesDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        void saveAvailableMinutes();
+                      }
+                    }}
+                    className="h-8 w-[88px] rounded-lg border border-black/10 bg-white px-2 text-right text-[12px] tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:border-white/10 dark:bg-[#242426] dark:text-[#f5f5f7]"
+                  />
+                  <span className="text-[12px] text-gray-400 dark:text-[#8e8e93]">分钟</span>
+                  <button
+                    type="button"
+                    onClick={() => void saveAvailableMinutes()}
+                    className="rounded-full px-2 py-1 text-[12px] font-medium text-[#0071e3] hover:bg-[#0071e3]/10"
+                  >
+                    保存
+                  </button>
+                </div>
+              </div>
             ) : null}
             {workspace ? (
               <div className="mt-4 flex items-center justify-between gap-2 border-t border-gray-100 pt-3 dark:border-white/[0.08]">

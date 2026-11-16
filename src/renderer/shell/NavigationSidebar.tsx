@@ -14,31 +14,39 @@ import {
   SparklesIcon,
   SunIcon,
   TargetIcon,
-  ThinkIcon
+  ThinkIcon,
+  UserIcon
 } from '../ui/icons';
 import type { ConversationSummary } from '../../shared/conversations';
 import type { Workspace } from '../../shared/workspace';
 
 export type Section =
+  | 'today'
   | 'chat'
   | 'projects'
   | 'schedule'
   | 'plan'
   | 'knowledge'
   | 'memory'
+  | 'profile'
   | 'review'
   | 'reminders'
   | 'settings';
 export type ChatScope = 'daily' | 'unfiled' | 'workspace';
 export type NavSection =
+  | 'today'
   | 'schedule'
   | 'plan'
   | 'daily'
   | 'knowledge'
   | 'memory'
+  | 'profile'
   | 'review'
   | 'reminders'
   | 'settings';
+
+/** Status of the turn a conversation may still have in flight. */
+export type ConversationRunBadge = 'running' | 'interrupted' | 'failed' | 'completed';
 
 type NavigationSidebarProps = {
   section: Section;
@@ -47,6 +55,8 @@ type NavigationSidebarProps = {
   projects: Workspace[];
   activeConversationId: string | null;
   selectedProjectId: string | null;
+  /** Conversation id → what its last run is doing; draws a status dot. */
+  runStates?: Partial<Record<string, ConversationRunBadge>>;
   onSectionChange: (section: NavSection) => void;
   onNewConversation: () => void;
   onSelectConversation: (id: string) => void;
@@ -64,14 +74,38 @@ type NavigationSidebarProps = {
   onCloseMobile?: () => void;
 };
 
-const NAV_ITEMS: Array<{ id: NavSection; label: string; Icon: typeof SunIcon }> = [
-  { id: 'schedule', label: '今日安排', Icon: CalendarIcon },
-  { id: 'plan', label: '长期计划', Icon: TargetIcon },
-  { id: 'daily', label: '日常', Icon: SunIcon },
-  { id: 'knowledge', label: '知识库', Icon: SparklesIcon },
-  { id: 'memory', label: '记忆', Icon: ThinkIcon },
-  { id: 'review', label: '复盘', Icon: BookOpenIcon },
-  { id: 'reminders', label: '提醒', Icon: ClockIcon }
+type NavItem = { id: NavSection; label: string; Icon: typeof SunIcon };
+
+/**
+ * The sidebar is grouped by the question the user is asking: what to do now
+ * (阿咲), what the plan is, and what happened before. Entries themselves keep
+ * their old names so links and habits still work.
+ */
+const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
+  {
+    label: '阿咲',
+    items: [
+      { id: 'today', label: '今日', Icon: SunIcon },
+      { id: 'daily', label: '日常', Icon: SparklesIcon },
+      { id: 'knowledge', label: '知识库', Icon: BookOpenIcon },
+      { id: 'profile', label: '我的资料', Icon: UserIcon }
+    ]
+  },
+  {
+    label: '目标与计划',
+    items: [
+      { id: 'schedule', label: '今日安排', Icon: CalendarIcon },
+      { id: 'plan', label: '长期计划', Icon: TargetIcon },
+      { id: 'review', label: '复盘', Icon: ThinkIcon }
+    ]
+  },
+  {
+    label: '记录与提醒',
+    items: [
+      { id: 'memory', label: '记忆', Icon: ThinkIcon },
+      { id: 'reminders', label: '提醒', Icon: ClockIcon }
+    ]
+  }
 ];
 
 /** Tailwind's `md` breakpoint: from here the sidebar is a permanent column. */
@@ -153,6 +187,13 @@ const contextHeadingClass =
 const workspaceRowClass =
   'flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30';
 
+const RUN_BADGE_LABELS: Record<ConversationRunBadge, string> = {
+  running: '正在生成',
+  interrupted: '已中断',
+  failed: '生成失败',
+  completed: '已完成'
+};
+
 export function NavigationSidebar({
   section,
   chatScope,
@@ -160,6 +201,7 @@ export function NavigationSidebar({
   projects,
   activeConversationId,
   selectedProjectId,
+  runStates = {},
   onSectionChange,
   onNewConversation,
   onSelectConversation,
@@ -502,13 +544,19 @@ export function NavigationSidebar({
 
   function conversationRow(conversation: ConversationSummary) {
     const active = conversation.id === activeConversationId;
+    const badge = runStates[conversation.id];
+    const badgeLabel = badge ? RUN_BADGE_LABELS[badge] : null;
     if (renamingId === conversation.id) return renameRow(conversation);
     return (
       <div key={conversation.id} className="group relative">
         <button
           type="button"
           aria-current={active ? 'page' : undefined}
-          title={conversation.preview || conversation.title}
+          title={
+            badgeLabel
+              ? `${conversation.preview || conversation.title} · ${badgeLabel}`
+              : conversation.preview || conversation.title
+          }
           onClick={() => {
             closeMenu();
             onSelectConversation(conversation.id);
@@ -530,6 +578,18 @@ export function NavigationSidebar({
             {conversation.pinned ? '📌 ' : ''}
             {conversation.title}
           </span>
+          {badge ? (
+            <span
+              aria-hidden="true"
+              className={cn(
+                'h-1.5 w-1.5 shrink-0 rounded-full',
+                badge === 'running' && 'animate-pulse bg-[#0071e3] dark:bg-[#4da3ff]',
+                badge === 'completed' && 'bg-[#34c759]',
+                badge === 'interrupted' && 'bg-[#ff9f0a]',
+                badge === 'failed' && 'bg-[#ff3b30]'
+              )}
+            />
+          ) : null}
           <span className="shrink-0 text-[10px] tabular-nums text-gray-400 transition-opacity duration-200 group-hover:opacity-0 dark:text-[#8e8e93]">
             {timeLabel(conversation.updatedAt, clockNow)}
           </span>
@@ -761,8 +821,16 @@ export function NavigationSidebar({
         </button>
       </div>
 
+      {/* Navigation and the project tree scroll together: on a 768px-tall
+          window the fixed header would otherwise squeeze projects to zero. */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
       <nav aria-label="主导航" className="space-y-0.5 px-2 pb-2">
-        {NAV_ITEMS.map(({ id, label, Icon }) => {
+        {NAV_GROUPS.map((group) => (
+          <div key={group.label} className="pb-1.5">
+            <p className="px-2.5 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-gray-400 dark:text-[#6e6e73]">
+              {group.label}
+            </p>
+            {group.items.map(({ id, label, Icon }) => {
           const active =
             (id === 'daily' && dailyActive) ||
             (id !== 'daily' && section === id);
@@ -799,12 +867,15 @@ export function NavigationSidebar({
                 : null}
             </div>
           );
-        })}
+            })}
+          </div>
+        ))}
       </nav>
 
       <div className="mx-3 border-t border-gray-200/70 dark:border-white/10" />
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">{workspaceList()}</div>
+      <div className="px-2 pb-2">{workspaceList()}</div>
+      </div>
 
       <div className="flex items-center gap-2 border-t border-gray-200/70 px-3 py-3 dark:border-white/10">
         <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#1d1d1f] text-[11px] text-white">

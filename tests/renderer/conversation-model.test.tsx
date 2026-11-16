@@ -37,10 +37,10 @@ test('sets, shows and clears a per-conversation model', async () => {
   await userEvent.click(screen.getByRole('button', { name: '设置本对话模型' }));
   expect(screen.getByRole('dialog')).toBeInTheDocument();
   expect(screen.getByText('本对话模型')).toBeInTheDocument();
-  expect(screen.getByLabelText('模型 ID')).toHaveValue('');
+  expect(screen.getByLabelText('模型')).toHaveValue('');
   expect(screen.getByPlaceholderText(/跟随全局/)).toBeInTheDocument();
 
-  await userEvent.type(screen.getByLabelText('模型 ID'), 'gpt-x');
+  await userEvent.type(screen.getByLabelText('模型'), 'gpt-x');
   await userEvent.click(screen.getByRole('button', { name: '保存' }));
 
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
@@ -50,7 +50,7 @@ test('sets, shows and clears a per-conversation model', async () => {
   expect((await api.getConversation(summary.id))?.model).toBe('gpt-x');
 
   await userEvent.click(screen.getByRole('button', { name: '设置本对话模型' }));
-  await userEvent.clear(screen.getByLabelText('模型 ID'));
+  await userEvent.clear(screen.getByLabelText('模型'));
   await userEvent.click(screen.getByRole('button', { name: '保存' }));
 
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
@@ -68,13 +68,40 @@ test('keeps the dialog and input when saving fails', async () => {
     .mockRejectedValueOnce(new Error('保存失败'));
 
   await userEvent.click(screen.getByRole('button', { name: '设置本对话模型' }));
-  await userEvent.type(screen.getByLabelText('模型 ID'), 'bad-model');
+  await userEvent.type(screen.getByLabelText('模型'), 'bad-model');
   await userEvent.click(screen.getByRole('button', { name: '保存' }));
 
   expect(await screen.findByText('保存失败')).toBeInTheDocument();
-  expect(screen.getByLabelText('模型 ID')).toHaveValue('bad-model');
+  expect(screen.getByLabelText('模型')).toHaveValue('bad-model');
   expect(screen.getByRole('dialog')).toBeInTheDocument();
   spy.mockRestore();
+});
+
+test('offers the models discovered in the local CLI config', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage, { streamPace: 0.05 });
+  await api.updateSettings({
+    provider: { kind: 'local-cli', agent: 'codex', command: 'codex' }
+  });
+  window.studyCoach = api;
+  window.studyCoachPrototype = { reset: vi.fn() };
+  render(<Workspace hasApiKey={false} onRefresh={vi.fn()} />);
+  await sendFirstMessage();
+
+  await userEvent.click(screen.getByRole('button', { name: '设置本对话模型' }));
+  const select = await screen.findByRole('combobox', { name: '模型' });
+  // The global label names the CLI's own default instead of a bare agent name.
+  await waitFor(() =>
+    expect(select).toHaveTextContent('跟随全局（继承 CLI 默认（codex/gpt-6.1-sol））')
+  );
+  await userEvent.click(select);
+  const option = await screen.findByRole('option', { name: /GPT-6.1 Mini/ });
+  await userEvent.click(option);
+  await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  const summary = (await api.listConversations())[0]!;
+  expect((await api.getConversation(summary.id))?.model).toBe('codex/gpt-6.1-mini');
 });
 
 test('shows the override only for its own conversation', async () => {
@@ -82,7 +109,7 @@ test('shows the override only for its own conversation', async () => {
   await sendFirstMessage();
 
   await userEvent.click(screen.getByRole('button', { name: '设置本对话模型' }));
-  await userEvent.type(screen.getByLabelText('模型 ID'), 'model-a');
+  await userEvent.type(screen.getByLabelText('模型'), 'model-a');
   await userEvent.click(screen.getByRole('button', { name: '保存' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 

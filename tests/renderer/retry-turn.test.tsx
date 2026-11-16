@@ -27,7 +27,9 @@ test('retries the failed turn from the error banner instead of only refreshing',
   await userEvent.type(composer, '帮我排一下今天的优先级');
   await userEvent.click(screen.getByRole('button', { name: '发送' }));
 
-  expect(await screen.findByText(/网络断开/)).toBeInTheDocument();
+  // The reason shows twice on purpose: in the banner that offers the retry and
+  // under the partial answer the failed turn left behind.
+  expect((await screen.findAllByText(/网络断开/)).length).toBeGreaterThan(0);
   const retry = await screen.findByRole('button', { name: '重试发送' });
   await userEvent.click(retry);
 

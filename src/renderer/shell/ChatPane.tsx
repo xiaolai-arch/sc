@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
+import { BUTLER_REFERENCE_LABELS } from '../../shared/butler-stream';
 import { homeGreeting } from '../../shared/greeting';
 import { MenuIcon } from '../ui/icons';
 import { Composer } from './Composer';
@@ -7,6 +8,8 @@ import { MessageActions } from './MessageActions';
 import { stepsToTrace } from './trace';
 import { TraceFlow } from './TraceFlow';
 import type { Workspace } from '../../shared/workspace';
+import type { ButlerReference } from '../../shared/butler-stream';
+import type { AgentPermissions, ChatAttachment } from '../../shared/attachments';
 import type { ChatMessage } from './types';
 
 type ChatPaneProps = {
@@ -39,8 +42,85 @@ type ChatPaneProps = {
   onRegenerate?: (messageId: string) => void;
   onEditMessage?: (messageId: string) => void;
   onOpenModelPicker?: () => void;
+  /** Files staged for the next message. */
+  attachments?: ChatAttachment[];
+  onAttachmentsChange?: (attachments: ChatAttachment[]) => void;
+  /** What the agent may do in this conversation. */
+  permissions?: AgentPermissions;
+  onPermissionsChange?: (permissions: AgentPermissions) => void;
   typingStatus?: string | null;
+  /** Opens the record behind a "本次参考" row. */
+  onOpenReference?: (reference: ButlerReference) => void;
+  /** Compact next-step/reminder dashboard shown on the empty home screen. */
+  homeOverview?: ReactNode;
 };
+
+function UserAttachments({ items }: { items?: ChatMessage['attachments'] }) {
+  if (!items || items.length === 0) return null;
+  return (
+    <div className="mt-1.5 flex max-w-[85%] flex-wrap items-center justify-end gap-1.5">
+      {items.map((attachment, index) => (
+        <span
+          key={`${attachment.name}-${index}`}
+          className="max-w-[220px] truncate rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] text-gray-500 dark:bg-white/[0.08] dark:text-[#c7c7cc]"
+        >
+          {attachment.kind === 'image' ? '图片 · ' : ''}
+          {attachment.name}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function ReferenceList({
+  items,
+  onOpen
+}: {
+  items: ButlerReference[];
+  onOpen?: (reference: ButlerReference) => void;
+}) {
+  return (
+    <details className="mt-3 rounded-xl border border-black/[0.06] bg-[#f5f5f7]/70 px-3 py-2 dark:border-white/10 dark:bg-white/[0.04]">
+      <summary className="cursor-pointer list-none text-[12px] font-medium text-gray-500 outline-none dark:text-[#8e8e93]">
+        本次参考 · {items.length}
+      </summary>
+      <ul className="mt-1.5 space-y-1">
+        {items.map((reference) => {
+          const label = BUTLER_REFERENCE_LABELS[reference.kind];
+          const body = (
+            <>
+              <span className="shrink-0 text-gray-400 dark:text-[#8e8e93]">{label}</span>
+              <span className="min-w-0 truncate text-gray-600 dark:text-[#c7c7cc]">
+                {reference.title}
+              </span>
+            </>
+          );
+          return (
+            <li key={`${reference.kind}:${reference.id}`} className="min-w-0">
+              {onOpen ? (
+                <button
+                  type="button"
+                  onClick={() => onOpen(reference)}
+                  title={reference.detail ?? reference.title}
+                  className="flex w-full items-baseline gap-2 text-left text-[12px] hover:underline"
+                >
+                  {body}
+                </button>
+              ) : (
+                <span
+                  title={reference.detail ?? reference.title}
+                  className="flex w-full items-baseline gap-2 text-[12px]"
+                >
+                  {body}
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </details>
+  );
+}
 
 export function ChatPane({
   workspace,
@@ -63,13 +143,19 @@ export function ChatPane({
   onOpenSidebar,
   sidebarOpen = false,
   typingStatus = null,
+  onOpenReference,
+  homeOverview,
   composerText,
   onComposerTextChange,
   editing = false,
   onCancelEdit,
   onRegenerate,
   onEditMessage,
-  onOpenModelPicker
+  onOpenModelPicker,
+  attachments = [],
+  onAttachmentsChange,
+  permissions,
+  onPermissionsChange
 }: ChatPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
@@ -183,6 +269,8 @@ export function ChatPane({
                 ) : null}
               </div>
 
+              {homeOverview ? <div className="mt-6 text-left">{homeOverview}</div> : null}
+
               <div className="mt-8">
                 <Composer
                   hero
@@ -191,6 +279,10 @@ export function ChatPane({
                   onTextChange={onComposerTextChange}
                   onSend={onSend}
                   disabled={typing || loading}
+                  attachments={attachments}
+                  {...(onAttachmentsChange ? { onAttachmentsChange } : {})}
+                  {...(permissions ? { permissions } : {})}
+                  {...(onPermissionsChange ? { onPermissionsChange } : {})}
                 />
               </div>
             </div>
@@ -222,9 +314,10 @@ export function ChatPane({
           {messages.map((message) =>
             message.role === 'user' ? (
               <div key={message.id} className="group flex flex-col items-end">
-                <p className="max-w-[85%] rounded-2xl bg-[#0071e3] px-4 py-2.5 text-[14px] leading-6 text-white">
+                <p className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-[#0071e3] px-4 py-2.5 text-[14px] leading-6 text-white">
                   {message.text}
                 </p>
+                <UserAttachments items={message.attachments} />
                 {message.id === lastUserMessageId && onEditMessage ? (
                   <MessageActions
                     text={message.text}
@@ -243,6 +336,20 @@ export function ChatPane({
                     <div className="mt-1">
                       <MarkdownText text={message.text} />
                     </div>
+                  ) : null}
+                  {message.references && message.references.length > 0 ? (
+                    <ReferenceList
+                      items={message.references}
+                      {...(onOpenReference ? { onOpen: onOpenReference } : {})}
+                    />
+                  ) : null}
+                  {message.notice ? (
+                    <p
+                      role="status"
+                      className="mt-2 text-[12px] leading-5 text-[#b25000] dark:text-[#ffb340]"
+                    >
+                      {message.notice}
+                    </p>
                   ) : null}
                   <MessageActions
                     text={message.text}
@@ -271,6 +378,10 @@ export function ChatPane({
         onSend={onSend}
         disabled={typing || loading}
         editing={editing}
+        attachments={attachments}
+        {...(onAttachmentsChange ? { onAttachmentsChange } : {})}
+        {...(permissions ? { permissions } : {})}
+        {...(onPermissionsChange ? { onPermissionsChange } : {})}
         {...(onStop && typing ? { onStop } : {})}
         {...(onCancelEdit ? { onCancelEdit } : {})}
         {...(onOpenModelPicker ? { onOpenModelPicker } : {})}
