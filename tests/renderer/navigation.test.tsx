@@ -112,6 +112,23 @@ test('the daily section has no trailing disclosure arrow', async () => {
   expect(daily.querySelectorAll('svg')).toHaveLength(1);
 });
 
+test('keeps the workspace list outside the nav scroll region so it stays visible', async () => {
+  const { api } = setup();
+  await mount(api);
+
+  const navigation = screen.getByRole('navigation', { name: '主导航' });
+  expect(within(navigation).queryByText('工作区')).not.toBeInTheDocument();
+
+  const header = screen.getByText('工作区');
+  const section = header.parentElement?.parentElement;
+  expect(section).not.toBeNull();
+  expect(section?.className).toContain('max-h-[45%]');
+  expect(within(section as HTMLElement).getByRole('button', { name: '新建工作区' })).toBeInTheDocument();
+  expect(
+    within(section as HTMLElement).getByRole('button', { name: '考研' })
+  ).toBeInTheDocument();
+});
+
 test('keeps the conversation and project when moving between sections', async () => {
   const { api } = setup();
   await mount(api);

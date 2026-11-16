@@ -828,10 +828,11 @@ export function NavigationSidebar({
         </button>
       </div>
 
-      {/* Navigation and the project tree scroll together: on a 768px-tall
-          window the fixed header would otherwise squeeze projects to zero. */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
-      <nav aria-label="主导航" className="space-y-0.5 px-2 pb-2">
+      {/* The nav scrolls on its own so the workspace list stays pinned and
+          visible even on a 600px-tall window; projects no longer fall below
+          the fold behind the navigation groups. */}
+      <div className="flex min-h-0 flex-1 flex-col">
+      <nav aria-label="主导航" className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2">
         {NAV_GROUPS.map((group) => (
           <div key={group.label} className="pb-1.5">
             <p className="px-2.5 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-gray-400 dark:text-[#6e6e73]">
@@ -881,7 +882,7 @@ export function NavigationSidebar({
 
       <div className="mx-3 border-t border-gray-200/70 dark:border-white/10" />
 
-      <div className="px-2 pb-2">{workspaceList()}</div>
+      <div className="max-h-[45%] shrink-0 overflow-y-auto px-2 pb-2">{workspaceList()}</div>
       </div>
 
       <div className="flex items-center gap-2 border-t border-gray-200/70 px-3 py-3 dark:border-white/10">
