@@ -1,4 +1,5 @@
 import type { AppContext } from '../context';
+import { createDeliveryLog, type DeliveryLog } from './delivery-log';
 import { Scheduler, type SchedulerNotification, type SchedulerOptions } from './scheduler';
 
 export interface ContextSchedulerOptions {
@@ -8,6 +9,10 @@ export interface ContextSchedulerOptions {
   onEveningReview?: (date: string) => void | Promise<void>;
   onError?: (error: unknown) => void;
   now?: () => Date;
+  /** JSON file that remembers today's delivered reminders across restarts. */
+  deliveryLogPath?: string;
+  /** Test seam; overrides `deliveryLogPath`. */
+  deliveryLog?: DeliveryLog;
 }
 
 /**
@@ -68,6 +73,12 @@ export function createContextScheduler(options: ContextSchedulerOptions): Schedu
         );
     },
     notify: options.notify,
+    ...(options.deliveryLog !== undefined || options.deliveryLogPath !== undefined
+      ? {
+          deliveryLog:
+            options.deliveryLog ?? createDeliveryLog(options.deliveryLogPath as string)
+        }
+      : {}),
     onCheckIn: (kind, date) => options.context.checkIns.check(kind, date),
     ...(options.onEveningReview ? { onEveningReview: options.onEveningReview } : {}),
     ...(options.onError ? { onError: options.onError } : {}),

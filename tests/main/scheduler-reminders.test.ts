@@ -213,3 +213,46 @@ test('only fires a weekday-scoped reminder on its selected days', async () => {
     .sort();
   expect(ids).toEqual(['daily', 'weekend']);
 });
+
+test('a restart does not deliver the same reminder twice', async () => {
+  const stored = new Map<string, string[]>();
+  const deliveryLog = {
+    load: async (date: string) => stored.get(date) ?? [],
+    save: async (date: string, keys: readonly string[]) => {
+      stored.set(date, [...keys]);
+    }
+  };
+  const now = at(12, 0);
+  const reminders: Reminder[] = [
+    { id: 'water', time: '11:00', label: '喝水', enabled: true }
+  ];
+  const options = {
+    now: () => now,
+    getSettings: async () => settings(),
+    getReminders: async () => reminders,
+    notify: () => undefined,
+    deliveryLog
+  };
+
+  const first = await new Scheduler(options).tick();
+  expect(first.delivered.some((entry) => entry.reminderId === 'water')).toBe(true);
+
+  // A new process (fresh in-memory set) must reload today's delivered keys.
+  const afterRestart = await new Scheduler(options).tick();
+  expect(afterRestart.delivered).toHaveLength(0);
+});
+
+test('reminders arrive even when no model is configured', async () => {
+  const now = at(12, 0);
+  const scheduler = new Scheduler({
+    now: () => now,
+    getSettings: async () => settings(),
+    getReminders: async () => [
+      { id: 'water', time: '12:00', label: '喝水', enabled: true }
+    ],
+    notify: () => undefined
+  });
+
+  const result = await scheduler.tick();
+  expect(result.delivered.map((entry) => entry.reminderId)).toEqual(['water']);
+});

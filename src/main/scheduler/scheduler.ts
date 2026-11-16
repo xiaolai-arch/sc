@@ -1,6 +1,7 @@
 import { formatLocalDate } from '../../shared/date';
 import type { AppSettings } from '../../shared/types';
 import type { Reminder, WorkspaceTask } from '../../shared/workspace';
+import type { DeliveryLog } from './delivery-log';
 import {
   isTimeReached,
   notificationState,
@@ -51,6 +52,8 @@ export interface SchedulerOptions {
   /** Tasks pinned to a start time on today's schedule. */
   getScheduledTasks?: () => Promise<WorkspaceTask[]>;
   notify: (notification: SchedulerNotification) => void | Promise<void>;
+  /** Persists delivered keys so a restart does not repeat today's reminders. */
+  deliveryLog?: DeliveryLog;
   /** Called once before the morning notification is shown. */
   onMorningPlan?: (date: string) => void | Promise<void>;
   /** Called once before the evening notification is shown. */
@@ -170,12 +173,22 @@ function buildTriggers(
  * notification toggle suppress delivery without consuming the trigger, so it
  * can be delivered once the window ends.
  */
+/** Date-scoped keys in stable order, so saved snapshots compare reliably. */
+function dateKeysOf(keys: Iterable<string>, date: string): string[] {
+  return [...keys].filter((key) => key.startsWith(`${date}:`)).sort();
+}
+
 export class Scheduler {
   private readonly now: () => Date;
   private readonly getSettings: () => Promise<AppSettings>;
   private readonly getReminders: () => Promise<Reminder[]>;
   private readonly getScheduledTasks: () => Promise<WorkspaceTask[]>;
   private readonly notify: (notification: SchedulerNotification) => void | Promise<void>;
+  private readonly deliveryLog: DeliveryLog | undefined;
+  /** Date whose delivered keys were loaded from disk; avoids reloading each tick. */
+  private hydratedDate: string | null = null;
+  /** Last date-scoped key set written to disk; skips unchanged rewrites. */
+  private persistedSnapshot: string | null = null;
   private readonly onMorningPlan: ((date: string) => void | Promise<void>) | undefined;
   private readonly onEveningReview: ((date: string) => void | Promise<void>) | undefined;
   private readonly onCheckIn:
@@ -202,6 +215,7 @@ export class Scheduler {
     this.getReminders = options.getReminders ?? (async () => []);
     this.getScheduledTasks = options.getScheduledTasks ?? (async () => []);
     this.notify = options.notify;
+    this.deliveryLog = options.deliveryLog;
     this.onMorningPlan = options.onMorningPlan;
     this.onEveningReview = options.onEveningReview;
     this.onCheckIn = options.onCheckIn;
@@ -243,6 +257,7 @@ export class Scheduler {
   private async runTick(): Promise<SchedulerTickResult> {
     const at = this.now();
     const date = formatLocalDate(at);
+    await this.hydrateDelivered(date);
     this.pruneOldDays(date);
     const settings = await this.getSettings();
     let reminders: Reminder[] = [];
@@ -384,7 +399,37 @@ export class Scheduler {
       }
     }
 
+    await this.persistDelivered(date);
     return result;
+  }
+
+  /** Loads today's delivered keys once; a failed read retries on the next tick. */
+  private async hydrateDelivered(date: string): Promise<void> {
+    if (this.deliveryLog === undefined || this.hydratedDate === date) return;
+    try {
+      const keys = await this.deliveryLog.load(date);
+      for (const key of keys) this.delivered.add(key);
+      this.hydratedDate = date;
+      this.persistedSnapshot = dateKeysOf(keys, date).join('\n');
+    } catch (error) {
+      this.reportError(error);
+    }
+  }
+
+  /** Best-effort write; notification delivery must not wait on disk. */
+  private async persistDelivered(date: string): Promise<void> {
+    // Never overwrite the stored set with a partial one when the initial read
+    // failed: the next tick reloads and tries again.
+    if (this.deliveryLog === undefined || this.hydratedDate !== date) return;
+    const keys = dateKeysOf(this.delivered, date);
+    const snapshot = keys.join('\n');
+    if (snapshot === this.persistedSnapshot) return;
+    try {
+      await this.deliveryLog.save(date, keys);
+      this.persistedSnapshot = snapshot;
+    } catch (error) {
+      this.reportError(error);
+    }
   }
 
   /**
