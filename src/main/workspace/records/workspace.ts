@@ -1,5 +1,10 @@
 import type { NoteMeta } from '../../../shared/types';
-import type { Workspace, WorkspaceKind } from '../../../shared/workspace';
+import {
+  MAX_DAILY_AVAILABLE_MINUTES,
+  MIN_DAILY_AVAILABLE_MINUTES,
+  type Workspace,
+  type WorkspaceKind
+} from '../../../shared/workspace';
 import { parseNote, serializeNote } from '../../vault/note';
 import { asRecord, asString } from './coerce';
 
@@ -36,6 +41,12 @@ export function parseWorkspaceFile(raw: string, workspaceId: string): Workspace 
     goal: asString(meta.goal) ?? '',
     description: asString(meta.description) ?? '',
     checkIn: meta.checkIn === 'off' ? 'off' : 'daily',
+    ...(typeof meta.availableMinutes === 'number' &&
+    Number.isFinite(meta.availableMinutes) &&
+    Math.round(meta.availableMinutes) >= MIN_DAILY_AVAILABLE_MINUTES &&
+    Math.round(meta.availableMinutes) <= MAX_DAILY_AVAILABLE_MINUTES
+      ? { availableMinutes: Math.round(meta.availableMinutes) }
+      : {}),
     createdAt: asString(meta.createdAt),
     updatedAt: asString(meta.updatedAt)
   };
@@ -52,6 +63,9 @@ export function serializeWorkspaceFile(workspace: Workspace): string {
     goal: workspace.goal,
     description: workspace.description,
     checkIn: workspace.checkIn ?? 'daily',
+    ...(workspace.availableMinutes !== undefined
+      ? { availableMinutes: workspace.availableMinutes }
+      : {}),
     createdAt: workspace.createdAt,
     updatedAt: workspace.updatedAt
   };

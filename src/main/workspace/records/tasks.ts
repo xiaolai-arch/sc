@@ -16,6 +16,10 @@ export type TaskRecord = StudyTask & {
   repeat?: TaskRepeat;
   /** Set on copies that a completed occurrence spawned. */
   recurredFrom?: string;
+  /** Stable long-plan source; used to dedupe and to write progress back. */
+  planId?: string;
+  planWeekId?: string;
+  planItemId?: string;
   created?: string;
   updated?: string;
 };
@@ -46,6 +50,9 @@ function coerceTask(value: unknown): TaskRecord | null {
     due: asString(record.due),
     ...(isTaskRepeat(record.repeat) ? { repeat: record.repeat } : {}),
     ...(asString(record.recurredFrom) ? { recurredFrom: asString(record.recurredFrom) } : {}),
+    ...(asString(record.planId) ? { planId: asString(record.planId) } : {}),
+    ...(asString(record.planWeekId) ? { planWeekId: asString(record.planWeekId) } : {}),
+    ...(asString(record.planItemId) ? { planItemId: asString(record.planItemId) } : {}),
     ...(isLocalDateTime(startAt) ? { startAt } : {}),
     created: asString(record.created),
     updated: asString(record.updated)
@@ -94,6 +101,9 @@ export function toWorkspaceTask(record: TaskRecord, workspaceId: string): Worksp
     due: record.due,
     ...(record.repeat ? { repeat: record.repeat } : {}),
     ...(record.recurredFrom ? { recurredFrom: record.recurredFrom } : {}),
+    ...(record.planId ? { planId: record.planId } : {}),
+    ...(record.planWeekId ? { planWeekId: record.planWeekId } : {}),
+    ...(record.planItemId ? { planItemId: record.planItemId } : {}),
     ...(record.startAt ? { startAt: record.startAt } : {}),
     createdAt: record.created,
     updatedAt: record.updated

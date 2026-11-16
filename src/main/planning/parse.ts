@@ -17,12 +17,8 @@ export function parseWorkspacePlanReply(
   const json = extractJson(text);
   if (json === null) return null;
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(json);
-  } catch {
-    return null;
-  }
+  const parsed = parseJsonLenient(json);
+  if (parsed === null) return null;
 
   const record = asRecord(parsed);
   const rawTasks = Array.isArray(parsed)
@@ -31,7 +27,6 @@ export function parseWorkspacePlanReply(
       ? record.tasks
       : null;
   if (rawTasks === null) return null;
-
   const tasks: WorkspacePlanTask[] = [];
   const seen = new Set<string>();
   for (const raw of rawTasks) {
@@ -76,6 +71,122 @@ export function extractJson(text: string): string | null {
     return trimmed.slice(firstBracket, lastBracket + 1);
   }
   return null;
+}
+
+/**
+ * Strict JSON.parse first; when it fails, repairs the small mistakes a model
+ * makes in long Chinese JSON — raw line breaks inside string literals, trailing
+ * commas, a reply cut off before the final closers — and parses again.
+ * `truncated` reports that the tail was rebuilt, which callers that need a
+ * complete plan treat as a failed reply so they can retry.
+ */
+export type LenientJsonResult = { value: unknown; truncated: boolean };
+
+export function parseJsonLenientDetailed(json: string): LenientJsonResult | null {
+  try {
+    return { value: JSON.parse(json), truncated: false };
+  } catch {
+    // Fall through to the repair pass.
+  }
+  const repaired = repairJson(json);
+  if (repaired.text === json) return null;
+  try {
+    return { value: JSON.parse(repaired.text), truncated: repaired.truncated };
+  } catch {
+    return null;
+  }
+}
+
+export function parseJsonLenient(json: string): unknown | null {
+  return parseJsonLenientDetailed(json)?.value ?? null;
+}
+
+function repairJson(json: string): { text: string; truncated: boolean } {
+  const closed = closeOpenStructures(escapeRawControlChars(json));
+  return { text: removeTrailingCommas(closed.text), truncated: closed.truncated };
+}
+
+/** Escapes \n / \r / \t that sit inside string literals. */
+function escapeRawControlChars(json: string): string {
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  for (const ch of json) {
+    if (inString) {
+      if (escaped) {
+        out += ch;
+        escaped = false;
+      } else if (ch === '\\') {
+        out += ch;
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+        out += ch;
+      } else if (ch === '\n') {
+        out += '\\n';
+      } else if (ch === '\r') {
+        out += '\\r';
+      } else if (ch === '\t') {
+        out += '\\t';
+      } else {
+        out += ch;
+      }
+      continue;
+    }
+    if (ch === '"') inString = true;
+    out += ch;
+  }
+  return out;
+}
+
+/** Closes a truncated reply: an unterminated string and any open brackets. */
+function closeOpenStructures(json: string): { text: string; truncated: boolean } {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (const ch of json) {
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{') stack.push('}');
+    else if (ch === '[') stack.push(']');
+    else if ((ch === '}' || ch === ']') && stack[stack.length - 1] === ch) stack.pop();
+  }
+  if (!inString && stack.length === 0) return { text: json, truncated: false };
+  let out = json;
+  if (inString) out += '"';
+  while (stack.length > 0) out += stack.pop();
+  return { text: out, truncated: true };
+}
+
+/** Drops `, }` / `, ]` sequences outside string literals. */
+function removeTrailingCommas(json: string): string {
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < json.length; index += 1) {
+    const ch = json[index]!;
+    if (inString) {
+      out += ch;
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === ',') {
+      let look = index + 1;
+      while (look < json.length && /\s/.test(json[look]!)) look += 1;
+      const next = json[look];
+      if (next === '}' || next === ']') continue;
+    }
+    out += ch;
+  }
+  return out;
 }
 
 function parseTask(value: unknown): WorkspacePlanTask | null {

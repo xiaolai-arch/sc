@@ -19,6 +19,7 @@ import {
   createWorkspacePlanner,
   parseWorkspacePlanReply
 } from '../../src/main/planning';
+import { parseJsonLenient } from '../../src/main/planning/parse';
 
 const NOW = new Date(2026, 10, 1, 9, 30, 0);
 
@@ -159,6 +160,8 @@ describe('WorkspacePlanner', () => {
       workspaceId: 'ws-exam',
       date: '2026-11-01',
       generatedBy: 'agent',
+      availableMinutes: 90,
+      availableMinutesSource: 'input',
       tasks: [
         {
           title: '极限错题二刷',
@@ -391,6 +394,36 @@ describe('parseWorkspacePlanReply', () => {
     ['all tasks invalid', '{"tasks":[{"title":"","subject":"","durationMin":0}]}']
   ])('returns null for %s', (_label, reply) => {
     expect(parseWorkspacePlanReply(reply, 'ws-exam', '2026-11-01')).toBeNull();
+  });
+
+  test('parses a reply with a raw line break inside a string', () => {
+    const plan = parseWorkspacePlanReply(
+      `{"tasks":[{"title":"错题整理
+第二步：重做","subject":"数学","durationMin":30,"acceptance":"完成"}]}`,
+      'ws-exam',
+      '2026-11-01'
+    );
+    expect(plan?.tasks[0]?.title).toBe('错题整理\n第二步：重做');
+  });
+
+  test('parses a reply with trailing commas and a cut-off tail', () => {
+    const plan = parseWorkspacePlanReply(
+      '{"tasks":[{"title":"背单词","subject":"英语","durationMin":20,"acceptance":"完成",}],"meta":{"date":"2026-11-01"',
+      'ws-exam',
+      '2026-11-01'
+    );
+    expect(plan?.tasks).toHaveLength(1);
+    expect(plan?.tasks[0]?.title).toBe('背单词');
+  });
+
+  test('parseJsonLenient repairs control characters, trailing commas and truncation', () => {
+    expect(parseJsonLenient('{"a":"第一行\n第二行","b":[1,2,]}')).toEqual({
+      a: '第一行\n第二行',
+      b: [1, 2]
+    });
+    expect(parseJsonLenient('{"list":["x","y"')).toEqual({ list: ['x', 'y'] });
+    expect(parseJsonLenient('not json at all')).toBeNull();
+    expect(parseJsonLenient('{"a":1}')).toEqual({ a: 1 });
   });
 });
 

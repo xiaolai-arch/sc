@@ -23,6 +23,10 @@ import type {
   WorkspaceSnapshot,
   WorkspaceTask
 } from '../../shared/workspace';
+import {
+  MAX_DAILY_AVAILABLE_MINUTES,
+  MIN_DAILY_AVAILABLE_MINUTES
+} from '../../shared/workspace';
 import { createMutex, listDirectories, listMarkdownFiles, pathExists, readFileOrNull, writeFileAtomic } from './fs-utils';
 import { newId, slugify, uniqueFileName } from './ids';
 import {
@@ -189,6 +193,17 @@ export function createWorkspaceService(
     return tasks;
   }
 
+  /** Raw records across every day, for identity checks that ignore the date. */
+  async function readAllTaskRecords(workspaceId: string): Promise<TaskRecord[]> {
+    const records: TaskRecord[] = [];
+    for (const fileName of await listMarkdownFiles(tasksDir(vaultRoot, workspaceId))) {
+      const raw = await readFileOrNull(`${tasksDir(vaultRoot, workspaceId)}/${fileName}`);
+      if (raw === null) continue;
+      records.push(...parseTaskFile(raw));
+    }
+    return records;
+  }
+
   async function readWorkspaceNotes(workspaceId: string): Promise<WorkspaceNote[]> {
     const dir = notesDir(vaultRoot, workspaceId);
     const notes: WorkspaceNote[] = [];
@@ -310,11 +325,26 @@ export function createWorkspaceService(
             : (() => {
                 throw new Error('Invalid check-in preference');
               })();
+      const rawAvailable = (input as { availableMinutes?: unknown } | undefined)
+        ?.availableMinutes;
+      let availableMinutes: number | undefined;
+      if (rawAvailable !== undefined) {
+        if (
+          typeof rawAvailable !== 'number' ||
+          !Number.isFinite(rawAvailable) ||
+          Math.round(rawAvailable) < MIN_DAILY_AVAILABLE_MINUTES ||
+          Math.round(rawAvailable) > MAX_DAILY_AVAILABLE_MINUTES
+        ) {
+          throw new Error('Daily available minutes must be between 5 and 1440');
+        }
+        availableMinutes = Math.round(rawAvailable);
+      }
       if (
         name === undefined &&
         goal === undefined &&
         description === undefined &&
-        checkIn === undefined
+        checkIn === undefined &&
+        availableMinutes === undefined
       ) {
         throw new Error('No workspace fields to update');
       }
@@ -326,6 +356,7 @@ export function createWorkspaceService(
           ...(goal !== undefined ? { goal } : {}),
           ...(description !== undefined ? { description } : {}),
           ...(checkIn !== undefined ? { checkIn } : {}),
+          ...(availableMinutes !== undefined ? { availableMinutes } : {}),
           updatedAt: new Date().toISOString()
         };
         await writeFileAtomic(
@@ -378,6 +409,9 @@ export function createWorkspaceService(
       if (input?.repeat !== undefined && !isTaskRepeat(input.repeat)) {
         throw new Error('Invalid task repeat rule');
       }
+      const planId = optionalString(input?.planId);
+      const planWeekId = planId ? optionalString(input?.planWeekId) : undefined;
+      const planItemId = planId ? optionalString(input?.planItemId) : undefined;
       const record: TaskRecord = {
         id: newId('t'),
         title,
@@ -392,22 +426,41 @@ export function createWorkspaceService(
         due,
         ...(startAt ? { startAt } : {}),
         ...(input?.repeat ? { repeat: input.repeat } : {}),
+        ...(planId ? { planId } : {}),
+        ...(planWeekId ? { planWeekId } : {}),
+        ...(planItemId ? { planItemId } : {}),
         created: new Date().toISOString(),
         updated: new Date().toISOString()
       };
       const date = startAt?.slice(0, 10) ?? due ?? formatLocalDate(new Date());
+      let saved = record;
       await runExclusively(async () => {
         const existingRaw = await readFileOrNull(taskFile(vaultRoot, workspaceId, date));
         const records = existingRaw === null ? [] : parseTaskFile(existingRaw);
         if (existingRaw !== null && records.length === 0) {
           assertAppendable(existingRaw, 'tasks', '任务文件');
         }
+        // The same plan day may be added twice (button pressed again, or both
+        // today's overview and the plan page): return the task already there.
+        // The duplicate may live on another date (rescheduled, or added with a
+        // different due date), so search the whole workspace.
+        if (record.planId !== undefined && record.planItemId !== undefined) {
+          const matches = (entry: TaskRecord): boolean =>
+            entry.planId === record.planId &&
+            entry.planItemId === record.planItemId &&
+            // One plan day holds several task lines; each line is its own
+            // item, so the title is part of the identity.
+            entry.title.trim() === record.title.trim();
+          const here = records.find(matches);
+          saved = here ?? (await readAllTaskRecords(workspaceId)).find(matches) ?? record;
+          if (saved !== record) return;
+        }
         await writeFileAtomic(
           taskFile(vaultRoot, workspaceId, date),
           serializeTaskFile(date, [...records, record])
         );
       });
-      return toWorkspaceTask(record, workspaceId);
+      return toWorkspaceTask(saved, workspaceId);
     },
 
     async updateWorkspaceTask(input: UpdateWorkspaceTaskInput): Promise<WorkspaceTask> {
@@ -512,6 +565,11 @@ export function createWorkspaceService(
             };
             delete next.actualMin;
             delete next.startAt;
+            // A recurrence is an ordinary task: linking it back to the plan day
+            // would let a later occurrence mark that day done or undone.
+            delete next.planId;
+            delete next.planWeekId;
+            delete next.planItemId;
             await writeFileAtomic(nextPath, serializeTaskFile(nextDue, [...nextRecords, next]));
           }
         }

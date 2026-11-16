@@ -146,6 +146,61 @@ test('pads missing weeks and days so the duration is always honored', async () =
   }
 });
 
+test('retries once when the first model reply is not parseable plan JSON', async () => {
+  const client = new FakeModelClient(['这份计划我无法用 JSON 表达，抱歉。', modelReply(2)]);
+  const { dir, workspaceId, service } = await setup(client);
+  try {
+    const plan = await service.create({
+      workspaceId,
+      goal: '学会 AI Agent',
+      startDate: '2026-11-02',
+      weeks: 2
+    });
+
+    expect(plan.generatedBy).toBe('agent');
+    expect(client.calls).toHaveLength(2);
+    expect(client.calls[1]?.messages[0]?.content).toContain('无法解析');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('falls back to the template after a second unparseable reply', async () => {
+  const client = new FakeModelClient(['不是 JSON 的回复', '还不是 JSON 的回复']);
+  const { dir, workspaceId, service } = await setup(client);
+  try {
+    const plan = await service.create({
+      workspaceId,
+      goal: '学会 AI Agent',
+      startDate: '2026-11-02',
+      weeks: 2
+    });
+
+    expect(plan.generatedBy).toBe('template');
+    expect(client.calls).toHaveLength(2);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('does not retry when the model call itself fails', async () => {
+  const client = new FakeModelClient([new Error('CLI 退出码 1')]);
+  const { dir, workspaceId, service } = await setup(client);
+  try {
+    const plan = await service.create({
+      workspaceId,
+      goal: '学会 AI Agent',
+      startDate: '2026-11-02',
+      weeks: 2
+    });
+
+    expect(plan.generatedBy).toBe('template');
+    expect(client.calls).toHaveLength(1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('falls back to a deterministic framework when no model is available', async () => {
   const { dir, workspaceId, service } = await setup(null);
   try {

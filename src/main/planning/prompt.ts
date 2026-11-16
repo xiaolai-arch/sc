@@ -11,6 +11,8 @@ export interface WorkspacePlanPromptInput {
   memory: MemoryItem[];
   date: string;
   availableMinutes: number;
+  /** Where the number came from, so the model can mention it honestly. */
+  availableMinutesSource?: 'input' | 'workspace' | 'default';
 }
 
 export interface WorkspacePlanPrompt {
@@ -32,7 +34,9 @@ export const WORKSPACE_PLAN_SYSTEM_PROMPT = `你是 阿咲 的规划助手。你
 export function buildWorkspacePlanPrompt(input: WorkspacePlanPromptInput): WorkspacePlanPrompt {
   const lines: string[] = [
     `今天：${input.date}`,
-    `今日可用时间：约 ${input.availableMinutes} 分钟`,
+    `今日可用时间：约 ${input.availableMinutes} 分钟（${availableSourceLabel(
+      input.availableMinutesSource
+    )}）`,
     `工作区：${input.workspace.name}（${input.workspace.kind}）`
   ];
 
@@ -74,4 +78,10 @@ export function buildWorkspacePlanPrompt(input: WorkspacePlanPromptInput): Works
 
 function clip(value: string, maxLength: number): string {
   return value.length > maxLength ? `${value.slice(0, maxLength)}…` : value;
+}
+
+function availableSourceLabel(source: 'input' | 'workspace' | 'default' | undefined): string {
+  if (source === 'input') return '用户本次说明';
+  if (source === 'workspace') return '来自项目设置的每天可用时间';
+  return '未设置时使用的默认值';
 }

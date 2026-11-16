@@ -9,8 +9,8 @@ import {
   type RawPhase,
   type RawWeek
 } from '../../shared/plan-template';
-import type { ModelClient } from '../agent/model-client';
-import { extractJson } from '../planning/parse';
+import type { ModelClient, ModelResponse } from '../agent/model-client';
+import { extractJson, parseJsonLenientDetailed } from '../planning/parse';
 import { buildLongPlanPrompt } from './prompt';
 
 const MAX_PHASES = 4;
@@ -98,15 +98,15 @@ function coercePhase(value: unknown): RawPhase | null {
 export function parseLongPlanReply(text: string): RawPhase[] | null {
   const json = extractJson(text);
   if (json === null) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(json);
-  } catch {
-    return null;
-  }
-  const record = asRecord(parsed);
-  const rawPhases = Array.isArray(parsed)
-    ? parsed
+  const parsed = parseJsonLenientDetailed(json);
+  // A rebuilt tail means the reply was cut off; accepting it would silently
+  // drop whole weeks, so treat it as a failed reply and let the caller retry.
+  if (parsed === null || parsed.truncated) return null;
+  const value = parsed.value;
+  if (typeof value !== 'object' || value === null) return null;
+  const record = asRecord(value);
+  const rawPhases = Array.isArray(value)
+    ? value
     : Array.isArray(record?.phases)
       ? record.phases
       : Array.isArray(record?.weeks)
@@ -120,6 +120,16 @@ export function parseLongPlanReply(text: string): RawPhase[] | null {
   return phases.length === 0 ? null : phases;
 }
 
+const RETRY_SYSTEM_HINT =
+  '\n注意：上一次的输出无法解析成 JSON。这次必须输出一个语法完全正确的单个 JSON 对象：不要 Markdown、代码围栏或任何解释文字；字符串里不要换行。';
+
+/**
+ * Generates the plan phases with the model; a broken or unparseable reply
+ * falls back to the deterministic template so the plan request is never lost.
+ * One unparseable reply is retried with a stricter instruction — long Chinese
+ * JSON occasionally arrives with a raw line break inside a string or a cut-off
+ * tail, and the template is a noticeably worse plan.
+ */
 export async function generateLongPlan(
   input: LongPlanGenerationInput,
   modelClient: ModelClient | null
@@ -133,23 +143,49 @@ export async function generateLongPlan(
         ...(input.knownTopics?.length ? { knownTopics: input.knownTopics } : {}),
         ...(input.recalibration ? { recalibration: input.recalibration } : {})
       });
-      const response = await modelClient.complete({
-        messages: [
-          { role: 'system', content: prompt.system },
-          { role: 'user', content: prompt.user }
-        ],
-        temperature: MODEL_TEMPERATURE,
-        maxTokens: MODEL_MAX_TOKENS
-      });
-      const raw = parseLongPlanReply(response.text);
-      if (raw !== null) {
-        return {
-          phases: normalizeLongPlanPhases(raw, input),
-          generatedBy: 'agent'
-        };
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        let response: ModelResponse;
+        try {
+          response = await modelClient.complete({
+            messages: [
+              {
+                role: 'system',
+                content:
+                  attempt === 0 ? prompt.system : `${prompt.system}${RETRY_SYSTEM_HINT}`
+              },
+              { role: 'user', content: prompt.user }
+            ],
+            temperature: MODEL_TEMPERATURE,
+            maxTokens: MODEL_MAX_TOKENS
+          });
+        } catch (error) {
+          console.warn(
+            '[long-plan] 模型调用失败，改用通用模板：',
+            error instanceof Error ? error.message : String(error)
+          );
+          break;
+        }
+        const raw = parseLongPlanReply(response.text);
+        if (raw !== null) {
+          return {
+            phases: normalizeLongPlanPhases(raw, input),
+            generatedBy: 'agent'
+          };
+        }
+        if (attempt === 0) {
+          console.warn(
+            `[long-plan] 模型回复无法解析为完整计划 JSON（${response.text.length} 字符），重试一次`
+          );
+        } else {
+          console.warn('[long-plan] 重试后仍无法解析，改用通用模板');
+        }
       }
-    } catch {
-      // A broken model must not lose the plan request; fall through to template.
+    } catch (error) {
+      // Prompt building or normalization must never lose the plan request.
+      console.warn(
+        '[long-plan] 生成计划失败，改用通用模板：',
+        error instanceof Error ? error.message : String(error)
+      );
     }
   }
   return buildTemplatePlan(input);

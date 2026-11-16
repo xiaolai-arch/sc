@@ -1,5 +1,6 @@
 import { formatLocalDate } from '../../shared/date';
 import type {
+  AvailableMinutesSource,
   PlanWorkspaceInput,
   WorkspacePlan,
   WorkspacePlanner
@@ -43,8 +44,22 @@ export class WorkspacePlannerImpl implements WorkspacePlanner {
   async plan(input: PlanWorkspaceInput): Promise<WorkspacePlan> {
     throwIfAborted(input.signal);
     const date = resolveDate(input.date, this.now());
-    const availableMinutes = normalizeAvailableMinutes(input.availableMinutes);
     const snapshot = await this.workspaceService.getWorkspaceSnapshot(input.workspaceId);
+    // Precedence: the caller's number for today, then the project's saved daily
+    // time, then the generic default. The UI shows which one was used — an
+    // invalid value must not be labelled as if it had been used.
+    const usable = (value: number | undefined): value is number =>
+      value !== undefined && Number.isFinite(value) && value > 0;
+    let availableMinutesSource: AvailableMinutesSource = 'default';
+    let requestedMinutes: number | undefined;
+    if (usable(input.availableMinutes)) {
+      availableMinutesSource = 'input';
+      requestedMinutes = input.availableMinutes;
+    } else if (usable(snapshot.workspace.availableMinutes)) {
+      availableMinutesSource = 'workspace';
+      requestedMinutes = snapshot.workspace.availableMinutes;
+    }
+    const availableMinutes = normalizeAvailableMinutes(requestedMinutes);
 
     if (this.modelClient !== null) {
       try {
@@ -53,7 +68,8 @@ export class WorkspacePlannerImpl implements WorkspacePlanner {
           notes: snapshot.notes,
           memory: snapshot.memory,
           date,
-          availableMinutes
+          availableMinutes,
+          availableMinutesSource
         });
         const response = await this.modelClient.complete({
           messages: [
@@ -66,7 +82,9 @@ export class WorkspacePlannerImpl implements WorkspacePlanner {
         });
         throwIfAborted(input.signal);
         const plan = parseWorkspacePlanReply(response.text, snapshot.workspace.id, date);
-        if (plan !== null) return plan;
+        if (plan !== null) {
+          return { ...plan, availableMinutes, availableMinutesSource };
+        }
       } catch (error) {
         // Abort is not a model failure: never mask it with a template plan.
         if (input.signal?.aborted) throw abortError();
@@ -74,11 +92,12 @@ export class WorkspacePlannerImpl implements WorkspacePlanner {
       }
     }
 
-    return buildTemplatePlan({
+    const plan = buildTemplatePlan({
       workspace: snapshot.workspace,
       date,
       availableMinutes
     });
+    return { ...plan, availableMinutes, availableMinutesSource };
   }
 }
 
