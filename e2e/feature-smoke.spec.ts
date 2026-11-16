@@ -33,7 +33,9 @@ test.describe('ASAKI feature smoke', () => {
       });
 
       await test.step('every navigation destination renders', async () => {
-        await page.getByRole('button', { name: '今日安排', exact: true }).click();
+        const nav = page.getByRole('navigation', { name: '主导航' });
+        // The 今日 screen also links to 今日安排, so scope navigation clicks.
+        await nav.getByRole('button', { name: '今日安排', exact: true }).click();
         await expect(page.locator('header').getByText('今日安排', { exact: true })).toBeVisible();
         await expect(page.getByText('今天还没有安排')).toBeVisible();
 
@@ -90,6 +92,11 @@ test.describe('ASAKI feature smoke', () => {
         await page.getByRole('button', { name: '新增主题' }).click();
         await page.getByLabel('主题名称').fill('LangChain');
         await page.getByRole('button', { name: '保存', exact: true }).click();
+        await expect(
+          page.locator('[aria-label="知识内容"]').getByText('在学', { exact: true })
+        ).toBeVisible();
+        // Below lg the topic opens in the note pane; go back to the list.
+        await page.getByRole('button', { name: '返回目录' }).click();
         await expect(page.getByRole('button', { name: 'LangChain', exact: true })).toBeVisible();
       });
 

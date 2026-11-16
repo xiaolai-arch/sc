@@ -104,7 +104,7 @@ export function KnowledgeNotePane({
               type="button"
               aria-label="返回目录"
               onClick={onBack}
-              className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-black/[0.04] hover:text-gray-700 md:hidden dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
+              className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-black/[0.04] hover:text-gray-700 lg:hidden dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
             >
               ←
             </button>

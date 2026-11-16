@@ -84,12 +84,17 @@ test.describe('ASAKI desktop', () => {
 
       await test.step('adds a knowledge topic, writes a note and persists both', async () => {
         await page.getByRole('button', { name: '知识库' }).click();
-        await expect(page.getByText('还没有知识主题。', { exact: true })).toBeVisible();
+        // At the 900px default window the note pane lives behind the list, so
+        // the empty state to check is the one in the directory column.
+        await expect(
+          page.locator('[aria-label="知识目录"]').getByText(/还没有知识主题。/)
+        ).toBeVisible();
         await page.getByRole('button', { name: '新增主题' }).click();
         await page.getByLabel('主题名称').fill('LangChain');
         await page.getByRole('button', { name: '保存' }).click();
+        // Below the lg breakpoint the new topic opens in the note pane.
         await expect(
-          page.getByRole('button', { name: 'LangChain', exact: true })
+          page.locator('[aria-label="知识内容"]').getByText('LangChain', { exact: true }).first()
         ).toBeVisible();
         await expect(
           page.locator('[aria-label="知识内容"]').getByText('在学', { exact: true })
