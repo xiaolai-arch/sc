@@ -437,3 +437,187 @@ test('keeps a late tool envelope out of the stream after a long preamble', async
   expect(result.text).toBe('最终答案');
   expect(result.toolCalls?.[0]?.name).toBe('get_today_plan');
 });
+
+test('claude forwards native tool start and result events', async () => {
+  const events: ModelStreamEvent[] = [];
+  const client = new CliAgentClient(
+    { kind: 'local-cli', agent: 'claude', command: 'claude', nativeTools: true },
+    {
+      cwd: process.cwd(),
+      streamRunner: scriptedStream([
+        line({
+          type: 'stream_event',
+          event: {
+            type: 'content_block_start',
+            content_block: { type: 'tool_use', id: 'toolu_1', name: 'Bash' }
+          }
+        }),
+        line({
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'toolu_1',
+                content: [{ type: 'text', text: '总计 2 个文件' }]
+              }
+            ]
+          }
+        }),
+        claudeText('看完了'),
+        claudeResult('看完了')
+      ])
+    }
+  );
+
+  await client.stream(
+    { messages: [{ role: 'user', content: '看看目录' }], cwd: process.cwd() },
+    (event) => events.push(event)
+  );
+
+  expect(events).toEqual([
+    { type: 'tool-start', id: 'toolu_1', name: 'Bash', label: '执行命令' },
+    {
+      type: 'tool-result',
+      id: 'toolu_1',
+      name: 'Bash',
+      label: '执行命令',
+      ok: true,
+      detail: '总计 2 个文件'
+    },
+    { type: 'text', text: '看完了' }
+  ]);
+});
+
+test('claude announces a tool once even when the full assistant message repeats it', async () => {
+  const events: ModelStreamEvent[] = [];
+  const client = new CliAgentClient(
+    { kind: 'local-cli', agent: 'claude', command: 'claude', nativeTools: true },
+    {
+      cwd: process.cwd(),
+      streamRunner: scriptedStream([
+        line({
+          type: 'stream_event',
+          event: {
+            type: 'content_block_start',
+            content_block: { type: 'tool_use', id: 'toolu_1', name: 'Read' }
+          }
+        }),
+        line({
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'toolu_1', name: 'Read', input: {} }]
+          }
+        }),
+        claudeResult('完成')
+      ])
+    }
+  );
+
+  await client.stream(
+    { messages: [{ role: 'user', content: '读文件' }], cwd: process.cwd() },
+    (event) => events.push(event)
+  );
+
+  expect(events.filter((event) => event.type === 'tool-start')).toEqual([
+    { type: 'tool-start', id: 'toolu_1', name: 'Read', label: '读取文件' }
+  ]);
+});
+
+test('codex forwards command execution events from item lifecycles', async () => {
+  const events: ModelStreamEvent[] = [];
+  const client = new CliAgentClient(
+    { kind: 'local-cli', agent: 'codex', command: 'codex', nativeTools: true },
+    {
+      cwd: process.cwd(),
+      streamRunner: scriptedStream([
+        line({
+          type: 'item.started',
+          item: { id: 'cmd_1', type: 'command_execution', command: 'ls' }
+        }),
+        line({
+          type: 'item.completed',
+          item: {
+            id: 'cmd_1',
+            type: 'command_execution',
+            command: 'ls',
+            aggregated_output: 'a.txt\nb.txt',
+            exit_code: 0,
+            status: 'completed'
+          }
+        }),
+        codexMessage('看完了'),
+        codexCompleted()
+      ])
+    }
+  );
+
+  await client.stream(
+    { messages: [{ role: 'user', content: '看看目录' }], cwd: process.cwd() },
+    (event) => events.push(event)
+  );
+
+  expect(events).toEqual([
+    { type: 'tool-start', id: 'cmd_1', name: 'command_execution', label: '执行命令' },
+    {
+      type: 'tool-result',
+      id: 'cmd_1',
+      name: 'command_execution',
+      label: '执行命令',
+      ok: true,
+      detail: 'a.txt b.txt'
+    },
+    { type: 'text', text: '看完了' }
+  ]);
+});
+
+test('codex marks a failed command as a failed tool result', async () => {
+  const events: ModelStreamEvent[] = [];
+  const client = new CliAgentClient(
+    { kind: 'local-cli', agent: 'codex', command: 'codex', nativeTools: true },
+    {
+      cwd: process.cwd(),
+      streamRunner: scriptedStream([
+        line({
+          type: 'item.completed',
+          item: {
+            id: 'cmd_2',
+            type: 'command_execution',
+            command: 'false',
+            aggregated_output: '出错',
+            exit_code: 1,
+            status: 'failed'
+          }
+        }),
+        codexMessage('失败了')
+      ])
+    }
+  );
+
+  await client.stream(
+    { messages: [{ role: 'user', content: '试试' }], cwd: process.cwd() },
+    (event) => events.push(event)
+  );
+
+  expect(events[1]).toMatchObject({ type: 'tool-result', id: 'cmd_2', ok: false });
+});
+
+test('a CLI that reports no tools emits no tool events', async () => {
+  const events: ModelStreamEvent[] = [];
+  const client = new CliAgentClient(
+    { kind: 'local-cli', agent: 'claude', command: 'claude', nativeTools: true },
+    {
+      cwd: process.cwd(),
+      streamRunner: scriptedStream([claudeText('直接回答'), claudeResult('直接回答')])
+    }
+  );
+
+  await client.stream(
+    { messages: [{ role: 'user', content: '你好' }], cwd: process.cwd() },
+    (event) => events.push(event)
+  );
+
+  expect(events.some((event) => event.type !== 'text' && event.type !== 'reasoning')).toBe(false);
+});

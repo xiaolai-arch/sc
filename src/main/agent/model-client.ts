@@ -52,6 +52,10 @@ export interface ModelRequest {
   tools?: ModelToolDefinition[];
   /** Ask the provider to expose its native web search/fetch tools (CLI agents only). */
   webTools?: boolean;
+  /** Allow the native agent to change files. Defaults to the CLI's own policy. */
+  allowWrites?: boolean;
+  /** Allow the native agent to run shell commands. Defaults to the CLI's policy. */
+  allowShell?: boolean;
   /** Working directory for native local-CLI agents (the current vault workspace). */
   cwd?: string;
   signal?: AbortSignal;
@@ -61,7 +65,7 @@ export interface ModelRequest {
    * tool declarations.
    */
   noTools?: boolean;
-  /** Overrides the provider's default per-request timeout (CLI default: 180s). */
+  /** Overrides the provider's default per-request timeout (CLI total cap: 15m). */
   timeoutMs?: number;
 }
 
@@ -83,7 +87,21 @@ export interface ModelClient {
 
 export type ModelStreamEvent =
   | { type: 'reasoning'; text: string }
-  | { type: 'text'; text: string };
+  | { type: 'text'; text: string }
+  /**
+   * A tool the CLI itself is running (Bash, file edits, web search…). Only
+   * providers that really report tool lifecycles emit these; nothing is
+   * invented when a CLI keeps its tools private.
+   */
+  | { type: 'tool-start'; id: string; name: string; label: string }
+  | {
+      type: 'tool-result';
+      id: string;
+      name: string;
+      label: string;
+      ok: boolean;
+      detail?: string;
+    };
 
 /** Optional capability implemented by providers that can stream deltas. */
 export interface StreamingModelClient extends ModelClient {

@@ -610,7 +610,7 @@ test('does not execute a markerless envelope embedded in prose', () => {
 });
 
 describe('CliAgentClient native agent mode', () => {
-  test('runs codex inside the workspace and skips the JSON tool protocol', async () => {
+  test('runs codex inside the workspace and advertises the ASAKI tool protocol', async () => {
     const calls: Array<{
       args: string[];
       input: string;
@@ -652,11 +652,66 @@ describe('CliAgentClient native agent mode', () => {
     expect(calls[0]?.cwd).toBe('/tmp/vault/workspaces/ws-1');
     expect(calls[0]?.input).toContain('## 原生 agent 模式');
     expect(calls[0]?.input).toContain('/tmp/vault/workspaces/ws-1');
-    expect(calls[0]?.input).not.toContain('工具调用协议');
+    // Native agents keep their own tools, but ASAKI records must still be
+    // written through the envelope so the app can read them.
+    expect(calls[0]?.input).toContain('工具调用协议');
+    expect(calls[0]?.input).toContain('write_note');
     expect(result).toEqual({
       text: '已经把笔记写好了。',
       usage: { inputTokens: 0, outputTokens: 0 }
     });
+  });
+
+  test('native mode without tools omits the tool protocol entirely', async () => {
+    let input = '';
+    const client = new CliAgentClient(
+      { kind: 'local-cli', agent: 'claude', command: 'claude', nativeTools: true },
+      {
+        runner: async (_command, _args, nextInput) => {
+          input = nextInput;
+          return { stdout: '直接回答。', stderr: '', code: 0 };
+        }
+      }
+    );
+
+    await client.complete({
+      cwd: '/tmp/vault',
+      messages: [{ role: 'user', content: '你好' }]
+    });
+
+    expect(input).not.toContain('工具调用协议');
+  });
+
+  test('native mode executes an ASAKI tool envelope from the final answer', async () => {
+    const client = new CliAgentClient(
+      { kind: 'local-cli', agent: 'claude', command: 'claude', nativeTools: true },
+      {
+        runner: async () => ({
+          stdout: `\`\`\`json\n${JSON.stringify({
+            protocol: 'asaki.butler.v1',
+            text: '我来安排计划。',
+            toolCalls: [{ name: 'plan_workspace', arguments: { availableMinutes: 120 } }]
+          })}\n\`\`\``,
+          stderr: '',
+          code: 0
+        })
+      }
+    );
+
+    const result = await client.complete({
+      cwd: '/tmp/vault/workspaces/ws-1',
+      messages: [{ role: 'user', content: '帮我排计划' }],
+      tools: [
+        {
+          name: 'plan_workspace',
+          description: '生成计划',
+          parameters: { type: 'object', properties: {} }
+        }
+      ]
+    });
+
+    expect(result.text).toBe('我来安排计划。');
+    expect(result.toolCalls?.[0]?.name).toBe('plan_workspace');
   });
 
   test('gives claude native file access without --bare', async () => {

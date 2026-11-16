@@ -105,6 +105,39 @@ test('lists opencode models and login connections without network access', async
   );
 });
 
+test('attaches the codex catalog from the local config', async () => {
+  const home = join(tmpdir(), 'asaki-catalog-home');
+  const configPath = join(home, '.codex', 'config.toml');
+  const catalogPath = join(home, '.codex', 'catalog.json');
+  const run = vi.fn(async (_command: string, args: string[]) => {
+    if (args[0] === '--version') return result('0.166.0\n');
+    if (args[0] === 'login') return result('Logged in with API key');
+    return result('--json resume --search --image\n');
+  });
+
+  const scan = await scanLocalClis({
+    resolve: async (name) => (name === 'codex' ? '/opt/homebrew/bin/codex' : null),
+    run,
+    homeDir: home,
+    readTextFile: async (path: string) => {
+      if (path === configPath) {
+        return 'model = "codex/gpt-6.1-sol"\nmodel_catalog_json = "catalog.json"\n';
+      }
+      if (path === catalogPath) {
+        return JSON.stringify([{ slug: 'codex/gpt-6.1-mini', display_name: 'Mini' }]);
+      }
+      throw new Error('ENOENT');
+    }
+  });
+
+  const codex = scan.entries.find((entry) => entry.agent === 'codex');
+  expect(codex?.modelCatalog?.defaultModel).toBe('codex/gpt-6.1-sol');
+  expect(codex?.modelCatalog?.options.map((option) => option.id)).toEqual([
+    'codex/gpt-6.1-sol',
+    'codex/gpt-6.1-mini'
+  ]);
+});
+
 test('uses stored zcode credentials and returns install hints for missing agents', async () => {
   const scan = await scanLocalClis({
     resolve: async (name) => (name === 'zcode' ? '/opt/homebrew/bin/zcode' : null),

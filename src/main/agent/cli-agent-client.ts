@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { prepareCliSpawn } from './cli-command';
@@ -29,14 +29,14 @@ export type CliRunner = (
   command: string,
   args: string[],
   input: string,
-  options: { cwd: string; timeoutMs: number; signal?: AbortSignal }
+  options: CliTimeoutOptions & { cwd: string; signal?: AbortSignal }
 ) => Promise<CliRunResult>;
 
 export type CliStreamRunner = (
   command: string,
   args: string[],
   input: string,
-  options: { cwd: string; timeoutMs: number; signal?: AbortSignal },
+  options: CliTimeoutOptions & { cwd: string; signal?: AbortSignal },
   onLine: (line: string) => void
 ) => Promise<CliRunResult>;
 
@@ -44,6 +44,35 @@ function abortError(): Error {
   const error = new Error('Aborted');
   error.name = 'AbortError';
   return error;
+}
+
+type KillableChild = Pick<ChildProcess, 'pid' | 'kill'>;
+
+/**
+ * Stops the CLI and everything it spawned. On Windows a `.cmd` launcher exits
+ * long before its Node child, so killing only the direct child leaves a native
+ * agent editing the vault after the turn was reported as timed out.
+ */
+export function terminateProcessTree(
+  child: KillableChild,
+  platform = process.platform
+): void {
+  try {
+    child.kill('SIGTERM');
+  } catch {
+    // Already exited.
+  }
+  if (platform !== 'win32' || typeof child.pid !== 'number') return;
+  try {
+    const killer = spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], {
+      windowsHide: true,
+      stdio: 'ignore'
+    });
+    killer?.on?.('error', () => undefined);
+    killer?.unref?.();
+  } catch {
+    // The direct kill above is the fallback.
+  }
 }
 
 type AgentConfig = {
@@ -82,15 +111,8 @@ const AGENT_CONFIG: Record<LocalCliAgent, AgentConfig> = {
  */
 const NATIVE_AGENT_CONFIG: Record<LocalCliAgent, AgentConfig> = {
   codex: {
-    args: ['exec', '--skip-git-repo-check', '--sandbox', 'workspace-write', '-'],
-    streamArgs: [
-      'exec',
-      '--json',
-      '--skip-git-repo-check',
-      '--sandbox',
-      'workspace-write',
-      '-'
-    ],
+    args: ['exec', '--skip-git-repo-check', '-'],
+    streamArgs: ['exec', '--json', '--skip-git-repo-check', '-'],
     stdin: true
   },
   claude: {
@@ -119,7 +141,107 @@ const NATIVE_AGENT_CONFIG: Record<LocalCliAgent, AgentConfig> = {
   }
 };
 
-const DEFAULT_TIMEOUT_MS = 180_000;
+/** Overall ceiling for one CLI turn. A long answer may legitimately take this. */
+const DEFAULT_TIMEOUT_MS = 900_000;
+/**
+ * Native agents edit files and run tools inside the vault, so a legitimate turn
+ * can be much longer than a single one-shot answer.
+ */
+const NATIVE_TIMEOUT_MS = 1_800_000;
+/** The CLI must say something (stdout or stderr) within this after spawning. */
+const DEFAULT_STARTUP_TIMEOUT_MS = 60_000;
+/** After the first output, this much silence means the CLI has stalled. */
+const DEFAULT_IDLE_TIMEOUT_MS = 120_000;
+
+function formatTimeout(ms: number): string {
+  return ms % 60_000 === 0 ? `${ms / 60_000} 分钟` : `${Math.round(ms / 1000)} 秒`;
+}
+
+export type CliTimeoutOptions = {
+  /** Total wall-clock ceiling for the whole turn. */
+  timeoutMs: number;
+  startupTimeoutMs?: number;
+  idleTimeoutMs?: number;
+};
+
+type CliWatchdog = {
+  /** Records output; the idle clock only starts once the CLI has spoken. */
+  touch(): void;
+  stop(): void;
+};
+
+/**
+ * Three clocks instead of one: a process that starts and then keeps producing
+ * output must not be killed for "taking too long", while a process that never
+ * answers and one that stalls mid-answer need different messages.
+ */
+export function createCliWatchdog(
+  options: CliTimeoutOptions,
+  onTimeout: (error: ModelTimeoutError) => void
+): CliWatchdog {
+  const totalMs = options.timeoutMs;
+  const startupMs = Math.min(options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS, totalMs);
+  const idleMs = Math.min(options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS, totalMs);
+  let active = true;
+  let sawOutput = false;
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const stop = () => {
+    active = false;
+    clearTimeout(totalTimer);
+    clearTimeout(startupTimer);
+    if (idleTimer !== null) clearTimeout(idleTimer);
+    idleTimer = null;
+  };
+  const fire = (error: ModelTimeoutError) => {
+    if (!active) return;
+    stop();
+    onTimeout(error);
+  };
+
+  const totalTimer = setTimeout(() => {
+    fire(
+      new ModelTimeoutError(
+        totalMs,
+        `本地 CLI agent 运行超过 ${formatTimeout(totalMs)}（总时长上限）。`
+      )
+    );
+  }, totalMs);
+  totalTimer.unref?.();
+
+  const startupTimer = setTimeout(() => {
+    if (sawOutput) return;
+    fire(
+      new ModelTimeoutError(
+        startupMs,
+        `本地 CLI agent 启动后 ${formatTimeout(startupMs)} 没有响应（启动超时）。`
+      )
+    );
+  }, startupMs);
+  startupTimer.unref?.();
+
+  const armIdle = () => {
+    if (idleTimer !== null) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      fire(
+        new ModelTimeoutError(
+          idleMs,
+          `本地 CLI agent 超过 ${formatTimeout(idleMs)} 没有输出（无活动超时）。`
+        )
+      );
+    }, idleMs);
+    idleTimer.unref?.();
+  };
+
+  return {
+    touch() {
+      if (!active) return;
+      sawOutput = true;
+      armIdle();
+    },
+    stop
+  };
+}
 
 /** Images attached to any user message in the conversation. */
 function collectImages(request: ModelRequest): ModelImage[] {
@@ -201,7 +323,14 @@ function addImageArgs(
 export function buildAgentArgs(
   provider: LocalCliProvider,
   baseArgs: readonly string[],
-  options: { webTools?: boolean; nativeTools?: boolean; cwd?: string; noTools?: boolean } = {}
+  options: {
+    webTools?: boolean;
+    nativeTools?: boolean;
+    cwd?: string;
+    noTools?: boolean;
+    allowWrites?: boolean;
+    allowShell?: boolean;
+  } = {}
 ): string[] {
   const args = [...baseArgs];
   const native = options.nativeTools === true;
@@ -213,7 +342,14 @@ export function buildAgentArgs(
     const additions: string[] = [];
     if (model) additions.push('-m', model);
     additions.push('-c', `model_reasoning_effort=${effort}`);
-    if (native && options.cwd) additions.push('-C', options.cwd);
+    if (native && options.cwd) {
+      additions.push('-C', options.cwd);
+      additions.push('--sandbox', options.allowWrites === false ? 'read-only' : 'workspace-write');
+    }
+    // `allowShell === false` cannot be enforced for codex: its sandbox levels
+    // gate writes, not command execution, and no public flag disables the
+    // shell tool. The ASAKI tool envelope stays permission-guarded; only
+    // codex's own native commands can still run.
     const stdinIndex = args.lastIndexOf('-');
     if (stdinIndex >= 0) {
       args.splice(stdinIndex, 0, ...additions);
@@ -236,14 +372,33 @@ export function buildAgentArgs(
     } else if (provider.isolate) {
       args.push('--bare');
     }
-    // Under `--bare` the web tools are only available when named explicitly.
-    // A no-tools request wins: the CLI loads an empty tool set instead.
+    // Native mode keeps its full file toolset; permissions only subtract from
+    // it. One-shot mode gets an explicit web-only toolset instead.
+    const disallowed: string[] = [];
+    if (native && options.allowWrites === false) {
+      disallowed.push('Edit', 'Write', 'MultiEdit', 'NotebookEdit');
+    }
+    if (native && options.allowShell === false) {
+      disallowed.push('Bash', 'BashOutput');
+    }
     if (noTools) {
       args.push('--tools', '');
     } else if (options.webTools) {
-      args.push('--tools', 'WebSearch,WebFetch', '--allowedTools', 'WebSearch,WebFetch');
+      if (native) {
+        // `--tools` would also replace the native file/search tools, so in
+        // native mode web access is granted without narrowing the toolset.
+        args.push('--allowedTools', 'WebSearch,WebFetch');
+      } else {
+        args.push('--tools', 'WebSearch,WebFetch', '--allowedTools', 'WebSearch,WebFetch');
+      }
+    }
+    if (disallowed.length > 0) {
+      args.push('--disallowedTools', disallowed.join(','));
     }
   }
+
+  // opencode and zcode have no permission flags; when they run with tools
+  // enabled, only the ASAKI envelope's permission guard limits writes.
 
   if (provider.agent === 'opencode') {
     const model = provider.model?.trim();
@@ -301,16 +456,34 @@ function buildPrompt(request: ModelRequest): string {
  */
 function buildNativePrompt(request: ModelRequest, cwd: string): string {
   const systemIndex = request.messages.findIndex((message) => message.role === 'system');
+  const withTools = Boolean(request.tools?.length) && !request.noTools;
   const environment = [
     '## 原生 agent 模式',
     `你正在 ASAKI 的本地工作区中运行，当前目录：${cwd}`,
-    '你可以使用自己的原生文件、搜索、命令行和联网工具来完成任务。',
+    '你可以使用自己的原生联网、搜索、读文件工具来查资料和了解上下文。',
     '只读取或修改这个工作区以及 ASAKI 的 vault；不要读取密钥、SSH、浏览器历史等私人数据。',
-    '如果修改 vault，保留现有 markdown/frontmatter 结构，不要重命名或删除无关文件。',
-    '回答用中文，先给结论；如果修改了文件，简短说明改了哪些文件。'
+    withTools
+      ? [
+          'ASAKI 的记录（项目、任务、长期计划、笔记、提醒、复盘、知识、记忆、档案）',
+          '必须通过下面的「工具调用协议」写入，由 ASAKI 落盘到它自己的数据结构；',
+          '不要用原生文件工具自创目录（如 projects/、tasks/）来保存这些记录，',
+          '也不要手写 frontmatter 来表达任务或计划——应用只读取通过工具写入的结构。',
+          '原生文件工具只用于：联网查资料、读取参考文件、以及用户明确要求整理的自由文档。'
+        ].join('\n')
+      : '如果修改 vault，保留现有 markdown/frontmatter 结构，不要重命名或删除无关文件。',
+    '回答用中文，先给结论；如果修改了数据，简短说明改了哪些内容。'
   ].join('\n');
   const parts = request.messages.map(renderMessage);
   parts.splice(systemIndex >= 0 ? systemIndex + 1 : 0, 0, environment);
+  // Native agents see the same tool protocol: ASAKI records must go through
+  // the envelope, or the app can never read what the CLI wrote.
+  if (withTools) {
+    parts.splice(
+      systemIndex >= 0 ? systemIndex + 2 : 1,
+      0,
+      renderToolSection(request.tools ?? [])
+    );
+  }
   return parts.join('\n\n');
 }
 
@@ -455,7 +628,7 @@ async function defaultRunner(
   command: string,
   args: string[],
   input: string,
-  options: { cwd: string; timeoutMs: number; signal?: AbortSignal }
+  options: CliTimeoutOptions & { cwd: string; signal?: AbortSignal }
 ): Promise<CliRunResult> {
   if (options.signal?.aborted) throw abortError();
   const spec = await prepareCliSpawn(command, args);
@@ -476,41 +649,39 @@ async function defaultRunner(
     let stdout = '';
     let stderr = '';
     let settled = false;
-    const cleanup = () => options.signal?.removeEventListener('abort', onAbort);
+    let watchdog: CliWatchdog | null = null;
+    const cleanup = () => {
+      options.signal?.removeEventListener('abort', onAbort);
+      watchdog?.stop();
+    };
     const finish = (result: CliRunResult) => {
       if (settled) return;
       settled = true;
       cleanup();
-      clearTimeout(timer);
       resolve(result);
     };
     const fail = (error: Error) => {
       if (settled) return;
       settled = true;
       cleanup();
-      clearTimeout(timer);
       reject(error);
     };
     const onAbort = () => {
-      child.kill('SIGTERM');
+      terminateProcessTree(child);
       fail(abortError());
     };
     options.signal?.addEventListener('abort', onAbort, { once: true });
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      fail(
-        new ModelTimeoutError(
-          options.timeoutMs,
-          `本地 CLI agent 超时（${options.timeoutMs}ms）。`
-        )
-      );
-    }, options.timeoutMs);
-    timer.unref?.();
+    watchdog = createCliWatchdog(options, (error) => {
+      terminateProcessTree(child);
+      fail(error);
+    });
 
     child.stdout?.on('data', (chunk: Buffer | string) => {
+      watchdog?.touch();
       stdout += chunk.toString();
     });
     child.stderr?.on('data', (chunk: Buffer | string) => {
+      watchdog?.touch();
       stderr += chunk.toString();
     });
     child.on('error', (error) => fail(error));
@@ -527,7 +698,7 @@ async function defaultStreamRunner(
   command: string,
   args: string[],
   input: string,
-  options: { cwd: string; timeoutMs: number; signal?: AbortSignal },
+  options: CliTimeoutOptions & { cwd: string; signal?: AbortSignal },
   onLine: (line: string) => void
 ): Promise<CliRunResult> {
   if (options.signal?.aborted) throw abortError();
@@ -550,6 +721,7 @@ async function defaultStreamRunner(
     let stderr = '';
     let pending = '';
     let settled = false;
+    let watchdog: CliWatchdog | null = null;
 
     const flush = (chunk: string, final: boolean) => {
       pending += chunk;
@@ -567,12 +739,14 @@ async function defaultStreamRunner(
       }
     };
 
-    const cleanup = () => options.signal?.removeEventListener('abort', onAbort);
+    const cleanup = () => {
+      options.signal?.removeEventListener('abort', onAbort);
+      watchdog?.stop();
+    };
     const finish = (result: CliRunResult) => {
       if (settled) return;
       settled = true;
       cleanup();
-      clearTimeout(timer);
       flush('', true);
       resolve(result);
     };
@@ -580,31 +754,26 @@ async function defaultStreamRunner(
       if (settled) return;
       settled = true;
       cleanup();
-      clearTimeout(timer);
       reject(error);
     };
     const onAbort = () => {
-      child.kill('SIGTERM');
+      terminateProcessTree(child);
       fail(abortError());
     };
     options.signal?.addEventListener('abort', onAbort, { once: true });
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      fail(
-        new ModelTimeoutError(
-          options.timeoutMs,
-          `本地 CLI agent 超时（${options.timeoutMs}ms）。`
-        )
-      );
-    }, options.timeoutMs);
-    timer.unref?.();
+    watchdog = createCliWatchdog(options, (error) => {
+      terminateProcessTree(child);
+      fail(error);
+    });
 
     child.stdout?.on('data', (chunk: Buffer | string) => {
+      watchdog?.touch();
       const text = chunk.toString();
       stdout += text;
       flush(text, false);
     });
     child.stderr?.on('data', (chunk: Buffer | string) => {
+      watchdog?.touch();
       stderr += chunk.toString();
     });
     child.on('error', (error) => fail(error));
@@ -713,11 +882,138 @@ function readUsage(value: unknown): { inputTokens: number; outputTokens: number 
 type StreamState = {
   emitted: boolean;
   text: string;
+  /** Thinking text already forwarded, used to avoid duplicating full blocks. */
+  reasoningText: string;
   finalResult: string;
   usage: { inputTokens: number; outputTokens: number };
   toolCalls?: ModelToolCall[];
   explicitFailure?: string;
+  /** Native tool ids already announced, so start/complete events pair up once. */
+  startedTools: Set<string>;
+  toolNames: Map<string, string>;
 };
+
+/** Chinese labels for the tools local CLIs report natively. */
+const NATIVE_TOOL_LABELS: Record<string, string> = {
+  Bash: '执行命令',
+  BashOutput: '读取命令输出',
+  Read: '读取文件',
+  Write: '写入文件',
+  Edit: '修改文件',
+  MultiEdit: '修改文件',
+  NotebookEdit: '修改笔记本',
+  Glob: '查找文件',
+  Grep: '搜索内容',
+  WebFetch: '读取网页',
+  WebSearch: '联网搜索',
+  TodoWrite: '更新待办',
+  Task: '调用子任务',
+  command_execution: '执行命令',
+  file_change: '修改文件',
+  mcp_tool_call: '调用 MCP 工具',
+  web_search: '联网搜索',
+  todo_list: '更新待办'
+};
+
+function nativeToolLabel(name: string): string {
+  return NATIVE_TOOL_LABELS[name] ?? name;
+}
+
+/** Announces a native tool once, even if several events describe it. */
+function announceTool(
+  state: StreamState,
+  forward: (event: ModelStreamEvent) => void,
+  id: string,
+  name: string,
+  label?: string
+) {
+  if (!id || state.startedTools.has(id)) return;
+  state.startedTools.add(id);
+  state.toolNames.set(id, name);
+  forward({ type: 'tool-start', id, name, label: label ?? nativeToolLabel(name) });
+}
+
+function finishTool(
+  state: StreamState,
+  forward: (event: ModelStreamEvent) => void,
+  id: string,
+  ok: boolean,
+  detail?: string
+) {
+  if (!id) return;
+  const name = state.toolNames.get(id) ?? id;
+  forward({
+    type: 'tool-result',
+    id,
+    name,
+    label: nativeToolLabel(name),
+    ok,
+    ...(detail ? { detail } : {})
+  });
+}
+
+/** Keeps tool rows to one readable line; the full output stays with the CLI. */
+function summarizeDetail(text: string): string | undefined {
+  const trimmed = text.trim().replace(/\s+/g, ' ');
+  if (!trimmed) return undefined;
+  return trimmed.length > 240 ? `${trimmed.slice(0, 240)}…` : trimmed;
+}
+
+function toolResultDetail(content: unknown): string | undefined {
+  if (typeof content === 'string') return summarizeDetail(content);
+  if (!Array.isArray(content)) return undefined;
+  const text = content
+    .map((item) => (isRecord(item) && typeof item['text'] === 'string' ? item['text'] : ''))
+    .filter(Boolean)
+    .join('\n');
+  return text ? summarizeDetail(text) : undefined;
+}
+
+const CODEX_TOOL_ITEMS = new Set([
+  'command_execution',
+  'file_change',
+  'mcp_tool_call',
+  'web_search',
+  'todo_list'
+]);
+
+function codexToolItem(item: Record<string, unknown>): boolean {
+  return typeof item['type'] === 'string' && CODEX_TOOL_ITEMS.has(item['type']);
+}
+
+function codexToolLabel(item: Record<string, unknown>): string {
+  if (item['type'] === 'mcp_tool_call') {
+    const server = typeof item['server'] === 'string' ? item['server'] : '';
+    const tool = typeof item['tool'] === 'string' ? item['tool'] : '';
+    if (server || tool) return `${server}${server && tool ? ' · ' : ''}${tool}`;
+  }
+  return nativeToolLabel(String(item['type']));
+}
+
+function codexToolDetail(item: Record<string, unknown>): string | undefined {
+  if (typeof item['aggregated_output'] === 'string') {
+    const output = summarizeDetail(item['aggregated_output']);
+    if (output) return output;
+  }
+  if (typeof item['command'] === 'string') return summarizeDetail(item['command']);
+  if (Array.isArray(item['changes'])) {
+    const changes = item['changes']
+      .filter(isRecord)
+      .map((change) => {
+        const kind = typeof change['kind'] === 'string' ? `${change['kind']} ` : '';
+        const path = typeof change['path'] === 'string' ? change['path'] : '';
+        return `${kind}${path}`.trim();
+      })
+      .filter(Boolean);
+    if (changes.length > 0) return summarizeDetail(changes.join('，'));
+  }
+  if (isRecord(item['error']) && typeof item['error']['message'] === 'string') {
+    return summarizeDetail(item['error']['message']);
+  }
+  if (typeof item['query'] === 'string') return summarizeDetail(item['query']);
+  if (Array.isArray(item['items'])) return `${item['items'].length} 项`;
+  return undefined;
+}
 
 /**
  * Runs a locally installed CLI agent (codex/claude/zcode/opencode). No API key
@@ -732,7 +1028,10 @@ export class CliAgentClient implements StreamingModelClient {
       runner?: CliRunner;
       streamRunner?: CliStreamRunner;
       cwd?: string;
+      /** Total ceiling; startup and idle windows derive from it. */
       timeoutMs?: number;
+      startupTimeoutMs?: number;
+      idleTimeoutMs?: number;
     } = {}
   ) {}
 
@@ -750,6 +1049,12 @@ export class CliAgentClient implements StreamingModelClient {
       buildAgentArgs(this.provider, config.args, {
         ...(request.webTools && !noTools ? { webTools: true } : {}),
         ...(native ? { nativeTools: true, cwd: request.cwd! } : {}),
+        ...(native && request.allowWrites !== undefined
+          ? { allowWrites: request.allowWrites }
+          : {}),
+        ...(native && request.allowShell !== undefined
+          ? { allowShell: request.allowShell }
+          : {}),
         ...(noTools ? { noTools: true } : {})
       }),
       images
@@ -772,7 +1077,7 @@ export class CliAgentClient implements StreamingModelClient {
       input,
       {
         cwd: native ? request.cwd! : (this.options.cwd ?? tmpdir()),
-        timeoutMs: this.resolveTimeoutMs(request),
+        ...this.timeoutOptions(request, native),
         ...(request.signal ? { signal: request.signal } : {})
       }
     );
@@ -793,6 +1098,18 @@ export class CliAgentClient implements StreamingModelClient {
       if (!answer) {
         throw new Error(`本地 CLI agent ${this.provider.agent} 没有返回内容。`);
       }
+      // With the tool protocol advertised, the final answer may be a tool
+      // envelope the butler must execute; only plain answers stay verbatim.
+      if (request.tools?.length && !request.noTools) {
+        const parsed = parseCliResponse(answer);
+        if (parsed.text || parsed.toolCalls?.length) {
+          return {
+            text: parsed.text,
+            usage: { inputTokens: 0, outputTokens: 0 },
+            ...(parsed.toolCalls?.length ? { toolCalls: parsed.toolCalls } : {})
+          };
+        }
+      }
       return { text: answer, usage: { inputTokens: 0, outputTokens: 0 } };
     }
     const parsed = parseCliResponse(answer);
@@ -811,8 +1128,24 @@ export class CliAgentClient implements StreamingModelClient {
     return this.provider.nativeTools === true && Boolean(request.cwd);
   }
 
-  private resolveTimeoutMs(request: ModelRequest): number {
-    return request.timeoutMs ?? this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  private timeoutOptions(request: ModelRequest, native: boolean): CliTimeoutOptions {
+    return {
+      timeoutMs: this.resolveTimeoutMs(request, native),
+      ...(this.options.startupTimeoutMs !== undefined
+        ? { startupTimeoutMs: this.options.startupTimeoutMs }
+        : {}),
+      ...(this.options.idleTimeoutMs !== undefined
+        ? { idleTimeoutMs: this.options.idleTimeoutMs }
+        : {})
+    };
+  }
+
+  private resolveTimeoutMs(request: ModelRequest, native: boolean): number {
+    return (
+      request.timeoutMs ??
+      this.options.timeoutMs ??
+      (native ? NATIVE_TIMEOUT_MS : DEFAULT_TIMEOUT_MS)
+    );
   }
 
   async stream(
@@ -843,6 +1176,12 @@ export class CliAgentClient implements StreamingModelClient {
     const args = buildAgentArgs(this.provider, config.streamArgs, {
       ...(request.webTools && !noTools ? { webTools: true } : {}),
       ...(native ? { nativeTools: true, cwd: request.cwd! } : {}),
+      ...(native && request.allowWrites !== undefined
+        ? { allowWrites: request.allowWrites }
+        : {}),
+      ...(native && request.allowShell !== undefined
+        ? { allowShell: request.allowShell }
+        : {}),
       ...(noTools ? { noTools: true } : {})
     });
     if (!config.stdin) {
@@ -853,15 +1192,23 @@ export class CliAgentClient implements StreamingModelClient {
     const state: StreamState = {
       emitted: false,
       text: '',
+      reasoningText: '',
       finalResult: '',
-      usage: { inputTokens: 0, outputTokens: 0 }
+      usage: { inputTokens: 0, outputTokens: 0 },
+      startedTools: new Set(),
+      toolNames: new Map()
     };
     const forward = (event: ModelStreamEvent) => {
       state.emitted = true;
       onEvent(event);
     };
+    // Native agents that were advertised the ASAKI tool protocol can also end
+    // with an envelope, so the gate must hold fenced JSON back for them too.
+    const withTools = Boolean(request.tools?.length) && !request.noTools;
     const gate =
-      this.provider.agent === 'claude' && !native ? new EnvelopeTextGate(forward) : null;
+      this.provider.agent === 'claude' && (!native || withTools)
+        ? new EnvelopeTextGate(forward)
+        : null;
 
     const handleLine = (line: string) => {
       const trimmed = line.trim();
@@ -886,7 +1233,7 @@ export class CliAgentClient implements StreamingModelClient {
       config.stdin ? prompt : '',
       {
         cwd: native ? request.cwd! : (this.options.cwd ?? tmpdir()),
-        timeoutMs: this.resolveTimeoutMs(request),
+        ...this.timeoutOptions(request, native),
         ...(request.signal ? { signal: request.signal } : {})
       },
       handleLine
@@ -904,12 +1251,22 @@ export class CliAgentClient implements StreamingModelClient {
     // never produce text deltas. Parse it here instead of spawning the CLI a
     // second time through the fallback path.
     if (!state.text.trim() && !state.toolCalls?.length && state.finalResult) {
-      if (native) {
+      if (native && !withTools) {
         state.text = state.finalResult;
       } else {
         const parsed = parseCliResponse(state.finalResult);
         state.text = parsed.text;
         if (parsed.toolCalls?.length) state.toolCalls = parsed.toolCalls;
+      }
+    }
+
+    // A native codex streams its answer verbatim; if that answer turns out to
+    // be a tool envelope, strip it and hand the calls to the butler.
+    if (native && withTools && !state.toolCalls?.length && state.text.trim()) {
+      const parsed = parseCliResponse(state.text);
+      if (parsed.toolCalls?.length) {
+        state.text = parsed.text;
+        state.toolCalls = parsed.toolCalls;
       }
     }
 
@@ -969,16 +1326,71 @@ export class CliAgentClient implements StreamingModelClient {
   ) {
     if (event['type'] === 'stream_event') {
       const streamEvent = event['event'];
-      if (!isRecord(streamEvent) || streamEvent['type'] !== 'content_block_delta') return;
+      if (!isRecord(streamEvent)) return;
+      if (streamEvent['type'] === 'content_block_start') {
+        const block = streamEvent['content_block'];
+        if (isRecord(block) && block['type'] === 'tool_use') {
+          const id = typeof block['id'] === 'string' ? block['id'] : '';
+          const name = typeof block['name'] === 'string' ? block['name'] : 'tool';
+          announceTool(state, forward, id, name);
+        }
+        return;
+      }
+      if (streamEvent['type'] !== 'content_block_delta') return;
       const delta = streamEvent['delta'];
       if (!isRecord(delta)) return;
       if (delta['type'] === 'thinking_delta' && typeof delta['thinking'] === 'string') {
+        state.reasoningText += delta['thinking'];
         forward({ type: 'reasoning', text: delta['thinking'] });
         return;
       }
       if (delta['type'] === 'text_delta' && typeof delta['text'] === 'string') {
         if (gate) gate.push(delta['text']);
         else forward({ type: 'text', text: delta['text'] });
+      }
+      return;
+    }
+
+    // Full assistant/user messages carry the tool lifecycle as well; the start
+    // and result are deduplicated by tool id.
+    if (event['type'] === 'assistant' || event['type'] === 'user') {
+      const message = event['message'];
+      if (!isRecord(message) || !Array.isArray(message['content'])) return;
+      for (const block of message['content']) {
+        if (!isRecord(block)) continue;
+        if (block['type'] === 'thinking') {
+          // Deltas may be absent (or the provider may only expose the final
+          // thinking block); forward only the part not streamed already.
+          const thinking =
+            typeof block['thinking'] === 'string'
+              ? block['thinking']
+              : typeof block['text'] === 'string'
+                ? block['text']
+                : '';
+          if (thinking && thinking.startsWith(state.reasoningText)) {
+            const suffix = thinking.slice(state.reasoningText.length);
+            state.reasoningText = thinking;
+            if (suffix) forward({ type: 'reasoning', text: suffix });
+          } else if (thinking && !state.reasoningText) {
+            state.reasoningText = thinking;
+            forward({ type: 'reasoning', text: thinking });
+          }
+          continue;
+        }
+        if (block['type'] === 'tool_use') {
+          const id = typeof block['id'] === 'string' ? block['id'] : '';
+          const name = typeof block['name'] === 'string' ? block['name'] : 'tool';
+          announceTool(state, forward, id, name);
+        } else if (block['type'] === 'tool_result') {
+          const id = typeof block['tool_use_id'] === 'string' ? block['tool_use_id'] : '';
+          finishTool(
+            state,
+            forward,
+            id,
+            block['is_error'] !== true,
+            toolResultDetail(block['content'])
+          );
+        }
       }
       return;
     }
@@ -1004,9 +1416,31 @@ export class CliAgentClient implements StreamingModelClient {
     state: StreamState,
     native = false
   ) {
+    if (event['type'] === 'item.started' || event['type'] === 'item.updated') {
+      const item = event['item'];
+      if (!isRecord(item) || !codexToolItem(item)) return;
+      const id = typeof item['id'] === 'string' ? item['id'] : '';
+      const kind = typeof item['type'] === 'string' ? item['type'] : 'tool';
+      announceTool(state, forward, id, kind, codexToolLabel(item));
+      return;
+    }
+
     if (event['type'] === 'item.completed') {
       const item = event['item'];
       if (!isRecord(item)) return;
+      if (codexToolItem(item)) {
+        const id = typeof item['id'] === 'string' ? item['id'] : '';
+        const kind = typeof item['type'] === 'string' ? item['type'] : 'tool';
+        announceTool(state, forward, id, kind, codexToolLabel(item));
+        const status = typeof item['status'] === 'string' ? item['status'] : '';
+        const exitCode = item['exit_code'];
+        const ok =
+          status !== 'failed' &&
+          status !== 'declined' &&
+          (typeof exitCode !== 'number' || exitCode === 0);
+        finishTool(state, forward, id, ok, codexToolDetail(item));
+        return;
+      }
       if (item['type'] === 'reasoning' && typeof item['text'] === 'string' && item['text'].trim()) {
         forward({ type: 'reasoning', text: item['text'] });
         return;

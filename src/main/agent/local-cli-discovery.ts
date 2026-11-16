@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { delimiter, isAbsolute, join } from 'node:path';
 import type { LocalCliAgent } from '../../shared/types';
 import { prepareCliSpawn, resolveWindowsCommand } from './cli-command';
+import { mergeCliAdvertisedModels, readCliModelCatalog } from './cli-model-config';
 import type {
   LocalCliAuthStatus,
   LocalCliEntry,
@@ -410,6 +411,7 @@ async function probeAgent(
   run: Runner,
   timeoutMs: number,
   home: string,
+  env: NodeJS.ProcessEnv,
   readTextFile: (path: string) => Promise<string>
 ): Promise<LocalCliEntry> {
   const path = await resolve(spec.binary);
@@ -443,6 +445,17 @@ async function probeAgent(
     }
   }
 
+  // Config-derived candidates come from files the CLI itself uses, so they are
+  // available even when the CLI cannot list models without network access.
+  const modelCatalog = await readCliModelCatalog(spec.agent, {
+    homeDir: home,
+    env,
+    readTextFile
+  }).catch((): undefined => undefined);
+  const mergedCatalog = modelCatalog
+    ? mergeCliAdvertisedModels(modelCatalog, models, spec.label)
+    : undefined;
+
   return {
     agent: spec.agent,
     label: spec.label,
@@ -453,7 +466,8 @@ async function probeAgent(
     auth: auth.auth,
     ...(auth.detail ? { authDetail: auth.detail } : {}),
     features,
-    ...(models ? { models } : {})
+    ...(models ? { models } : {}),
+    ...(mergedCatalog ? { modelCatalog: mergedCatalog } : {})
   };
 }
 
@@ -481,7 +495,7 @@ export async function scanLocalClis(
 
   const entries = await Promise.all(
     AGENTS.map((spec) =>
-      probeAgent(spec, resolve, run, timeoutMs, home, readTextFile).catch(
+      probeAgent(spec, resolve, run, timeoutMs, home, env, readTextFile).catch(
         (error: unknown): LocalCliEntry => ({
           agent: spec.agent,
           label: spec.label,

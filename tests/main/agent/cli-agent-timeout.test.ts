@@ -4,7 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { spawn } from 'node:child_process';
-import { CliAgentClient, type CliRunner } from '../../../src/main/agent/cli-agent-client';
+import {
+  CliAgentClient,
+  terminateProcessTree,
+  type CliRunner
+} from '../../../src/main/agent/cli-agent-client';
 import { ModelTimeoutError } from '../../../src/main/agent/model-client';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
@@ -40,8 +44,21 @@ afterEach(() => {
   vi.mocked(spawn).mockReset();
 });
 
+describe('terminateProcessTree', () => {
+  test('also stops grandchildren on Windows', () => {
+    const child = { pid: 1234, kill: vi.fn(() => true) };
+    terminateProcessTree(child, 'win32');
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(spawn).toHaveBeenCalledWith(
+      'taskkill',
+      ['/pid', '1234', '/t', '/f'],
+      expect.objectContaining({ windowsHide: true })
+    );
+  });
+});
+
 describe('CLI per-request timeout', () => {
-  test('defaults to 180s and lets the request override it', async () => {
+  test('defaults to a 15 minute total ceiling and lets the request override it', async () => {
     const timeouts: number[] = [];
     const runner: CliRunner = async (_command, _args, _input, options) => {
       timeouts.push(options.timeoutMs);
@@ -52,21 +69,47 @@ describe('CLI per-request timeout', () => {
     await client.complete({ messages: [{ role: 'user', content: 'hi' }] });
     await client.complete({
       messages: [{ role: 'user', content: 'hi' }],
-      timeoutMs: 900_000
+      timeoutMs: 300_000
     });
 
-    expect(timeouts).toEqual([180_000, 900_000]);
+    expect(timeouts).toEqual([900_000, 300_000]);
   });
 
-  test('a constructor timeout is the fallback between default and request', async () => {
+  test('native agents get a longer ceiling for vault work', async () => {
     const timeouts: number[] = [];
     const runner: CliRunner = async (_command, _args, _input, options) => {
       timeouts.push(options.timeoutMs);
       return { stdout: 'ok', stderr: '', code: 0 };
     };
     const client = new CliAgentClient(
+      { kind: 'local-cli', agent: 'claude', nativeTools: true },
+      { runner }
+    );
+
+    await client.complete({
+      messages: [{ role: 'user', content: 'hi' }],
+      cwd: 'C:\\vault'
+    });
+
+    expect(timeouts).toEqual([1_800_000]);
+  });
+
+  test('a constructor timeout is the fallback between default and request', async () => {
+    const timeouts: number[] = [];
+    const windows: Array<[number | undefined, number | undefined]> = [];
+    const runner: CliRunner = async (_command, _args, _input, options) => {
+      timeouts.push(options.timeoutMs);
+      windows.push([options.startupTimeoutMs, options.idleTimeoutMs]);
+      return { stdout: 'ok', stderr: '', code: 0 };
+    };
+    const client = new CliAgentClient(
       { kind: 'local-cli', agent: 'codex' },
-      { runner, timeoutMs: 240_000 }
+      {
+        runner,
+        timeoutMs: 240_000,
+        startupTimeoutMs: 30_000,
+        idleTimeoutMs: 90_000
+      }
     );
 
     await client.complete({ messages: [{ role: 'user', content: 'hi' }] });
@@ -76,24 +119,31 @@ describe('CLI per-request timeout', () => {
     });
 
     expect(timeouts).toEqual([240_000, 1_000]);
+    expect(windows).toEqual([
+      [30_000, 90_000],
+      [30_000, 90_000]
+    ]);
   });
 
-  test('kills the child and rejects with a timeout error', async () => {
+  test('kills a silent child and reports a startup timeout', async () => {
     await withFakeExecutable(async (exe) => {
       const child = fakeChild();
       vi.mocked(spawn).mockReturnValueOnce(child as never);
-      const client = new CliAgentClient({ kind: 'local-cli', agent: 'claude', command: exe });
+      const client = new CliAgentClient(
+        { kind: 'local-cli', agent: 'claude', command: exe },
+        { startupTimeoutMs: 20, idleTimeoutMs: 60_000 }
+      );
 
       await expect(
-        client.complete({ messages: [{ role: 'user', content: 'hi' }], timeoutMs: 20 })
+        client.complete({ messages: [{ role: 'user', content: 'hi' }], timeoutMs: 60_000 })
       ).rejects.toBeInstanceOf(ModelTimeoutError);
       expect(child.kill).toHaveBeenCalledWith('SIGTERM');
 
       const second = fakeChild();
       vi.mocked(spawn).mockReturnValueOnce(second as never);
       await expect(
-        client.complete({ messages: [{ role: 'user', content: 'hi' }], timeoutMs: 20 })
-      ).rejects.toThrow('本地 CLI agent 超时（20ms）');
+        client.complete({ messages: [{ role: 'user', content: 'hi' }], timeoutMs: 60_000 })
+      ).rejects.toThrow('启动超时');
       expect(second.kill).toHaveBeenCalledWith('SIGTERM');
     });
   });
