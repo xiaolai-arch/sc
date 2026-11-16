@@ -5,6 +5,7 @@ import {
   createButlerStreamHandler,
   type IpcEventLike
 } from '../../src/main/ipc';
+import { ConversationRunStore } from '../../src/main/butler/conversation-runs';
 
 type Sent = { channel: string; payload: unknown };
 
@@ -136,4 +137,40 @@ test('cancels a stream by assistant message id and clears the registry', async (
   expect(aborted).toBe(true);
   expect(registry.has('a1')).toBe(false);
   expect(sent).toHaveLength(0);
+});
+
+test('records the run in the store while streaming and removes it when done', async () => {
+  const runs = new ConversationRunStore();
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const api = {
+    async stream(_input: unknown, onEvent: (event: unknown) => void) {
+      onEvent({ type: 'text', text: '半段' });
+      await gate;
+      onEvent({ type: 'done', text: '半段完成' });
+      return { text: '半段完成' };
+    }
+  } as unknown as StudyCoachApi;
+  const handler = createButlerStreamHandler(api, new Map(), runs);
+  const { event } = sender();
+
+  const promise = handler(event, {
+    requestId: 'req-run',
+    input: { message: '你好', conversationId: 'c1', assistantMessageId: 'a1' }
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const [run] = await runs.list();
+  expect(run).toMatchObject({
+    runId: 'a1',
+    conversationId: 'c1',
+    status: 'running',
+    partialText: '半段'
+  });
+
+  release();
+  await expect(promise).resolves.toEqual({ text: '半段完成' });
+  expect(await runs.list()).toEqual([]);
 });

@@ -9,6 +9,14 @@ import type {
   StudyCoachApi
 } from '../shared/ipc';
 import type { ButlerStreamEvent } from '../shared/butler-stream';
+import type { ConversationRunSnapshot } from '../shared/butler-run';
+import {
+  isAgentPermissions,
+  normalizePermissions,
+  type AgentPermissions,
+  type AttachmentKind,
+  type ChatAttachment
+} from '../shared/attachments';
 import type {
   ConversationMessage,
   CreateConversationInput
@@ -40,6 +48,15 @@ import type {
   UpdatePracticeSetInput
 } from '../shared/practice';
 import type {
+  CreateProfileEntryInput,
+  DeleteProfileEntryInput,
+  ProfileCategory,
+  ProfileConfidence,
+  ProfileSource,
+  ProfileStatus,
+  UpdateProfileEntryInput
+} from '../shared/profile';
+import type {
   CreateKnowledgeTopicInput,
   KnowledgeStatus,
   MergeKnowledgeTopicsInput,
@@ -69,6 +86,7 @@ import type {
   VideoNotesProgress,
   VideoNotesResult
 } from '../shared/video-notes';
+import { ConversationRunStore } from './butler/conversation-runs';
 import { isSupportedMedia } from '../shared/video-notes';
 
 /** Every IPC channel exposed to the preload bridge. */
@@ -145,7 +163,14 @@ export const IPC_CHANNELS = {
   updatePracticeSet: 'study-coach:practice:update-set',
   deletePracticeSet: 'study-coach:practice:delete-set',
   reviewPracticeMistake: 'study-coach:practice:review-mistake',
-  setPracticeMistakeResolved: 'study-coach:practice:set-mistake-resolved'
+  setPracticeMistakeResolved: 'study-coach:practice:set-mistake-resolved',
+  // Profile channels are appended so existing channel order stays stable.
+  listProfile: 'study-coach:profile:list',
+  createProfileEntry: 'study-coach:profile:create',
+  updateProfileEntry: 'study-coach:profile:update',
+  deleteProfileEntry: 'study-coach:profile:delete',
+  // Appended after the profile batch for the same stability reason.
+  setConversationPermissions: 'study-coach:conversations:set-permissions'
 } as const;
 
 /** Streaming uses a separate request/event pair so the request map stays stable. */
@@ -153,6 +178,12 @@ export const BUTLER_STREAM_CHANNELS = {
   stream: 'study-coach:butler:stream',
   cancel: 'study-coach:butler:cancel-stream',
   event: 'study-coach:butler:stream-event'
+} as const;
+
+/** Main-process conversation runs: snapshots for rehydration and targeted cancel. */
+export const BUTLER_RUN_CHANNELS = {
+  list: 'study-coach:butler-runs:list',
+  cancel: 'study-coach:butler-runs:cancel'
 } as const;
 
 /** Outbound conversation events (proactive check-ins). */
@@ -268,12 +299,25 @@ function requireUpdateWorkspace(value: unknown): UpdateWorkspaceInput {
   }
   const goal = optionalString(input.goal, '工作区目标');
   const description = optionalString(input.description, '工作区描述');
+  let availableMinutes: number | undefined;
+  if (input.availableMinutes !== undefined) {
+    if (
+      typeof input.availableMinutes !== 'number' ||
+      !Number.isInteger(input.availableMinutes) ||
+      input.availableMinutes < 5 ||
+      input.availableMinutes > 24 * 60
+    ) {
+      throw new Error('每天可用时间需在 5 到 1440 分钟之间。');
+    }
+    availableMinutes = input.availableMinutes;
+  }
   return {
     workspaceId: requireString(input.workspaceId, '工作区 ID'),
     ...(input.name !== undefined ? { name: requireString(input.name, '工作区名称') } : {}),
     ...(input.goal !== undefined ? { goal: goal ?? '' } : {}),
     ...(input.description !== undefined ? { description: description ?? '' } : {}),
-    ...(checkIn !== undefined ? { checkIn: checkIn as 'daily' | 'off' } : {})
+    ...(checkIn !== undefined ? { checkIn: checkIn as 'daily' | 'off' } : {}),
+    ...(availableMinutes !== undefined ? { availableMinutes } : {})
   };
 }
 
@@ -445,7 +489,39 @@ function requireSend(value: unknown): SendMessageInput {
   requireString(input.message, '消息内容');
   optionalString(input.workspaceId, '工作区 ID');
   optionalString(input.taskId, '任务 ID');
-  return input as unknown as SendMessageInput;
+  const permissions =
+    input.permissions === undefined ? undefined : requirePermissions(input.permissions);
+  const attachments: ChatAttachment[] = Array.isArray(input.attachments)
+    ? input.attachments
+        .slice(0, 60)
+        .filter((entry): entry is Record<string, unknown> => isRecord(entry))
+        .flatMap((entry): ChatAttachment[] => {
+          const rawKind = entry['kind'];
+          const kind: AttachmentKind | null =
+            rawKind === 'image' || rawKind === 'text' ? rawKind : null;
+          const name = typeof entry['name'] === 'string' ? entry['name'].slice(0, 160) : '';
+          const data = typeof entry['data'] === 'string' ? entry['data'] : '';
+          if (kind === null || name.length === 0) return [];
+          if (data.length === 0 || data.length > 16_000_000) return [];
+          return [
+            {
+              name,
+              mediaType: typeof entry['mediaType'] === 'string' ? entry['mediaType'] : '',
+              size: typeof entry['size'] === 'number' ? entry['size'] : 0,
+              kind,
+              data
+            }
+          ];
+        })
+        .slice(0, 6)
+    : [];
+  // Never let the raw payload through: only the sanitized list may be sent.
+  const { attachments: _rawAttachments, ...rest } = input as unknown as SendMessageInput;
+  return {
+    ...rest,
+    ...(permissions ? { permissions } : {}),
+    ...(attachments.length > 0 ? { attachments } : {})
+  };
 }
 
 function requireCreateConversation(value: unknown): CreateConversationInput {
@@ -457,10 +533,13 @@ function requireCreateConversation(value: unknown): CreateConversationInput {
     throw new Error('对话类型无效。');
   }
   const workspaceId = optionalString(input.workspaceId, '工作区 ID');
+  const permissions =
+    input.permissions === undefined ? undefined : requirePermissions(input.permissions);
   return {
     ...(title !== undefined ? { title } : {}),
     ...(kind !== undefined ? { kind } : {}),
-    ...(workspaceId !== undefined ? { workspaceId } : {})
+    ...(workspaceId !== undefined ? { workspaceId } : {}),
+    ...(permissions !== undefined ? { permissions } : {})
   };
 }
 
@@ -518,6 +597,21 @@ function requireSetConversationModel(value: unknown): {
     conversationId: requireString(input.conversationId, '对话 ID'),
     model
   };
+}
+
+function requireSetConversationPermissions(value: unknown) {
+  const input = requireObject(value, '设置对话权限');
+  return {
+    conversationId: requireString(input.conversationId, '对话 ID'),
+    permissions: requirePermissions(input.permissions)
+  };
+}
+
+function requirePermissions(value: unknown): AgentPermissions {
+  if (!isAgentPermissions(value)) {
+    throw new Error('权限设置无效。');
+  }
+  return normalizePermissions(value);
 }
 
 function requireConversationSearch(value: unknown): string {
@@ -702,6 +796,78 @@ function requireDeleteMemory(value: unknown): DeleteMemoryInput {
     workspaceId: requireString(input.workspaceId, '工作区 ID'),
     id: requireString(input.id, '记忆 ID')
   };
+}
+
+const PROFILE_CATEGORIES = ['identity', 'constraints', 'abilities', 'recent'] as const;
+const PROFILE_SOURCES = ['user', 'model'] as const;
+const PROFILE_CONFIDENCES = ['confirmed', 'candidate'] as const;
+const PROFILE_STATUSES = ['active', 'expired'] as const;
+
+function requireProfileCategory(value: unknown): ProfileCategory {
+  if (typeof value !== 'string' || !(PROFILE_CATEGORIES as readonly string[]).includes(value)) {
+    throw new Error('档案分类无效。');
+  }
+  return value as ProfileCategory;
+}
+
+function optionalProfileSource(value: unknown): ProfileSource | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !(PROFILE_SOURCES as readonly string[]).includes(value)) {
+    throw new Error('档案来源无效。');
+  }
+  return value as ProfileSource;
+}
+
+function optionalProfileConfidence(value: unknown): ProfileConfidence | undefined {
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== 'string' ||
+    !(PROFILE_CONFIDENCES as readonly string[]).includes(value)
+  ) {
+    throw new Error('档案可信度无效。');
+  }
+  return value as ProfileConfidence;
+}
+
+function optionalProfileStatus(value: unknown): ProfileStatus | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !(PROFILE_STATUSES as readonly string[]).includes(value)) {
+    throw new Error('档案状态无效。');
+  }
+  return value as ProfileStatus;
+}
+
+function requireCreateProfileEntry(value: unknown): CreateProfileEntryInput {
+  const input = requireObject(value, '新增个人档案');
+  const source = optionalProfileSource(input.source);
+  const confidence = optionalProfileConfidence(input.confidence);
+  const origin = optionalString(input.origin, '档案来源说明');
+  return {
+    category: requireProfileCategory(input.category),
+    text: requireString(input.text, '档案内容'),
+    ...(source ? { source } : {}),
+    ...(confidence ? { confidence } : {}),
+    ...(origin ? { origin } : {})
+  };
+}
+
+function requireUpdateProfileEntry(value: unknown): UpdateProfileEntryInput {
+  const input = requireObject(value, '更新个人档案');
+  const category = input.category === undefined ? undefined : requireProfileCategory(input.category);
+  const confidence = optionalProfileConfidence(input.confidence);
+  const status = optionalProfileStatus(input.status);
+  return {
+    id: requireString(input.id, '档案 ID'),
+    ...(input.text !== undefined ? { text: requireString(input.text, '档案内容') } : {}),
+    ...(category ? { category } : {}),
+    ...(confidence ? { confidence } : {}),
+    ...(status ? { status } : {})
+  };
+}
+
+function requireDeleteProfileEntry(value: unknown): DeleteProfileEntryInput {
+  const input = requireObject(value, '删除个人档案');
+  return { id: requireString(input.id, '档案 ID') };
 }
 
 const KNOWLEDGE_STATUSES: readonly KnowledgeStatus[] = ['planned', 'learning', 'mastered', 'paused'];
@@ -1138,6 +1304,13 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
     },
     updateMemory: async (input) => api.updateMemory(requireUpdateMemory(input)),
     deleteMemory: async (input) => api.deleteMemory(requireDeleteMemory(input)),
+    listProfile: async () => api.listProfile(),
+    createProfileEntry: async (input) =>
+      api.createProfileEntry(requireCreateProfileEntry(input)),
+    updateProfileEntry: async (input) =>
+      api.updateProfileEntry(requireUpdateProfileEntry(input)),
+    deleteProfileEntry: async (input) =>
+      api.deleteProfileEntry(requireDeleteProfileEntry(input)),
     listKnowledgeTopics: async (input) => api.listKnowledgeTopics(optionalString(input, '工作区 ID')),
     createKnowledgeTopic: async (input) =>
       api.createKnowledgeTopic(requireCreateKnowledgeTopic(input)),
@@ -1180,6 +1353,10 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
     setConversationModel: async (input) => {
       const { conversationId, model } = requireSetConversationModel(input);
       return api.setConversationModel(conversationId, model);
+    },
+    setConversationPermissions: async (input) => {
+      const { conversationId, permissions } = requireSetConversationPermissions(input);
+      return api.setConversationPermissions(conversationId, permissions);
     },
     getUsageSummary: async (input) => api.getUsageSummary(requireUsageDays(input)),
     clearUsage: async () => api.clearUsage(),
@@ -1280,20 +1457,28 @@ async function invokeSafely(handler: IpcHandler, args: unknown[]): Promise<unkno
 /**
  * Streams one butler request to the requesting webContents. Events carry the
  * caller's requestId so a delayed stream cannot leak into another message.
+ * When a run store is provided, the run itself lives in the main process and
+ * survives renderer navigation; the renderer only mirrors its events.
  */
 export function createButlerStreamHandler(
   api: StudyCoachApi,
-  registry: Map<string, AbortController> = new Map()
+  registry: Map<string, AbortController> = new Map(),
+  runs?: ConversationRunStore
 ) {
   return async (event: IpcEventLike, value: unknown): Promise<SendMessageResult> => {
     const { requestId, input } = requireStreamPayload(value);
     const key = input.assistantMessageId?.trim() || requestId;
-    const controller = new AbortController();
+    const assistantMessageId = input.assistantMessageId?.trim() || key;
+    const conversationId = input.conversationId?.trim() ?? '';
+    const controller = runs
+      ? await runs.begin({ runId: key, conversationId, assistantMessageId })
+      : new AbortController();
     registry.set(key, controller);
     try {
       return await api.stream(
         input,
         (streamEvent: ButlerStreamEvent) => {
+          runs?.update(key, streamEvent);
           if (event.sender.isDestroyed?.()) return;
           event.sender.send(BUTLER_STREAM_CHANNELS.event, {
             requestId,
@@ -1309,9 +1494,11 @@ export function createButlerStreamHandler(
           event: { type: 'error', message: serializeError(error).message }
         });
       }
+      await runs?.fail(key, serializeError(error).message);
       throw toSafeError(error);
     } finally {
       registry.delete(key);
+      await runs?.finish(key);
     }
   };
 }
@@ -1320,6 +1507,16 @@ export function createButlerCancelHandler(registry: Map<string, AbortController>
   return async (value: unknown): Promise<void> => {
     const id = requireString(value, '消息 ID');
     registry.get(id)?.abort();
+  };
+}
+
+export function createButlerRunHandlers(runs: ConversationRunStore) {
+  return {
+    list: async (): Promise<ConversationRunSnapshot[]> => runs.list(),
+    cancel: async (value: unknown): Promise<void> => {
+      const runId = requireString(value, '运行 ID');
+      await runs.cancel(runId);
+    }
   };
 }
 
@@ -1383,19 +1580,38 @@ export function createVideoJobHandlers(api: StudyCoachApi) {
 }
 
 /** Registers every channel; Electron's ipcMain is injected for testability. */
-export function registerIpcHandlers(api: StudyCoachApi, ipcMain: IpcMainLike): void {
+export function registerIpcHandlers(
+  api: StudyCoachApi,
+  ipcMain: IpcMainLike,
+  options: { runs?: ConversationRunStore } = {}
+): void {
   const handlers = createIpcHandlers(api);
+  const runs = options.runs ?? new ConversationRunStore();
+  // Deleting a conversation must also drop any interrupted run it left behind,
+  // otherwise the next hydrate would draw a live-looking bubble for a thread
+  // that no longer exists.
+  const deleteConversation = handlers.deleteConversation;
+  handlers.deleteConversation = async (input) => {
+    const result = await deleteConversation(input);
+    if (typeof input === 'string') await runs.dismissConversation(input);
+    return result;
+  };
   for (const name of Object.keys(IPC_CHANNELS) as IpcChannelName[]) {
     ipcMain.handle(IPC_CHANNELS[name], (_event, ...args) => handlers[name](args[0]));
   }
   const registry = new Map<string, AbortController>();
-  const streamHandler = createButlerStreamHandler(api, registry);
+  const streamHandler = createButlerStreamHandler(api, registry, runs);
   ipcMain.handle(BUTLER_STREAM_CHANNELS.stream, (event, ...args) =>
     streamHandler(event as IpcEventLike, args[0])
   );
   const cancelHandler = createButlerCancelHandler(registry);
   ipcMain.handle(BUTLER_STREAM_CHANNELS.cancel, (_event, ...args) =>
     cancelHandler(args[0])
+  );
+  const runHandlers = createButlerRunHandlers(runs);
+  ipcMain.handle(BUTLER_RUN_CHANNELS.list, () => runHandlers.list());
+  ipcMain.handle(BUTLER_RUN_CHANNELS.cancel, (_event, ...args) =>
+    runHandlers.cancel(args[0])
   );
   const videoNotesHandler = createVideoNotesHandler(api);
   ipcMain.handle(VIDEO_NOTES_CHANNELS.generate, (event, ...args) =>
@@ -1475,6 +1691,10 @@ export function createStudyCoachBridge(
     getMemoryProfile: (workspaceId) => call(IPC_CHANNELS.getMemoryProfile, workspaceId),
     updateMemory: (input) => call(IPC_CHANNELS.updateMemory, input),
     deleteMemory: (input) => call(IPC_CHANNELS.deleteMemory, input),
+    listProfile: () => call(IPC_CHANNELS.listProfile),
+    createProfileEntry: (input) => call(IPC_CHANNELS.createProfileEntry, input),
+    updateProfileEntry: (input) => call(IPC_CHANNELS.updateProfileEntry, input),
+    deleteProfileEntry: (input) => call(IPC_CHANNELS.deleteProfileEntry, input),
     listKnowledgeTopics: (workspaceId) =>
       call(IPC_CHANNELS.listKnowledgeTopics, workspaceId),
     createKnowledgeTopic: (input) => call(IPC_CHANNELS.createKnowledgeTopic, input),
@@ -1500,9 +1720,13 @@ export function createStudyCoachBridge(
     searchConversations: (query) => call(IPC_CHANNELS.searchConversations, query),
     setConversationModel: (id, model) =>
       call(IPC_CHANNELS.setConversationModel, { conversationId: id, model }),
+    setConversationPermissions: (id, permissions) =>
+      call(IPC_CHANNELS.setConversationPermissions, { conversationId: id, permissions }),
     getUsageSummary: (days) => call(IPC_CHANNELS.getUsageSummary, days),
     clearUsage: () => call(IPC_CHANNELS.clearUsage),
     cancelStream: (messageId) => call(BUTLER_STREAM_CHANNELS.cancel, messageId),
+    listConversationRuns: () => call(BUTLER_RUN_CHANNELS.list),
+    cancelRun: (runId) => call(BUTLER_RUN_CHANNELS.cancel, runId),
     onConversationOpened(listener) {
       if (!subscribe) return () => undefined;
       return subscribe(CONVERSATION_EVENT_CHANNELS.open, (payload) => {

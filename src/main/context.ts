@@ -3,6 +3,8 @@ import { formatLocalDate } from '../shared/date';
 import type { ListReviewsInput, ReviewRecord, StudyCoachApi } from '../shared/ipc';
 import type { KnowledgeService } from '../shared/knowledge';
 import type { MemoryService } from '../shared/memory';
+import { createProfileService } from './memory/profile-service';
+import type { ProfileService } from '../shared/profile';
 import type { LongPlanService } from '../shared/plans';
 import type { WorkspacePlanner } from '../shared/planning';
 import type { PracticeService } from '../shared/practice';
@@ -79,7 +81,10 @@ export interface ButlerFactoryDependencies {
   conversationStore?: ConversationStore;
   memoryService?: MemoryService;
   knowledgeService?: KnowledgeService;
+  profileService?: ProfileService;
+  getSearchService?: () => SearchService | null;
   planner?: WorkspacePlanner;
+  longPlans?: LongPlanService;
   modelClient?: ModelClient | null;
   modelClientFor?: (model: string) => ModelClient | null;
 }
@@ -100,6 +105,7 @@ export interface CreateAppContextOptions {
   practiceService?: PracticeService;
   memoryService?: MemoryService;
   knowledgeService?: KnowledgeService;
+  profileService?: ProfileService;
   searchService?: SearchService;
   workspacePlanner?: WorkspacePlanner;
   longPlanService?: LongPlanService;
@@ -147,6 +153,7 @@ export interface AppContext {
   readonly butler: ButlerService;
   readonly practice: PracticeService;
   readonly memory: MemoryService;
+  readonly profile: ProfileService;
   readonly knowledge: KnowledgeService;
   readonly planner: WorkspacePlanner;
   readonly longPlans: LongPlanService;
@@ -171,6 +178,7 @@ interface ActiveServices {
   butler: ButlerService;
   practice: PracticeService;
   memory: MemoryService;
+  profile: ProfileService;
   knowledge: KnowledgeService;
   planner: WorkspacePlanner;
   longPlans: LongPlanService;
@@ -266,7 +274,14 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       ...(dependencies.knowledgeService
         ? { knowledgeService: dependencies.knowledgeService }
         : {}),
+      ...(dependencies.profileService
+        ? { profileService: dependencies.profileService }
+        : {}),
+      ...(dependencies.getSearchService
+        ? { getSearchService: dependencies.getSearchService }
+        : {}),
       ...(dependencies.planner ? { planner: dependencies.planner } : {}),
+      ...(dependencies.longPlans ? { longPlanService: dependencies.longPlans } : {}),
       now,
       ...(dependencies.modelClient !== undefined ? { modelClient: dependencies.modelClient } : {}),
       ...(dependencies.modelClientFor ? { modelClientFor: dependencies.modelClientFor } : {})
@@ -277,6 +292,11 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     if (options.practiceService) return options.practiceService;
     if (options.practiceServiceFactory) return options.practiceServiceFactory(root);
     return createPracticeService(root, { now });
+  }
+
+  function createProfile(root: string): ProfileService {
+    if (options.profileService) return options.profileService;
+    return createProfileService({ root, now });
   }
 
   function createMemory(root: string, modelClient: ModelClient | null): MemoryService {
@@ -380,7 +400,17 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     }
 
     const memory = createMemory(nextSettings.vaultPath, modelClient);
+    const profile = createProfile(nextSettings.vaultPath);
     const knowledge = createKnowledge(nextSettings.vaultPath);
+    // The search index is expensive (a file watcher + full scan), so it stays
+    // lazy even though both the API surface and the butler can reach it.
+    let searchInstance: SearchService | null = null;
+    const getSearchService = (): SearchService => {
+      if (searchInstance === null) {
+        searchInstance = createSearch(nextSettings.vaultPath, workspace);
+      }
+      return searchInstance;
+    };
     const planner = createPlanner(nextSettings.vaultPath, workspace, modelClient);
     const longPlans = createLongPlans(
       nextSettings.vaultPath,
@@ -394,8 +424,11 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       apiKey,
       conversationStore,
       memoryService: memory,
+      profileService: profile,
       knowledgeService: knowledge,
+      getSearchService,
       planner,
+      longPlans,
       modelClient,
       modelClientFor
     };
@@ -410,7 +443,6 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       now
     });
 
-    let searchInstance: SearchService | null = null;
     return {
       vaultPath: nextSettings.vaultPath,
       providerSignature: JSON.stringify(nextSettings.provider),
@@ -421,15 +453,13 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       butler,
       practice: createPractice(nextSettings.vaultPath),
       memory,
+      profile,
       knowledge,
       planner,
       longPlans,
       checkIns,
       get search() {
-        if (searchInstance === null) {
-          searchInstance = createSearch(nextSettings.vaultPath, workspace);
-        }
-        return searchInstance;
+        return getSearchService();
       },
       async dispose() {
         if (searchInstance === null) return;
@@ -708,6 +738,21 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     async updateWorkspaceTask(input) {
       const services = await getServices();
       const task = await services.workspace.updateWorkspaceTask(input);
+      if (task.planId && task.planWeekId && task.planItemId) {
+        // Keep the long plan in step with today's checkbox instead of
+        // maintaining a second, drifting copy of the same fact.
+        try {
+          await services.longPlans.setItemDone({
+            planId: task.planId,
+            weekId: task.planWeekId,
+            itemId: task.planItemId,
+            kind: 'day',
+            done: task.status === 'done'
+          });
+        } catch {
+          // The task write stays authoritative even if the plan moved.
+        }
+      }
       if (task.status === 'done') {
         // Knowledge linking is additive metadata; the task write is authoritative.
         try {
@@ -887,6 +932,18 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       if (!memory.deleteRecord) throw new Error('当前存储不支持编辑记忆。');
       await memory.deleteRecord(input);
     },
+    async listProfile() {
+      return (await getServices()).profile.list();
+    },
+    async createProfileEntry(input) {
+      return (await getServices()).profile.create(input);
+    },
+    async updateProfileEntry(input) {
+      return (await getServices()).profile.update(input);
+    },
+    async deleteProfileEntry(input) {
+      await (await getServices()).profile.delete(input);
+    },
     async listKnowledgeTopics(workspaceId) {
       return (await getServices()).knowledge.list(workspaceId);
     },
@@ -952,6 +1009,9 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     async setConversationModel(id, model) {
       return conversationStore.setModel(id, model);
     },
+    async setConversationPermissions(id, permissions) {
+      return conversationStore.setPermissions(id, permissions);
+    },
     async getUsageSummary(days) {
       const requested =
         typeof days === 'number' && Number.isFinite(days) ? Math.trunc(days) : 7;
@@ -1008,6 +1068,10 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     get memory() {
       if (!active) throw new Error('记忆服务尚未初始化。');
       return active.memory;
+    },
+    get profile() {
+      if (!active) throw new Error('个人档案服务尚未初始化。');
+      return active.profile;
     },
     get knowledge() {
       if (!active) throw new Error('知识库服务尚未初始化。');

@@ -6,6 +6,7 @@ import type { PracticeService } from '../../src/shared/practice';
 import type { StudyCoachApi } from '../../src/shared/ipc';
 import { createAppContext, type AppContext } from '../../src/main/context';
 import {
+  BUTLER_RUN_CHANNELS,
   BUTLER_STREAM_CHANNELS,
   IPC_CHANNELS,
   VIDEO_NOTES_CHANNELS,
@@ -74,12 +75,14 @@ test('registers every channel exactly once', async () => {
     }
   });
 
-  expect(registered.size).toBe(Object.keys(IPC_CHANNELS).length + 10);
+  expect(registered.size).toBe(Object.keys(IPC_CHANNELS).length + 12);
   for (const channel of Object.values(IPC_CHANNELS)) {
     expect(registered.has(channel)).toBe(true);
   }
   expect(registered.has(BUTLER_STREAM_CHANNELS.stream)).toBe(true);
   expect(registered.has(BUTLER_STREAM_CHANNELS.cancel)).toBe(true);
+  expect(registered.has(BUTLER_RUN_CHANNELS.list)).toBe(true);
+  expect(registered.has(BUTLER_RUN_CHANNELS.cancel)).toBe(true);
   expect(registered.has(VIDEO_NOTES_CHANNELS.generate)).toBe(true);
   expect(registered.has(VIDEO_NOTES_CHANNELS.enqueue)).toBe(true);
   expect(registered.has(VIDEO_NOTES_CHANNELS.listJobs)).toBe(true);

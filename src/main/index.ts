@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, globalShortcut, ipcMain, screen, shell } fr
 import { join } from 'node:path';
 import { handleExportBackup, handleRestoreBackup } from './backup';
 import { createAppContext } from './context';
+import { ConversationRunStore } from './butler/conversation-runs';
 import {
   APP_EVENT_CHANNELS,
   APP_IPC_CHANNELS,
@@ -192,7 +193,10 @@ app.whenReady().then(async () => {
   // Re-apply the stored preference so a state file edited outside the app (or
   // an OS reset) converges on the next launch.
   applyLaunchAtLogin(app, (await context.settings.get()).launchAtLogin);
-  registerIpcHandlers(context.api, ipcMain);
+  const runStore = new ConversationRunStore({
+    filePath: join(app.getPath('userData'), 'conversation-runs.json')
+  });
+  registerIpcHandlers(context.api, ipcMain, { runs: runStore });
   initialWindowState = await readWindowState(
     windowStateFile(),
     screen.getAllDisplays().map((display) => display.workArea)
@@ -361,6 +365,7 @@ app.whenReady().then(async () => {
     scheduler = createContextScheduler({
       context,
       notify,
+      deliveryLogPath: join(app.getPath('userData'), 'scheduler-delivered.json'),
       onError: (error) => {
         console.error('ASAKI scheduler error:', serializeError(error).message);
       }
@@ -421,6 +426,9 @@ app.whenReady().then(async () => {
     // Abort the running video job and persist it as interrupted before the
     // process goes away; the job list offers "继续" on the next launch.
     void context.videoJobs.interruptRunning().catch(() => undefined);
+    // Write any debounced run snapshot now; a turn that ended in the last
+    // 200ms would otherwise be lost and look completed instead of interrupted.
+    void runStore.flush().catch(() => undefined);
     // Stops the vault search watcher; the app is already quitting, so this is
     // fire-and-forget (the resources are released with the process anyway).
     void context.dispose().catch(() => undefined);
