@@ -1,8 +1,10 @@
-
 import { formatLocalDate } from '../../shared/date';
+import type { AgentPermissions } from '../../shared/attachments';
 import type { KnowledgeService, KnowledgeStatus } from '../../shared/knowledge';
 import type { MemoryService } from '../../shared/memory';
+import { isProfileCategory, type ProfileService } from '../../shared/profile';
 import type { WorkspacePlanner } from '../../shared/planning';
+import type { LongPlanService } from '../../shared/plans';
 import type {
   WorkspaceKind,
   WorkspaceService,
@@ -15,8 +17,17 @@ export interface ButlerToolContext {
   /** Workspace selected in the UI, used when a tool call omits workspaceId. */
   workspaceId?: string;
   memory?: MemoryService | null;
+  profile?: ProfileService | null;
   planner?: WorkspacePlanner | null;
+  /** Long-plan service; absent in tests without plan persistence. */
+  longPlans?: LongPlanService | null;
   knowledge?: KnowledgeService | null;
+  /**
+   * The turn's permission level. When present, write tools are refused without
+   * `write`; tools marked `requiresWeb` also need `web`. Absent means the caller
+   * (tests, internal jobs) already decided the tool may run.
+   */
+  permissions?: AgentPermissions;
   now: () => Date;
   /** Stop generation must prevent starting or continuing tool work. */
   signal?: AbortSignal;
@@ -34,6 +45,10 @@ export interface ButlerToolDefinition {
   description: string;
   /** JSON Schema object describing the tool input. */
   parameters: Record<string, unknown>;
+  /** True (the default) when the tool changes the vault. */
+  requiresWrite?: boolean;
+  /** True when the tool may reach the network. */
+  requiresWeb?: boolean;
   execute(input: Record<string, unknown>, context: ButlerToolContext): Promise<unknown>;
 }
 
@@ -311,7 +326,88 @@ export function createButlerTools(): ButlerToolDefinition[] {
           workspaceId,
           date: plan.date,
           generatedBy: plan.generatedBy,
+          availableMinutes: plan.availableMinutes,
+          availableMinutesSource: plan.availableMinutesSource,
           tasks
+        };
+      }
+    },
+    {
+      name: 'create_long_plan',
+      description:
+        '为项目生成一份跨周的长期计划（写入长期计划页）。用户要「未来几周 / 到某个日期 / 阶段性」计划时使用；需要先有项目（workspace）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          workspaceId: { type: 'string', description: '项目 ID；省略时使用当前项目' },
+          goal: { type: 'string', description: '计划目标；省略时使用项目目标' },
+          weeks: { type: 'number', minimum: 1, maximum: 16, description: '计划周数（1-16）' },
+          weeklyHours: { type: 'number', minimum: 1, description: '每周可投入小时数' },
+          startDate: { type: 'string', description: '开始日期 YYYY-MM-DD；省略为今天' },
+          notes: { type: 'string', description: '背景信息：当前水平、约束、可用时间等' },
+          research: {
+            type: 'boolean',
+            description: '生成前是否联网调研；用户要求核实信息时设为 true'
+          }
+        },
+        additionalProperties: false
+      },
+      async execute(input, context) {
+        const workspaceId = optionalString(input, 'workspaceId') ?? context.workspaceId;
+        if (!workspaceId) {
+          throw new ToolInputError('缺少 workspaceId：请先创建或选择项目。');
+        }
+        if (!context.longPlans) {
+          throw new ToolInputError('当前没有可用的长期计划服务。');
+        }
+        throwIfAborted(context.signal);
+        const workspace = await context.workspace.getWorkspaceSnapshot(workspaceId);
+        const goal = optionalString(input, 'goal') ?? workspace.workspace.goal;
+        if (!goal) {
+          throw new ToolInputError('缺少 goal：请提供计划目标，或先在项目中设置目标。');
+        }
+        const weeks = Math.min(16, Math.max(1, Math.round(optionalNumber(input, 'weeks') ?? 4)));
+        const rawWeeklyHours = optionalNumber(input, 'weeklyHours');
+        const weeklyHours =
+          rawWeeklyHours !== undefined && rawWeeklyHours > 0
+            ? rawWeeklyHours
+            : undefined;
+        const rawStartDate = optionalString(input, 'startDate');
+        if (rawStartDate !== undefined && !isIsoDate(rawStartDate)) {
+          throw new ToolInputError('参数 startDate 必须是 YYYY-MM-DD。');
+        }
+        const notes = optionalString(input, 'notes');
+        const research = input['research'] === true;
+        if (research && context.permissions?.web === false) {
+          throw new ToolInputError('当前权限不允许联网调研，请去掉 research 或让用户开启联网。');
+        }
+        const plan = await context.longPlans.create({
+          workspaceId,
+          goal,
+          weeks,
+          ...(weeklyHours !== undefined ? { weeklyHours } : {}),
+          ...(rawStartDate !== undefined ? { startDate: rawStartDate } : {}),
+          ...(notes !== undefined ? { notes } : {}),
+          ...(research ? { research: true } : {})
+        });
+        return {
+          planId: plan.id,
+          workspaceId: plan.workspaceId,
+          goal: plan.goal,
+          startDate: plan.startDate,
+          weeks: plan.weeks,
+          weeklyHours: plan.weeklyHours,
+          phases: plan.phases.map((phase) => ({
+            id: phase.id,
+            title: phase.title,
+            weeks: phase.weeks.map((week) => ({
+              id: week.id,
+              number: week.number,
+              title: week.title,
+              startDate: week.startDate,
+              endDate: week.endDate
+            }))
+          }))
         };
       }
     },
@@ -325,7 +421,13 @@ export function createButlerTools(): ButlerToolDefinition[] {
           workspaceId: { type: 'string', description: '项目 ID；省略时使用当前项目' },
           name: { type: 'string', description: '新的项目名称' },
           goal: { type: 'string', description: '新的项目目标' },
-          description: { type: 'string', description: '新的项目说明' }
+          description: { type: 'string', description: '新的项目说明' },
+          availableMinutes: {
+            type: 'number',
+            minimum: 5,
+            maximum: 1440,
+            description: '用户每天可用的分钟数；用户说「每天只有一小时」时传 60'
+          }
         },
         additionalProperties: false
       },
@@ -341,14 +443,23 @@ export function createButlerTools(): ButlerToolDefinition[] {
         const name = optionalString(input, 'name');
         const goal = optionalString(input, 'goal');
         const description = optionalString(input, 'description');
-        if (name === undefined && goal === undefined && description === undefined) {
-          throw new ToolInputError('至少提供 name / goal / description 之一。');
+        const availableMinutes = optionalNumber(input, 'availableMinutes');
+        if (
+          name === undefined &&
+          goal === undefined &&
+          description === undefined &&
+          availableMinutes === undefined
+        ) {
+          throw new ToolInputError('至少提供 name / goal / description / availableMinutes 之一。');
         }
         return update.call(context.workspace, {
           workspaceId,
           ...(name !== undefined ? { name } : {}),
           ...(goal !== undefined ? { goal } : {}),
-          ...(description !== undefined ? { description } : {})
+          ...(description !== undefined ? { description } : {}),
+          ...(availableMinutes !== undefined
+            ? { availableMinutes: Math.round(availableMinutes) }
+            : {})
         });
       }
     },
@@ -356,6 +467,7 @@ export function createButlerTools(): ButlerToolDefinition[] {
       name: 'get_today_plan',
       description:
         '读取今天的计划与任务。可以指定工作区；省略 workspaceId 时汇总所有工作区的任务。',
+      requiresWrite: false,
       parameters: {
         type: 'object',
         properties: {
@@ -502,6 +614,7 @@ export function createButlerTools(): ButlerToolDefinition[] {
     {
       name: 'get_memory',
       description: '读取阿咲关于用户的长期记忆，可以按工作区过滤。',
+      requiresWrite: false,
       parameters: {
         type: 'object',
         properties: {
@@ -584,6 +697,49 @@ export function createButlerTools(): ButlerToolDefinition[] {
           message: `已记录：${topic.name}（${KNOWLEDGE_STATUS_LABELS[topic.status]}）`
         };
       }
+    },
+    {
+      name: 'save_profile',
+      description:
+        '记录一条跨项目长期有效的个人信息（身份、偏好与约束、能力经验、近期变化）。只有用户明确说过或明确要求记住时才调用；从对话里推断的信息会保存为待确认，不会当成事实。',
+      parameters: {
+        type: 'object',
+        properties: {
+          category: {
+            type: 'string',
+            enum: ['identity', 'constraints', 'abilities', 'recent'],
+            description: 'identity 身份现状 / constraints 偏好与约束 / abilities 能力经验 / recent 近期变化'
+          },
+          text: { type: 'string', description: '一句话事实，例如：工作日每天可用 1 小时' }
+        },
+        required: ['category', 'text'],
+        additionalProperties: false
+      },
+      async execute(input, context) {
+        const profile = context.profile;
+        if (!profile) throw new ToolInputError('当前版本不支持记录个人档案。');
+        const category = input.category;
+        if (!isProfileCategory(category)) {
+          throw new ToolInputError('category 必须是 identity / constraints / abilities / recent。');
+        }
+        const text = requiredString(input, 'text');
+        // Tool-created entries are always candidates: the model cannot prove the
+        // user said it, and attachment or web text must not look user-verified.
+        const entry = await profile.create({
+          category,
+          text,
+          source: 'model',
+          confidence: 'candidate',
+          origin: '对话'
+        });
+        return {
+          ok: true,
+          id: entry.id,
+          category: entry.category,
+          confidence: entry.confidence,
+          message: '已记到个人档案，等你确认。'
+        };
+      }
     }
   ];
 }
@@ -613,6 +769,26 @@ export async function executeButlerTool(
     return {
       ok: false,
       content: toJson({ ok: false, tool: call.name, error: `未知工具：${call.name}` })
+    };
+  }
+  if (context.permissions?.write === false && tool.requiresWrite !== false) {
+    return {
+      ok: false,
+      content: toJson({
+        ok: false,
+        tool: call.name,
+        error: '当前是「仅可查看」权限，不能修改学习库。请让用户切到「工作区内修改」后再试。'
+      })
+    };
+  }
+  if (context.permissions?.web === false && tool.requiresWeb === true) {
+    return {
+      ok: false,
+      content: toJson({
+        ok: false,
+        tool: call.name,
+        error: '当前权限不允许联网。'
+      })
     };
   }
 
@@ -738,6 +914,13 @@ function optionalNumber(input: Record<string, unknown>, key: string): number | u
     throw new ToolInputError(`参数 ${key} 必须是非负数字。`);
   }
   return value;
+}
+
+/** True for a real calendar date written as YYYY-MM-DD. */
+function isIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00`);
+  return !Number.isNaN(date.getTime()) && formatLocalDate(date) === value;
 }
 
 function requiredWorkspaceKind(input: Record<string, unknown>): WorkspaceKind {

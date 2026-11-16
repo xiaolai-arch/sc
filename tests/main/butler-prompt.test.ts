@@ -14,6 +14,7 @@ test('buildSystemPrompt keeps the weekly guidance alongside context', () => {
     workspaces: [],
     tasks: [],
     memory: [],
+    profile: [],
     knowledge: [],
     contextError: false
   });
@@ -48,6 +49,7 @@ test('includes workspace and task ids so check-ins can call project tools', () =
       }
     ],
     memory: [],
+    profile: [],
     knowledge: [],
     contextError: false
   });
@@ -76,6 +78,7 @@ test('shows pinned start times and teaches the butler to reschedule', () => {
       }
     ],
     memory: [],
+    profile: [],
     knowledge: [],
     contextError: false
   });
@@ -89,6 +92,7 @@ test('renders knowledge summaries, levels and note excerpts for grounding', () =
     workspaces: [],
     tasks: [],
     memory: [],
+    profile: [],
     knowledge: [
       {
         id: 'kt-lc',
@@ -136,6 +140,7 @@ test('renders mastered and learning topics from the knowledge base', () => {
     workspaces: [],
     tasks: [],
     memory: [],
+    profile: [],
     knowledge: [
       topic('LangChain', 'mastered'),
       topic('LangGraph', 'learning')

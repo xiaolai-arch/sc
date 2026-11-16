@@ -9,7 +9,10 @@ import { ButlerServiceImpl, type ButlerServiceOptions } from './butler-service';
 import type { ConversationStore } from '../conversations/conversation-store';
 import type { KnowledgeService } from '../../shared/knowledge';
 import type { MemoryService } from '../../shared/memory';
+import type { ProfileService } from '../../shared/profile';
+import type { SearchService } from '../../shared/search';
 import type { WorkspacePlanner } from '../../shared/planning';
+import type { LongPlanService } from '../../shared/plans';
 
 export interface CreateButlerServiceOptions {
   /**
@@ -25,7 +28,10 @@ export interface CreateButlerServiceOptions {
   conversationStore?: ConversationStore | null;
   memoryService?: MemoryService | null;
   planner?: WorkspacePlanner | null;
+  longPlanService?: LongPlanService | null;
   knowledgeService?: KnowledgeService | null;
+  profileService?: ProfileService | null;
+  getSearchService?: (() => SearchService | null) | null;
   provider?: ProviderConfig;
   /** Kept in memory only; never logged, stored, or echoed in replies. */
   apiKey?: string | null;
@@ -60,8 +66,17 @@ export function createButlerService(
       : {}),
     ...(options.memoryService !== undefined ? { memoryService: options.memoryService } : {}),
     ...(options.planner !== undefined ? { planner: options.planner } : {}),
+    ...(options.longPlanService !== undefined
+      ? { longPlanService: options.longPlanService }
+      : {}),
     ...(options.knowledgeService !== undefined
       ? { knowledgeService: options.knowledgeService }
+      : {}),
+    ...(options.profileService !== undefined
+      ? { profileService: options.profileService }
+      : {}),
+    ...(options.getSearchService !== undefined
+      ? { getSearchService: options.getSearchService }
       : {}),
     ...(options.now ? { now: options.now } : {}),
     ...(options.maxToolSteps !== undefined ? { maxToolSteps: options.maxToolSteps } : {}),

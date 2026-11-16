@@ -323,13 +323,79 @@ describe('ButlerServiceImpl replies', () => {
       'set_reminder',
       'save_review',
       'plan_workspace',
+      'create_long_plan',
       'update_workspace',
       'get_today_plan',
       'write_note',
       'update_task',
       'get_memory',
-      'record_knowledge'
+      'record_knowledge',
+      'save_profile'
     ]);
+  });
+
+  test('forwards the conversation permissions to the model request', async () => {
+    const client = new FakeModelClient(['好。']);
+    const service = makeService(client);
+
+    await service.send({
+      message: '帮我查一下今年招生简章',
+      permissions: { web: true, write: false, shell: false }
+    });
+
+    expect(client.calls[0]?.webTools).toBe(true);
+    expect(client.calls[0]?.allowWrites).toBe(false);
+    expect(client.calls[0]?.allowShell).toBe(false);
+  });
+
+  test('falls back to the permissions stored with the conversation', async () => {
+    const client = new FakeModelClient(['好。']);
+    const conversation: Conversation = {
+      ...longConversation(2),
+      permissions: { web: false, write: true, shell: true }
+    };
+    const { store } = fakeConversationStore(conversation);
+    const service = makeService(client, new MemoryWorkspaceService(), {
+      conversationStore: store
+    });
+
+    await service.send({ conversationId: 'c1', message: '继续。' });
+
+    expect(client.calls[0]?.webTools).toBe(false);
+    expect(client.calls[0]?.allowWrites).toBe(true);
+    expect(client.calls[0]?.allowShell).toBe(true);
+  });
+
+  test('inlines text attachments and lets the caller drop image files after use', async () => {
+    const client = new FakeModelClient(['看完了。']);
+    const service = makeService(client);
+
+    await service.send({
+      message: '看看这份笔记',
+      attachments: [
+        {
+          name: '笔记.md',
+          mediaType: 'text/markdown',
+          size: 12,
+          kind: 'text',
+          data: '# 极限\n用夹逼法'
+        },
+        {
+          name: 'screen.png',
+          mediaType: 'image/png',
+          size: 3,
+          kind: 'image',
+          // 1x1 transparent PNG.
+          data:
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+        }
+      ]
+    });
+
+    const request = client.calls[0];
+    expect(request?.messages.at(-1)?.content).toContain('## 附件内容');
+    expect(request?.messages.at(-1)?.content).toContain('用夹逼法');
+    expect(request?.messages.at(-1)?.images).toHaveLength(1);
   });
 
   test('finds a focus task across workspaces when workspaceId is omitted', async () => {

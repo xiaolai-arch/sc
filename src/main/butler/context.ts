@@ -1,5 +1,6 @@
 import { isActiveKnowledgeTopic } from '../../shared/knowledge';
 import type { KnowledgeService } from '../../shared/knowledge';
+import { activeProfileEntries, type ProfileEntry, type ProfileService } from '../../shared/profile';
 import type {
   MemoryItem,
   SendMessageInput,
@@ -21,6 +22,8 @@ export interface ButlerContext {
   focusTask?: WorkspaceTask;
   tasks: WorkspaceTask[];
   memory: MemoryItem[];
+  /** Active profile entries; confirmed first, model guesses marked. */
+  profile: ProfileEntry[];
   /** Active topics (usually mastered + learning) the butler should remember. */
   knowledge: KnowledgeTopicContext[];
   /** True when at least part of the local data could not be read. */
@@ -32,7 +35,7 @@ const MAX_CONTEXT_KNOWLEDGE_NOTES = 8;
 const MAX_CONTEXT_NOTE_CHARS = 240;
 
 function emptyContext(now: Date, contextError = false): ButlerContext {
-  return { now, workspaces: [], tasks: [], memory: [], knowledge: [], contextError };
+  return { now, workspaces: [], tasks: [], memory: [], profile: [], knowledge: [], contextError };
 }
 
 /** Mastered first, then most recently touched; a broken vault means no topics. */
@@ -61,18 +64,30 @@ async function selectKnowledge(
 }
 
 /**
- * Collects workspace, task, memory, and knowledge context. Context is
+ * Collects workspace, task, memory, knowledge, and profile context. Context is
  * best-effort: a broken vault must never prevent the butler from replying.
  */
 export async function gatherContext(
   workspaceService: WorkspaceService | null,
   input: SendMessageInput,
   now: Date,
-  knowledgeService: KnowledgeService | null = null
+  knowledgeService: KnowledgeService | null = null,
+  profileService: ProfileService | null = null
 ): Promise<ButlerContext> {
   const context = await collectContext(workspaceService, input, now);
   context.knowledge = await selectKnowledge(knowledgeService, input.workspaceId);
+  context.profile = await selectProfile(profileService);
   return context;
+}
+
+/** Stable profile facts; a model guess is included but marked as a candidate. */
+async function selectProfile(profileService: ProfileService | null): Promise<ProfileEntry[]> {
+  if (profileService === null) return [];
+  try {
+    return activeProfileEntries(await profileService.list());
+  } catch {
+    return [];
+  }
 }
 
 async function collectContext(
@@ -95,6 +110,7 @@ async function collectContext(
         focusTask: input.taskId ? snapshot.tasks.find((task) => task.id === input.taskId) : undefined,
         tasks: snapshot.tasks,
         memory: snapshot.memory,
+        profile: [],
         knowledge: [],
         contextError: false
       };
@@ -124,6 +140,7 @@ async function collectContext(
       focusTask,
       tasks,
       memory: loaded.flatMap((snapshot) => snapshot.memory),
+      profile: [],
       knowledge: [],
       contextError: loaded.length < workspaces.length
     };

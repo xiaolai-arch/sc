@@ -15,8 +15,16 @@ import type {
 import type { KnowledgeService } from '../../shared/knowledge';
 import type { MemoryService } from '../../shared/memory';
 import type { WorkspacePlanner } from '../../shared/planning';
-import type { ButlerStreamListener } from '../../shared/butler-stream';
+import type { LongPlanService } from '../../shared/plans';
+import type { ProfileService } from '../../shared/profile';
+import type { SearchService } from '../../shared/search';
+import type { ButlerReference, ButlerStreamListener } from '../../shared/butler-stream';
 import { butlerToolLabel } from '../../shared/butler-stream';
+import {
+  DEFAULT_AGENT_PERMISSIONS,
+  normalizePermissions,
+  type AgentPermissions
+} from '../../shared/attachments';
 import type {
   ModelClient,
   ModelMessage,
@@ -34,6 +42,8 @@ import {
 } from '../agent/model-retry';
 import type { ConversationStore } from '../conversations/conversation-store';
 import { gatherContext, type ButlerContext } from './context';
+import { prepareAttachments, type PreparedAttachments } from './attachments';
+import { collectReferences } from './references';
 import { buildSystemPrompt, buildUserPrompt } from './prompt';
 import { buildTemplateReply, type TemplateOptions } from './template';
 import {
@@ -68,7 +78,12 @@ export interface ButlerServiceOptions {
   conversationStore?: ConversationStore | null;
   memoryService?: MemoryService | null;
   planner?: WorkspacePlanner | null;
+  /** Lets the butler create long plans (the 长期计划 page) through the service. */
+  longPlanService?: LongPlanService | null;
   knowledgeService?: KnowledgeService | null;
+  profileService?: ProfileService | null;
+  /** Lazy getter keeps the search watcher off until a turn actually searches. */
+  getSearchService?: (() => SearchService | null) | null;
   now?: () => Date;
   /** Maximum number of tool-call rounds before the butler stops. */
   maxToolSteps?: number;
@@ -87,7 +102,10 @@ export class ButlerServiceImpl implements ButlerService {
   private readonly conversationStore: ConversationStore | null;
   private readonly memoryService: MemoryService | null;
   private readonly planner: WorkspacePlanner | null;
+  private readonly longPlanService: LongPlanService | null;
   private readonly knowledgeService: KnowledgeService | null;
+  private readonly profileService: ProfileService | null;
+  private readonly getSearchService: (() => SearchService | null) | null;
   private readonly now: () => Date;
   private readonly maxToolSteps: number;
   private readonly temperature: number | undefined;
@@ -106,7 +124,10 @@ export class ButlerServiceImpl implements ButlerService {
     this.conversationStore = options.conversationStore ?? null;
     this.memoryService = options.memoryService ?? null;
     this.planner = options.planner ?? null;
+    this.longPlanService = options.longPlanService ?? null;
     this.knowledgeService = options.knowledgeService ?? null;
+    this.profileService = options.profileService ?? null;
+    this.getSearchService = options.getSearchService ?? null;
     this.now = options.now ?? (() => new Date());
     this.maxToolSteps = Math.max(
       0,
@@ -126,24 +147,30 @@ export class ButlerServiceImpl implements ButlerService {
       this.workspaceService,
       effectiveInput,
       this.now(),
-      this.knowledgeService
+      this.knowledgeService,
+      this.profileService
     );
     const cwd = this.cwdFor(context);
+    const references = await this.loadReferences(context, message);
 
     if (!message) {
       const text = buildTemplateReply(context, input, { reason: 'empty-message' });
-      await this.persistAssistant(conversation, input, text, []);
+      await this.persistAssistant(conversation, input, text, [], references);
       return { text, ...(conversation ? { conversationId: conversation.id } : {}) };
     }
 
     if (!client) {
       const text = buildTemplateReply(context, input, { reason: 'no-key' });
-      await this.persistAssistant(conversation, input, text, []);
+      await this.persistAssistant(conversation, input, text, [], references);
       return { text, ...(conversation ? { conversationId: conversation.id } : {}) };
     }
 
     const summaryUsage = await this.maybeSummarize(conversation, client);
-    const messages = this.buildModelMessages(context, conversation, input);
+    const permissions = normalizePermissions(
+      input.permissions ?? conversation?.permissions ?? DEFAULT_AGENT_PERMISSIONS
+    );
+    const prepared = await prepareAttachments(input.attachments);
+    const messages = this.buildModelMessages(context, conversation, input, prepared);
     const steps: ConversationStep[] = [];
     let usage = summaryUsage;
     let lastText = '';
@@ -151,9 +178,10 @@ export class ButlerServiceImpl implements ButlerService {
     let retried = false;
 
     try {
+      try {
       for (let stepIndex = 0; stepIndex <= this.maxToolSteps; stepIndex += 1) {
         const outcome = await runWithModelRetry(
-          () => this.complete(messages, undefined, client, true, cwd),
+          () => this.complete(messages, undefined, client, true, cwd, permissions),
           { attempts: this.modelRetry.attempts, delayMs: this.modelRetry.delayMs }
         );
         if (outcome.attempts > 1) retried = true;
@@ -164,7 +192,7 @@ export class ButlerServiceImpl implements ButlerService {
         const toolCalls = response.toolCalls ?? [];
         if (toolCalls.length === 0) {
           const text = lastText || '我暂时没有整理出回复，请再试一次。';
-          await this.persistAssistant(conversation, input, text, steps);
+          await this.persistAssistant(conversation, input, text, steps, references);
           return {
             text,
             ...(usage ? { usage } : {}),
@@ -174,7 +202,7 @@ export class ButlerServiceImpl implements ButlerService {
 
         if (stepIndex === this.maxToolSteps) {
           const text = buildTemplateReply(context, input, { reason: 'tool-limit' });
-          await this.persistAssistant(conversation, input, text, steps);
+          await this.persistAssistant(conversation, input, text, steps, references);
           return {
             text,
             ...(usage ? { usage } : {}),
@@ -190,7 +218,7 @@ export class ButlerServiceImpl implements ButlerService {
 
         for (const call of toolCalls) {
           const step = this.startToolStep(call, steps);
-          const result = await this.runTool(call, context);
+          const result = await this.runTool(call, context, permissions);
           if (!result.ok) lastToolFailure = call.name;
           this.finishToolStep(step, result);
           await this.linkCreatedWorkspace(call, result, context, conversation);
@@ -212,17 +240,20 @@ export class ButlerServiceImpl implements ButlerService {
         lastToolFailure,
         wasRetried
       );
-      await this.persistAssistant(conversation, input, fallback.text, steps);
+      await this.persistAssistant(conversation, input, fallback.text, steps, references);
       return { ...fallback, ...(conversation ? { conversationId: conversation.id } : {}) };
     }
 
     const text = lastText || buildTemplateReply(context, input, { reason: 'tool-limit' });
-    await this.persistAssistant(conversation, input, text, steps);
+    await this.persistAssistant(conversation, input, text, steps, references);
     return {
       text,
       ...(usage ? { usage } : {}),
       ...(conversation ? { conversationId: conversation.id } : {})
     };
+    } finally {
+      await prepared.cleanup();
+    }
   }
 
   async stream(
@@ -239,13 +270,16 @@ export class ButlerServiceImpl implements ButlerService {
       this.workspaceService,
       effectiveInput,
       this.now(),
-      this.knowledgeService
+      this.knowledgeService,
+      this.profileService
     );
     const cwd = this.cwdFor(context);
+    const references = await this.loadReferences(context, message);
+    if (references.length > 0) onEvent({ type: 'references', items: references });
 
     if (!message) {
       const text = buildTemplateReply(context, input, { reason: 'empty-message' });
-      await this.persistAssistant(conversation, input, text, []);
+      await this.persistAssistant(conversation, input, text, [], references);
       onEvent({ type: 'text', text });
       onEvent({ type: 'done', text });
       return { text, ...(conversation ? { conversationId: conversation.id } : {}) };
@@ -253,7 +287,7 @@ export class ButlerServiceImpl implements ButlerService {
 
     if (!client) {
       const text = buildTemplateReply(context, input, { reason: 'no-key' });
-      await this.persistAssistant(conversation, input, text, []);
+      await this.persistAssistant(conversation, input, text, [], references);
       onEvent({ type: 'text', text });
       onEvent({ type: 'done', text });
       return { text, ...(conversation ? { conversationId: conversation.id } : {}) };
@@ -261,7 +295,11 @@ export class ButlerServiceImpl implements ButlerService {
 
     const summaryUsage = await this.maybeSummarize(conversation, client, signal);
     throwIfAborted(signal);
-    const messages = this.buildModelMessages(context, conversation, input);
+    const permissions = normalizePermissions(
+      input.permissions ?? conversation?.permissions ?? DEFAULT_AGENT_PERMISSIONS
+    );
+    const prepared = await prepareAttachments(input.attachments);
+    const messages = this.buildModelMessages(context, conversation, input, prepared);
     const steps: ConversationStep[] = [];
     let usage = summaryUsage;
     let lastToolFailure: string | undefined;
@@ -269,7 +307,7 @@ export class ButlerServiceImpl implements ButlerService {
     let retried = false;
 
     const finish = async (text: string): Promise<SendMessageResult> => {
-      await this.persistAssistant(conversation, input, text, steps);
+      await this.persistAssistant(conversation, input, text, steps, references);
       onEvent({ type: 'done', text, ...(usage ? { usage } : {}) });
       return {
         text,
@@ -279,6 +317,7 @@ export class ButlerServiceImpl implements ButlerService {
     };
 
     try {
+      try {
       for (let stepIndex = 0; stepIndex <= this.maxToolSteps; stepIndex += 1) {
         throwIfAborted(signal);
         let attemptEmitted = false;
@@ -291,21 +330,27 @@ export class ButlerServiceImpl implements ButlerService {
             attemptEmitted = false;
             if (supportsStreaming(client)) {
               return client.stream(
-                this.buildRequest(messages, signal, cwd),
+                this.buildRequest(messages, signal, cwd, permissions),
                 (event) => {
                   attemptEmitted = true;
                   if (event.type === 'reasoning') {
                     onEvent({ type: 'reasoning', text: event.text });
-                  } else {
-                    streamedText = true;
-                    streamedTextContent += event.text;
-                    streamedSoFar += event.text;
-                    onEvent({ type: 'text', text: event.text });
+                    return;
                   }
+                  // Native CLI tool lifecycles go straight to the view; they are
+                  // not ASAKI tool calls and do not change the answer text.
+                  if (event.type === 'tool-start' || event.type === 'tool-result') {
+                    onEvent(event);
+                    return;
+                  }
+                  streamedText = true;
+                  streamedTextContent += event.text;
+                  streamedSoFar += event.text;
+                  onEvent({ type: 'text', text: event.text });
                 }
               );
             }
-            return this.complete(messages, signal, client, true, cwd);
+            return this.complete(messages, signal, client, true, cwd, permissions);
           },
           {
             attempts: this.modelRetry.attempts,
@@ -353,7 +398,7 @@ export class ButlerServiceImpl implements ButlerService {
           throwIfAborted(signal);
           const step = this.startToolStep(call, steps);
           onEvent({ type: 'tool-start', id: call.id, name: call.name, label: step.label });
-          const result = await this.runTool(call, context, signal);
+          const result = await this.runTool(call, context, permissions, signal);
           if (!result.ok) {
             lastToolFailure = call.name;
           }
@@ -378,7 +423,7 @@ export class ButlerServiceImpl implements ButlerService {
     } catch (error) {
       if (isAbortError(error) || signal?.aborted) {
         const text = streamedSoFar.trim() || '（已停止生成）';
-        await this.persistAssistant(conversation, input, text, steps);
+        await this.persistAssistant(conversation, input, text, steps, references);
         onEvent({
           type: 'done',
           text,
@@ -401,7 +446,7 @@ export class ButlerServiceImpl implements ButlerService {
       });
       if (streamedSoFar.trim()) {
         const text = `${streamedSoFar.trim()}\n\n（模型连接中断，以上内容可能不完整。）`;
-        await this.persistAssistant(conversation, input, text, steps);
+        await this.persistAssistant(conversation, input, text, steps, references);
         onEvent({ type: 'done', text, ...(usage ? { usage } : {}) });
         return {
           text,
@@ -410,7 +455,7 @@ export class ButlerServiceImpl implements ButlerService {
         };
       }
       const fallback = this.failureResult(context, input, usage, lastToolFailure, wasRetried);
-      await this.persistAssistant(conversation, input, fallback.text, steps);
+      await this.persistAssistant(conversation, input, fallback.text, steps, references);
       onEvent({
         type: 'done',
         text: fallback.text,
@@ -425,6 +470,9 @@ export class ButlerServiceImpl implements ButlerService {
         ...(lastToolFailure ? { toolName: lastToolFailure } : {})
       })
     );
+    } finally {
+      await prepared.cleanup();
+    }
   }
 
   /** Conversation override first; any failure falls back to the default client. */
@@ -459,16 +507,22 @@ export class ButlerServiceImpl implements ButlerService {
   private buildModelMessages(
     context: ButlerContext,
     conversation: Conversation | null,
-    input: SendMessageInput
+    input: SendMessageInput,
+    prepared?: PreparedAttachments
   ): ModelMessage[] {
     const summary = conversation?.summary?.trim();
     const system = summary
       ? `${buildSystemPrompt(context)}\n\n## 此前对话摘要\n${summary}\n（更早的消息已压缩在这里；最近的消息仍以原文为准。）`
       : buildSystemPrompt(context);
+    const userText = prepared?.text
+      ? `${buildUserPrompt(input)}\n\n## 附件内容\n${prepared.text}`
+      : buildUserPrompt(input);
+    const userMessage: ModelMessage = { role: 'user', content: userText };
+    if (prepared && prepared.images.length > 0) userMessage.images = prepared.images;
     return [
       { role: 'system', content: system },
       ...(conversation ? this.historyBefore(conversation, input.message.trim()) : []),
-      { role: 'user', content: buildUserPrompt(input) }
+      userMessage
     ];
   }
 
@@ -550,7 +604,8 @@ export class ButlerServiceImpl implements ButlerService {
     conversation: Conversation | null,
     input: SendMessageInput,
     text: string,
-    steps: ConversationStep[]
+    steps: ConversationStep[],
+    references: ButlerReference[] = []
   ): Promise<void> {
     if (!this.conversationStore || !conversation) return;
     const message: ConversationMessage = {
@@ -559,6 +614,7 @@ export class ButlerServiceImpl implements ButlerService {
       text,
       createdAt: this.now().toISOString(),
       ...(steps.length > 0 ? { steps: steps.map((step) => ({ ...step })) } : {}),
+      ...(references.length > 0 ? { references: references.map((entry) => ({ ...entry })) } : {}),
       source: 'butler'
     };
     await this.conversationStore.appendMessage(conversation.id, message);
@@ -601,7 +657,8 @@ export class ButlerServiceImpl implements ButlerService {
   private buildRequest(
     messages: ModelMessage[],
     signal?: AbortSignal,
-    cwd?: string
+    cwd?: string,
+    permissions?: AgentPermissions
   ) {
     return {
       messages,
@@ -611,6 +668,13 @@ export class ButlerServiceImpl implements ButlerService {
       ...(this.temperature !== undefined ? { temperature: this.temperature } : {}),
       ...(this.maxTokens !== undefined ? { maxTokens: this.maxTokens } : {}),
       ...(cwd ? { cwd } : {}),
+      ...(permissions
+        ? {
+            webTools: permissions.web,
+            allowWrites: permissions.write,
+            allowShell: permissions.shell
+          }
+        : {}),
       ...(signal ? { signal } : {})
     };
   }
@@ -620,9 +684,10 @@ export class ButlerServiceImpl implements ButlerService {
     signal: AbortSignal | undefined,
     client: ModelClient,
     withTools = true,
-    cwd?: string
+    cwd?: string,
+    permissions?: AgentPermissions
   ): Promise<ModelResponse> {
-    const request = this.buildRequest(messages, signal, cwd);
+    const request = this.buildRequest(messages, signal, cwd, permissions);
     if (!withTools) delete request.tools;
     return client.complete(request);
   }
@@ -640,6 +705,7 @@ export class ButlerServiceImpl implements ButlerService {
   private async runTool(
     call: { id: string; name: string; arguments: unknown },
     context: ButlerContext,
+    permissions: AgentPermissions,
     signal?: AbortSignal
   ): Promise<ButlerToolResult> {
     if (!this.workspaceService) {
@@ -656,10 +722,30 @@ export class ButlerServiceImpl implements ButlerService {
       workspace: this.workspaceService,
       workspaceId: context.workspaceId,
       memory: this.memoryService,
+      profile: this.profileService,
       planner: this.planner,
+      longPlans: this.longPlanService,
       knowledge: this.knowledgeService,
+      permissions,
       now: this.now,
       ...(signal ? { signal } : {})
+    });
+  }
+
+  /**
+   * Records the profile facts and vault records this turn actually used.
+   * Retrieval is best-effort: search failures never block a reply.
+   */
+  private async loadReferences(
+    context: ButlerContext,
+    message: string
+  ): Promise<ButlerReference[]> {
+    if (message.trim().length === 0) return [];
+    return collectReferences({
+      profile: context.profile,
+      getSearch: this.getSearchService,
+      query: message,
+      ...(context.workspaceId ? { workspaceId: context.workspaceId } : {})
     });
   }
 

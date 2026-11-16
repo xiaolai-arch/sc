@@ -168,6 +168,7 @@ test('only the model-error template mentions the retry', () => {
     workspaces: [],
     tasks: [],
     memory: [],
+    profile: [],
     knowledge: [],
     contextError: false
   };

@@ -14,6 +14,7 @@ import { isLocalDateTime } from '../../shared/date';
  *   <root>/knowledge/topics/*.md             knowledge topics (global + per workspace)
  *   <root>/knowledge/notes/*.md              user-authored note per knowledge topic
  *   <root>/reminders.md                      reminders are vault-global
+ *   <root>/profile.md                        personal profile (vault-global)
  *
  * Frontmatter is the machine-readable source of truth; the markdown body is a
  * human-friendly rendering that may be edited freely in Obsidian.
@@ -101,6 +102,11 @@ export function reviewFile(root: string, workspaceId: string | undefined, date: 
 
 export function remindersFile(root: string): string {
   return join(root, 'reminders.md');
+}
+
+/** Vault-wide personal profile (not tied to one workspace). */
+export function profileFile(root: string): string {
+  return join(root, 'profile.md');
 }
 
 export function knowledgeDir(root: string): string {

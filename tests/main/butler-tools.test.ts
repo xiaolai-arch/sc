@@ -1,5 +1,6 @@
 import { createButlerTools, executeButlerTool } from '../../src/main/butler/tools';
 import type { KnowledgeService } from '../../src/shared/knowledge';
+import type { ProfileService } from '../../src/shared/profile';
 import type { WorkspaceService } from '../../src/shared/workspace';
 
 function knowledgeStub(overrides: Partial<KnowledgeService> = {}): KnowledgeService {
@@ -454,6 +455,85 @@ test('plans a workspace and persists the plan tasks', async () => {
   });
 });
 
+test('creates a long plan through the long plan service', async () => {
+  const create = vi.fn(async (input: {
+    workspaceId: string;
+    goal: string;
+    weeks: number;
+    weeklyHours?: number;
+  }) => ({
+    id: 'lp-1',
+    workspaceId: input.workspaceId,
+    goal: input.goal,
+    startDate: '2026-11-16',
+    weeks: input.weeks,
+    weeklyHours: input.weeklyHours ?? 10,
+    generatedBy: 'agent',
+    createdAt: '2026-11-15T09:00:00.000Z',
+    updatedAt: '2026-11-15T09:00:00.000Z',
+    phases: [
+      {
+        id: 'ph1',
+        title: '起步',
+        subtitle: '',
+        goal: '',
+        weeks: [
+          {
+            id: 'w1',
+            number: 1,
+            title: 'W47',
+            goal: '',
+            startDate: '2026-11-16',
+            endDate: '2026-11-22',
+            days: [],
+            checks: []
+          }
+        ]
+      }
+    ]
+  }));
+  const result = await executeButlerTool(
+    { id: 'c-lp', name: 'create_long_plan', arguments: { weeks: 6, weeklyHours: 10 } },
+    tools,
+    {
+      workspace: {
+        ...workspaceService,
+        getWorkspaceSnapshot: async (workspaceId: string) => ({
+          workspace: {
+            id: workspaceId,
+            name: '考研',
+            kind: 'exam',
+            color: '#000000',
+            goal: '2028 中科大软件工程',
+            description: ''
+          },
+          tasks: [],
+          notes: [],
+          memory: [],
+          reminders: []
+        })
+      } as unknown as WorkspaceService,
+      workspaceId: 'ws-exam',
+      longPlans: { create } as never,
+      now: () => new Date()
+    }
+  );
+
+  expect(result.ok).toBe(true);
+  expect(create).toHaveBeenCalledWith(
+    expect.objectContaining({
+      workspaceId: 'ws-exam',
+      goal: '2028 中科大软件工程',
+      weeks: 6,
+      weeklyHours: 10
+    })
+  );
+  expect(JSON.parse(result.content)).toMatchObject({
+    ok: true,
+    result: { planId: 'lp-1', workspaceId: 'ws-exam', weeks: 6 }
+  });
+});
+
 test('updates workspace metadata', async () => {
   const result = await executeButlerTool(
     {
@@ -483,4 +563,43 @@ test('does not start a tool after generation was stopped', async () => {
     )
   ).rejects.toThrow(/已停止生成/);
   expect(execute).not.toHaveBeenCalled();
+});
+
+test('save_profile keeps a model guess pending unless the user confirmed it', async () => {
+  const tools = createButlerTools();
+  const create = vi.fn(async (input: Parameters<ProfileService['create']>[0]) => ({
+    id: 'p1',
+    category: input.category,
+    text: input.text,
+    source: 'model' as const,
+    confidence: 'candidate' as const,
+    status: 'active' as const,
+    origin: input.origin ?? '对话',
+    createdAt: '2026-11-02T09:00:00.000Z',
+    updatedAt: '2026-11-02T09:00:00.000Z'
+  }));
+  const profile = { create } as unknown as ProfileService;
+
+  await executeButlerTool(
+    {
+      id: '1',
+      name: 'save_profile',
+      arguments: { category: 'constraints', text: '工作日只能学一小时' }
+    },
+    tools,
+    {
+      workspace: workspaceService,
+      profile,
+      now: () => new Date('2026-11-02T09:00:00.000Z')
+    }
+  );
+
+  expect(create).toHaveBeenCalledWith(
+    expect.objectContaining({
+      category: 'constraints',
+      text: '工作日只能学一小时',
+      source: 'model',
+      confidence: 'candidate'
+    })
+  );
 });
