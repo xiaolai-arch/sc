@@ -8,6 +8,12 @@ import type {
   ConversationSummary,
   CreateConversationInput
 } from '../../shared/conversations';
+import type { ButlerReference } from '../../shared/butler-stream';
+import {
+  normalizePermissions,
+  type AgentPermissions,
+  type MessageAttachment
+} from '../../shared/attachments';
 
 const DEFAULT_TITLE = '新对话';
 const TITLE_LIMIT = 24;
@@ -73,6 +79,58 @@ function normalizeStep(value: unknown): ConversationStep | null {
   return { id, name, label, status, ...(detail ? { detail } : {}) };
 }
 
+const REFERENCE_KINDS = [
+  'profile',
+  'workspace',
+  'note',
+  'task',
+  'memory',
+  'plan',
+  'review',
+  'knowledge-topic',
+  'practice-set',
+  'practice-question',
+  'practice-mistake'
+] as const;
+
+function normalizeReference(value: unknown): ButlerReference | null {
+  if (!isRecord(value)) return null;
+  const id = typeof value['id'] === 'string' ? value['id'] : '';
+  const title = typeof value['title'] === 'string' ? value['title'] : '';
+  const kind = value['kind'];
+  if (
+    !id ||
+    !title ||
+    typeof kind !== 'string' ||
+    !(REFERENCE_KINDS as readonly string[]).includes(kind)
+  ) {
+    return null;
+  }
+  const detail = typeof value['detail'] === 'string' ? value['detail'] : undefined;
+  const workspaceId = typeof value['workspaceId'] === 'string' ? value['workspaceId'] : undefined;
+  const path = typeof value['path'] === 'string' ? value['path'] : undefined;
+  return {
+    id,
+    kind: kind as ButlerReference['kind'],
+    title,
+    ...(detail ? { detail } : {}),
+    ...(workspaceId ? { workspaceId } : {}),
+    ...(path ? { path } : {})
+  };
+}
+
+function normalizeAttachment(value: unknown): MessageAttachment | null {
+  if (!isRecord(value)) return null;
+  const name = typeof value['name'] === 'string' ? value['name'].trim() : '';
+  const mediaType = typeof value['mediaType'] === 'string' ? value['mediaType'] : '';
+  const size = typeof value['size'] === 'number' && Number.isFinite(value['size'])
+    ? value['size']
+    : 0;
+  const kind = value['kind'] === 'image' || value['kind'] === 'text' ? value['kind'] : null;
+  if (!name || !kind) return null;
+  return { name: Array.from(name).slice(0, 160).join(''), mediaType, size, kind };
+}
+
 function normalizeMessage(value: unknown): ConversationMessage | null {
   if (!isRecord(value)) return null;
   const id = typeof value['id'] === 'string' ? value['id'] : '';
@@ -98,12 +156,24 @@ function normalizeMessage(value: unknown): ConversationMessage | null {
       ? value['trigger']
       : undefined;
 
+  const references = Array.isArray(value['references'])
+    ? value['references']
+        .map(normalizeReference)
+        .filter((entry): entry is ButlerReference => entry !== null)
+    : [];
+  const attachments = Array.isArray(value['attachments'])
+    ? value['attachments']
+        .map(normalizeAttachment)
+        .filter((entry): entry is MessageAttachment => entry !== null)
+    : [];
   return {
     id,
     role,
     text,
     createdAt,
     ...(steps.length > 0 ? { steps } : {}),
+    ...(references.length > 0 ? { references } : {}),
+    ...(attachments.length > 0 ? { attachments } : {}),
     ...(source ? { source } : {}),
     ...(trigger ? { trigger } : {})
   };
@@ -135,6 +205,9 @@ function normalizeConversation(value: unknown): Conversation | null {
     summary && typeof rawCount === 'number' && Number.isInteger(rawCount) && rawCount >= 0
       ? rawCount
       : undefined;
+  const permissions = isRecord(value['permissions'])
+    ? normalizePermissions(value['permissions'])
+    : undefined;
 
   return {
     id,
@@ -143,6 +216,7 @@ function normalizeConversation(value: unknown): Conversation | null {
     ...(workspaceId ? { workspaceId } : {}),
     ...(value['pinned'] === true ? { pinned: true } : {}),
     ...(model ? { model } : {}),
+    ...(permissions ? { permissions } : {}),
     ...(summary && summaryCount !== undefined ? { summary, summaryCount } : {}),
     createdAt,
     updatedAt,
@@ -216,6 +290,7 @@ export class ConversationStore {
         title,
         kind: input.kind ?? 'chat',
         ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+        ...(input.permissions ? { permissions: normalizePermissions(input.permissions) } : {}),
         createdAt: timestamp,
         updatedAt: timestamp,
         messages: []
@@ -287,6 +362,20 @@ export class ConversationStore {
         delete conversation.model;
       }
       // Keep the list order stable: a model change is not new activity.
+      await this.writeFile(conversation);
+      return clone(conversation);
+    });
+  }
+
+  async setPermissions(
+    id: string,
+    permissions: AgentPermissions
+  ): Promise<Conversation> {
+    return this.runExclusive(async () => {
+      const conversation = await this.readFile(assertSafeId(id));
+      if (conversation === null) throw new Error(`Conversation not found: ${id}`);
+      conversation.permissions = normalizePermissions(permissions);
+      // Keep the list order stable: changing permissions is not new activity.
       await this.writeFile(conversation);
       return clone(conversation);
     });

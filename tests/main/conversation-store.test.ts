@@ -202,6 +202,57 @@ test('sets and clears the per-conversation model without touching updatedAt', as
   expect((await store.get(created.id))?.model).toBeUndefined();
 });
 
+test('persists per-conversation permissions without touching updatedAt', async () => {
+  const dir = await tempDir();
+  let now = new Date('2026-11-01T09:00:00.000Z');
+  const store = new ConversationStore(dir, { now: () => now });
+
+  const created = await store.create({
+    permissions: { web: true, write: false, shell: true }
+  });
+  // Shell implies write: a stored combination that grants commands but denies
+  // file edits is not meaningful, so it normalizes to the safer reading.
+  expect(created.permissions).toEqual({ web: true, write: true, shell: true });
+
+  await store.appendMessage(
+    created.id,
+    message('m1', 'user', '帮我查资料', '2026-11-01T09:01:00.000Z')
+  );
+  const before = (await store.get(created.id))!.updatedAt;
+
+  now = new Date('2026-11-02T09:00:00.000Z');
+  const updated = await store.setPermissions(created.id, {
+    web: false,
+    write: true,
+    shell: false
+  });
+  expect(updated.permissions).toEqual({ web: false, write: true, shell: false });
+  expect(updated.updatedAt).toBe(before);
+  expect((await store.get(created.id))?.permissions).toEqual({
+    web: false,
+    write: true,
+    shell: false
+  });
+});
+
+test('normalizes permissions from stored files to safe defaults', async () => {
+  const dir = await tempDir();
+  const store = new ConversationStore(dir);
+  const created = await store.create();
+
+  const raw = JSON.parse(await readFile(join(dir, `${created.id}.json`), 'utf8'));
+  raw.permissions = { web: false, write: 'yes', shell: true };
+  await writeFile(join(dir, `${created.id}.json`), JSON.stringify(raw), 'utf8');
+
+  // Unknown fields fall back to defaults; shell only ever comes from an
+  // explicit `true`, so a corrupt file cannot silently grant command access.
+  expect((await store.get(created.id))?.permissions).toEqual({
+    web: false,
+    write: true,
+    shell: true
+  });
+});
+
 test('truncates long conversation models and normalizes stored files', async () => {
   const dir = await tempDir();
   const store = new ConversationStore(dir);
@@ -419,4 +470,36 @@ test('skips greetings and punctuation-only messages for the auto title', async (
     message('m6', 'user', '帮我安排明天的复习', '2026-11-01T09:02:00.000Z')
   );
   expect(titled.title).toBe('帮我安排明天的复习');
+});
+
+test('keeps the references an answer drew on', async () => {
+  const dir = await tempDir();
+  const store = new ConversationStore(dir, {
+    now: () => new Date('2026-11-01T09:00:00.000Z')
+  });
+  const created = await store.create();
+  await store.appendMessage(created.id, {
+    id: 'm1',
+    role: 'assistant',
+    text: '按你每天一小时来排。',
+    createdAt: '2026-11-01T09:02:00.000Z',
+    references: [
+      {
+        id: 'p1',
+        kind: 'profile',
+        title: '工作日每天只能安排 1 小时',
+        detail: '偏好与约束 · 你提供'
+      }
+    ]
+  });
+
+  const fetched = await store.get(created.id);
+  expect(fetched?.messages[0]?.references).toEqual([
+    {
+      id: 'p1',
+      kind: 'profile',
+      title: '工作日每天只能安排 1 小时',
+      detail: '偏好与约束 · 你提供'
+    }
+  ]);
 });
