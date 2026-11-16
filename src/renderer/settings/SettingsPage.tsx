@@ -661,7 +661,7 @@ export function SettingsPage({
           </h2>
           {!page ? (
             <p className={embedded ? 'mt-0.5 text-[12px] text-gray-500 dark:text-[#8e8e93]' : 'mt-2 text-gray-500 dark:text-[#a1a1a6]'}>
-              管理模型、预算与提醒。
+              管理个人资料、模型、提醒与数据。
             </p>
           ) : null}
         </div>

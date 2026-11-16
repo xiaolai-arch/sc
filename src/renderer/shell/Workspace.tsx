@@ -1681,7 +1681,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
           {section === 'settings' ? (
             <PageFrame
               title="设置"
-              subtitle="模型、预算与提醒"
+              subtitle="个人、模型与数据"
               onOpenSidebar={openSidebar}
               action={
                 <button
