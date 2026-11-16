@@ -4,6 +4,8 @@ import type {
   ConversationSummary,
   CreateConversationInput
 } from './conversations';
+import type { ConversationRunSnapshot } from './butler-run';
+import type { AgentPermissions } from './attachments';
 import type { KnowledgeApi } from './knowledge';
 import type {
   CreateMemoryInput,
@@ -28,6 +30,7 @@ import type {
 } from './practice';
 import type { LongPlanApi } from './plans';
 import type { PlanWorkspaceInput, WorkspacePlan } from './planning';
+import type { ProfileApi } from './profile';
 import type { SearchResult } from './search';
 import type { AppSettings, NotificationSettings, ProviderConfig, ReviewAnswers } from './types';
 import type { LocalCliScanResult } from './local-cli';
@@ -134,8 +137,17 @@ export interface ConversationApi {
   searchConversations(query: string): Promise<ConversationSummary[]>;
   /** Per-conversation model override; null clears it (follow the global provider). */
   setConversationModel(id: string, model: string | null): Promise<Conversation>;
+  /** What the local agent may do in this conversation. */
+  setConversationPermissions(
+    id: string,
+    permissions: AgentPermissions
+  ): Promise<Conversation>;
   /** Abort the in-flight turn identified by the renderer's assistant message id. */
   cancelStream(messageId: string): Promise<void>;
+  /** Running and interrupted turns (the main process owns their lifecycle). */
+  listConversationRuns?(): Promise<ConversationRunSnapshot[]>;
+  /** Cancels one run by id without touching other conversations. */
+  cancelRun?(runId: string): Promise<void>;
   /** Proactive check-ins ask the renderer to open a conversation. */
   onConversationOpened(listener: (conversationId: string) => void): () => void;
   /** Global shortcut / tray asks the renderer to open the quick capture dialog. */
@@ -196,6 +208,7 @@ export interface StudyCoachApi
     ButlerService,
     PracticeApi,
     MemoryApi,
+    ProfileApi,
     KnowledgeApi,
     SearchApi,
     PlannerApi,

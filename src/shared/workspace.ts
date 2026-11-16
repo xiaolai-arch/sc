@@ -1,11 +1,16 @@
 import type { ReviewAnswers, TaskStatus } from './types';
 import type { ButlerStreamEvent } from './butler-stream';
 import type { TaskRepeat } from './recurrence';
+import type { AgentPermissions, ChatAttachment } from './attachments';
 
 export type WorkspaceKind = 'exam' | 'study' | 'project' | 'life';
 export type WorkspaceTaskStatus = TaskStatus;
 /** Whether proactive check-ins include this project; undefined means daily. */
 export type WorkspaceCheckIn = 'daily' | 'off';
+
+/** Range the UI and vault accept for the daily minute budget. */
+export const MIN_DAILY_AVAILABLE_MINUTES = 5;
+export const MAX_DAILY_AVAILABLE_MINUTES = 24 * 60;
 
 export interface Workspace {
   id: string;
@@ -15,6 +20,8 @@ export interface Workspace {
   goal: string;
   description: string;
   checkIn?: WorkspaceCheckIn;
+  /** Default minutes the user can study per day; planning starts from it. */
+  availableMinutes?: number;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -35,6 +42,10 @@ export interface WorkspaceTask {
   recurredFrom?: string;
   /** Local start time (YYYY-MM-DDTHH:mm) pinned on the daily schedule. */
   startAt?: string;
+  /** Long-plan provenance: the plan and day item this task came from. */
+  planId?: string;
+  planWeekId?: string;
+  planItemId?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -94,6 +105,8 @@ export interface UpdateWorkspaceInput {
   goal?: string;
   description?: string;
   checkIn?: WorkspaceCheckIn;
+  /** Daily minutes the planner should assume; omit to keep the current value. */
+  availableMinutes?: number;
 }
 
 export interface WorkspaceOnboardingInput {
@@ -114,6 +127,10 @@ export interface CreateTaskInput {
   /** Local start time (YYYY-MM-DDTHH:mm) to pin on the daily schedule. */
   startAt?: string;
   repeat?: TaskRepeat;
+  /** Long-plan provenance; the same plan item never creates two tasks. */
+  planId?: string;
+  planWeekId?: string;
+  planItemId?: string;
 }
 
 export interface UpdateWorkspaceTaskInput {
@@ -194,6 +211,10 @@ export interface SendMessageInput {
   conversationId?: string;
   /** Renderer-provided id so live reasoning can be reattached after reload. */
   assistantMessageId?: string;
+  /** Files to give the model for this turn (images are sent inline). */
+  attachments?: ChatAttachment[];
+  /** Capabilities for this turn; omitted keeps the native-agent defaults. */
+  permissions?: AgentPermissions;
 }
 
 export interface SendMessageResult {

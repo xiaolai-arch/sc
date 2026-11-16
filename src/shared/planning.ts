@@ -7,6 +7,9 @@
 /** Who produced the plan: the injected model or the deterministic template. */
 export type WorkspacePlanGeneratedBy = 'agent' | 'template';
 
+/** Which input supplied the daily minute budget the plan was built around. */
+export type AvailableMinutesSource = 'input' | 'workspace' | 'default';
+
 export interface WorkspacePlanTask {
   title: string;
   subject: string;
@@ -21,6 +24,9 @@ export interface WorkspacePlan {
   date: string;
   tasks: WorkspacePlanTask[];
   generatedBy: WorkspacePlanGeneratedBy;
+  /** Minutes the plan was built around, and where that number came from. */
+  availableMinutes?: number;
+  availableMinutesSource?: AvailableMinutesSource;
 }
 
 export interface PlanWorkspaceInput {
