@@ -62,7 +62,7 @@ test.describe('ASAKI desktop', () => {
         await expect(
           detail.getByRole('heading', { name: '系统学习 AI Agent，能独立做项目' })
         ).toBeVisible({ timeout: 60_000 });
-        await expect(detail.getByText(/通用框架/)).toBeVisible();
+        await expect(detail.getByText(/模板生成的备用计划/)).toBeVisible();
 
         await detail.getByRole('button', { name: '重排剩余安排' }).click();
         await expect(page.getByText(/会保留已经勾选进度的周/)).toBeVisible();

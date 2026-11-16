@@ -130,12 +130,33 @@ test('refuses to create a second review for the same date and workspace', async 
   renderPage({ reviews: [makeReview({ date: '2026-10-30' })], onSubmitReview });
 
   await userEvent.click(screen.getByRole('button', { name: '补录复盘' }));
+  // The form now defaults to the first project, so pick 全局 explicitly to
+  // collide with the existing workspace-less review.
+  await pickOption('工作区', '全局（不选工作区）');
   fireEvent.change(screen.getByLabelText('日期'), { target: { value: '2026-10-30' } });
   await userEvent.type(screen.getByLabelText('完成'), '重复的一次');
   await userEvent.click(screen.getByRole('button', { name: '保存' }));
 
   expect(screen.getByRole('alert')).toHaveTextContent('这一天已经有复盘了');
   expect(onSubmitReview).not.toHaveBeenCalled();
+});
+
+test('defaults the backfill workspace to the first project so synthesis runs', async () => {
+  const onSubmitReview = vi.fn(async () => undefined);
+  renderPage({ onSubmitReview });
+
+  await userEvent.click(screen.getByRole('button', { name: '补录复盘' }));
+  expect(screen.getByLabelText('工作区')).toHaveTextContent('考研');
+
+  fireEvent.change(screen.getByLabelText('日期'), { target: { value: '2026-10-31' } });
+  await userEvent.type(screen.getByLabelText('完成'), '完成数学 10 题');
+  await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+  await waitFor(() =>
+    expect(onSubmitReview).toHaveBeenCalledWith(
+      expect.objectContaining({ date: '2026-10-31', workspaceId: 'kaoyan' })
+    )
+  );
 });
 
 test('expands and collapses a review to read the full text', async () => {

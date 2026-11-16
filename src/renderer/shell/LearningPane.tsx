@@ -19,6 +19,8 @@ import { PracticeSetDialog } from './PracticeSetDialog';
 type LearningPaneProps = {
   set: PracticeSet | null;
   workspace: Workspace | null;
+  /** All projects, so the practice dialog can show/choose where a set lands. */
+  workspaces?: Workspace[];
   notes: WorkspaceNote[];
   mistakes: PracticeMistake[];
   /** Active mistakes due today, used to highlight and start a review. */
@@ -36,6 +38,7 @@ type LearningPaneProps = {
 export function LearningPane({
   set,
   workspace,
+  workspaces,
   notes,
   mistakes,
   dueMistakes,
@@ -77,6 +80,7 @@ export function LearningPane({
     <PracticeSetDialog
       open={createOpen}
       workspaceId={workspace?.id ?? set?.workspaceId ?? ''}
+      workspaces={workspaces}
       onClose={() => setCreateOpen(false)}
       onCreate={onCreateSet}
     />

@@ -40,7 +40,7 @@ test('creates a plan from the sidebar and turns today’s row into schedule task
 
   const detail = await screen.findByRole('region', { name: '计划详情' });
   await within(detail).findByText('系统学习 AI Agent，能独立做项目');
-  expect(within(detail).getByText(/通用框架/)).toBeInTheDocument();
+  expect(within(detail).getByText(/模板生成的备用计划/)).toBeInTheDocument();
   expect(within(detail).getByRole('progressbar', { name: '计划进度' })).toHaveAttribute(
     'aria-valuenow',
     '0'

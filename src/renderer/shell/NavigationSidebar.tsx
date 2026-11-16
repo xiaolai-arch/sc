@@ -20,6 +20,13 @@ import {
 import type { ConversationSummary } from '../../shared/conversations';
 import type { Workspace } from '../../shared/workspace';
 
+/** The search shortcut is Cmd on macOS and Ctrl elsewhere (Workspace.tsx listens for both). */
+const SEARCH_SHORTCUT_HINT = /mac/i.test(
+  typeof navigator === 'undefined' ? '' : navigator.platform
+)
+  ? '⌘K'
+  : 'Ctrl K';
+
 export type Section =
   | 'today'
   | 'chat'
@@ -816,7 +823,7 @@ export function NavigationSidebar({
           <SearchIcon className="h-3.5 w-3.5 shrink-0" />
           <span className="min-w-0 flex-1 truncate">搜索全部内容</span>
           <kbd className="shrink-0 rounded-md border border-black/10 px-1.5 py-0.5 text-[10px] text-gray-400 dark:border-white/10 dark:text-[#8e8e93]">
-            ⌘K
+            {SEARCH_SHORTCUT_HINT}
           </kbd>
         </button>
       </div>

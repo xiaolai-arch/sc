@@ -16,8 +16,8 @@ const KIND_OPTIONS: Array<{ value: WorkspaceKind; label: string }> = [
 
 type FirstRunDialogProps = {
   open: boolean;
-  /** Marks onboarding as handled and reloads the workspace data. */
-  onComplete: () => void;
+  /** Marks onboarding as handled (with the created project's name) and reloads. */
+  onComplete: (workspaceName: string) => void;
   /** Dismisses for this session without changing the saved onboarding state. */
   onSkip: () => void;
 };
@@ -54,7 +54,7 @@ export function FirstRunDialog({ open, onComplete, onSkip }: FirstRunDialogProps
         goal: goal.trim() || '先完成今天最重要的一件事',
         description: ''
       });
-      onComplete();
+      onComplete(trimmed);
     } catch (cause) {
       setError(friendlyErrorMessage(cause, '创建项目失败，请重试。'));
     } finally {

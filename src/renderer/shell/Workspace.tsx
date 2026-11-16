@@ -1795,6 +1795,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
                 <LearningPane
                   set={selectedPracticeSet}
                   workspace={currentWorkspace}
+                  workspaces={workspaces}
                   notes={notes.filter(
                     (note) => !projectId || note.workspaceId === projectId
                   )}
@@ -1911,10 +1912,24 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
 
       <FirstRunDialog
         open={needsOnboarding && !onboardingDone}
-        onComplete={() => {
+        onComplete={(createdName) => {
           setOnboardingDone(true);
           onRefresh();
-          void reload();
+          void (async () => {
+            await reload();
+            // Land inside the project the user just created instead of the
+            // generic 日常 home, so the first screen is their own goal.
+            try {
+              const list = await window.studyCoach?.listWorkspaces();
+              const created = list?.find((workspace) => workspace.name === createdName);
+              if (created) {
+                selectProject(created.id);
+                setSection('projects');
+              }
+            } catch {
+              // Keep the default view if the lookup fails; onboarding still completed.
+            }
+          })();
         }}
         onSkip={() => setOnboardingDone(true)}
       />
@@ -2007,6 +2022,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
         open={renameSetId !== null}
         workspaceId={currentWorkspace?.id ?? ''}
         set={filteredPracticeSets.find((set) => set.id === renameSetId) ?? null}
+        workspaces={workspaces}
         onClose={() => setRenameSetId(null)}
         onUpdate={updatePracticeSet}
       />

@@ -22,6 +22,15 @@ const workspace: Workspace = {
   description: ''
 };
 
+const guokaoWorkspace: Workspace = {
+  id: 'guokao',
+  name: '2027 国考',
+  kind: 'exam',
+  color: '#ff9500',
+  goal: '行测 75+',
+  description: ''
+};
+
 const practiceSet: PracticeSet = {
   id: 'ps1',
   workspaceId: 'kaoyan',
@@ -130,6 +139,39 @@ describe('LearningPane practice UI', () => {
       ]
     });
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('shows and lets the user change the destination project on create', async () => {
+    const user = userEvent.setup();
+    const onCreateSet = vi.fn(
+      async (input: CreatePracticeSetInput): Promise<PracticeSet> => ({
+        ...practiceSet,
+        id: 'ps-new',
+        workspaceId: input.workspaceId,
+        title: input.title
+      })
+    );
+
+    renderPane({
+      workspace: guokaoWorkspace,
+      workspaces: [workspace, guokaoWorkspace],
+      onCreateSet
+    });
+
+    await user.click(screen.getByRole('button', { name: '新建练习集' }));
+    // The destination defaults to the project the pane was opened from.
+    expect(screen.getByLabelText('所属项目')).toHaveTextContent('2027 国考');
+
+    await user.type(screen.getByLabelText('标题'), '判断推理');
+    await user.type(screen.getByLabelText('第 1 题题干'), '图形推理');
+    await user.type(screen.getByLabelText('第 1 题选项 1'), 'A');
+    await user.type(screen.getByLabelText('第 1 题选项 2'), 'B');
+    await pickOption('第 1 题正确答案', 'A · A');
+    await pickOption('所属项目', '考研');
+    await user.click(screen.getByRole('button', { name: '创建练习集' }));
+
+    await waitFor(() => expect(onCreateSet).toHaveBeenCalledTimes(1));
+    expect(onCreateSet.mock.calls[0]?.[0]).toMatchObject({ workspaceId: 'kaoyan' });
   });
 
   it('keeps the create actions outside the scrollable dialog body', async () => {

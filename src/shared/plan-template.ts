@@ -106,6 +106,216 @@ function fillerWeek(goal: string): RawWeek {
   };
 }
 
+const XINGCE_MODULES = ['资料分析', '判断推理', '言语理解', '数量关系', '常识判断'];
+const SHENLUN_TYPES = ['归纳概括', '综合分析', '提出对策', '贯彻执行', '大作文'];
+
+/** 国考/省考-style exams get subject-specific template weeks instead of the generic ones. */
+function isCivilServiceExam(input: LongPlanGenerationInput): boolean {
+  const haystack = [
+    input.goal,
+    input.workspace.name,
+    input.workspace.goal ?? '',
+    input.workspace.description ?? ''
+  ].join(' ');
+  return /国考|省考|考公|公务员|行测|申论|事业单位/.test(haystack);
+}
+
+function civilFoundationWeek(module: string, shenlun: string, goal: string, hours: number): RawDay[] {
+  return [
+    {
+      tasks: [`行测 · ${module}：方法与公式梳理`, '做一组配套例题'],
+      output: `${module}方法笔记`
+    },
+    {
+      tasks: [`行测 · ${module}：限时练习 20 题`, '记录用时与错题'],
+      output: '限时练记录 + 错题清单'
+    },
+    {
+      tasks: [`申论 · ${shenlun}：真题 1 道`, '对照参考要点批改'],
+      output: `${shenlun}批改记录`
+    },
+    {
+      tasks: [`行测 · ${module}：错题重做`, '总结 2 个易错点'],
+      output: '错题复盘笔记'
+    },
+    {
+      tasks: [`行测 · ${module}：混合限时练`, '统计正确率'],
+      output: '正确率记录'
+    },
+    {
+      tasks: [`申论 · 规范词与案例积累`, '摘 3 条规范表述并仿写'],
+      output: '规范表述摘抄'
+    },
+    {
+      tasks: ['复盘本周：正确率与错题', '写下下周重点模块'],
+      output: `「${goal}」本周复盘 + 下周清单（约 ${hours} 小时）`
+    }
+  ];
+}
+
+function civilStrengthenWeek(module: string, shenlun: string, goal: string, hours: number): RawDay[] {
+  return [
+    {
+      tasks: [`行测 · ${module}：强化限时 35 题`, '逐题写一句错因'],
+      output: `${module}强化练 + 归因`
+    },
+    {
+      tasks: ['行测 · 资料分析：限时 4 篇', '目标 25 分钟内完成'],
+      output: '资料分析用时记录'
+    },
+    {
+      tasks: [`申论 · ${shenlun}：限时 40 分钟完成`, '对照要点批改并重写要点句'],
+      output: `${shenlun}限时批改`
+    },
+    {
+      tasks: ['行测 · 判断推理 + 言语理解 混合练', '分别统计正确率'],
+      output: '混合练正确率'
+    },
+    {
+      tasks: [`行测 · ${module}：错题二刷`, '更新方法论笔记'],
+      output: '错题二刷记录'
+    },
+    {
+      tasks: ['申论 · 案例与规范词积累', '仿写 2 段'],
+      output: '规范表述积累'
+    },
+    {
+      tasks: ['复盘本周：正确率与用时变化', '定下周强化重点'],
+      output: `「${goal}」本周复盘 + 下周清单（约 ${hours} 小时）`
+    }
+  ];
+}
+
+function civilSprintWeek(shenlun: string, goal: string, hours: number): RawDay[] {
+  return [
+    {
+      tasks: ['行测整卷模考（严格计时）', '记录各模块正确率与用时'],
+      output: '模考成绩单'
+    },
+    {
+      tasks: ['模考错题归因', '只重做同类型题各 5 道'],
+      output: '模考复盘记录'
+    },
+    {
+      tasks: [`申论 · ${shenlun}：限时完成`, '批改并重写要点句'],
+      output: `${shenlun}限时批改`
+    },
+    {
+      tasks: ['行测最弱模块专项回炉', '正确率达到目标再收手'],
+      output: '弱项回炉记录'
+    },
+    {
+      tasks: ['申论大作文：审题 + 提纲', '积累 3 个可用案例'],
+      output: '大作文提纲'
+    },
+    {
+      tasks: ['行测半卷限时：资料 + 判断 + 言语', '核对答案并订正'],
+      output: '半卷成绩记录'
+    },
+    {
+      tasks: ['复盘本周模考与弱项', '写下考前一周清单'],
+      output: `「${goal}」本周复盘 + 冲刺清单（约 ${hours} 小时）`
+    }
+  ];
+}
+
+function civilServiceShapes(input: LongPlanGenerationInput, total: number): PhaseShape[] {
+  const moduleAt = (weekIndex: number) => XINGCE_MODULES[weekIndex % XINGCE_MODULES.length]!;
+  const shenlunAt = (weekIndex: number) => SHENLUN_TYPES[weekIndex % SHENLUN_TYPES.length]!;
+
+  if (total <= 2) {
+    return [
+      {
+        title: '阶段一：行测 + 申论基础',
+        subtitle: '五大模块方法梳理 → 申论小题入门',
+        goal: `围绕「${input.goal}」把行测模块过一遍，申论学会小题答法`,
+        stacks: Array.from({ length: total }, (_value, weekIndex) =>
+          civilFoundationWeek(moduleAt(weekIndex), shenlunAt(weekIndex), input.goal, input.weeklyHours)
+        ),
+        checks: [
+          '行测五大模块各完成一轮方法梳理',
+          '每周都有限时练和错题记录',
+          '申论小题完成批改并重写过要点句'
+        ]
+      }
+    ];
+  }
+
+  if (total <= 4) {
+    return [
+      {
+        title: '阶段一：行测 + 申论基础',
+        subtitle: '五大模块方法梳理 → 申论小题入门',
+        goal: `围绕「${input.goal}」把行测模块过一遍，申论学会小题答法`,
+        stacks: Array.from({ length: total }, (_value, weekIndex) =>
+          civilFoundationWeek(moduleAt(weekIndex), shenlunAt(weekIndex), input.goal, input.weeklyHours)
+        ),
+        checks: [
+          '行测五大模块各完成一轮方法梳理',
+          '每周都有限时练和错题记录',
+          '申论小题完成批改并重写过要点句'
+        ]
+      },
+      {
+        title: '阶段二：专项强化',
+        subtitle: '限时上量 → 正确率与用时双达标',
+        goal: `围绕「${input.goal}」把弱项模块练到稳定`,
+        stacks: Array.from({ length: total }, (_value, weekIndex) =>
+          civilStrengthenWeek(moduleAt(weekIndex), shenlunAt(weekIndex), input.goal, input.weeklyHours)
+        ),
+        checks: [
+          '正确率比上一阶段提升或保持稳定',
+          '每道错题都有归因和二刷记录',
+          '申论小题能在限时内完成'
+        ]
+      }
+    ];
+  }
+
+  const sprintWeeks = Math.max(1, total - Math.max(1, Math.floor(total * 0.75)));
+  return [
+    {
+      title: '阶段一：行测 + 申论基础',
+      subtitle: '五大模块方法梳理 → 申论小题入门',
+      goal: `围绕「${input.goal}」把行测模块过一遍，申论学会小题答法`,
+      stacks: Array.from({ length: total }, (_value, weekIndex) =>
+        civilFoundationWeek(moduleAt(weekIndex), shenlunAt(weekIndex), input.goal, input.weeklyHours)
+      ),
+      checks: [
+        '行测五大模块各完成一轮方法梳理',
+        '每周都有限时练和错题记录',
+        '申论小题完成批改并重写过要点句'
+      ]
+    },
+    {
+      title: '阶段二：专项强化',
+      subtitle: '限时上量 → 正确率与用时双达标',
+      goal: `围绕「${input.goal}」把弱项模块练到稳定`,
+      stacks: Array.from({ length: total }, (_value, weekIndex) =>
+        civilStrengthenWeek(moduleAt(weekIndex), shenlunAt(weekIndex), input.goal, input.weeklyHours)
+      ),
+      checks: [
+        '正确率比上一阶段提升或保持稳定',
+        '每道错题都有归因和二刷记录',
+        '申论小题能在限时内完成'
+      ]
+    },
+    {
+      title: '阶段三：套题冲刺',
+      subtitle: '整卷模考 → 弱项回炉 → 申论大作文',
+      goal: `围绕「${input.goal}」用模考把分数稳定在目标线`,
+      stacks: Array.from({ length: sprintWeeks }, (_value, weekIndex) =>
+        civilSprintWeek(shenlunAt(weekIndex), input.goal, input.weeklyHours)
+      ),
+      checks: [
+        '完成至少一次行测整卷模考并记录成绩',
+        '模考错题都完成归因和回炉',
+        '申论大作文完成至少 1 篇提纲或全文'
+      ]
+    }
+  ];
+}
+
 function normalizeDay(
   day: RawDay | undefined,
   weekId: string,
@@ -288,7 +498,9 @@ function projectDays(goal: string): RawDay[][] {
 function buildTemplatePhases(input: LongPlanGenerationInput): RawPhase[] {
   const total = Math.max(1, Math.min(MAX_WEEKS, input.weeks));
   const shapes: PhaseShape[] = [];
-  if (total <= 2) {
+  if (isCivilServiceExam(input)) {
+    shapes.push(...civilServiceShapes(input, total));
+  } else if (total <= 2) {
     shapes.push({
       title: '阶段一：快速建立基础',
       subtitle: '理解核心概念 → 完成一个最小产出',

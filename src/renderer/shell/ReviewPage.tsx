@@ -100,8 +100,9 @@ export function ReviewPage({
 
   const openBackfill = () => {
     setDate(today);
-    // Default to the active filter, but leave "全局" selectable.
-    setWorkspaceId(filterId);
+    // Default to the active filter, then the first project: a review without a
+    // workspace never feeds memory synthesis, so 全局 stays a deliberate choice.
+    setWorkspaceId(filterId || workspaces[0]?.id || '');
     setCompleted('');
     setStuck('');
     setTomorrow('');

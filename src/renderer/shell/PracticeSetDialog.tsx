@@ -12,6 +12,7 @@ import { Input } from '../ui/Input';
 import { Label } from '../ui/Label';
 import { Select } from '../ui/Select';
 import { Textarea } from '../ui/Textarea';
+import type { Workspace } from '../../shared/workspace';
 
 const MIN_OPTIONS = 2;
 const MAX_OPTIONS = 6;
@@ -28,9 +29,12 @@ type QuestionDraft = {
 
 type PracticeSetDialogProps = {
   open: boolean;
+  /** Default workspace for a new set (usually the project the user opened). */
   workspaceId: string;
   /** When set, the dialog edits this set instead of creating a new one. */
   set?: PracticeSet | null;
+  /** Workspaces shown so the destination is visible (and choosable on create). */
+  workspaces?: Workspace[];
   onClose: () => void;
   onCreate?: (input: CreatePracticeSetInput) => Promise<PracticeSet>;
   onUpdate?: (input: UpdatePracticeSetInput) => Promise<PracticeSet>;
@@ -61,6 +65,7 @@ export function PracticeSetDialog({
   open,
   workspaceId,
   set = null,
+  workspaces = [],
   onClose,
   onCreate,
   onUpdate
@@ -72,9 +77,16 @@ export function PracticeSetDialog({
   const [questions, setQuestions] = useState<QuestionDraft[]>(() => [
     blankQuestion(nextKey.current++)
   ]);
+  const [targetWorkspaceId, setTargetWorkspaceId] = useState(workspaceId);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const editing = set !== null;
+  // On create the destination must be visible; fall back to the first project
+  // when the caller has no current workspace (e.g. opened from 全部工作区).
+  const workspaceChoices = workspaces.length > 0 ? workspaces : null;
+  const owningWorkspace = set
+    ? (workspaces.find((workspace) => workspace.id === set.workspaceId) ?? null)
+    : null;
 
   function reset() {
     setTitle(set?.title ?? '');
@@ -84,6 +96,13 @@ export function PracticeSetDialog({
         ? draftFrom(set, () => nextKey.current++)
         : [blankQuestion(nextKey.current++)]
     );
+    setTargetWorkspaceId((current) => {
+      if (set) return set.workspaceId;
+      if (workspaceId) return workspaceId;
+      return current && workspaces.some((workspace) => workspace.id === current)
+        ? current
+        : (workspaces[0]?.id ?? '');
+    });
     setError(null);
     setSubmitting(false);
   }
@@ -154,7 +173,7 @@ export function PracticeSetDialog({
   }
 
   function validate(): string | null {
-    if (!set && !workspaceId) return '缺少工作区信息，暂时无法创建练习集。';
+    if (!set && !targetWorkspaceId) return '缺少工作区信息，暂时无法创建练习集。';
     if (!title.trim()) return '请填写标题。';
     for (let index = 0; index < questions.length; index += 1) {
       const question = questions[index];
@@ -209,7 +228,7 @@ export function PracticeSetDialog({
       } else {
         if (!onCreate) throw new Error('当前版本不支持创建练习集。');
         await onCreate({
-          workspaceId,
+          workspaceId: targetWorkspaceId,
           title: title.trim(),
           subject: subject.trim(),
           questions: nextQuestions
@@ -262,6 +281,28 @@ export function PracticeSetDialog({
       footer={footer}
     >
       <div className="space-y-4">
+        {editing ? (
+          owningWorkspace ? (
+            <p className="text-[12px] text-gray-500 dark:text-[#8e8e93]">
+              所属项目：{owningWorkspace.name}
+            </p>
+          ) : null
+        ) : workspaceChoices ? (
+          <div>
+            <Label htmlFor={`${formId}-workspace`}>所属项目</Label>
+            <Select
+              id={`${formId}-workspace`}
+              value={targetWorkspaceId}
+              onChange={(event) => setTargetWorkspaceId(event.target.value)}
+            >
+              {workspaceChoices.map((workspace) => (
+                <option key={workspace.id} value={workspace.id}>
+                  {workspace.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+        ) : null}
         <div>
           <Label htmlFor={`${formId}-title`}>标题</Label>
           <Input

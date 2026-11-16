@@ -273,7 +273,7 @@ test('shows an empty state and explains the generic framework', async () => {
 
 test('marks template-generated plans so users know to refine them', () => {
   renderPage({ plans: [{ ...plan, generatedBy: 'template' }] });
-  expect(screen.getByText(/通用框架/)).toBeInTheDocument();
+  expect(screen.getByText(/模板生成的备用计划/)).toBeInTheDocument();
 });
 
 test('edits the plan goal and weekly hours', async () => {

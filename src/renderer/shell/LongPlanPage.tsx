@@ -718,7 +718,7 @@ export function LongPlanPage({
                 ) : null}
                 {selectedPlan.generatedBy === 'template' ? (
                   <p className="mt-2 rounded-xl bg-[#ff9f0a]/10 px-3 py-2 text-[12px] leading-5 text-[#8a5a00] dark:bg-[#ff9f0a]/15 dark:text-[#ffb340]">
-                    这份是通用框架（模型这次没有给出可用的结构化计划）；可以重新生成更贴合目标的计划。
+                    这份是模板生成的备用计划（模型这次没有给出可用的结构化计划）；配置模型后重新生成会更贴合目标。
                   </p>
                 ) : null}
                 {selectedPlan.generatedBy !== 'template' ? (
