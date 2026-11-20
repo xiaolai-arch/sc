@@ -103,6 +103,14 @@ function providerEndpoint(provider: ProviderConfig): string {
   return `${provider.kind}:${provider.baseURL}`;
 }
 
+/** One-line provider state for the collapsed API panel's summary. */
+function providerSummary(kind: ProviderConfig['kind'], agent: LocalCliAgent): string {
+  if (kind === 'local-cli') return `当前使用：${cliAgentLabels[agent]}（本机 CLI）`;
+  if (kind === 'anthropic') return '当前使用：Anthropic API';
+  if (kind === 'openai-compatible') return '当前使用：OpenAI 兼容 API';
+  return '当前使用：Ollama';
+}
+
 function cliAuthLabel(entry: LocalCliEntry): string {
   if (entry.auth === 'ready') return '已登录';
   if (entry.auth === 'missing') return '未登录';
@@ -148,6 +156,9 @@ export function SettingsPage({
   const [keyConfigured, setKeyConfigured] = useState(hasApiKey);
   const [confirmClearKey, setConfirmClearKey] = useState(false);
   const [clearingKey, setClearingKey] = useState(false);
+  // The API panel holds provider selection and credentials. It starts closed so
+  // the common local-CLI case stays uncluttered, but opens for an API provider.
+  const [apiAdvancedOpen, setApiAdvancedOpen] = useState(false);
 
   useEffect(() => {
     setKeyConfigured(hasApiKey);
@@ -263,6 +274,9 @@ export function SettingsPage({
       const [value, usageSummary] = await Promise.all([api.getSettings(), usagePromise]);
       setSavedProvider(value.provider);
       setKind(value.provider.kind);
+      // An API user must land on the credentials they configured, not on a
+      // collapsed panel that looks like the local-CLI default.
+      setApiAdvancedOpen(value.provider.kind !== 'local-cli');
       setModel(value.provider.model ?? '');
       setBaseURL('baseURL' in value.provider ? value.provider.baseURL : '');
       if (value.provider.kind === 'local-cli') {
@@ -743,86 +757,12 @@ export function SettingsPage({
           </Card>
           <Card id="settings-model-section">
             <h3 className="text-[17px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">模型</h3>
-            <p className="mt-2 text-gray-500 dark:text-[#a1a1a6]">选择模型提供商并配置访问凭据。</p>
-            <div className="mt-6 grid gap-5 md:grid-cols-2">
-              <div>
-                <Label htmlFor="settings-provider">提供商</Label>
-                <Select
-                  id="settings-provider"
-                  value={kind}
-                  onChange={(event) => updateKind(event.target.value as ProviderConfig['kind'])}
-                >
-                  {(Object.keys(providerLabels) as ProviderConfig['kind'][]).map((value) => (
-                    <option key={value} value={value}>
-                      {providerLabels[value]}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              {kind === 'local-cli' && cliAgent === 'zcode' ? null : kind === 'local-cli' ? (
-                <div>
-                  <Label htmlFor="settings-cli-model">模型</Label>
-                  <Select
-                    id="settings-cli-model"
-                    aria-label="模型"
-                    value={cliModelSelectValue}
-                    onChange={(event) => {
-                      const next = event.target.value;
-                      if (next === CUSTOM_MODEL_VALUE) {
-                        setModelCustom(true);
-                        return;
-                      }
-                      setModelCustom(false);
-                      setModel(next);
-                    }}
-                  >
-                    <option value="">{cliInheritLabel}</option>
-                    {cliModelPending ? (
-                      <option value={cliModelTrimmed}>{cliModelTrimmed}（读取中…）</option>
-                    ) : null}
-                    {cliModelOptions.map((option) => (
-                      <option key={`${option.origin}:${option.id}`} value={option.id}>
-                        {optionLabel(option)}（{cliModelOriginLabels[option.origin]}）
-                      </option>
-                    ))}
-                    <option value={CUSTOM_MODEL_VALUE}>自定义模型 ID…</option>
-                  </Select>
-                  {cliModelIsCustom ? (
-                    <Input
-                      className="mt-2"
-                      aria-label="自定义模型 ID"
-                      value={model}
-                      onChange={(event) => setModel(event.target.value)}
-                      placeholder="输入 CLI 支持的模型 ID"
-                    />
-                  ) : null}
-                  <p className="mt-2 text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
-                    {cliModelOptions.length > 0
-                      ? `本机读到 ${cliModelOptions.length} 个候选${
-                          cliCatalog?.files.length ? `，来源：${cliCatalog.files.join('、')}` : ''
-                        }。留空表示不传 --model，完全跟随 CLI 自己的设置。`
-                      : '本机配置里没有读到模型列表；留空表示完全跟随 CLI 自己的设置，不需要猜型号。'}
-                  </p>
-                  {cliCatalog?.warnings.length ? (
-                    <p className="mt-1 text-[12px] text-[#b25000] dark:text-[#ffa657]">
-                      {cliCatalog.warnings.join('；')}
-                    </p>
-                  ) : null}
-                </div>
-              ) : (
-                <div>
-                  <Label htmlFor="settings-model">模型名称</Label>
-                  <Input
-                    id="settings-model"
-                    value={model}
-                    onChange={(event) => setModel(event.target.value)}
-                  />
-                </div>
-              )}
-            </div>
+            <p className="mt-2 text-gray-500 dark:text-[#a1a1a6]">
+              默认使用本机已登录的 CLI；需要接入 API 提供商时展开下方的高级设置。
+            </p>
 
             {kind === 'local-cli' ? (
-              <div className="mt-5 grid gap-5 md:grid-cols-2">
+              <div className="mt-6 grid gap-5 md:grid-cols-2">
                 <div className="rounded-xl border border-black/[0.06] bg-[#f5f5f7]/70 p-4 dark:border-white/[0.08] dark:bg-white/[0.03] md:col-span-2">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
@@ -962,6 +902,57 @@ export function SettingsPage({
                     ))}
                   </Select>
                 </div>
+                {cliAgent === 'zcode' ? null : (
+                  <div>
+                    <Label htmlFor="settings-cli-model">模型</Label>
+                    <Select
+                      id="settings-cli-model"
+                      aria-label="模型"
+                      value={cliModelSelectValue}
+                      onChange={(event) => {
+                        const next = event.target.value;
+                        if (next === CUSTOM_MODEL_VALUE) {
+                          setModelCustom(true);
+                          return;
+                        }
+                        setModelCustom(false);
+                        setModel(next);
+                      }}
+                    >
+                      <option value="">{cliInheritLabel}</option>
+                      {cliModelPending ? (
+                        <option value={cliModelTrimmed}>{cliModelTrimmed}（读取中…）</option>
+                      ) : null}
+                      {cliModelOptions.map((option) => (
+                        <option key={`${option.origin}:${option.id}`} value={option.id}>
+                          {optionLabel(option)}（{cliModelOriginLabels[option.origin]}）
+                        </option>
+                      ))}
+                      <option value={CUSTOM_MODEL_VALUE}>自定义模型 ID…</option>
+                    </Select>
+                    {cliModelIsCustom ? (
+                      <Input
+                        className="mt-2"
+                        aria-label="自定义模型 ID"
+                        value={model}
+                        onChange={(event) => setModel(event.target.value)}
+                        placeholder="输入 CLI 支持的模型 ID"
+                      />
+                    ) : null}
+                    <p className="mt-2 text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
+                      {cliModelOptions.length > 0
+                        ? `本机读到 ${cliModelOptions.length} 个候选${
+                            cliCatalog?.files.length ? `，来源：${cliCatalog.files.join('、')}` : ''
+                          }。留空表示不传 --model，完全跟随 CLI 自己的设置。`
+                        : '本机配置里没有读到模型列表；留空表示完全跟随 CLI 自己的设置，不需要猜型号。'}
+                    </p>
+                    {cliCatalog?.warnings.length ? (
+                      <p className="mt-1 text-[12px] text-[#b25000] dark:text-[#ffa657]">
+                        {cliCatalog.warnings.join('；')}
+                      </p>
+                    ) : null}
+                  </div>
+                )}
                 {cliAgent === 'codex' || cliAgent === 'claude' || cliAgent === 'opencode' ? (
                   <div>
                     <Label htmlFor="settings-cli-effort">推理强度</Label>
@@ -1056,74 +1047,126 @@ export function SettingsPage({
               </div>
             ) : null}
 
-            {(kind === 'openai-compatible' || kind === 'ollama') ? (
-              <div className="mt-5">
-                <Label htmlFor="settings-base-url">Base URL</Label>
-                <Input
-                  id="settings-base-url"
-                  value={baseURL}
-                  onChange={(event) => setBaseURL(event.target.value)}
-                  placeholder="https://api.example.com/v1"
-                />
-              </div>
-            ) : null}
-
-            {kind !== 'local-cli' ? (
-              <div className="mt-5">
-                <div className="flex items-center justify-between gap-2">
-                  <Label htmlFor="settings-api-key">API Key</Label>
-                  <span
-                    className={`text-[12px] font-medium ${
-                      keyConfigured
-                        ? 'text-[#1d7a36] dark:text-[#7ee787]'
-                        : 'text-gray-500 dark:text-[#a1a1a6]'
-                    }`}
-                  >
-                    {keyConfigured ? '已配置' : '未配置'}
-                  </span>
-                </div>
-                <Input
-                  id="settings-api-key"
-                  type="password"
-                  value={apiKey}
-                  onChange={(event) => setApiKey(event.target.value)}
-                  placeholder={keyConfigured ? '已保存，留空则保持不变' : '粘贴 API Key'}
-                  autoComplete="off"
-                />
-                <p className="mt-2 text-sm text-gray-500 dark:text-[#a1a1a6]">
-                  {window.studyCoachPrototype
-                    ? '原型模式下，API Key 只保存在当前页面内存，刷新页面即清空。'
-                    : 'API Key 通过系统钥匙串加密保存（Electron safeStorage），不会写入 vault、日志或测试快照；对话时只发送给当前选择的模型服务。'}
-                </p>
-                {keyConfigured ? (
-                  <div className="mt-2 flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="danger"
-                      size="sm"
-                      disabled={clearingKey}
-                      onClick={() => void clearApiKey()}
+            <details
+              open={apiAdvancedOpen}
+              className="mt-5 rounded-xl border border-black/[0.06] px-3 py-2 text-sm text-gray-500 dark:border-white/[0.08] dark:text-[#a1a1a6]"
+            >
+              <summary
+                className="cursor-pointer select-none py-1 text-[13px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7]"
+                onClick={(event) => {
+                  // Drive the panel from state so a closed panel renders no
+                  // provider/credential inputs at all, not just hidden ones.
+                  event.preventDefault();
+                  setApiAdvancedOpen((open) => !open);
+                }}
+              >
+                高级：接入方式与 API 凭据 · {providerSummary(kind, cliAgent)}
+              </summary>
+              {apiAdvancedOpen ? (
+                <div className="mt-3 grid gap-5 md:grid-cols-2">
+                  <div>
+                    <Label htmlFor="settings-provider">提供商</Label>
+                    <Select
+                      id="settings-provider"
+                      value={kind}
+                      onChange={(event) =>
+                        updateKind(event.target.value as ProviderConfig['kind'])
+                      }
                     >
-                      {clearingKey
-                        ? '正在清除…'
-                        : confirmClearKey
-                          ? '确认清除'
-                          : '清除已保存的密钥'}
-                    </Button>
-                    {confirmClearKey ? (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => setConfirmClearKey(false)}
-                      >
-                        取消
-                      </Button>
-                    ) : null}
+                      {(Object.keys(providerLabels) as ProviderConfig['kind'][]).map(
+                        (value) => (
+                          <option key={value} value={value}>
+                            {providerLabels[value]}
+                          </option>
+                        )
+                      )}
+                    </Select>
                   </div>
-                ) : null}
-              </div>
-            ) : null}
+                  {kind !== 'local-cli' ? (
+                    <div>
+                      <Label htmlFor="settings-model">模型名称</Label>
+                      <Input
+                        id="settings-model"
+                        value={model}
+                        onChange={(event) => setModel(event.target.value)}
+                      />
+                    </div>
+                  ) : null}
+                  {kind === 'openai-compatible' || kind === 'ollama' ? (
+                    <div className="md:col-span-2">
+                      <Label htmlFor="settings-base-url">Base URL</Label>
+                      <Input
+                        id="settings-base-url"
+                        value={baseURL}
+                        onChange={(event) => setBaseURL(event.target.value)}
+                        placeholder="https://api.example.com/v1"
+                      />
+                    </div>
+                  ) : null}
+                  {kind !== 'local-cli' ? (
+                    <div className="md:col-span-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <Label htmlFor="settings-api-key">API Key</Label>
+                        <span
+                          className={`text-[12px] font-medium ${
+                            keyConfigured
+                              ? 'text-[#1d7a36] dark:text-[#7ee787]'
+                              : 'text-gray-500 dark:text-[#a1a1a6]'
+                          }`}
+                        >
+                          {keyConfigured ? '已配置' : '未配置'}
+                        </span>
+                      </div>
+                      <Input
+                        id="settings-api-key"
+                        type="password"
+                        value={apiKey}
+                        onChange={(event) => setApiKey(event.target.value)}
+                        placeholder={keyConfigured ? '已保存，留空则保持不变' : '粘贴 API Key'}
+                        autoComplete="off"
+                      />
+                      <p className="mt-2 text-sm text-gray-500 dark:text-[#a1a1a6]">
+                        {window.studyCoachPrototype
+                          ? '原型模式下，API Key 只保存在当前页面内存，刷新页面即清空。'
+                          : 'API Key 通过系统钥匙串加密保存（Electron safeStorage），不会写入 vault、日志或测试快照；对话时只发送给当前选择的模型服务。'}
+                      </p>
+                      {keyConfigured ? (
+                        <div className="mt-2 flex items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="danger"
+                            size="sm"
+                            disabled={clearingKey}
+                            onClick={() => void clearApiKey()}
+                          >
+                            {clearingKey
+                              ? '正在清除…'
+                              : confirmClearKey
+                                ? '确认清除'
+                                : '清除已保存的密钥'}
+                          </Button>
+                          {confirmClearKey ? (
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => setConfirmClearKey(false)}
+                            >
+                              取消
+                            </Button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="text-sm leading-6 text-gray-500 dark:text-[#a1a1a6] md:col-span-2">
+                      当前使用本机 CLI。需要改用 API 时在这里选择提供商；本机 CLI
+                      的设置会保留，随时可以切回。
+                    </p>
+                  )}
+                </div>
+              ) : null}
+            </details>
           </Card>
 
           <Card id="settings-budget">
