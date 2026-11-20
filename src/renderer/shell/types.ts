@@ -38,6 +38,8 @@ export type ChatMessage = {
   references?: ButlerReference[];
   /** Files the user attached to this turn. */
   attachments?: MessageAttachment[];
+  /** Real run start for a live answer, so the work-process clock is absolute. */
+  startedAt?: number;
   /** Legacy fields kept for compatibility; the UI renders `trace` instead. */
   reasoning?: string;
   steps?: ChatStep[];

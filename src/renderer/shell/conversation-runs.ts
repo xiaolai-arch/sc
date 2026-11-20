@@ -561,6 +561,7 @@ export function runToChatMessage(run: ConversationRun): ChatMessage {
     text: run.text,
     trace: run.trace.map((item) => ({ ...item })),
     ...(run.references.length > 0 ? { references: run.references } : {}),
+    startedAt: run.startedAt,
     streaming: isActiveRun(run),
     ...(notice !== null ? { notice } : {})
   };

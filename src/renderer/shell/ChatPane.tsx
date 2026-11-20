@@ -1,11 +1,16 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { BUTLER_REFERENCE_LABELS } from '../../shared/butler-stream';
 import { homeGreeting } from '../../shared/greeting';
-import { MenuIcon } from '../ui/icons';
+import { ChevronRightIcon, MenuIcon } from '../ui/icons';
 import { Composer } from './Composer';
 import { MarkdownText } from './MarkdownText';
 import { MessageActions } from './MessageActions';
-import { stepsToTrace } from './trace';
+import {
+  resultLinksFromTrace,
+  stepsToTrace,
+  type ChatResultKind,
+  type ChatResultLink
+} from './trace';
 import { TraceFlow } from './TraceFlow';
 import type { Workspace } from '../../shared/workspace';
 import type { ButlerReference } from '../../shared/butler-stream';
@@ -51,6 +56,10 @@ type ChatPaneProps = {
   typingStatus?: string | null;
   /** Opens the record behind a "本次参考" row. */
   onOpenReference?: (reference: ButlerReference) => void;
+  /** Result entry points: open the page a finished turn actually wrote to. */
+  onOpenLongPlan?: () => void;
+  onOpenTodayTasks?: () => void;
+  onOpenProfile?: () => void;
   /** Compact next-step/reminder dashboard shown on the empty home screen. */
   homeOverview?: ReactNode;
 };
@@ -122,6 +131,38 @@ function ReferenceList({
   );
 }
 
+/** Result entry points under the answer; nothing renders without a real result. */
+function ResultLinks({
+  links,
+  onOpen
+}: {
+  links: ChatResultLink[];
+  onOpen: Record<ChatResultKind, (() => void) | undefined>;
+}) {
+  const linkClass =
+    'inline-flex items-center gap-1 rounded-full border border-black/[0.06] bg-[#f5f5f7]/70 px-2.5 py-1 text-[12px] font-medium text-[#0071e3] transition-all duration-300 hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:border-white/10 dark:bg-white/[0.06] dark:text-[#4da3ff]';
+  return (
+    <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
+      {links.map((link) => {
+        const open = onOpen[link.kind];
+        if (!open) {
+          return (
+            <span key={link.kind} className={linkClass}>
+              {link.label}
+            </span>
+          );
+        }
+        return (
+          <button key={link.kind} type="button" onClick={open} className={linkClass}>
+            <ChevronRightIcon className="h-3 w-3 shrink-0" />
+            {link.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function ChatPane({
   workspace,
   displayName = 'xiaolai',
@@ -144,6 +185,9 @@ export function ChatPane({
   sidebarOpen = false,
   typingStatus = null,
   onOpenReference,
+  onOpenLongPlan,
+  onOpenTodayTasks,
+  onOpenProfile,
   homeOverview,
   composerText,
   onComposerTextChange,
@@ -311,31 +355,53 @@ export function ChatPane({
             </p>
           ) : null}
 
-          {messages.map((message) =>
-            message.role === 'user' ? (
-              <div key={message.id} className="group flex flex-col items-end">
-                <p className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-[#0071e3] px-4 py-2.5 text-[14px] leading-6 text-white">
-                  {message.text}
-                </p>
-                <UserAttachments items={message.attachments} />
-                {message.id === lastUserMessageId && onEditMessage ? (
-                  <MessageActions
-                    text={message.text}
-                    showCopy={false}
-                    disabled={typing || Boolean(message.streaming)}
-                    onEdit={() => onEditMessage(message.id)}
-                  />
-                ) : null}
-              </div>
-            ) : (
+          {messages.map((message) => {
+            if (message.role === 'user') {
+              return (
+                <div key={message.id} className="group flex flex-col items-end">
+                  <p className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-[#0071e3] px-4 py-2.5 text-[14px] leading-6 text-white">
+                    {message.text}
+                  </p>
+                  <UserAttachments items={message.attachments} />
+                  {message.id === lastUserMessageId && onEditMessage ? (
+                    <MessageActions
+                      text={message.text}
+                      showCopy={false}
+                      disabled={typing || Boolean(message.streaming)}
+                      onEdit={() => onEditMessage(message.id)}
+                    />
+                  ) : null}
+                </div>
+              );
+            }
+            const trace = message.trace ?? stepsToTrace(message.steps);
+            // Entry points belong to a finished answer; while it streams the
+            // work-process header is the live signal instead.
+            const resultLinks = message.streaming ? [] : resultLinksFromTrace(trace);
+            return (
               <div key={message.id} className="group">
                 <div className="min-w-0">
                   <p className="text-[12px] font-medium text-gray-500 dark:text-[#8e8e93]">阿咲</p>
-                  <TraceFlow items={message.trace ?? stepsToTrace(message.steps)} />
+                  <TraceFlow
+                    items={trace}
+                    running={message.streaming === true}
+                    referencesCount={message.references?.length ?? 0}
+                    {...(message.startedAt !== undefined ? { startedAt: message.startedAt } : {})}
+                  />
                   {message.text ? (
                     <div className="mt-1">
                       <MarkdownText text={message.text} />
                     </div>
+                  ) : null}
+                  {resultLinks.length > 0 ? (
+                    <ResultLinks
+                      links={resultLinks}
+                      onOpen={{
+                        plan: onOpenLongPlan,
+                        task: onOpenTodayTasks,
+                        profile: onOpenProfile
+                      }}
+                    />
                   ) : null}
                   {message.references && message.references.length > 0 ? (
                     <ReferenceList
@@ -360,8 +426,8 @@ export function ChatPane({
                   />
                 </div>
               </div>
-            )
-          )}
+            );
+          })}
 
           {typing && (typingStatus || !messages.some((message) => message.streaming)) ? (
             <p className="text-[13px] text-gray-500 dark:text-[#8e8e93]" role="status">
