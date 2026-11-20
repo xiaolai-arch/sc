@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 import { TraceFlow } from '../../src/renderer/shell/TraceFlow';
-import { stepsToTrace } from '../../src/renderer/shell/trace';
+import { resultLinksFromTrace, stepsToTrace } from '../../src/renderer/shell/trace';
 import type { ChatTraceItem } from '../../src/renderer/shell/types';
 
 function reasoning(id: string, text: string, streaming = false): ChatTraceItem {
@@ -246,3 +246,85 @@ test('shows a live placeholder before reasoning text arrives', () => {
   expect(screen.getByText(/正在思考…/)).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /思考/ })).not.toBeInTheDocument();
 });
+
+test('shows one work-process header with the real clock and real counts', () => {
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(20_000);
+    render(
+      <TraceFlow
+        running
+        startedAt={6_000}
+        referencesCount={3}
+        items={[
+          { kind: 'reasoning', id: 'r1', text: '先看今天的任务', streaming: true },
+          tool('t1', '生成长期计划', 'done'),
+          tool('t2', '写入笔记', 'done'),
+          tool('t3', '读取今日计划', 'running')
+        ]}
+      />
+    );
+
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent('正在为你处理 · 已运行 14 秒');
+    expect(screen.getByText('参考 3 项 · 完成 2 项操作')).toBeInTheDocument();
+
+    // The clock is anchored to the run start, not to the first render.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+    expect(status).toHaveTextContent('正在为你处理 · 已运行 15 秒');
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('summarizes a finished turn from its real rows and invents no progress', () => {
+  render(
+    <TraceFlow
+      referencesCount={2}
+      items={[
+        tool('t1', '生成长期计划', 'done'),
+        tool('t2', '读取今日计划', 'failed', '读取失败')
+      ]}
+    />
+  );
+
+  expect(screen.getByText('参考 2 项 · 完成 1 项操作 · 失败 1 项')).toBeInTheDocument();
+  expect(screen.queryByText(/正在为你处理/)).not.toBeInTheDocument();
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+});
+
+test('renders no header when a finished turn has nothing real to count', () => {
+  render(<TraceFlow items={[reasoning('r1', '只是想了想')]} />);
+
+  expect(screen.queryByText(/参考/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/完成/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/正在为你处理/)).not.toBeInTheDocument();
+});
+
+test('derives result links only from successful result tool rows', () => {
+  const links = resultLinksFromTrace(
+    stepsToTrace([
+      { id: 's1', name: 'create_long_plan', label: '生成长期计划', status: 'done' },
+      { id: 's2', name: 'create_task', label: '创建任务', status: 'done' },
+      { id: 's3', name: 'save_profile', label: '记录个人信息', status: 'done' },
+      { id: 's4', name: 'create_task', label: '创建任务', status: 'done' }
+    ])
+  );
+  expect(links).toEqual([
+    { kind: 'plan', label: '查看长期计划' },
+    { kind: 'task', label: '查看今日任务' },
+    { kind: 'profile', label: '查看新增记忆' }
+  ]);
+
+  expect(
+    resultLinksFromTrace(
+      stepsToTrace([
+        { id: 's1', name: 'create_task', label: '创建任务', status: 'failed' },
+        { id: 's2', name: 'write_note', label: '写入笔记', status: 'done' }
+      ])
+    )
+  ).toEqual([]);
+});
+

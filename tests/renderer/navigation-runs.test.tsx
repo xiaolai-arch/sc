@@ -3,7 +3,10 @@ import { homeGreeting } from '../../src/shared/greeting';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { sendPrompt } from './send-prompt';
-import type { ButlerStreamListener } from '../../src/shared/butler-stream';
+import type {
+  ButlerStreamEvent,
+  ButlerStreamListener
+} from '../../src/shared/butler-stream';
 import type { SendMessageInput, SendMessageResult } from '../../src/shared/workspace';
 import { Workspace } from '../../src/renderer/shell/Workspace';
 import { conversationRuns } from '../../src/renderer/shell/conversation-runs';
@@ -57,6 +60,21 @@ function gatedStream() {
     };
   };
   return { stream, release };
+}
+
+/** A turn whose tool rows are scripted, so result entry points can be checked. */
+function resultStream(answer: string, events: ButlerStreamEvent[]): StreamFn {
+  return async (input, onEvent) => {
+    onEvent({ type: 'reasoning', text: '先看已有数据' });
+    for (const event of events) onEvent(event);
+    onEvent({ type: 'text', text: answer });
+    onEvent({ type: 'done', text: answer });
+    await persistAnswer(input, answer);
+    return {
+      text: answer,
+      ...(input.conversationId ? { conversationId: input.conversationId } : {})
+    };
+  };
 }
 
 async function openConversationFromSidebar(title: RegExp) {
@@ -405,4 +423,89 @@ test('two conversations stream at once without crossing answers or assistant ids
   await selectConversationFromSidebar(new RegExp(promptA));
   expect((await screen.findAllByText(answerA)).length).toBeGreaterThan(0);
   expect(screen.queryByText(answerB)).not.toBeInTheDocument();
+});
+
+test('a turn that produced results offers entry points that open their pages', async () => {
+  const answer = '都已经安排好了';
+  setup(
+    resultStream(answer, [
+      { type: 'tool-start', id: 't1', name: 'create_long_plan', label: '生成长期计划' },
+      {
+        type: 'tool-result',
+        id: 't1',
+        name: 'create_long_plan',
+        ok: true,
+        label: '生成长期计划',
+        detail: '已生成 4 周计划'
+      },
+      { type: 'tool-start', id: 't2', name: 'create_task', label: '创建任务' },
+      {
+        type: 'tool-result',
+        id: 't2',
+        name: 'create_task',
+        ok: true,
+        label: '创建任务',
+        detail: '已创建任务'
+      },
+      { type: 'tool-start', id: 't3', name: 'save_profile', label: '记录个人信息' },
+      {
+        type: 'tool-result',
+        id: 't3',
+        name: 'save_profile',
+        ok: true,
+        label: '记录个人信息',
+        detail: '等你确认'
+      }
+    ])
+  );
+
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
+  await sendPrompt('帮我安排一下');
+  await screen.findAllByText(answer);
+
+  // The three links come from the turn's own tool results, not the reply text.
+  const planLink = await screen.findByRole('button', { name: '查看长期计划' });
+  expect(screen.getByRole('button', { name: '查看今日任务' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '查看新增记忆' })).toBeInTheDocument();
+
+  await userEvent.click(planLink);
+  expect(await screen.findByText('还没有长期计划。')).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: '日常' }));
+  await userEvent.click(await screen.findByRole('button', { name: '查看今日任务' }));
+  expect(await screen.findByText('今天的时间表')).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: '日常' }));
+  await userEvent.click(await screen.findByRole('button', { name: '查看新增记忆' }));
+  expect(await screen.findByText(/这里是你亲口说过/)).toBeInTheDocument();
+});
+
+test('a turn without real results renders no entry points', async () => {
+  const answer = '今天的安排已经看过了';
+  setup(
+    resultStream(answer, [
+      { type: 'tool-start', id: 't1', name: 'get_today_plan', label: '读取今日计划' },
+      { type: 'tool-result', id: 't1', name: 'get_today_plan', ok: true, label: '读取今日计划' },
+      { type: 'tool-start', id: 't2', name: 'write_note', label: '写入笔记' },
+      { type: 'tool-result', id: 't2', name: 'write_note', ok: true, label: '写入笔记' },
+      { type: 'tool-start', id: 't3', name: 'create_task', label: '创建任务' },
+      {
+        type: 'tool-result',
+        id: 't3',
+        name: 'create_task',
+        ok: false,
+        label: '创建任务',
+        detail: '创建失败'
+      }
+    ])
+  );
+
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
+  await sendPrompt('今天还有什么');
+  await screen.findAllByText(answer);
+
+  // A failed tool is not a result, and a note or a read never produces one.
+  expect(screen.queryByText('查看长期计划')).not.toBeInTheDocument();
+  expect(screen.queryByText('查看今日任务')).not.toBeInTheDocument();
+  expect(screen.queryByText('查看新增记忆')).not.toBeInTheDocument();
 });

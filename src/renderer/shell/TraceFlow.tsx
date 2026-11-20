@@ -2,10 +2,17 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { cn } from '../ui/cn';
 import { ChevronDownIcon, TerminalIcon, ThinkIcon } from '../ui/icons';
 import { MarkdownText } from './MarkdownText';
+import { summarizeTrace, traceCountLabel, type ChatTraceCounts } from './trace';
 import type { ChatTraceItem } from './types';
 
 type TraceFlowProps = {
   items: ChatTraceItem[];
+  /** True while this answer is still streaming. */
+  running?: boolean;
+  /** The real run start; the header clock counts from here instead of rendering. */
+  startedAt?: number;
+  /** Records this answer actually drew on ("本次参考"). */
+  referencesCount?: number;
 };
 
 const rowClass =
@@ -206,6 +213,71 @@ function ReasoningRow({
   );
 }
 
+/**
+ * One header above the rows of an assistant turn: a live status line while the
+ * answer streams, plus a deterministic count of what actually happened. The
+ * count is derived from real references and tool rows, so an idle turn shows
+ * nothing rather than invented progress.
+ */
+function WorkProcessHeader({
+  running,
+  startedAt,
+  counts
+}: {
+  running: boolean;
+  startedAt?: number;
+  counts: ChatTraceCounts;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!running || startedAt === undefined) return undefined;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [running, startedAt]);
+
+  const elapsed =
+    running && startedAt !== undefined
+      ? Math.max(0, Math.floor((now - startedAt) / 1000))
+      : null;
+  const countLabel = traceCountLabel(counts);
+
+  return (
+    <div
+      className={cn(
+        'flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 rounded-xl border px-2.5 py-1.5 text-[12px]',
+        running
+          ? 'border-[#0071e3]/15 bg-[#0071e3]/[0.06] dark:border-[#0a84ff]/25 dark:bg-[#0a84ff]/10'
+          : 'border-black/[0.05] bg-black/[0.02] dark:border-white/[0.06] dark:bg-white/[0.03]'
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          'h-1.5 w-1.5 shrink-0 rounded-full',
+          running
+            ? 'animate-pulse bg-[#0071e3] dark:bg-[#4da3ff]'
+            : 'bg-gray-400 dark:bg-[#8e8e93]'
+        )}
+      />
+      {running ? (
+        <span
+          role="status"
+          className="shrink-0 font-medium tabular-nums text-[#0071e3] dark:text-[#4da3ff]"
+        >
+          正在为你处理{elapsed !== null ? ` · 已运行 ${elapsed} 秒` : ''}
+        </span>
+      ) : null}
+      {countLabel ? (
+        <span className="min-w-0 truncate text-gray-500 dark:text-[#8e8e93]">
+          {countLabel}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 function ToolRow({ item }: { item: Extract<ChatTraceItem, { kind: 'tool' }> }) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
@@ -298,10 +370,26 @@ function ToolRow({ item }: { item: Extract<ChatTraceItem, { kind: 'tool' }> }) {
 }
 
 /** Compact, ordered thinking/tool rows rendered above an assistant answer. */
-export function TraceFlow({ items }: TraceFlowProps) {
-  if (items.length === 0) return null;
+export function TraceFlow({
+  items,
+  running = false,
+  startedAt,
+  referencesCount = 0
+}: TraceFlowProps) {
+  if (items.length === 0 && !running && referencesCount === 0) return null;
+  const counts = summarizeTrace(items, referencesCount);
+  // The header exists while a run is live, or once the turn has real work to
+  // summarize. A finished turn with only live-only reasoning gets no header.
+  const showHeader = running || counts.references > 0 || counts.done > 0 || counts.failed > 0;
   return (
     <div className="mt-1 space-y-0.5">
+      {showHeader ? (
+        <WorkProcessHeader
+          running={running}
+          {...(startedAt !== undefined ? { startedAt } : {})}
+          counts={counts}
+        />
+      ) : null}
       {items.map((item) =>
         item.kind === 'reasoning' ? (
           <ReasoningRow key={item.id} item={item} />

@@ -1486,6 +1486,9 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
               }
               messages={chatMessages}
               onOpenReference={openReference}
+              onOpenLongPlan={() => changeSection('plan')}
+              onOpenTodayTasks={() => changeSection('schedule')}
+              onOpenProfile={() => changeSection('profile')}
               typing={typing}
               loading={conversations.selecting}
               onSend={(text) => submitComposer(text)}
