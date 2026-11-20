@@ -14,7 +14,7 @@ import type {
 } from '../../shared/conversations';
 import type { KnowledgeService } from '../../shared/knowledge';
 import type { MemoryService } from '../../shared/memory';
-import type { WorkspacePlanner } from '../../shared/planning';
+import { availableMinutesLabel, type WorkspacePlanner } from '../../shared/planning';
 import type { LongPlanService } from '../../shared/plans';
 import type { ProfileService } from '../../shared/profile';
 import type { SearchService } from '../../shared/search';
@@ -220,7 +220,7 @@ export class ButlerServiceImpl implements ButlerService {
           const step = this.startToolStep(call, steps);
           const result = await this.runTool(call, context, permissions);
           if (!result.ok) lastToolFailure = call.name;
-          this.finishToolStep(step, result);
+          this.finishToolStep(step, result, call.name);
           await this.linkCreatedWorkspace(call, result, context, conversation);
           messages.push({
             role: 'tool',
@@ -402,7 +402,7 @@ export class ButlerServiceImpl implements ButlerService {
           if (!result.ok) {
             lastToolFailure = call.name;
           }
-          this.finishToolStep(step, result);
+          this.finishToolStep(step, result, call.name);
           onEvent({
             type: 'tool-result',
             id: call.id,
@@ -631,10 +631,21 @@ export class ButlerServiceImpl implements ButlerService {
     return step;
   }
 
-  private finishToolStep(step: ConversationStep, result: ButlerToolResult): void {
+  private finishToolStep(
+    step: ConversationStep,
+    result: ButlerToolResult,
+    toolName: string
+  ): void {
     step.status = result.ok ? 'done' : 'failed';
     if (!result.ok) {
       step.detail = redactSecrets(errorDetailFromToolResult(result.content));
+      return;
+    }
+    // A finished plan says which minute budget it was built around, so the
+    // user sees the source instead of having to read the model's wording.
+    if (toolName === 'plan_workspace') {
+      const detail = availableMinutesDetailFromToolResult(result.content);
+      if (detail) step.detail = detail;
     }
   }
 
@@ -835,4 +846,28 @@ function errorDetailFromToolResult(content: string): string {
     // Fall through to the generic message.
   }
   return '工具执行失败。';
+}
+
+/** Reads the budget a `plan_workspace` result reports, for the step's summary line. */
+function availableMinutesDetailFromToolResult(content: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(content);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
+    const record = parsed as Record<string, unknown>;
+    const result =
+      typeof record['result'] === 'object' &&
+      record['result'] !== null &&
+      !Array.isArray(record['result'])
+        ? (record['result'] as Record<string, unknown>)
+        : undefined;
+    if (result === undefined) return undefined;
+    const minutes = result['availableMinutes'];
+    const source = result['availableMinutesSource'];
+    return availableMinutesLabel(
+      typeof minutes === 'number' ? minutes : undefined,
+      source === 'input' || source === 'workspace' || source === 'default' ? source : undefined
+    );
+  } catch {
+    return undefined;
+  }
 }

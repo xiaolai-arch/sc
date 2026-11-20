@@ -10,6 +10,27 @@ export type WorkspacePlanGeneratedBy = 'agent' | 'template';
 /** Which input supplied the daily minute budget the plan was built around. */
 export type AvailableMinutesSource = 'input' | 'workspace' | 'default';
 
+/** Plain-Chinese provenance shown next to the planned daily minutes. */
+export const AVAILABLE_MINUTES_SOURCE_LABELS: Record<AvailableMinutesSource, string> = {
+  input: '本次指定',
+  workspace: '来自项目设置',
+  default: '默认值'
+};
+
+/**
+ * Deterministic one-line label for a plan's daily budget, e.g.
+ * "每天可用 45 分钟 · 来自项目设置". Returns undefined when the plan carries no
+ * usable minute budget, so the UI never invents a value or a source.
+ */
+export function availableMinutesLabel(
+  minutes: number | undefined,
+  source: AvailableMinutesSource | undefined
+): string | undefined {
+  if (minutes === undefined || !Number.isFinite(minutes) || minutes <= 0) return undefined;
+  const origin = source ? AVAILABLE_MINUTES_SOURCE_LABELS[source] : undefined;
+  return origin ? `每天可用 ${minutes} 分钟 · ${origin}` : `每天可用 ${minutes} 分钟`;
+}
+
 export interface WorkspacePlanTask {
   title: string;
   subject: string;

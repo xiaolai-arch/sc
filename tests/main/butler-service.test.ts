@@ -14,7 +14,7 @@ import type {
   WorkspaceTask
 } from '../../src/shared/workspace';
 import { FakeModelClient } from '../../src/main/agent/model-client';
-import type { Conversation } from '../../src/shared/conversations';
+import type { Conversation, ConversationMessage } from '../../src/shared/conversations';
 import type { ConversationStore } from '../../src/main/conversations/conversation-store';
 import {
   ButlerServiceImpl,
@@ -514,6 +514,96 @@ describe('ButlerServiceImpl tool calls', () => {
       done: 1,
       skipped: 0
     });
+  });
+
+  test('persists the plan step with the minutes and their source', async () => {
+    const client = new FakeModelClient([
+      {
+        text: '',
+        usage: { inputTokens: 2, outputTokens: 1 },
+        toolCalls: [{ id: 'c1', name: 'plan_workspace', arguments: {} }]
+      },
+      { text: '今天先做极限。', usage: { inputTokens: 3, outputTokens: 1 } }
+    ]);
+    const { store } = fakeConversationStore({
+      id: 'c1',
+      title: '计划',
+      kind: 'chat',
+      workspaceId: 'ws-exam',
+      createdAt: NOW.toISOString(),
+      updatedAt: NOW.toISOString(),
+      messages: []
+    });
+    const planner = {
+      plan: async (input: { workspaceId: string; date?: string }) => ({
+        workspaceId: input.workspaceId,
+        date: input.date ?? '2026-10-31',
+        generatedBy: 'agent' as const,
+        availableMinutes: 45,
+        availableMinutesSource: 'workspace' as const,
+        tasks: [
+          { title: '极限 10 题', subject: '数学', durationMin: 30, acceptance: '完成并订正' }
+        ]
+      })
+    };
+
+    await makeService(client, new MemoryWorkspaceService(), {
+      conversationStore: store,
+      planner
+    }).send({ conversationId: 'c1', message: '排一下今天的计划' });
+
+    const appendMessage = store.appendMessage as unknown as {
+      mock: { calls: Array<[string, ConversationMessage]> };
+    };
+    const persisted = appendMessage.mock.calls.at(-1)?.[1];
+    expect(persisted?.steps).toEqual([
+      expect.objectContaining({
+        name: 'plan_workspace',
+        status: 'done',
+        detail: '每天可用 45 分钟 · 来自项目设置'
+      })
+    ]);
+  });
+
+  test('an invalid plan result never gains a fabricated minutes label', async () => {
+    const client = new FakeModelClient([
+      {
+        text: '',
+        usage: { inputTokens: 2, outputTokens: 1 },
+        toolCalls: [{ id: 'c1', name: 'plan_workspace', arguments: {} }]
+      },
+      { text: '今天先做极限。', usage: { inputTokens: 3, outputTokens: 1 } }
+    ]);
+    const { store } = fakeConversationStore({
+      id: 'c1',
+      title: '计划',
+      kind: 'chat',
+      workspaceId: 'ws-exam',
+      createdAt: NOW.toISOString(),
+      updatedAt: NOW.toISOString(),
+      messages: []
+    });
+    const planner = {
+      plan: async (input: { workspaceId: string; date?: string }) => ({
+        workspaceId: input.workspaceId,
+        date: input.date ?? '2026-10-31',
+        generatedBy: 'template' as const,
+        tasks: [
+          { title: '极限 10 题', subject: '数学', durationMin: 30, acceptance: '完成并订正' }
+        ]
+      })
+    };
+
+    await makeService(client, new MemoryWorkspaceService(), {
+      conversationStore: store,
+      planner
+    }).send({ conversationId: 'c1', message: '排一下今天的计划' });
+
+    const appendMessage = store.appendMessage as unknown as {
+      mock: { calls: Array<[string, ConversationMessage]> };
+    };
+    const persisted = appendMessage.mock.calls.at(-1)?.[1];
+    expect(persisted?.steps?.[0]).not.toHaveProperty('detail');
   });
 
   test('write_note defaults to the selected workspace and derives the subject', async () => {
