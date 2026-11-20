@@ -170,6 +170,66 @@ test('reports the selected CLI login state when testing the connection', async (
   expect(await screen.findByRole('alert')).toHaveTextContent('尚未登录');
 });
 
+test('adopts the second scan when 重新扫描 is clicked', async () => {
+  const firstScan = scanWith(codexCatalog);
+  const secondScan = scanWith({
+    defaultModel: 'codex/gpt-6.1-max',
+    defaultEffort: 'high',
+    files: ['~/.codex/config.toml'],
+    warnings: [],
+    options: [
+      {
+        id: 'codex/gpt-6.1-max',
+        origin: 'config' as const,
+        source: '~/.codex/config.toml',
+        label: '当前使用'
+      }
+    ]
+  });
+
+  // Hold the second scan open so the in-flight label is observable, then
+  // release it with the new payload.
+  let finishSecondScan!: (value: unknown) => void;
+  const secondScanResult = new Promise<unknown>((resolve) => {
+    finishSecondScan = resolve;
+  });
+  const scanLocalClis = vi
+    .fn()
+    .mockResolvedValueOnce(firstScan)
+    .mockReturnValueOnce(secondScanResult);
+  stub({ scanLocalClis });
+
+  render(<SettingsPage onClose={() => {}} />);
+
+  await waitFor(() => {
+    expect(scanLocalClis).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText('模型')).toHaveTextContent(
+      '继承 CLI 默认（codex/gpt-6.1-sol）'
+    );
+  });
+  expect(screen.getByText(/本机读到 2 个候选/)).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: '重新扫描' }));
+
+  const scanning = await screen.findByRole('button', { name: '正在扫描…' });
+  expect(scanning).toBeDisabled();
+
+  finishSecondScan(secondScan);
+
+  await waitFor(() =>
+    expect(screen.getByLabelText('模型')).toHaveTextContent(
+      '继承 CLI 默认（codex/gpt-6.1-max）'
+    )
+  );
+  expect(screen.getByText(/本机读到 1 个候选/)).toBeInTheDocument();
+  expect(screen.queryByText(/本机读到 2 个候选/)).not.toBeInTheDocument();
+  // The loading state settles back to the idle button.
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: '重新扫描' })).toBeEnabled()
+  );
+  expect(scanLocalClis).toHaveBeenCalledTimes(2);
+});
+
 test('clears a model override when switching to a different CLI', async () => {
   const { update } = stub({}, {
     kind: 'local-cli',

@@ -195,6 +195,75 @@ describe('context integration with real vault and butler factories', () => {
     expect(reply.text).toBe(`reply:${vaultB}`);
   });
 
+  test('keeps history, model and permissions when the CLI agent switches', async () => {
+    const dir = await tempDir();
+    const context = await createAppContext({
+      userDataPath: join(dir, 'user-data'),
+      defaultVaultPath: join(dir, 'vault'),
+      secretStore: new InMemorySecretStore(),
+      now: fixedNow
+    });
+
+    const created = await context.api.createConversation({
+      title: '极限练习',
+      permissions: { web: true, write: false, shell: false }
+    });
+    await context.api.appendConversationMessage(created.id, {
+      id: 'm1',
+      role: 'user',
+      text: '帮我找极限的题目',
+      createdAt: '2026-11-21T09:00:00.000Z'
+    });
+    await context.api.appendConversationMessage(created.id, {
+      id: 'm2',
+      role: 'assistant',
+      text: '先做这 10 道，做完我帮你复盘。',
+      createdAt: '2026-11-21T09:01:00.000Z'
+    });
+    // Both overrides live on the conversation, not on the global provider.
+    await context.api.setConversationModel(created.id, 'codex/gpt-6.1-mini');
+    await context.api.setConversationPermissions(created.id, {
+      web: false,
+      write: true,
+      shell: false
+    });
+
+    const before = await context.api.getConversation(created.id);
+    const beforeList = await context.api.listConversations();
+    expect(before?.messages).toHaveLength(2);
+    expect(before?.model).toBe('codex/gpt-6.1-mini');
+    expect(before?.permissions).toEqual({ web: false, write: true, shell: false });
+    expect((await context.api.getSettings()).provider).toEqual({
+      kind: 'local-cli',
+      agent: 'codex',
+      command: 'codex'
+    });
+
+    // The same path the settings page uses: codex CLI -> claude CLI.
+    await context.api.updateSettings({
+      provider: { kind: 'local-cli', agent: 'claude', command: 'claude' }
+    });
+
+    // Guards against a vacuous pass: the provider really did switch.
+    expect((await context.api.getSettings()).provider).toEqual({
+      kind: 'local-cli',
+      agent: 'claude',
+      command: 'claude'
+    });
+
+    const after = await context.api.getConversation(created.id);
+    expect(after).toEqual(before);
+    // Byte-for-byte: a re-read from disk must be identical to the pre-switch copy.
+    expect(JSON.stringify(after)).toBe(JSON.stringify(before));
+    expect(after?.messages.map((message) => message.text)).toEqual([
+      '帮我找极限的题目',
+      '先做这 10 道，做完我帮你复盘。'
+    ]);
+    expect(after?.model).toBe('codex/gpt-6.1-mini');
+    expect(after?.permissions).toEqual({ web: false, write: true, shell: false });
+    expect(await context.api.listConversations()).toEqual(beforeList);
+  });
+
   test('refreshServices re-reads settings and rebuilds explicitly', async () => {
     const dir = await tempDir();
     const roots: string[] = [];
