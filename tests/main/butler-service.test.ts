@@ -16,6 +16,7 @@ import type {
 import { FakeModelClient } from '../../src/main/agent/model-client';
 import type { Conversation, ConversationMessage } from '../../src/shared/conversations';
 import type { ConversationStore } from '../../src/main/conversations/conversation-store';
+import type { SearchResult, SearchService } from '../../src/shared/search';
 import {
   ButlerServiceImpl,
   type ButlerServiceOptions
@@ -464,6 +465,50 @@ describe('ButlerServiceImpl replies', () => {
 
     expect(result.text).toContain('没有收到具体内容');
     expect(client.calls).toHaveLength(0);
+  });
+
+  test('feeds the references shown in the UI into the system prompt', async () => {
+    const client = new FakeModelClient(['先把极限笔记复习一遍。']);
+    const searchResult: SearchResult = {
+      workspaceId: 'ws-exam',
+      docId: 'n1',
+      kind: 'note',
+      title: '极限笔记',
+      snippet: '等价无穷小替换',
+      score: 1,
+      path: 'workspaces/ws-exam/notes/n1.md'
+    };
+    const search = {
+      search: vi.fn().mockResolvedValue([searchResult]),
+      searchAll: vi.fn().mockResolvedValue([searchResult]),
+      rebuild: vi.fn(),
+      dispose: vi.fn()
+    } as unknown as SearchService;
+
+    await makeService(client, new MemoryWorkspaceService(), {
+      getSearchService: () => search
+    }).send({ workspaceId: 'ws-exam', message: '极限怎么复习？' });
+
+    const system = systemPromptOf(client);
+    expect(system).toContain('## 本次检索');
+    expect(system).toContain('- [笔记] 极限笔记：等价无穷小替换');
+  });
+
+  test('a throwing search still answers without adding a prompt section', async () => {
+    const client = new FakeModelClient(['先按计划复习。']);
+    const search = {
+      search: vi.fn().mockRejectedValue(new Error('index offline')),
+      searchAll: vi.fn().mockRejectedValue(new Error('index offline')),
+      rebuild: vi.fn(),
+      dispose: vi.fn()
+    } as unknown as SearchService;
+
+    const result = await makeService(client, new MemoryWorkspaceService(), {
+      getSearchService: () => search
+    }).send({ workspaceId: 'ws-exam', message: '极限怎么复习？' });
+
+    expect(result.text).toBe('先按计划复习。');
+    expect(systemPromptOf(client)).not.toContain('## 本次检索');
   });
 });
 

@@ -1,4 +1,11 @@
+import {
+  buildReferencesPrompt,
+  buildSystemPrompt,
+  BUTLER_SYSTEM_PROMPT
+} from '../../src/main/butler/prompt';
 import { collectReferences, profileReferences } from '../../src/main/butler/references';
+import type { ButlerReference } from '../../src/shared/butler-stream';
+import { formatChineseDate } from '../../src/shared/date';
 import type { ProfileEntry } from '../../src/shared/profile';
 import type { SearchResult, SearchService } from '../../src/shared/search';
 
@@ -101,4 +108,73 @@ test('a search failure never blocks the answer', async () => {
     query: '极限'
   });
   expect(references.map((entry) => entry.id)).toEqual(['p1', 'p2']);
+});
+
+const EMPTY_CONTEXT = {
+  now: new Date(2026, 10, 21, 9, 0, 0),
+  workspaces: [],
+  tasks: [],
+  memory: [],
+  profile: [],
+  knowledge: [],
+  contextError: false
+};
+
+/** The exact prompt this context produced before retrieval fed the model. */
+const PRE_CHANGE_PROMPT =
+  `${BUTLER_SYSTEM_PROMPT}\n\n## 当前上下文\n` +
+  `今天：2026-11-21（${formatChineseDate('2026-11-21')}）\n` +
+  '任务：暂无记录。';
+
+test('without references the system prompt is identical to the pre-change prompt', () => {
+  expect(buildSystemPrompt(EMPTY_CONTEXT)).toBe(PRE_CHANGE_PROMPT);
+  expect(buildSystemPrompt(EMPTY_CONTEXT, [])).toBe(PRE_CHANGE_PROMPT);
+  expect(buildReferencesPrompt([])).toBe('');
+});
+
+test('renders the shown references in order with truncation', () => {
+  const longSnippet = '笔记正文'.repeat(100);
+  const references: ButlerReference[] = [
+    { id: 'n1', kind: 'note', title: '极限笔记', detail: '等价无穷小替换' },
+    { id: 't1', kind: 'task', title: '极限错题二刷', detail: longSnippet }
+  ];
+
+  const prompt = buildSystemPrompt(EMPTY_CONTEXT, references);
+
+  expect(prompt).toContain('## 本次检索');
+  const noteAt = prompt.indexOf('[笔记] 极限笔记：等价无穷小替换');
+  const taskAt = prompt.indexOf('[任务] 极限错题二刷');
+  expect(noteAt).toBeGreaterThan(-1);
+  expect(taskAt).toBeGreaterThan(noteAt);
+  // The whole note body is never pasted: the detail is cut at its cap.
+  expect(prompt).not.toContain(longSnippet);
+  const taskLine = prompt.split('\n').find((line) => line.startsWith('- [任务]'));
+  expect(taskLine).toBeDefined();
+  const detail = taskLine!.slice(taskLine!.indexOf('：') + 1);
+  expect(detail.endsWith('…')).toBe(true);
+  expect(Array.from(detail)).toHaveLength(200);
+});
+
+test('bounds the 本次检索 section by item count and character budget', () => {
+  const references: ButlerReference[] = Array.from({ length: 20 }, (_, index) => ({
+    id: `n${index}`,
+    kind: 'note' as const,
+    title: `标题${index}`,
+    detail: '说明'.repeat(120)
+  }));
+
+  const prompt = buildSystemPrompt(EMPTY_CONTEXT, references);
+  const section = prompt.slice(prompt.indexOf('## 本次检索'));
+  const lines = section.split('\n').filter((line) => line.startsWith('- ['));
+
+  expect(lines.length).toBeLessThanOrEqual(10);
+  expect(lines.length).toBeLessThan(references.length);
+  expect(lines.join('\n').length).toBeLessThanOrEqual(1_200);
+});
+
+test('a reference without text adds no empty heading', () => {
+  const references: ButlerReference[] = [{ id: 'x1', kind: 'note', title: '  ', detail: '' }];
+
+  expect(buildReferencesPrompt(references)).toBe('');
+  expect(buildSystemPrompt(EMPTY_CONTEXT, references)).toBe(PRE_CHANGE_PROMPT);
 });

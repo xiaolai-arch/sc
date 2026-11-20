@@ -170,7 +170,7 @@ export class ButlerServiceImpl implements ButlerService {
       input.permissions ?? conversation?.permissions ?? DEFAULT_AGENT_PERMISSIONS
     );
     const prepared = await prepareAttachments(input.attachments);
-    const messages = this.buildModelMessages(context, conversation, input, prepared);
+    const messages = this.buildModelMessages(context, conversation, input, prepared, references);
     const steps: ConversationStep[] = [];
     let usage = summaryUsage;
     let lastText = '';
@@ -299,7 +299,7 @@ export class ButlerServiceImpl implements ButlerService {
       input.permissions ?? conversation?.permissions ?? DEFAULT_AGENT_PERMISSIONS
     );
     const prepared = await prepareAttachments(input.attachments);
-    const messages = this.buildModelMessages(context, conversation, input, prepared);
+    const messages = this.buildModelMessages(context, conversation, input, prepared, references);
     const steps: ConversationStep[] = [];
     let usage = summaryUsage;
     let lastToolFailure: string | undefined;
@@ -508,12 +508,13 @@ export class ButlerServiceImpl implements ButlerService {
     context: ButlerContext,
     conversation: Conversation | null,
     input: SendMessageInput,
-    prepared?: PreparedAttachments
+    prepared?: PreparedAttachments,
+    references: readonly ButlerReference[] = []
   ): ModelMessage[] {
     const summary = conversation?.summary?.trim();
     const system = summary
-      ? `${buildSystemPrompt(context)}\n\n## 此前对话摘要\n${summary}\n（更早的消息已压缩在这里；最近的消息仍以原文为准。）`
-      : buildSystemPrompt(context);
+      ? `${buildSystemPrompt(context, references)}\n\n## 此前对话摘要\n${summary}\n（更早的消息已压缩在这里；最近的消息仍以原文为准。）`
+      : buildSystemPrompt(context, references);
     const userText = prepared?.text
       ? `${buildUserPrompt(input)}\n\n## 附件内容\n${prepared.text}`
       : buildUserPrompt(input);

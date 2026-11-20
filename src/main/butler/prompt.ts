@@ -1,3 +1,7 @@
+import {
+  BUTLER_REFERENCE_LABELS,
+  type ButlerReference
+} from '../../shared/butler-stream';
 import { formatChineseDate, formatLocalDate } from '../../shared/date';
 import { PROFILE_CATEGORY_LABELS } from '../../shared/profile';
 import type { SendMessageInput } from '../../shared/workspace';
@@ -45,9 +49,66 @@ const MAX_PROMPT_EVIDENCE = 3;
 const MAX_PROMPT_KNOWLEDGE_DETAILS = 8;
 const MAX_PROMPT_KNOWLEDGE_SUMMARY = 160;
 const MAX_PROMPT_KNOWLEDGE_NOTE = 240;
+/** Retrieval can list up to profile + search references; render the same count. */
+const MAX_PROMPT_REFERENCES = 10;
+const MAX_PROMPT_REFERENCE_TITLE = 60;
+/** Same order of magnitude as the search snippet cap: never a whole note. */
+const MAX_PROMPT_REFERENCE_DETAIL = 200;
+/** Whole-section character budget for the rendered entries, bounding prompt growth. */
+const MAX_PROMPT_REFERENCES_CHARS = 1_200;
+const REFERENCES_INTRO =
+  '以下是按用户问题检索到的本地记录（顺序与「本次参考」一致，已截断）；回答时以这些内容为依据，没有列出的内容不要编造。';
 
-export function buildSystemPrompt(context: ButlerContext): string {
-  return `${BUTLER_SYSTEM_PROMPT}\n\n${renderContext(context)}`;
+export function buildSystemPrompt(
+  context: ButlerContext,
+  references: readonly ButlerReference[] = []
+): string {
+  const base = `${BUTLER_SYSTEM_PROMPT}\n\n${renderContext(context)}`;
+  const referencesSection = buildReferencesPrompt(references);
+  return referencesSection ? `${base}\n\n${referencesSection}` : base;
+}
+
+/**
+ * Renders the "本次检索" system-prompt section from the same reference objects
+ * the UI lists, in the same order. Bounded per item and in total; returns ""
+ * when nothing usable remains so best-effort retrieval never adds an empty
+ * heading (and the prompt stays identical to the no-reference prompt).
+ */
+export function buildReferencesPrompt(references: readonly ButlerReference[]): string {
+  if (references.length === 0) return '';
+  const lines: string[] = [];
+  let remaining = MAX_PROMPT_REFERENCES_CHARS;
+  for (const reference of references) {
+    if (lines.length >= MAX_PROMPT_REFERENCES) break;
+    const title = clipPromptText(reference.title, MAX_PROMPT_REFERENCE_TITLE);
+    const detail = clipPromptText(reference.detail ?? '', MAX_PROMPT_REFERENCE_DETAIL);
+    if (!title && !detail) continue;
+    const label = BUTLER_REFERENCE_LABELS[reference.kind] ?? '记录';
+    const prefix = `- [${label}] `;
+    // Stop rather than emit a line with no room for real content.
+    if (remaining < prefix.length + 8) break;
+    const body = title && detail ? `${title}：${detail}` : title || detail;
+    const line = `${prefix}${truncateToBudget(body, remaining - prefix.length)}`;
+    lines.push(line);
+    remaining -= line.length + 1;
+  }
+  if (lines.length === 0) return '';
+  return `## 本次检索\n${REFERENCES_INTRO}\n${lines.join('\n')}`;
+}
+
+function clipPromptText(text: string, maxChars: number): string {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxChars) return normalized;
+  const chars = Array.from(normalized);
+  return chars.length <= maxChars
+    ? normalized
+    : `${chars.slice(0, maxChars - 1).join('')}…`;
+}
+
+function truncateToBudget(text: string, budget: number): string {
+  const chars = Array.from(text);
+  if (chars.length <= budget) return text;
+  return budget <= 1 ? '…' : `${chars.slice(0, budget - 1).join('')}…`;
 }
 
 export function buildUserPrompt(input: SendMessageInput): string {
