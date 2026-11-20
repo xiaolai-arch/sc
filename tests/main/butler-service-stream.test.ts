@@ -7,6 +7,7 @@ import type {
 import { FakeModelClient } from '../../src/main/agent/model-client';
 import { ButlerServiceImpl } from '../../src/main/butler/butler-service';
 import type { ButlerStreamEvent } from '../../src/shared/butler-stream';
+import type { WorkspacePlanner } from '../../src/shared/planning';
 import type {
   Workspace,
   WorkspaceService,
@@ -91,13 +92,25 @@ const workspaceService = {
     durationMin: 30,
     acceptance: '完成',
     status: input.status
-  })
+  }),
+  createTask: async (input: {
+    workspaceId: string;
+    title: string;
+    subject: string;
+    durationMin: number;
+    acceptance: string;
+  }) => ({ id: 't-new', ...input, status: 'pending' })
 } as unknown as WorkspaceService;
 
-function service(client: StreamingModelClient | FakeModelClient, maxToolSteps = 4) {
+function service(
+  client: StreamingModelClient | FakeModelClient,
+  maxToolSteps = 4,
+  planner: WorkspacePlanner | null = null
+) {
   return new ButlerServiceImpl({
     workspaceService,
     modelClient: client,
+    planner,
     now: () => NOW,
     maxToolSteps
   });
@@ -252,4 +265,68 @@ test('stops at maxToolSteps with a template reply', async () => {
 
   expect(result.text).not.toBe('第二轮');
   expect(events.at(-1)?.type).toBe('done');
+});
+
+function planToolRound(minutes: number, source: 'input' | 'workspace' | 'default') {
+  const planner: WorkspacePlanner = {
+    plan: async (planInput) => ({
+      workspaceId: planInput.workspaceId,
+      date: planInput.date ?? '2026-11-01',
+      generatedBy: 'agent',
+      availableMinutes: minutes,
+      availableMinutesSource: source,
+      tasks: [
+        { title: '极限 10 题', subject: '数学', durationMin: 30, acceptance: '完成并订正' }
+      ]
+    })
+  };
+  const client = new ScriptedStreamingClient([
+    {
+      events: [],
+      response: {
+        text: '',
+        usage: { inputTokens: 1, outputTokens: 1 },
+        toolCalls: [{ id: 'p1', name: 'plan_workspace', arguments: {} }]
+      }
+    },
+    {
+      events: [{ type: 'text', text: '排好了。' }],
+      response: { text: '排好了。', usage: { inputTokens: 1, outputTokens: 1 } }
+    }
+  ]);
+  return { client, planner };
+}
+
+test('plan tool step names the minutes and their project-setting source', async () => {
+  const { client, planner } = planToolRound(45, 'workspace');
+  const events: ButlerStreamEvent[] = [];
+  const result = await service(client, 4, planner).stream(input('排今天的计划'), (event) =>
+    events.push(event)
+  );
+
+  const toolResult = events.find((event) => event.type === 'tool-result');
+  expect(toolResult).toMatchObject({
+    type: 'tool-result',
+    name: 'plan_workspace',
+    ok: true,
+    label: '生成计划',
+    detail: '每天可用 45 分钟 · 来自项目设置'
+  });
+  expect(result.text).toBe('排好了。');
+});
+
+test('plan tool step names a caller-specified budget as 本次指定', async () => {
+  const { client, planner } = planToolRound(90, 'input');
+  const events: ButlerStreamEvent[] = [];
+  await service(client, 4, planner).stream(input('今天只能学 90 分钟'), (event) =>
+    events.push(event)
+  );
+
+  const toolResult = events.find((event) => event.type === 'tool-result');
+  expect(toolResult).toMatchObject({
+    type: 'tool-result',
+    name: 'plan_workspace',
+    ok: true,
+    detail: '每天可用 90 分钟 · 本次指定'
+  });
 });

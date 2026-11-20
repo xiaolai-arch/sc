@@ -203,6 +203,20 @@ test('renders nothing for an empty trace', () => {
   expect(container).toBeEmptyDOMElement();
 });
 
+test('shows where the planned daily minutes came from on the plan row', () => {
+  render(
+    <TraceFlow
+      items={[
+        tool('p1', '生成计划', 'done', '每天可用 45 分钟 · 来自项目设置'),
+        tool('p2', '生成计划', 'done', '每天可用 90 分钟 · 本次指定')
+      ]}
+    />
+  );
+
+  expect(screen.getByText('每天可用 45 分钟 · 来自项目设置')).toBeInTheDocument();
+  expect(screen.getByText('每天可用 90 分钟 · 本次指定')).toBeInTheDocument();
+});
+
 test('maps persisted steps to tool rows', () => {
   expect(
     stepsToTrace([
