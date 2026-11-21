@@ -661,6 +661,8 @@ function requireConversationMessage(value: unknown): ConversationMessage {
   const trigger =
     input.trigger === 'morning' ||
     input.trigger === 'evening' ||
+    input.trigger === 'weekly' ||
+    input.trigger === 'behind' ||
     input.trigger === 'custom'
       ? input.trigger
       : undefined;

@@ -2,7 +2,7 @@ import type { ButlerReference } from './butler-stream';
 import type { AgentPermissions, MessageAttachment } from './attachments';
 
 export type ConversationKind = 'chat' | 'check-in';
-export type CheckInTrigger = 'morning' | 'evening' | 'weekly' | 'custom';
+export type CheckInTrigger = 'morning' | 'evening' | 'weekly' | 'behind' | 'custom';
 
 /**
  * Virtual workspace for cross-workspace chats (daily planning and check-ins).

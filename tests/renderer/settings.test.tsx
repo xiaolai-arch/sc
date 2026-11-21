@@ -13,6 +13,8 @@ const settings = {
     evening: '21:30',
     weekly: '20:00',
     weeklyEnabled: true,
+    behindSchedule: '20:30',
+    behindScheduleEnabled: true,
     dndStart: '23:00',
     dndEnd: '07:30'
   },
@@ -186,8 +188,49 @@ test('saves the weekly review toggle and time', async () => {
   );
 });
 
-test('fills weekly defaults for old settings payloads', async () => {
-  const oldSettings = {
+test('saves the behind-schedule reminder toggle and time', async () => {
+  const update = vi.fn().mockResolvedValue(settings);
+  window.studyCoach = {
+    getSettings: vi.fn().mockResolvedValue(settings),
+    updateSettings: update,
+    setApiKey: vi.fn()
+  } as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  const toggle = await screen.findByRole('checkbox', { name: '落后提醒' });
+  expect(toggle).toBeChecked();
+  expect(screen.getByLabelText('落后提醒时间')).toHaveValue('20:30');
+
+  await userEvent.clear(screen.getByLabelText('落后提醒时间'));
+  await userEvent.type(screen.getByLabelText('落后提醒时间'), '19:45');
+  await userEvent.click(toggle);
+  await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+
+  expect(update).toHaveBeenCalledWith(
+    expect.objectContaining({
+      notifications: expect.objectContaining({
+        behindSchedule: '19:45',
+        behindScheduleEnabled: false
+      })
+    })
+  );
+});
+
+test('fills behind-schedule defaults for settings payloads without them', async () => {
+  const { behindSchedule: _time, behindScheduleEnabled: _on, ...notifications } =
+    settings.notifications;
+  window.studyCoach = {
+    getSettings: vi.fn().mockResolvedValue({ ...settings, notifications }),
+    updateSettings: vi.fn(),
+    setApiKey: vi.fn()
+  } as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  expect(await screen.findByLabelText('落后提醒时间')).toHaveValue('20:30');
+  expect(screen.getByRole('checkbox', { name: '落后提醒' })).toBeChecked();
+});
+
+test('fills weekly defaults for old settings payloads', async () => {  const oldSettings = {
     ...settings,
     notifications: {
       enabled: true,

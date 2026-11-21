@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { formatLocalDate } from '../../shared/date';
+import type { PracticeService } from '../../shared/practice';
 import type { AppSettings } from '../../shared/types';
 import type { WorkspaceService } from '../../shared/workspace';
 import type { ModelClient } from '../agent/model-client';
@@ -7,6 +8,11 @@ import { gatherContext, type ButlerContext } from '../butler/context';
 import type { Conversation } from '../../shared/conversations';
 import type { ConversationStore } from '../conversations/conversation-store';
 import type { SchedulerNotification } from '../scheduler/scheduler';
+import {
+  BEHIND_SCHEDULE_TITLE,
+  behindScheduleSummary,
+  isTaskForDate
+} from '../scheduler/behind-schedule';
 import {
   buildCheckInNotificationBody,
   buildCheckInPrompt,
@@ -24,14 +30,30 @@ export interface ProactiveCheckInOptions {
    * "每日 token 上限" budget before spending another proactive model call.
    */
   getDailyTokensUsed?: () => Promise<number>;
+  /**
+   * Read-only source for the due-mistake digest on the morning check-in. When
+   * absent or failing, the message stays exactly as it was without it.
+   */
+  practiceService?: PracticeService | null;
   now?: () => Date;
 }
 
 const CHECK_IN_TITLE_PREFIX = '今天的检查';
 const WEEKLY_TITLE_PREFIX = '每周复盘';
+const BEHIND_TITLE_PREFIX = '落后提醒';
+
+/** One deterministic line appended to the morning message; never model-written. */
+function dueMistakeLine(count: number): string {
+  return `今天有 ${count} 道到期错题，抽 10 分钟过一遍。`;
+}
 
 function checkInTitle(trigger: CheckInTrigger, date: string): string {
-  const prefix = trigger === 'weekly' ? WEEKLY_TITLE_PREFIX : CHECK_IN_TITLE_PREFIX;
+  const prefix =
+    trigger === 'weekly'
+      ? WEEKLY_TITLE_PREFIX
+      : trigger === 'behind'
+        ? BEHIND_TITLE_PREFIX
+        : CHECK_IN_TITLE_PREFIX;
   return `${prefix} · ${date.slice(5)}`;
 }
 
@@ -67,12 +89,19 @@ function excludeCheckInOff(context: ButlerContext): ButlerContext {
   };
 }
 
+/** True when today's plan exists and fewer than half of its tasks are done. */
+function isBehindSchedule(context: ButlerContext, date: string): boolean {
+  const tasks = context.tasks.filter((task) => isTaskForDate(task, date));
+  return behindScheduleSummary(tasks) !== null;
+}
+
 export class ProactiveCheckInService {
   private readonly conversationStore: ConversationStore;
   private readonly workspaceService: WorkspaceService | null;
   private readonly modelClient: ModelClient | null;
   private readonly getSettings: () => Promise<AppSettings>;
   private readonly getDailyTokensUsed: (() => Promise<number>) | undefined;
+  private readonly practiceService: PracticeService | null;
   private readonly now: () => Date;
 
   constructor(options: ProactiveCheckInOptions) {
@@ -81,6 +110,7 @@ export class ProactiveCheckInService {
     this.modelClient = options.modelClient;
     this.getSettings = options.getSettings;
     this.getDailyTokensUsed = options.getDailyTokensUsed;
+    this.practiceService = options.practiceService ?? null;
     this.now = options.now ?? (() => new Date());
   }
 
@@ -107,6 +137,10 @@ export class ProactiveCheckInService {
     const rawContext = await gatherContext(this.workspaceService, { message: '' }, this.now());
     const context = excludeCheckInOff(rawContext);
     if (rawContext.workspaces.length > 0 && context.workspaces.length === 0) return null;
+    // 落后提醒 is silent unless today's plan exists and is more than half
+    // undone. Checked before a conversation is created, so an on-track day
+    // leaves no trace at all.
+    if (trigger === 'behind' && !isBehindSchedule(context, date)) return null;
     // Only create the conversation once the check is certain to happen, so a
     // skipped check does not leave an empty "今天的检查" behind.
     const conversation =
@@ -116,34 +150,46 @@ export class ProactiveCheckInService {
         title: checkInTitle(trigger, date)
       }));
     const text = await this.generate(trigger, date, context);
+    // The due-mistake digest is a deterministic line on the morning message
+    // only; it is computed once here so text and the surfaced body agree.
+    const digest = trigger === 'morning' ? await this.dueMistakeDigest(context, date) : '';
     const createdAt = this.now().toISOString();
     await this.conversationStore.appendMessage(conversation.id, {
       id: randomUUID(),
       role: 'assistant',
-      text,
+      text: digest === '' ? text : `${text}\n${digest}`,
       createdAt,
       source: 'check-in',
       trigger
     });
 
+    const behind = trigger === 'behind';
+    const body = buildCheckInNotificationBody(context, trigger, date);
     return {
       key: `${date}:check-in:${trigger}`,
-      kind:
-        trigger === 'morning'
+      kind: behind
+        ? 'behind-schedule'
+        : trigger === 'morning'
           ? 'morning-plan'
           : trigger === 'evening'
             ? 'evening-review'
             : 'weekly-review',
       date,
-      scheduledTime:
-        trigger === 'morning'
+      scheduledTime: behind
+        ? settings.notifications.behindSchedule
+        : trigger === 'morning'
           ? settings.notifications.morning
           : trigger === 'evening'
             ? settings.notifications.evening
             : settings.notifications.weekly,
-      title:
-        trigger === 'weekly' ? '阿咲想和你回顾这一周' : '阿咲想和你聊聊今天的进度',
-      body: buildCheckInNotificationBody(context, trigger),
+      title: behind
+        ? BEHIND_SCHEDULE_TITLE
+        : trigger === 'weekly'
+          ? '阿咲想和你回顾这一周'
+          : '阿咲想和你聊聊今天的进度',
+      // Only the morning message carries a deterministic digest line; the
+      // behind-schedule body is already the deterministic text itself.
+      body: digest === '' ? body : `${body}\n${digest}`,
       conversationId: conversation.id
     };
   }
@@ -188,20 +234,53 @@ export class ProactiveCheckInService {
     date: string,
     context: Awaited<ReturnType<typeof gatherContext>>
   ): Promise<string> {
-    const template = buildCheckInTemplate(context, trigger);
+    const template = buildCheckInTemplate(context, trigger, date);
     if (!this.modelClient) return template;
     try {
-      const response = await this.modelClient.complete({
-        messages: [
-          {
-            role: 'system',
-            content: buildCheckInPrompt(context, trigger, date)
-          }
-        ]
-      });
-      return response.text.trim() || template;
+      return await this.composeWithModel(trigger, date, context, template);
     } catch {
       return template;
+    }
+  }
+
+  private async composeWithModel(
+    trigger: CheckInTrigger,
+    date: string,
+    context: Awaited<ReturnType<typeof gatherContext>>,
+    template: string
+  ): Promise<string> {
+    const response = await this.modelClient!.complete({
+      messages: [
+        {
+          role: 'system',
+          content: buildCheckInPrompt(context, trigger, date)
+        }
+      ]
+    });
+    return response.text.trim() || template;
+  }
+
+  /**
+   * `今天有 N 道到期错题，抽 10 分钟过一遍。` for active mistakes due by
+   * `date` across the check-in projects; '' when zero or unreadable, so the
+   * message stays byte-identical without mistakes.
+   */
+  private async dueMistakeDigest(
+    context: Awaited<ReturnType<typeof gatherContext>>,
+    date: string
+  ): Promise<string> {
+    const practice = this.practiceService;
+    if (practice === null) return '';
+    const workspaceIds = context.workspaces.map((workspace) => workspace.id);
+    if (workspaceIds.length === 0) return '';
+    try {
+      const due = await Promise.all(
+        workspaceIds.map((id) => practice.getDue(id, date))
+      );
+      const count = due.reduce((sum, mistakes) => sum + mistakes.length, 0);
+      return count > 0 ? dueMistakeLine(count) : '';
+    } catch {
+      return '';
     }
   }
 }

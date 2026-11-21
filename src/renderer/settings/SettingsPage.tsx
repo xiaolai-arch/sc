@@ -185,6 +185,8 @@ export function SettingsPage({
     evening: '21:30',
     weekly: '20:00',
     weeklyEnabled: true,
+    behindSchedule: '20:30',
+    behindScheduleEnabled: true,
     dndStart: '23:00',
     dndEnd: '07:30'
   });
@@ -297,6 +299,8 @@ export function SettingsPage({
         evening: value.notifications.evening ?? '21:30',
         weekly: value.notifications.weekly ?? '20:00',
         weeklyEnabled: value.notifications.weeklyEnabled ?? true,
+        behindSchedule: value.notifications.behindSchedule ?? '20:30',
+        behindScheduleEnabled: value.notifications.behindScheduleEnabled ?? true,
         dndStart: value.notifications.dndStart ?? '23:00',
         dndEnd: value.notifications.dndEnd ?? '07:30'
       });
@@ -1462,6 +1466,38 @@ export function SettingsPage({
                 value={notifications.weekly}
                 onChange={(event) =>
                   setNotifications((current) => ({ ...current, weekly: event.target.value }))
+                }
+              />
+            </div>
+            <label className="mt-5 flex min-h-11 items-center gap-3 text-sm font-medium text-gray-500 dark:text-[#a1a1a6]">
+              <input
+                type="checkbox"
+                aria-label="落后提醒"
+                checked={notifications.behindScheduleEnabled}
+                onChange={(event) =>
+                  setNotifications((current) => ({
+                    ...current,
+                    behindScheduleEnabled: event.target.checked
+                  }))
+                }
+                className="h-5 w-5 rounded-[4px] accent-[#0071e3]"
+              />
+              落后提醒
+              <span className="text-xs font-normal text-gray-500 dark:text-[#8e8e93]">
+                当天过半任务还没完成时提醒一次
+              </span>
+            </label>
+            <div className="mt-3 max-w-xs">
+              <Label htmlFor="settings-behind-schedule">落后提醒时间</Label>
+              <Input
+                id="settings-behind-schedule"
+                type="time"
+                value={notifications.behindSchedule}
+                onChange={(event) =>
+                  setNotifications((current) => ({
+                    ...current,
+                    behindSchedule: event.target.value
+                  }))
                 }
               />
             </div>

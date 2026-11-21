@@ -7,6 +7,7 @@ import { ConversationStore } from '../../src/main/conversations/conversation-sto
 import { Scheduler, type SchedulerNotification } from '../../src/main/scheduler/scheduler';
 import { createDefaultSettings } from '../../src/main/settings/defaults';
 import type { AppSettings } from '../../src/shared/types';
+import type { PracticeMistake, PracticeService } from '../../src/shared/practice';
 import type {
   Workspace,
   WorkspaceService,
@@ -505,6 +506,283 @@ test('skips check-ins when notifications are disabled', async () => {
 
     expect(await service.check('morning', '2026-11-01')).toBeNull();
     expect(await value.list()).toEqual([]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+function mistake(workspaceId: string, due: string): PracticeMistake {
+  return {
+    id: `m-${workspaceId}-${due}`,
+    workspaceId,
+    setId: 'ps-1',
+    questionId: `q-${due}`,
+    prompt: '题目',
+    options: ['A', 'B'],
+    answer: 0,
+    explanation: '',
+    wrongCount: 1,
+    correctStreak: 0,
+    priority: 1,
+    intervalDays: 1,
+    due,
+    status: 'active',
+    createdAt: '2026-10-30T08:00:00.000Z',
+    updatedAt: '2026-10-30T08:00:00.000Z',
+    lastAnsweredAt: '2026-10-30T08:00:00.000Z'
+  };
+}
+
+function practiceWith(due: PracticeMistake[]): PracticeService {
+  return {
+    listSets: async () => [],
+    getSet: async () => null,
+    createSet: async () => {
+      throw new Error('not used');
+    },
+    submitAnswer: async () => {
+      throw new Error('not used');
+    },
+    getMistakes: async () => due,
+    getDue: async () => due,
+    listAttempts: async () => []
+  } as unknown as PracticeService;
+}
+
+test('appends one deterministic due-mistake line to the morning message', async () => {
+  const { dir, value } = await store();
+  try {
+    const client = new FakeModelClient(['早上好。今天先做极限基础，做完告诉我。']);
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: client,
+      practiceService: practiceWith([mistake('ws-exam', '2026-11-01')]),
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    const notification = await service.check('morning', '2026-11-01');
+
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    const text = conversation?.messages[0]?.text ?? '';
+    expect(text).toBe('早上好。今天先做极限基础，做完告诉我。\n今天有 1 道到期错题，抽 10 分钟过一遍。');
+    // The surfaced body carries the same line so the OS banner matches.
+    expect(notification?.body).toContain('今天有 1 道到期错题，抽 10 分钟过一遍。');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('leaves the morning message byte-identical when no mistake is due', async () => {
+  const { dir, value } = await store();
+  try {
+    const client = new FakeModelClient(['早上好。今天先做极限基础，做完告诉我。']);
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: client,
+      practiceService: practiceWith([]),
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    const notification = await service.check('morning', '2026-11-01');
+
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    expect(conversation?.messages[0]?.text).toBe('早上好。今天先做极限基础，做完告诉我。');
+    expect(notification?.body).toBe('今天还有 1 个任务没完成，点开看看。');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('an unreadable practice service does not change the morning message', async () => {
+  const { dir, value } = await store();
+  try {
+    const client = new FakeModelClient(['早上好。今天先做极限基础，做完告诉我。']);
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: client,
+      practiceService: {
+        ...practiceWith([]),
+        getDue: async () => {
+          throw new Error('practice unreadable');
+        }
+      } as unknown as PracticeService,
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    await service.check('morning', '2026-11-01');
+
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    expect(conversation?.messages[0]?.text).toBe('早上好。今天先做极限基础，做完告诉我。');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the evening message never carries the due-mistake digest', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      practiceService: practiceWith([mistake('ws-exam', '2026-11-01')]),
+      getSettings: async () => settings(),
+      now: () => at(21, 30)
+    });
+
+    await service.check('evening', '2026-11-01');
+
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    expect(conversation?.messages[0]?.text ?? '').not.toContain('到期错题');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+function at(hour: number, minute: number): Date {
+  return new Date(2026, 9, 31, hour, minute, 0);
+}
+
+const behindTask = (
+  id: string,
+  status: WorkspaceSnapshot['tasks'][0]['status']
+): WorkspaceSnapshot['tasks'][0] => ({
+  id,
+  workspaceId: 'ws-exam',
+  title: id === 't1' ? '数学真题' : '英语阅读',
+  subject: '数学',
+  durationMin: 45,
+  acceptance: '',
+  status,
+  due: '2026-10-31'
+});
+
+function behindService(tasks: WorkspaceSnapshot['tasks']): WorkspaceService {
+  const behind: WorkspaceSnapshot = { ...snapshot, tasks };
+  return {
+    ...workspaceServiceFor([behind]),
+    listWorkspaces: async () => [behind.workspace],
+    getWorkspaceSnapshot: async () => behind
+  } as unknown as WorkspaceService;
+}
+
+test('creates a behind-schedule nudge naming the count and first task', async () => {
+  const { dir, value } = await store();
+  try {
+    const tasks = [
+      behindTask('t0', 'done'),
+      { ...behindTask('t1', 'pending'), title: '数学真题' },
+      behindTask('t2', 'pending')
+    ];
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService: behindService(tasks),
+      modelClient: null,
+      getSettings: async () => settings(),
+      now: () => at(20, 30)
+    });
+
+    const notification = await service.check('behind', '2026-10-31');
+
+    expect(notification).toMatchObject({
+      kind: 'behind-schedule',
+      scheduledTime: '20:30',
+      title: '今天有点落后，要调整一下吗？',
+      body: '今天还有 2 个任务没完成，下一项是「数学真题」。要不要一起调整一下今天的安排？',
+      conversationId: expect.any(String)
+    });
+    const summaries = await value.list();
+    expect(summaries[0]).toMatchObject({ kind: 'check-in', title: '落后提醒 · 10-31' });
+    const conversation = await value.get(summaries[0]!.id);
+    expect(conversation?.messages[0]?.text).toBe(
+      '今天还有 2 个任务没完成，下一项是「数学真题」。要不要一起调整一下今天的安排？'
+    );
+    expect(conversation?.messages[0]?.trigger).toBe('behind');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the behind-schedule nudge is silent when the plan is on track or empty', async () => {
+  const { dir, value } = await store();
+  try {
+    const onTrack = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService: behindService([
+        behindTask('t0', 'done'),
+        behindTask('t1', 'done'),
+        behindTask('t2', 'pending')
+      ]),
+      modelClient: null,
+      getSettings: async () => settings(),
+      now: () => at(20, 30)
+    });
+    expect(await onTrack.check('behind', '2026-10-31')).toBeNull();
+
+    const empty = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService: behindService([]),
+      modelClient: null,
+      getSettings: async () => settings(),
+      now: () => at(20, 30)
+    });
+    expect(await empty.check('behind', '2026-10-31')).toBeNull();
+
+    // A skipped nudge must not leave an empty "落后提醒" conversation behind.
+    expect(await value.list()).toEqual([]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('respects snooze, disabled notifications and the daily cap for the behind nudge', async () => {
+  const { dir, value } = await store();
+  try {
+    const tasks = [behindTask('t1', 'pending'), behindTask('t2', 'pending')];
+    const snoozed = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService: behindService(tasks),
+      modelClient: null,
+      getSettings: async () =>
+        settings({
+          notifications: { ...settings().notifications, snoozedUntil: '2026-10-31' }
+        }),
+      now: () => at(20, 30)
+    });
+    expect(await snoozed.check('behind', '2026-10-31')).toBeNull();
+
+    const disabled = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService: behindService(tasks),
+      modelClient: null,
+      getSettings: async () =>
+        settings({ notifications: { ...settings().notifications, enabled: false } }),
+      now: () => at(20, 30)
+    });
+    expect(await disabled.check('behind', '2026-10-31')).toBeNull();
+
+    // The shared daily cap counts the behind nudge like any other check-in.
+    const capped = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService: behindService(tasks),
+      modelClient: null,
+      getSettings: async () =>
+        settings({ budget: { proactiveSessionsPerDay: 1, dailyTokens: 1000 } }),
+      now: () => at(20, 30)
+    });
+    expect(await capped.check('behind', '2026-10-31')).not.toBeNull();
+    expect(await capped.check('behind', '2026-10-31')).toBeNull();
+    expect(await value.list()).toHaveLength(1);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

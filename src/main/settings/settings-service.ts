@@ -31,7 +31,15 @@ function normalizeNotifications(value: NotificationSettings | undefined): Notifi
     weeklyEnabled:
       typeof current.weeklyEnabled === 'boolean'
         ? current.weeklyEnabled
-        : DEFAULT_NOTIFICATIONS.weeklyEnabled
+        : DEFAULT_NOTIFICATIONS.weeklyEnabled,
+    behindSchedule:
+      typeof current.behindSchedule === 'string' && TIME_PATTERN.test(current.behindSchedule)
+        ? current.behindSchedule
+        : DEFAULT_NOTIFICATIONS.behindSchedule,
+    behindScheduleEnabled:
+      typeof current.behindScheduleEnabled === 'boolean'
+        ? current.behindScheduleEnabled
+        : DEFAULT_NOTIFICATIONS.behindScheduleEnabled
   };
 }
 
@@ -115,7 +123,7 @@ function validateNotifications(value: unknown): Partial<NotificationSettings> {
     if (typeof value.enabled !== 'boolean') throw new Error('通知开关必须是布尔值。');
     result.enabled = value.enabled;
   }
-  for (const key of ['morning', 'evening', 'weekly', 'dndStart', 'dndEnd'] as const) {
+  for (const key of ['morning', 'evening', 'weekly', 'behindSchedule', 'dndStart', 'dndEnd'] as const) {
     const entry = value[key];
     if (entry === undefined) continue;
     if (typeof entry !== 'string' || !TIME_PATTERN.test(entry)) {
@@ -128,6 +136,12 @@ function validateNotifications(value: unknown): Partial<NotificationSettings> {
       throw new Error('周日复盘开关必须是布尔值。');
     }
     result.weeklyEnabled = value.weeklyEnabled;
+  }
+  if (value.behindScheduleEnabled !== undefined) {
+    if (typeof value.behindScheduleEnabled !== 'boolean') {
+      throw new Error('落后提醒开关必须是布尔值。');
+    }
+    result.behindScheduleEnabled = value.behindScheduleEnabled;
   }
   if (value.snoozedUntil !== undefined) {
     if (typeof value.snoozedUntil !== 'string') {
