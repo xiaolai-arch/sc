@@ -349,3 +349,90 @@ test('rejects a non-boolean strictMastery', async () => {
   );
   expect((await service.get()).strictMastery).toBeUndefined();
 });
+
+test('trims the accountability name and rejects one that is too long or multiline', async () => {
+  const { service } = memorySettings();
+
+  const saved = await service.update({ accountabilityName: '  小林  ' });
+  expect(saved.accountabilityName).toBe('小林');
+  expect((await service.get()).accountabilityName).toBe('小林');
+
+  // 20 characters are fine; a 21st is rejected with a Chinese message.
+  const twenty = await service.update({ accountabilityName: '一二三四五六七八九十一二三四五六七八九十' });
+  expect([...(twenty.accountabilityName ?? '')]).toHaveLength(20);
+  await expect(
+    service.update({ accountabilityName: '一二三四五六七八九十一二三四五六七八九十一' })
+  ).rejects.toThrow('问责对象不能超过 20 字。');
+
+  await expect(
+    service.update({ accountabilityName: '小林\n小王' } as never)
+  ).rejects.toThrow('问责对象不能包含换行。');
+  await expect(
+    service.update({ accountabilityName: 42 } as never)
+  ).rejects.toThrow('问责对象必须是文本。');
+
+  // A rejected patch never reaches the store.
+  expect((await service.get()).accountabilityName).toBe('一二三四五六七八九十一二三四五六七八九十');
+});
+
+test('clearing the accountability name removes the key entirely', async () => {
+  const dir = await tempDir();
+  try {
+    const filePath = join(dir, 'state.json');
+    const store = new JsonStateStore({
+      filePath,
+      createDefault: () => createDefaultAppState('/tmp/name-vault')
+    });
+    const service = new SettingsService(store);
+
+    expect((await service.get()).accountabilityName).toBeUndefined();
+    const set = await service.update({ accountabilityName: '小林' });
+    expect(set.accountabilityName).toBe('小林');
+    expect(await readFile(filePath, 'utf8')).toContain('"accountabilityName": "小林"');
+
+    for (const clear of ['', '   ']) {
+      const cleared = await service.update({ accountabilityName: clear });
+      expect(cleared.accountabilityName).toBeUndefined();
+      expect(await readFile(filePath, 'utf8')).not.toContain('accountabilityName');
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('legacy settings without an accountability name round-trip byte-identically', async () => {
+  const dir = await tempDir();
+  try {
+    const filePath = join(dir, 'state.json');
+    const defaults = createDefaultSettings('/tmp/legacy-name-vault');
+    const legacy = `${JSON.stringify({ onboarded: true, settings: defaults }, null, 2)}\n`;
+    await writeFile(filePath, legacy, 'utf8');
+
+    const store = new JsonStateStore({
+      filePath,
+      createDefault: () => createDefaultAppState('/tmp/ignored')
+    });
+    const service = new SettingsService(store);
+    expect((await service.get()).accountabilityName).toBeUndefined();
+    expect(await readFile(filePath, 'utf8')).toBe(legacy);
+
+    // A save of an unrelated setting still does not introduce the key.
+    await service.update({ notifications: { morning: '07:15' } as never });
+    expect(await readFile(filePath, 'utf8')).not.toContain('accountabilityName');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a malformed stored accountability name reads as off', async () => {
+  const defaults = createDefaultSettings('/tmp/old-vault');
+  const state = new JsonStateStore({
+    filePath: null,
+    createDefault: () => ({
+      onboarded: true,
+      settings: { ...defaults, accountabilityName: '小林\n小王' } as never
+    })
+  });
+  const service = new SettingsService(state);
+  expect((await service.get()).accountabilityName).toBeUndefined();
+});

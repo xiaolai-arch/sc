@@ -623,3 +623,51 @@ test('reflects a stored strictMastery value when the page loads', async () => {
   render(<SettingsPage onClose={() => {}} />);
   expect(await screen.findByRole('checkbox', { name: /更严的掌握判定/ })).toBeChecked();
 });
+
+test('saves and one-tap clears the local accountability name', async () => {
+  const update = vi.fn().mockResolvedValue({ ...settings, accountabilityName: '小林' });
+  window.studyCoach = {
+    getSettings: vi.fn().mockResolvedValue(settings),
+    updateSettings: update,
+    setApiKey: vi.fn()
+  } as never;
+
+  render(<SettingsPage onClose={() => {}} />);
+  const input = (await screen.findByLabelText('问责对象（可选）')) as HTMLInputElement;
+  expect(input).toHaveValue('');
+  // The clear button only exists while a name is present.
+  expect(screen.queryByRole('button', { name: '清空' })).toBeNull();
+
+  await userEvent.type(input, '小林');
+  expect(
+    screen.getByText(
+      '只在提醒里陈述事实，例如「你告诉过 A 的是周五」。不会联系、不会发送给任何人，一键清空。'
+    )
+  ).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+  expect(update).toHaveBeenCalledWith(
+    expect.objectContaining({ accountabilityName: '小林' })
+  );
+
+  // One tap empties the input; saving persists the explicit clear.
+  await userEvent.click(screen.getByRole('button', { name: '清空' }));
+  expect(input).toHaveValue('');
+  await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+  expect(update).toHaveBeenLastCalledWith(
+    expect.objectContaining({ accountabilityName: '' })
+  );
+});
+
+test('loads a stored accountability name and caps the input length', async () => {
+  window.studyCoach = {
+    getSettings: vi.fn().mockResolvedValue({ ...settings, accountabilityName: '小林' }),
+    updateSettings: vi.fn().mockResolvedValue(settings),
+    setApiKey: vi.fn()
+  } as never;
+
+  render(<SettingsPage onClose={() => {}} />);
+  const input = await screen.findByLabelText('问责对象（可选）');
+  expect(input).toHaveValue('小林');
+  expect(input).toHaveAttribute('maxlength', '20');
+});

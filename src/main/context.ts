@@ -510,6 +510,11 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
      * (seed set ids repeat across workspaces). Projects opted out of check-ins
      * are excluded; any read failure means null and the weekly message keeps
      * its previous shape.
+     *
+     * The accountability name is read live from settings so turning it off
+     * takes effect on the next review without a service rebuild. It is only
+     * ever used to build one sentence; it is never written to a commitment or
+     * anywhere else.
      */
     async function readWeeklyHonest(today: Date): Promise<WeeklyHonest | null> {
       try {
@@ -560,11 +565,32 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
             );
           }
         }
+        // Promises resolved this week, for the optional accountability clause.
+        // The name is read live and passed in; it never touches the records.
+        const accountabilityName = (await settings.get()).accountabilityName;
+        const resolvedCommitments =
+          accountabilityName === undefined
+            ? []
+            : (await commitments.list())
+                .filter(
+                  (entry) =>
+                    (entry.status === 'done' || entry.status === 'dropped') &&
+                    entry.resolvedAt !== undefined
+                )
+                .map((entry) => ({
+                  id: entry.id,
+                  text: entry.text,
+                  due: entry.due,
+                  status: entry.status as 'done' | 'dropped',
+                  resolvedAt: entry.resolvedAt as string
+                }));
         return weeklyHonest({
           attempts,
           mistakes,
           today: todayKey,
-          accuracyBySubject
+          accuracyBySubject,
+          resolvedCommitments,
+          accountabilityName
         });
       } catch {
         return null;

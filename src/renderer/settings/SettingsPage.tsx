@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatLocalDate } from '../../shared/date';
 import { friendlyErrorMessage } from '../../shared/errors';
-import type {
-  LocalCliAgent,
-  LocalCliEffort,
-  NotificationSettings,
-  ProviderConfig
+import {
+  MAX_ACCOUNTABILITY_NAME,
+  type LocalCliAgent,
+  type LocalCliEffort,
+  type NotificationSettings,
+  type ProviderConfig
 } from '../../shared/types';
 import type {
   LocalCliEntry,
@@ -193,6 +194,9 @@ export function SettingsPage({
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
   const [strictMastery, setStrictMastery] = useState(false);
   const [displayName, setDisplayName] = useState('xiaolai');
+  // The local accountability name: '' means off, and clearing the input turns
+  // the feature off everywhere (nothing else persists the name).
+  const [accountabilityName, setAccountabilityName] = useState('');
   const baselineRef = useRef<string | null>(null);
   const [dirty, setDirty] = useState(false);
 
@@ -214,6 +218,7 @@ export function SettingsPage({
       launchAtLogin,
       strictMastery,
       displayName,
+      accountabilityName,
       apiKeyValue
     ]);
   }
@@ -245,6 +250,7 @@ export function SettingsPage({
     launchAtLogin,
     strictMastery,
     displayName,
+    accountabilityName,
     apiKey
   ]);
 
@@ -310,6 +316,7 @@ export function SettingsPage({
       setLaunchAtLogin(value.launchAtLogin);
       setStrictMastery(value.strictMastery === true);
       setDisplayName(value.displayName?.trim() || 'xiaolai');
+      setAccountabilityName(value.accountabilityName ?? '');
       setLoaded(true);
     } catch (cause) {
       setLoadError(friendlyErrorMessage(cause, '加载设置失败。'));
@@ -413,6 +420,11 @@ export function SettingsPage({
       setError('请填写称呼。');
       return;
     }
+    const trimmedAccountabilityName = accountabilityName.trim();
+    if ([...trimmedAccountabilityName].length > MAX_ACCOUNTABILITY_NAME) {
+      setError(`问责对象不能超过 ${MAX_ACCOUNTABILITY_NAME} 字。`);
+      return;
+    }
     if (kind !== 'local-cli' && !model.trim()) {
       setError('请填写模型名称。');
       return;
@@ -484,7 +496,9 @@ export function SettingsPage({
         },
         notifications,
         launchAtLogin,
-        strictMastery
+        strictMastery,
+        // '' reaches the service as an explicit clear, removing the key.
+        accountabilityName: trimmedAccountabilityName
       });
       if (apiKey.trim()) {
         await api.setApiKey(apiKey.trim());
@@ -1528,6 +1542,33 @@ export function SettingsPage({
                   }))
                 }
               />
+            </div>
+            <div className="mt-8 border-t border-black/[0.06] pt-6 dark:border-white/[0.08]">
+              <div className="flex items-end justify-between gap-3">
+                <Label htmlFor="settings-accountability">问责对象（可选）</Label>
+                {accountabilityName.trim() !== '' ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setAccountabilityName('')}
+                  >
+                    清空
+                  </Button>
+                ) : null}
+              </div>
+              <div className="mt-2 max-w-xs">
+                <Input
+                  id="settings-accountability"
+                  value={accountabilityName}
+                  onChange={(event) => setAccountabilityName(event.target.value)}
+                  maxLength={MAX_ACCOUNTABILITY_NAME}
+                  placeholder="例如：小林"
+                />
+              </div>
+              <p className="mt-2 text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
+                只在提醒里陈述事实，例如「你告诉过 A 的是周五」。不会联系、不会发送给任何人，一键清空。
+              </p>
             </div>
           </Card>
 

@@ -1,5 +1,6 @@
 import { parseLocalDate } from '../../shared/date';
 import type { PracticeAttempt, PracticeMistake } from '../../shared/practice';
+import { isCommitmentDate } from '../commitments/records';
 
 /** The window shared with 正确率趋势 / 把握度校准: this Monday week plus seven. */
 export const WEEKLY_HONEST_WEEKS = 8;
@@ -9,6 +10,28 @@ export interface WeeklyHonest {
   calibration: string | null;
   /** e.g. `下周先练「三角函数」的到期错题（3 道）`; null when no subject qualifies. */
   nextStep: string | null;
+  /**
+   * One factual clause naming the user's own accountability person, e.g.
+   * `你说过要做「写完第三章」，你告诉过 A 的时间是 2026-11-20`. Absent unless a
+   * commitment was kept or dropped this week and a name is set, so the weekly
+   * message stays byte-identical otherwise.
+   */
+  accountability?: string;
+}
+
+/**
+ * A promise resolved (done or dropped) this week. Declared locally so this
+ * pure helper never depends on the commitment store; the caller maps vault
+ * records onto it. The accountability name is never stored on a record.
+ */
+export interface WeeklyHonestCommitment {
+  id: string;
+  text: string;
+  /** Local date YYYY-MM-DD the promise was due. */
+  due: string;
+  status: 'done' | 'dropped';
+  /** ISO timestamp of when it was resolved. */
+  resolvedAt: string;
 }
 
 /**
@@ -32,6 +55,17 @@ export interface WeeklyHonestInput {
    * break due-mistake ties and as the fallback when no mistake is due.
    */
   accuracyBySubject?: Record<string, { answered: number; correct: number }>;
+  /**
+   * Promises already resolved (done or dropped), optionally narrowed by the
+   * caller. Only one resolved in the review's own Monday week is used, and
+   * only when an accountability name is set.
+   */
+  resolvedCommitments?: readonly WeeklyHonestCommitment[];
+  /**
+   * The user's locally stored accountability name; blank/absent turns the
+   * trailing clause off entirely.
+   */
+  accountabilityName?: string;
 }
 
 type SubjectStats = { answered: number; correct: number };
@@ -72,6 +106,50 @@ function compareSubject(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+/** True when `value` falls in the current Monday week (Monday..Sunday). */
+function inCurrentWeek(value: Date, currentMonday: Date): boolean {
+  const nextMonday = new Date(
+    currentMonday.getFullYear(),
+    currentMonday.getMonth(),
+    currentMonday.getDate() + 7
+  );
+  return value.getTime() >= currentMonday.getTime() && value.getTime() < nextMonday.getTime();
+}
+
+/**
+ * The accountability clause, or null when it does not apply. One resolved
+ * promise is picked deterministically: the most recently resolved since
+ * Monday, then the larger id so a same-instant tie never depends on input
+ * order. The name is only interpolated into the sentence; nothing is written
+ * anywhere.
+ */
+function accountabilityLine(
+  commitments: readonly WeeklyHonestCommitment[] | undefined,
+  name: string | undefined,
+  currentMonday: Date
+): string | null {
+  const trimmedName = name?.trim();
+  if (!trimmedName || !commitments || commitments.length === 0) return null;
+  const resolvedAt = (entry: WeeklyHonestCommitment): number =>
+    new Date(entry.resolvedAt).getTime();
+  const resolved = commitments
+    .filter((entry) => {
+      if (entry.status !== 'done' && entry.status !== 'dropped') return false;
+      if (!entry.text.trim() || !isCommitmentDate(entry.due)) return false;
+      const at = new Date(entry.resolvedAt);
+      return !Number.isNaN(at.getTime()) && inCurrentWeek(at, currentMonday);
+    })
+    // Most recently resolved first; a tie falls to the larger id so neither
+    // input order nor a same-instant timestamp decides the sentence.
+    .sort(
+      (a, b) =>
+        resolvedAt(b) - resolvedAt(a) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)
+    );
+  const picked = resolved[0];
+  if (!picked) return null;
+  return `你说过要做「${picked.text.trim()}」，你告诉过 ${trimmedName} 的时间是 ${picked.due}`;
+}
+
 /**
  * The honest receipt appended to the Sunday review.
  *
@@ -87,7 +165,9 @@ function compareSubject(a: string, b: string): number {
  *    values), then the subject name so input order never decides.
  * 3. With no subject-bearing due mistake, the lowest-accuracy subject with at
  *    least 10 answers wins (same tie order).
- * 4. Otherwise both fields are null and the weekly message stays byte-identical.
+ * 4. The optional accountability clause is added only when a name and a
+ *    promise resolved in the review's own week both exist; with neither the
+ *    weekly message keeps its previous bytes exactly.
  *
  * A mistake without a non-empty known subject is skipped, never guessed.
  */
@@ -145,9 +225,16 @@ export function weeklyHonest(input: WeeklyHonestInput): WeeklyHonest {
     }
   }
 
+  const accountability = accountabilityLine(
+    input.resolvedCommitments,
+    input.accountabilityName,
+    currentMonday
+  );
+
   return {
     calibration: segments.length === 0 ? null : segments.join(' · '),
-    nextStep
+    nextStep,
+    ...(accountability === null ? {} : { accountability })
   };
 }
 

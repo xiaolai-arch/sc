@@ -298,6 +298,38 @@ test('honest facts never enter the morning, evening or behind prompts', () => {
   expect(buildCheckInPrompt(context, 'behind', DATE, null, honest)).not.toContain('本周诚实数据');
 });
 
+test('the accountability clause trails the honest lines exactly once', () => {
+  const clause = '你说过要做「写完第三章」，你告诉过 小林 的时间是 2026-11-20';
+  const withClause = { ...honest, accountability: clause };
+
+  const weekly = buildCheckInTemplate(context, 'weekly', DATE, stats, withClause);
+  expect(weekly.split(clause)).toHaveLength(2);
+  expect(weekly.endsWith(clause)).toBe(true);
+  expect(weekly).toBe(
+    buildCheckInTemplate(context, 'weekly', DATE, stats, honest) + `\n${clause}`
+  );
+
+  // An empty or null clause keeps the message byte-identical.
+  for (const accountability of [undefined, null, '']) {
+    expect(
+      buildCheckInTemplate(context, 'weekly', DATE, stats, { ...honest, accountability })
+    ).toBe(buildCheckInTemplate(context, 'weekly', DATE, stats, honest));
+  }
+});
+
+test('the accountability clause is never handed to the model', () => {
+  const clause = '你说过要做「写完第三章」，你告诉过 小林 的时间是 2026-11-20';
+  const prompt = buildCheckInPrompt(context, 'weekly', DATE, stats, {
+    ...honest,
+    accountability: clause
+  });
+  // The deterministic sentence is appended after the reply, never restated in
+  // the 诚实数据 block where the model could reword or duplicate it.
+  expect(prompt).not.toContain(clause);
+  expect(prompt).not.toContain('你告诉过');
+  expect(prompt).toContain('本周诚实数据：');
+});
+
 // --- the promise revisit line ----------------------------------------------
 
 // 2026-11-08 is a Sunday; yesterday is 2026-11-07.

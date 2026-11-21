@@ -6,10 +6,19 @@ import {
 
 export type CheckInTrigger = 'morning' | 'evening' | 'weekly' | 'behind';
 
-/** The two honest facts the Sunday review may append; a subset of `WeeklyHonest`. */
+/**
+ * The honest facts the Sunday review may append; a subset of `WeeklyHonest`.
+ * `accountability` is the optional factual clause naming the user's local
+ * accountability person.
+ */
 export interface WeeklyHonestLike {
   calibration: string | null;
   nextStep: string | null;
+  /**
+   * Optional factual clause naming the user's local accountability person.
+   * Absent keeps the weekly message byte-identical.
+   */
+  accountability?: string | null;
 }
 
 /** The weekly numbers a check-in may quote; a subset of `WeeklyOverview`. */
@@ -130,8 +139,9 @@ function weeklyRecapLine(
 
 /**
  * The deterministic tail of the Sunday review: the calibration line followed
- * by `下一步：…`, one line each, in that order. Empty when the helper found
- * neither fact, so the message keeps its previous bytes.
+ * by `下一步：…`, one line each, in that order, then the optional
+ * accountability clause. Empty when the helper found no fact, so the message
+ * keeps its previous bytes.
  */
 export function weeklyHonestLines(
   honest: WeeklyHonestLike | null | undefined
@@ -139,15 +149,25 @@ export function weeklyHonestLines(
   if (!honest) return [];
   return [
     ...(honest.calibration ? [honest.calibration] : []),
-    ...(honest.nextStep ? [`下一步：${honest.nextStep}`] : [])
+    ...(honest.nextStep ? [`下一步：${honest.nextStep}`] : []),
+    ...(honest.accountability ? [honest.accountability] : [])
   ];
 }
 
-/** The prompt's 诚实数据 block, or [] when there is nothing honest to add. */
+/**
+ * The prompt's 诚实数据 block, or [] when there is nothing honest to add. The
+ * accountability clause is deliberately left out: it is a deterministic
+ * sentence appended after the message, never handed to the model to restate
+ * (which would risk two differently-worded mentions).
+ */
 function honestPromptLines(
   honest: WeeklyHonestLike | null | undefined
 ): string[] {
-  const lines = weeklyHonestLines(honest);
+  if (!honest) return [];
+  const lines = [
+    ...(honest.calibration ? [honest.calibration] : []),
+    ...(honest.nextStep ? [`下一步：${honest.nextStep}`] : [])
+  ];
   if (lines.length === 0) return [];
   return ['本周诚实数据：', ...lines.map((line) => `- ${line}`)];
 }

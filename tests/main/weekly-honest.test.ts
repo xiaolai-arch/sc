@@ -2,7 +2,8 @@ import type { PracticeAttempt, PracticeMistake } from '../../src/shared/practice
 import {
   WEEKLY_HONEST_WEEKS,
   weeklyAccuracyBySubject,
-  weeklyHonest
+  weeklyHonest,
+  type WeeklyHonestCommitment
 } from '../../src/main/check-ins/weekly-honest';
 
 // Saturday 21 November 2026. The current Monday week runs 11-16..11-22, so
@@ -243,6 +244,151 @@ describe('next step', () => {
       calibration: null,
       nextStep: null
     });
+  });
+});
+
+describe('accountability clause', () => {
+  // TODAY = 2026-11-21 (Saturday); the current Monday week is 11-16..11-22.
+  function resolved(
+    overrides: Partial<WeeklyHonestCommitment> = {}
+  ): WeeklyHonestCommitment {
+    return {
+      id: 'cm-1',
+      text: '写完第三章',
+      due: '2026-11-20',
+      status: 'done',
+      resolvedAt: '2026-11-19T10:00:00',
+      ...overrides
+    };
+  }
+
+  test('appears exactly once with the exact clause when a name and a resolved promise exist', () => {
+    const result = weeklyHonest({
+      today: TODAY,
+      attempts: [],
+      mistakes: [],
+      accountabilityName: '小林',
+      resolvedCommitments: [resolved()]
+    });
+
+    expect(result.accountability).toBe(
+      '你说过要做「写完第三章」，你告诉过 小林 的时间是 2026-11-20'
+    );
+  });
+
+  test('is absent when the name is blank or missing', () => {
+    for (const accountabilityName of [undefined, '', '   ']) {
+      const result = weeklyHonest({
+        today: TODAY,
+        attempts: [],
+        mistakes: [],
+        ...(accountabilityName === undefined ? {} : { accountabilityName }),
+        resolvedCommitments: [resolved()]
+      });
+      expect(result).not.toHaveProperty('accountability');
+      expect(result).toEqual({ calibration: null, nextStep: null });
+    }
+  });
+
+  test('is absent when no promise resolved this week', () => {
+    expect(
+      weeklyHonest({
+        today: TODAY,
+        attempts: [],
+        mistakes: [],
+        accountabilityName: '小林',
+        resolvedCommitments: []
+      })
+    ).not.toHaveProperty('accountability');
+
+    // Resolved last week (the 11-15 Sunday belongs to the previous Monday week).
+    expect(
+      weeklyHonest({
+        today: TODAY,
+        attempts: [],
+        mistakes: [],
+        accountabilityName: '小林',
+        resolvedCommitments: [resolved({ resolvedAt: '2026-11-15T10:00:00' })]
+      })
+    ).not.toHaveProperty('accountability');
+
+    // Resolved next week / unparseable timestamps never count either.
+    expect(
+      weeklyHonest({
+        today: TODAY,
+        attempts: [],
+        mistakes: [],
+        accountabilityName: '小林',
+        resolvedCommitments: [
+          resolved({ resolvedAt: '2026-11-23T10:00:00' }),
+          resolved({ id: 'bad', resolvedAt: 'not-a-date' })
+        ]
+      })
+    ).not.toHaveProperty('accountability');
+  });
+
+  test('ignores promises that are still open', () => {
+    const open = resolved();
+    const result = weeklyHonest({
+      today: TODAY,
+      attempts: [],
+      mistakes: [],
+      accountabilityName: '小林',
+      // An open record has no resolvedAt and is filtered by the caller; even a
+      // wrongly-typed status here must not produce a clause.
+      resolvedCommitments: [{ ...open, status: 'open' as never }]
+    });
+    expect(result).not.toHaveProperty('accountability');
+  });
+
+  test('picks the most recently resolved promise deterministically', () => {
+    const result = weeklyHonest({
+      today: TODAY,
+      attempts: [],
+      mistakes: [],
+      accountabilityName: '小林',
+      resolvedCommitments: [
+        resolved({ id: 'older', text: '旧承诺', resolvedAt: '2026-11-17T10:00:00' }),
+        resolved({ id: 'newer', text: '新承诺', resolvedAt: '2026-11-20T10:00:00' })
+      ]
+    });
+    expect(result.accountability).toBe(
+      '你说过要做「新承诺」，你告诉过 小林 的时间是 2026-11-20'
+    );
+
+    // A same-instant tie falls to the larger id, never to input order.
+    const a = weeklyHonest({
+      today: TODAY,
+      attempts: [],
+      mistakes: [],
+      accountabilityName: '小林',
+      resolvedCommitments: [
+        resolved({ id: 'a', text: 'A承诺' }),
+        resolved({ id: 'b', text: 'B承诺' })
+      ]
+    });
+    const b = weeklyHonest({
+      today: TODAY,
+      attempts: [],
+      mistakes: [],
+      accountabilityName: '小林',
+      resolvedCommitments: [
+        resolved({ id: 'b', text: 'B承诺' }),
+        resolved({ id: 'a', text: 'A承诺' })
+      ]
+    });
+    expect(a.accountability).toBe(b.accountability);
+    expect(a.accountability).toContain('「B承诺」');
+  });
+
+  test('the two original fields stay byte-identical without a clause', () => {
+    expect(
+      weeklyHonest({
+        today: TODAY,
+        attempts: [attempt({ confidence: 'sure', correct: false })],
+        mistakes: []
+      })
+    ).toEqual({ calibration: '有把握但错 1 道', nextStep: null });
   });
 });
 
