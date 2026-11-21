@@ -74,7 +74,11 @@ export function isActiveRun(run: ConversationRun): boolean {
 }
 
 export function runStatus(run: ConversationRun): ConversationRunStatus {
-  if (run.phase === 'completed') return 'completed';
+  // A user-stopped run settles through phase `completed` (its partial text is
+  // kept), but it must never read as one: the sidebar would hang a green
+  // 已完成 dot under a message that says （已停止生成）. A failure stays
+  // `failed` even for a canceled run — it outranks interrupted in the sidebar.
+  if (run.phase === 'completed') return run.canceled ? 'interrupted' : 'completed';
   if (run.phase === 'failed') return 'failed';
   if (run.phase === 'interrupted') return 'interrupted';
   return 'running';

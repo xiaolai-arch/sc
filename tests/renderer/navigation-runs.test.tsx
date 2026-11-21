@@ -509,3 +509,92 @@ test('a turn without real results renders no entry points', async () => {
   expect(screen.queryByText('查看今日任务')).not.toBeInTheDocument();
   expect(screen.queryByText('查看新增记忆')).not.toBeInTheDocument();
 });
+
+test('a stopped run shows 已中断 in the sidebar, never 已完成', async () => {
+  // Like the main process, the stream keeps polling for cancellation while it
+  // works; 停止生成 lands between polls and settles the turn as canceled.
+  const cancelled = new Set<string>();
+  const stream: StreamFn = async (input, onEvent) => {
+    const streamId = input.assistantMessageId ?? '';
+    onEvent({ type: 'reasoning', text: '先看今天的任务' });
+    for (let i = 0; i < 400 && !cancelled.has(streamId); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    const text = '（已停止生成）';
+    await persistAnswer(input, text);
+    onEvent({ type: 'done', text, canceled: true });
+    return {
+      text,
+      ...(input.conversationId ? { conversationId: input.conversationId } : {})
+    };
+  };
+  const api = setup(stream);
+  api.cancelRun = async (runId: string) => {
+    cancelled.add(runId);
+  };
+
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
+  await sendPrompt('帮我排一下今天的优先级');
+  await screen.findByRole('button', { name: '停止生成' });
+  await userEvent.click(screen.getByRole('button', { name: '停止生成' }));
+
+  // A stop settles through the same completed phase as a normal end; only
+  // `canceled` tells them apart.
+  await waitFor(() => {
+    const run = conversationRuns.list()[0];
+    expect(run?.phase).toBe('completed');
+    expect(run?.canceled).toBe(true);
+  });
+
+  const sidebar = screen.getAllByRole('complementary')[0]!;
+  const row = await within(sidebar).findByRole('button', {
+    name: /帮我排一下今天的优先级/
+  });
+  await waitFor(() => expect(row.getAttribute('title') ?? '').toContain('已中断'));
+  expect(row.getAttribute('title')).not.toContain('已完成');
+  // The tooltip carries title · badge, not the stopped-message preview.
+  expect(row.getAttribute('title')).not.toContain('（已停止生成）');
+});
+
+test('a failed run keeps its 生成失败 badge in the sidebar', async () => {
+  setup(async () => {
+    throw new Error('网络断开');
+  });
+
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
+  await sendPrompt('帮我排一下今天的优先级');
+  await waitFor(() => expect(conversationRuns.list()[0]?.phase).toBe('failed'));
+
+  const sidebar = screen.getAllByRole('complementary')[0]!;
+  const row = await within(sidebar).findByRole('button', {
+    name: /帮我排一下今天的优先级/
+  });
+  await waitFor(() => expect(row.getAttribute('title') ?? '').toContain('生成失败'));
+  expect(row.getAttribute('title')).not.toContain('已完成');
+});
+
+test('a finished conversation tooltips the title plus the badge, not the preview', async () => {
+  const { stream, release } = gatedStream();
+  setup(stream);
+
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
+  await sendPrompt('帮我排一下今天的优先级');
+  // Let the turn finish so the sidebar dot reads 已完成.
+  release();
+  await waitFor(() => expect(conversationRuns.list()[0]?.phase).toBe('completed'));
+
+  const sidebar = screen.getAllByRole('complementary')[0]!;
+  const row = await within(sidebar).findByRole('button', {
+    name: /帮我排一下今天的优先级/
+  });
+  const tooltip = await waitFor(() => {
+    const value = row.getAttribute('title') ?? '';
+    expect(value).toContain('· 已完成');
+    return value;
+  });
+  // The preview is the answer text itself; the tooltip must not repeat it.
+  expect(tooltip).not.toContain(ANSWER);
+  // And it says more than the visible row text (the title alone).
+  const visible = within(row).getByText('帮我排一下今天的优先级').textContent ?? '';
+  expect(tooltip).not.toBe(visible);
+});

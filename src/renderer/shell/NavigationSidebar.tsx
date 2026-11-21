@@ -560,9 +560,12 @@ export function NavigationSidebar({
           type="button"
           aria-current={active ? 'page' : undefined}
           title={
+            // The row already shows the (truncated) title, so the tooltip adds
+            // what it does not show: the full title plus the run badge — not
+            // the message preview, which would just repeat the visible text.
             badgeLabel
-              ? `${conversation.preview || conversation.title} · ${badgeLabel}`
-              : conversation.preview || conversation.title
+              ? `${conversation.title} · ${badgeLabel}`
+              : conversation.title
           }
           onClick={() => {
             closeMenu();
