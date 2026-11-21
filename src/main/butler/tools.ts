@@ -1,6 +1,10 @@
 import { formatLocalDate } from '../../shared/date';
 import type { AgentPermissions } from '../../shared/attachments';
-import type { KnowledgeService, KnowledgeStatus } from '../../shared/knowledge';
+import {
+  resolveKnowledgeLink,
+  type KnowledgeService,
+  type KnowledgeStatus
+} from '../../shared/knowledge';
 import type { MemoryService } from '../../shared/memory';
 import { isProfileCategory, type ProfileService } from '../../shared/profile';
 import type {
@@ -127,6 +131,55 @@ async function linkKnowledge(run: () => Promise<void>): Promise<void> {
     await run();
   } catch {
     // Keep the source write.
+  }
+}
+
+/** Revisit windows are bounded so a stray model number cannot hide a topic for months. */
+function clampRevisitDays(value: number | undefined): number {
+  return Math.min(30, Math.max(1, Math.round(value ?? 1)));
+}
+
+/** Local calendar arithmetic; crossing month and year boundaries stays exact. */
+function addLocalDays(date: Date, days: number): string {
+  const due = new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+  return formatLocalDate(due);
+}
+
+/** One knowledge topic the butler should offer to retrieve today. */
+interface DueRevisit {
+  topicId: string;
+  name: string;
+  /** The (possibly overdue) revisit date, so the butler can say "过期 N 天". */
+  revisitDue: string;
+}
+
+/** Due-revisit cap: a real butler day never has more; bounds the tool output. */
+const MAX_DUE_REVISITS = 5;
+
+/**
+ * Topics whose `revisitDue` is today or earlier. Best-effort: a broken
+ * knowledge service must never hide today's plan, so any failure is empty.
+ */
+async function dueRevisits(
+  context: ButlerToolContext,
+  now: Date
+): Promise<DueRevisit[]> {
+  const knowledge = context.knowledge;
+  if (!knowledge) return [];
+  try {
+    const today = formatLocalDate(now);
+    const topics = await knowledge.list();
+    return topics
+      .filter((topic) => topic.revisitDue !== undefined && topic.revisitDue <= today)
+      .sort((a, b) => (a.revisitDue ?? '').localeCompare(b.revisitDue ?? ''))
+      .slice(0, MAX_DUE_REVISITS)
+      .map((topic) => ({
+        topicId: topic.id,
+        name: topic.name,
+        revisitDue: topic.revisitDue as string
+      }));
+  } catch {
+    return [];
   }
 }
 
@@ -506,7 +559,7 @@ export function createButlerTools(): ButlerToolDefinition[] {
     {
       name: 'get_today_plan',
       description:
-        '读取今天的计划与任务。可以指定工作区；省略 workspaceId 时汇总所有工作区的任务。',
+        '读取今天的计划与任务，以及到了回访日的知识主题（revisits：今天该让学习者自测的主题，主动提议抽几道题）。可以指定工作区；省略 workspaceId 时汇总所有工作区的任务。',
       requiresWrite: false,
       parameters: {
         type: 'object',
@@ -524,7 +577,12 @@ export function createButlerTools(): ButlerToolDefinition[] {
 
         if (requested) {
           const snapshot = await context.workspace.getWorkspaceSnapshot(requested);
-          return summarizePlan([snapshot], now, [snapshot.workspace.id]);
+          return summarizePlan(
+            [snapshot],
+            now,
+            [snapshot.workspace.id],
+            await dueRevisits(context, now)
+          );
         }
 
         const workspaces = await context.workspace.listWorkspaces();
@@ -540,7 +598,8 @@ export function createButlerTools(): ButlerToolDefinition[] {
         return summarizePlan(
           snapshots,
           now,
-          snapshots.map((snapshot) => snapshot.workspace.id)
+          snapshots.map((snapshot) => snapshot.workspace.id),
+          await dueRevisits(context, now)
         );
       }
     },
@@ -747,6 +806,54 @@ export function createButlerTools(): ButlerToolDefinition[] {
           ok: true,
           topic,
           message: `已记录：${topic.name}（${KNOWLEDGE_STATUS_LABELS[topic.status]}）`
+        };
+      }
+    },
+    {
+      name: 'schedule_revisit',
+      description:
+        '给一个已记录的知识主题安排一次回访自测：把该主题标记为几天后需要回忆练习，到期后会出现在今日页。刚讲完并确认学习者真正学会了一个主题时调用；name 必须是知识库里已有的主题。',
+      requiresWrite: true,
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: '知识主题名称，必须与知识库中的主题一致，例如：LangChain' },
+          days: {
+            type: 'number',
+            minimum: 1,
+            maximum: 30,
+            description: '几天后回访（1-30）；省略为明天'
+          }
+        },
+        required: ['name'],
+        additionalProperties: false
+      },
+      async execute(input, context) {
+        const name = requiredString(input, 'name');
+        if (!context.knowledge) {
+          throw new ToolInputError('知识库未连接。');
+        }
+        const knowledge = context.knowledge;
+        const days = clampRevisitDays(optionalNumber(input, 'days'));
+        const dueDate = addLocalDays(context.now(), days);
+        throwIfAborted(context.signal);
+        const topics = await knowledge.list();
+        throwIfAborted(context.signal);
+        const topic = resolveKnowledgeLink(topics, name);
+        if (!topic) {
+          throw new ToolInputError(
+            `知识库里没有「${name}」这个主题；先用 record_knowledge 记录，再安排回访。`
+          );
+        }
+        const updated = await knowledge.update({ id: topic.id, revisitDue: dueDate });
+        throwIfAborted(context.signal);
+        const when = days === 1 ? '明天' : `${days} 天后（${dueDate}）`;
+        return {
+          ok: true,
+          topicId: updated.id,
+          name: updated.name,
+          revisitDue: dueDate,
+          message: `已安排：${when}抽 5 分钟自测「${updated.name}」。`
         };
       }
     },
@@ -1062,7 +1169,8 @@ function summarizePlan(
     }>;
   }>,
   now: Date,
-  workspaceIds: string[]
+  workspaceIds: string[],
+  revisits: DueRevisit[] = []
 ) {
   const tasks = snapshots.flatMap((snapshot) => snapshot.tasks);
   const counts = {
@@ -1083,6 +1191,14 @@ function summarizePlan(
       goal: snapshot.workspace.goal
     })),
     counts,
+    // Omitted entirely when nothing is due, so today's output stays identical.
+    ...(revisits.length > 0
+      ? {
+          revisits,
+          revisitHint:
+            '以上主题到了回访日：主动提议让学习者抽几分钟自测（create_practice_set），不要只列出来。'
+        }
+      : {}),
     tasks: tasks.map((task) => ({
       id: task.id,
       workspaceId: task.workspaceId,

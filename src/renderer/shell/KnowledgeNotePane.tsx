@@ -126,6 +126,14 @@ export function KnowledgeNotePane({
                   L{topic.level}
                 </span>
               ) : null}
+              {topic.revisitDue ? (
+                <span
+                  className="text-[11px] text-gray-400 dark:text-[#8e8e93]"
+                  aria-label="下次回访"
+                >
+                  下次回访 {topic.revisitDue}
+                </span>
+              ) : null}
               <span className="text-[11px] text-gray-400 dark:text-[#8e8e93]">
                 {workspaceLabel}
               </span>

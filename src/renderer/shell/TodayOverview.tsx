@@ -1,5 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { formatLocalDate } from '../../shared/date';
+import type { KnowledgeTopic } from '../../shared/knowledge';
 import { planProgress } from '../../shared/plans';
 import type { LongPlan } from '../../shared/plans';
 import type { Reminder, Workspace, WorkspaceTask } from '../../shared/workspace';
@@ -9,12 +10,20 @@ import { PageFrame } from './PageFrame';
 import { nextScheduledDay } from './schedule';
 import { TodaySchedule } from './TodaySchedule';
 
+/** One knowledge topic that is due for a retrieval today. */
+export type TodayRevisit = {
+  topicId: string;
+  name: string;
+};
+
 export type TodayOverviewProps = {
   tasks: WorkspaceTask[];
   workspaces: Workspace[];
   reminders: Reminder[];
   longPlans: LongPlan[];
   today: string;
+  /** Topics whose revisit day (revisitDue) is today or earlier. */
+  revisits?: TodayRevisit[];
   /** Compact form sits inside the chat home; the page form has its own frame. */
   compact?: boolean;
   onOpenSidebar?: () => void;
@@ -79,6 +88,20 @@ export function nextTasks(tasks: WorkspaceTask[], today: string): WorkspaceTask[
     .slice(0, 3);
 }
 
+/**
+ * Topics whose revisit day has come (revisitDue today or earlier, so an
+ * overdue revisit never disappears), oldest due date first.
+ */
+export function dueRevisitTopics(
+  topics: KnowledgeTopic[],
+  today: string
+): TodayRevisit[] {
+  return topics
+    .filter((topic) => topic.revisitDue !== undefined && topic.revisitDue <= today)
+    .sort((a, b) => (a.revisitDue ?? '').localeCompare(b.revisitDue ?? ''))
+    .map((topic) => ({ topicId: topic.id, name: topic.name }));
+}
+
 /** The time a reminder will actually fire: its postpone target when it has one. */
 function reminderTime(reminder: Reminder): string {
   return reminderState(reminder) === 'postponed' && reminder.postponedTo
@@ -117,6 +140,7 @@ export function TodayOverview({
   reminders,
   longPlans,
   today,
+  revisits = [],
   compact = false,
   onOpenSidebar,
   onOpenWorkspace,
@@ -245,6 +269,31 @@ export function TodayOverview({
             })}
           </ul>
         )}
+        {revisits.length > 0 ? (
+          <ul className="mt-2 space-y-1 border-t border-black/[0.06] pt-2 dark:border-white/10">
+            {revisits.map((revisit) => (
+              <li
+                key={revisit.topicId}
+                className="flex items-center justify-between gap-2"
+              >
+                <span
+                  className="min-w-0 truncate text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]"
+                  aria-label={`${revisit.name} 回访日`}
+                >
+                  今天是「{revisit.name}」的回访日：让阿咲抽 3 道？
+                </span>
+                <button
+                  type="button"
+                  aria-label={`抽 3 道复习「${revisit.name}」`}
+                  onClick={() => onPrompt(`考考我「${revisit.name}」，出 3 道题`)}
+                  className="shrink-0 rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-medium text-[#0071e3] transition-colors hover:bg-[#0071e3]/10 dark:bg-white/[0.08] dark:text-[#4da3ff] dark:hover:bg-[#4da3ff]/15"
+                >
+                  抽 3 道
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </section>
 
       {!compact ? (

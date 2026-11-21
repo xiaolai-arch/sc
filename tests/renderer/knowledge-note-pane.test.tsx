@@ -49,6 +49,7 @@ function setup(options: {
   getNote?: (topicId: string) => Promise<KnowledgeNote>;
   saveNote?: (input: { topicId: string; body: string }) => Promise<KnowledgeNote>;
   getBacklinks?: (topicId: string) => Promise<{ topicId: string; name: string }[]>;
+  topic?: KnowledgeTopic;
 } = {}) {
   const getNote = vi.fn(options.getNote ?? (async () => note('kt-2', '# LangGraph\n\n正文')));
   const saveNote = vi.fn(
@@ -64,7 +65,7 @@ function setup(options: {
 
   render(
     <KnowledgeNotePane
-      topic={langGraph}
+      topic={options.topic ?? langGraph}
       topics={[langChain, langGraph]}
       workspaceLabel="全局"
       getNote={getNote}
@@ -121,6 +122,18 @@ test('opens a resolved wiki link and renders unresolved ones inert', async () =>
 
   expect(screen.getByText('Missing')).toHaveAttribute('title', '没有这个知识点');
   expect(screen.queryByRole('button', { name: /Missing/ })).not.toBeInTheDocument();
+});
+
+test('shows the revisit date only when one is scheduled', async () => {
+  setup({ topic: topic({ id: 'kt-2', name: 'LangGraph', revisitDue: '2026-11-22' }) });
+  await screen.findByRole('textbox', { name: '知识笔记' });
+  expect(screen.getByText('下次回访 2026-11-22')).toBeInTheDocument();
+});
+
+test('a topic without a revisit date shows no revisit line', async () => {
+  setup();
+  await screen.findByRole('textbox', { name: '知识笔记' });
+  expect(screen.queryByText(/下次回访/)).not.toBeInTheDocument();
 });
 
 test('renders evidence and backlinks and opens a backlink target', async () => {

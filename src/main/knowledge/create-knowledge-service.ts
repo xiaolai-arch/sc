@@ -118,6 +118,13 @@ function normalizeWorkspace(value: unknown): string | undefined {
   return assertSafeSegment(workspaceId, 'workspace id');
 }
 
+/** True for a real calendar date written as YYYY-MM-DD. */
+function isLocalDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00`);
+  return !Number.isNaN(date.getTime()) && formatLocalDate(date) === value;
+}
+
 function isSafeTopicId(value: string): boolean {
   try {
     assertSafeSegment(value, 'knowledge topic id');
@@ -433,6 +440,14 @@ export function createKnowledgeService(options: KnowledgeServiceOptions): Knowle
           delete next.level;
         } else if (input.level !== undefined) {
           next.level = normalizeLevel(input.level);
+        }
+        if (input.revisitDue === null) {
+          delete next.revisitDue;
+        } else if (input.revisitDue !== undefined) {
+          if (!isLocalDate(input.revisitDue)) {
+            throw new Error('回访日期必须是 YYYY-MM-DD。');
+          }
+          next.revisitDue = input.revisitDue;
         }
         if (input.workspaceId === null) {
           delete next.workspaceId;

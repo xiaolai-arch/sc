@@ -6,7 +6,14 @@ import {
   parseKnowledgeNoteFile,
   serializeKnowledgeNoteFile
 } from '../../src/main/knowledge/notes';
-import { KNOWLEDGE_NOTE_CONFLICT_MESSAGE } from '../../src/shared/knowledge';
+import {
+  parseKnowledgeTopicFile,
+  serializeKnowledgeTopicFile
+} from '../../src/main/knowledge/records';
+import {
+  KNOWLEDGE_NOTE_CONFLICT_MESSAGE,
+  type KnowledgeTopic
+} from '../../src/shared/knowledge';
 
 const dirs: string[] = [];
 const NOW = new Date('2026-11-02T09:00:00.000Z');
@@ -475,4 +482,131 @@ test('ignores self-links and broken note files', async () => {
   await writeFile(join(dir, 'knowledge', 'notes', 'kt-broken.md'), 'not: [valid', 'utf8');
   await service.create({ name: 'LangChain' });
   expect(await service.getBacklinks(topic.id)).toEqual([]);
+});
+
+test('revisitDue round-trips and stays absent for topics without one', () => {
+  const base: KnowledgeTopic = {
+    id: 'kt-1',
+    name: 'LangChain',
+    aliases: [],
+    status: 'learning',
+    summary: '',
+    evidence: [],
+    createdAt: '2026-11-01T00:00:00.000Z',
+    updatedAt: '2026-11-01T00:00:00.000Z'
+  };
+  const plain = serializeKnowledgeTopicFile(base);
+  // Serialize-only-when-present: ordinary topics never gain the key.
+  expect(plain).not.toContain('revisitDue');
+  const parsed = parseKnowledgeTopicFile(plain, 'kt-1');
+  expect(parsed?.revisitDue).toBeUndefined();
+  // Byte-identical: re-saving an existing file rewrites nothing.
+  expect(serializeKnowledgeTopicFile(parsed as KnowledgeTopic)).toBe(plain);
+
+  const withRevisit = serializeKnowledgeTopicFile({ ...base, revisitDue: '2026-11-22' });
+  const roundTripped = parseKnowledgeTopicFile(withRevisit, 'kt-1');
+  expect(roundTripped?.revisitDue).toBe('2026-11-22');
+  expect(serializeKnowledgeTopicFile(roundTripped as KnowledgeTopic)).toBe(withRevisit);
+});
+
+test('an invalid revisitDue is ignored without losing the topic', () => {
+  const meta = [
+    '---',
+    'type: note',
+    'source: user',
+    'kind: knowledge-topic',
+    'id: kt-1',
+    'name: LangChain',
+    'status: learning',
+    "revisitDue: '2026-13-99'",
+    '---',
+    ''
+  ].join('\n');
+  const parsed = parseKnowledgeTopicFile(`${meta}# LangChain\n`, 'kt-1');
+  expect(parsed).not.toBeNull();
+  expect(parsed?.name).toBe('LangChain');
+  expect(parsed?.revisitDue).toBeUndefined();
+  // Re-saving after the bad date is dropped must not reintroduce it.
+  expect(serializeKnowledgeTopicFile(parsed as KnowledgeTopic)).not.toContain('revisitDue');
+});
+
+test('a hand-edited unquoted revisit date still parses', () => {
+  const raw = [
+    '---',
+    'type: note',
+    'source: user',
+    'kind: knowledge-topic',
+    'id: kt-1',
+    'name: LangChain',
+    'status: learning',
+    'revisitDue: 2026-11-22',
+    '---',
+    '# LangChain'
+  ].join('\n');
+  const parsed = parseKnowledgeTopicFile(raw, 'kt-1');
+  expect(parsed?.revisitDue).toBe('2026-11-22');
+});
+
+test('schedules and clears a revisit through the service', async () => {
+  const { dir, service } = await setup();
+  const topic = await service.create({ name: 'LangChain' });
+  const file = join(dir, 'knowledge', 'topics', `${topic.id}.md`);
+
+  const updated = await service.update({ id: topic.id, revisitDue: '2026-11-22' });
+  expect(updated.revisitDue).toBe('2026-11-22');
+  expect((await service.get(topic.id))?.revisitDue).toBe('2026-11-22');
+  expect(await readFile(file, 'utf8')).toContain('revisitDue');
+
+  // An unrelated update leaves an existing revisit untouched.
+  await service.update({ id: topic.id, summary: '会调用' });
+  expect((await service.get(topic.id))?.revisitDue).toBe('2026-11-22');
+
+  const cleared = await service.update({ id: topic.id, revisitDue: null });
+  expect(cleared.revisitDue).toBeUndefined();
+  expect((await service.get(topic.id))?.revisitDue).toBeUndefined();
+  expect(await readFile(file, 'utf8')).not.toContain('revisitDue');
+});
+
+test('rejects an invalid revisit date when writing', async () => {
+  const { service } = await setup();
+  const topic = await service.create({ name: 'LangChain' });
+  await expect(
+    service.update({ id: topic.id, revisitDue: '11月22日' })
+  ).rejects.toThrow('回访日期');
+  expect((await service.get(topic.id))?.revisitDue).toBeUndefined();
+});
+
+test('existing topic files without revisitDue round-trip byte-identically', async () => {
+  const { dir, service } = await setup();
+  const topic = await service.create({
+    name: 'LangChain',
+    aliases: ['LC'],
+    level: 2,
+    workspaceId: 'ws',
+    summary: '会调用'
+  });
+  const file = join(dir, 'knowledge', 'topics', `${topic.id}.md`);
+  const before = await readFile(file, 'utf8');
+  const parsed = parseKnowledgeTopicFile(before, topic.id);
+  expect(parsed?.revisitDue).toBeUndefined();
+  expect(serializeKnowledgeTopicFile(parsed as KnowledgeTopic)).toBe(before);
+
+  // The real write path keeps those bytes stable apart from the timestamp.
+  await service.update({ id: topic.id, status: 'learning' });
+  const after = await readFile(file, 'utf8');
+  expect(after.replace(/updated: .*/, 'updated: STAMP')).toBe(
+    before.replace(/updated: .*/, 'updated: STAMP')
+  );
+});
+
+test('a stored bad revisit date is dropped on load, not fatal', async () => {
+  const { dir, service } = await setup();
+  const topic = await service.create({ name: 'LangChain' });
+  const file = join(dir, 'knowledge', 'topics', `${topic.id}.md`);
+  const raw = await readFile(file, 'utf8');
+  await writeFile(file, raw.replace('updated:', "revisitDue: 'soon'\nupdated:"), 'utf8');
+
+  const loaded = await service.get(topic.id);
+  expect(loaded?.name).toBe('LangChain');
+  expect(loaded?.revisitDue).toBeUndefined();
 });
