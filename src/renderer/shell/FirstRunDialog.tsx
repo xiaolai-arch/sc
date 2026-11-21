@@ -126,6 +126,10 @@ export function FirstRunDialog({ open, onComplete, onSkip }: FirstRunDialogProps
         </div>
       </div>
 
+      <p className="mt-4 text-[13px] leading-6 text-gray-500 dark:text-[#a1a1a6]">
+        不用先搭任何系统——创建项目就能用，所有数据都是本地的 Markdown 文件。
+      </p>
+
       {error ? (
         <p role="alert" className="mt-3 text-[13px] text-[#d70015] dark:text-[#ff7b72]">
           {error}
