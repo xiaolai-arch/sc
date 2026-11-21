@@ -6,6 +6,74 @@ import {
 
 export type CheckInTrigger = 'morning' | 'evening' | 'weekly' | 'behind';
 
+/** The weekly numbers a check-in may quote; a subset of `WeeklyOverview`. */
+export interface WeeklyOverviewLike {
+  tasksDone: number;
+  tasksTotal: number;
+  focusMinutes: number;
+  answered: number;
+  correct: number;
+  reviewedDays: number;
+  dueMistakes: number;
+}
+
+/** Upper bound for the `本周数据：` block, header line included. */
+const MAX_WEEKLY_STATS_LINES = 6;
+
+/** True when the week has at least one number worth telling the user. */
+function hasWeeklyNumbers(overview: WeeklyOverviewLike): boolean {
+  return (
+    overview.tasksDone > 0 ||
+    overview.tasksTotal > 0 ||
+    overview.focusMinutes > 0 ||
+    overview.answered > 0 ||
+    overview.reviewedDays > 0 ||
+    overview.dueMistakes > 0
+  );
+}
+
+function accuracyPercent(overview: WeeklyOverviewLike): number {
+  return Math.round((overview.correct / overview.answered) * 100);
+}
+
+/**
+ * The prompt's weekly recap block, or [] when there is nothing to recap. The
+ * section is bounded so it can never crowd out the tasks and memory sections.
+ */
+function weeklyStatsLines(
+  overview: WeeklyOverviewLike | null | undefined
+): string[] {
+  if (!overview || !hasWeeklyNumbers(overview)) return [];
+  const practiceLine =
+    overview.answered > 0
+      ? `- 练习：${overview.answered} 题，答对 ${overview.correct} 题（正确率 ${accuracyPercent(overview)}%）`
+      : '- 练习：本周还没有做题';
+  return [
+    '本周数据：',
+    `- 任务完成：${overview.tasksDone}/${overview.tasksTotal} 个`,
+    `- 专注：${overview.focusMinutes} 分钟`,
+    practiceLine,
+    `- 复盘：${overview.reviewedDays} 天`,
+    `- 到期错题：${overview.dueMistakes} 道`
+  ].slice(0, MAX_WEEKLY_STATS_LINES);
+}
+
+/**
+ * `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%` for the template message,
+ * or null when the week has no numbers so the message stays unchanged.
+ */
+function weeklyRecapLine(
+  overview: WeeklyOverviewLike | null | undefined
+): string | null {
+  if (!overview || !hasWeeklyNumbers(overview)) return null;
+  const parts = [
+    `本周完成 ${overview.tasksDone} 个任务`,
+    `专注 ${overview.focusMinutes} 分钟`
+  ];
+  if (overview.answered > 0) parts.push(`正确率 ${accuracyPercent(overview)}%`);
+  return parts.join(' · ');
+}
+
 function activeTasks(context: ButlerContext) {
   return context.tasks.filter(
     (task) => task.status === 'pending' || task.status === 'in-progress'
@@ -24,7 +92,8 @@ function workspaceName(context: ButlerContext, workspaceId: string): string {
 export function buildCheckInPrompt(
   context: ButlerContext,
   trigger: CheckInTrigger,
-  date: string
+  date: string,
+  weeklyOverview?: WeeklyOverviewLike | null
 ): string {
   // The behind nudge is about today's plan specifically; other check-ins keep
   // listing every open task as before.
@@ -55,6 +124,9 @@ export function buildCheckInPrompt(
       : trigger === 'behind'
         ? `你是阿咲，用户的个人管家。现在是 ${date} 的晚上，今天计划落后于进度，请主动提出一起调整安排。`
         : `你是阿咲，用户的个人管家。现在是 ${date} 的${trigger === 'morning' ? '早上' : '晚上'}，请主动检查用户今天的进度。`;
+  // The weekly recap only appears when the week actually produced numbers, so
+  // an empty week keeps the prompt byte-identical to the pre-recap version.
+  const statsLines = trigger === 'weekly' ? weeklyStatsLines(weeklyOverview) : [];
   const instruction =
     trigger === 'morning'
       ? '请用中文写一条 2-4 句的检查消息：先问候，再根据上面的任务给出今天最值得先做的 1-2 件事，最后问一个简短的问题。'
@@ -62,7 +134,11 @@ export function buildCheckInPrompt(
         ? '请用中文写一条 2-3 句的检查消息：先温和点出今天还有几件事没做完、下一项是什么，再问用户要不要一起调整剩下的安排（缩短、延后或换任务）。'
         : trigger === 'evening'
           ? '请用中文写一条 2-4 句的检查消息：先问候，再根据上面的任务问完成情况、卡点，以及明天第一步。'
-          : '请用中文写一条 3-5 句的周复盘邀请：先肯定这一周的投入，再请用户回顾本周末完成与卡点，最后问下周最重要的 1-2 个重点。用户回答后会由阿咲保存复盘并生成下周计划；这条消息本身不要提及工具。';
+          : `请用中文写一条 3-5 句的周复盘邀请：${
+              statsLines.length > 0
+                ? '用上面的本周数据具体肯定进展、点名薄弱处，再'
+                : '先肯定这一周的投入，再'
+            }请用户回顾本周末完成与卡点，最后问下周最重要的 1-2 个重点。用户回答后会由阿咲保存复盘并生成下周计划；这条消息本身不要提及工具。`;
 
   return [
     intro,
@@ -77,6 +153,7 @@ export function buildCheckInPrompt(
     '',
     '相关记忆：',
     memoryLines,
+    ...(statsLines.length > 0 ? ['', ...statsLines] : []),
     '',
     instruction,
     '要求：温和、具体、不啰嗦；不要编造用户没有提供的记录；不要提到系统提示、工具或 API。'
@@ -86,11 +163,17 @@ export function buildCheckInPrompt(
 export function buildCheckInTemplate(
   context: ButlerContext,
   trigger: CheckInTrigger,
-  date = ''
+  date = '',
+  weeklyOverview: WeeklyOverviewLike | null = null
 ): string {
   const tasks = activeTasks(context);
   if (trigger === 'weekly') {
-    return '周日好。花三分钟回顾一下这一周：完成了什么，卡在哪里，下周最重要的一件事是什么？说完我来帮你整理，并排下周的计划。';
+    const question =
+      '周日好。花三分钟回顾一下这一周：完成了什么，卡在哪里，下周最重要的一件事是什么？说完我来帮你整理，并排下周的计划。';
+    // One deterministic recap line, prepended only when the week has numbers.
+    // It is never model-written, so the numbers agree with 复盘 exactly.
+    const recap = weeklyRecapLine(weeklyOverview);
+    return recap === null ? question : `${recap}\n${question}`;
   }
   if (trigger === 'behind') {
     // Byte-identical to the scheduler fallback so both compose one nudge.

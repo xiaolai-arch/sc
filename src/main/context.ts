@@ -11,6 +11,7 @@ import type { PracticeService } from '../shared/practice';
 import type { SearchService } from '../shared/search';
 import type { AppSettings, ProviderConfig } from '../shared/types';
 import type { VideoNotesProgress } from '../shared/video-notes';
+import { weeklyOverview, type WeeklyOverview } from '../shared/weekly-stats';
 import { estimateUsageCost, summarizeUsage } from '../shared/usage';
 import type { ButlerService, SendMessageInput, WorkspaceService } from '../shared/workspace';
 import { scanLocalClis } from './agent/local-cli-discovery';
@@ -439,6 +440,42 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     };
     const butler = createButler(nextSettings.vaultPath, dependencies);
 
+    /**
+     * The Sunday review's numbers, from the same sources the 复盘 page uses.
+     * Projects opted out of check-ins are excluded so the recap never quotes
+     * a project the user asked 阿咲 to ignore. Any read failure means null and
+     * the check-in goes out without a stats section.
+     */
+    async function readWeeklyOverview(today: Date): Promise<WeeklyOverview | null> {
+      try {
+        const workspaces = (await workspace.listWorkspaces()).filter(
+          (entry) => entry.checkIn !== 'off'
+        );
+        const allowed = new Set(workspaces.map((entry) => entry.id));
+        const [snapshots, attempts, mistakes, topics, reviews] = await Promise.all([
+          Promise.all(workspaces.map((entry) => workspace.getWorkspaceSnapshot(entry.id))),
+          Promise.all(workspaces.map((entry) => practice.listAttempts(entry.id))),
+          Promise.all(workspaces.map((entry) => practice.getMistakes(entry.id))),
+          knowledge.list(),
+          readReviews({ limit: 200 })
+        ]);
+        return weeklyOverview({
+          tasks: snapshots.flatMap((entry) => entry.tasks),
+          attempts: attempts.flat(),
+          reviews: reviews.filter(
+            (entry) => entry.workspaceId === undefined || allowed.has(entry.workspaceId)
+          ),
+          dueMistakes: mistakes.flat(),
+          topics: topics.filter(
+            (entry) => entry.workspaceId === undefined || allowed.has(entry.workspaceId)
+          ),
+          today
+        });
+      } catch {
+        return null;
+      }
+    }
+
     const checkIns = new ProactiveCheckInService({
       conversationStore,
       workspaceService: workspace,
@@ -448,6 +485,8 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       // Read-only digest: the morning check-in names due mistakes without
       // touching grading or scheduling.
       practiceService: practice,
+      // Read-only recap: the Sunday review quotes the week's real numbers.
+      getWeeklyOverview: readWeeklyOverview,
       now
     });
 

@@ -787,3 +787,181 @@ test('respects snooze, disabled notifications and the daily cap for the behind n
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+const WEEKLY_TEMPLATE =
+  '周日好。花三分钟回顾一下这一周：完成了什么，卡在哪里，下周最重要的一件事是什么？说完我来帮你整理，并排下周的计划。';
+
+const weeklyStats = {
+  tasksDone: 3,
+  tasksTotal: 5,
+  focusMinutes: 135,
+  answered: 6,
+  correct: 5,
+  reviewedDays: 4,
+  dueMistakes: 2
+};
+
+test('grounds the weekly check-in prompt in the provided weekly numbers', async () => {
+  const { dir, value } = await store();
+  try {
+    const client = new FakeModelClient(['这一周你完成了 3 个任务，专注 135 分钟。']);
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: client,
+      getWeeklyOverview: async (today) => {
+        // The provider is keyed to the check-in's own date, not the wall clock.
+        expect(today.getDate()).toBe(1);
+        return weeklyStats;
+      },
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    const notification = await service.check('weekly', '2026-11-01');
+
+    const prompt = client.calls[0]?.messages[0]?.content ?? '';
+    expect(prompt).toContain('本周数据：');
+    expect(prompt).toContain('- 任务完成：3/5 个');
+    expect(prompt).toContain('- 专注：135 分钟');
+    expect(prompt).toContain('- 练习：6 题，答对 5 题（正确率 83%）');
+    expect(prompt).toContain('- 复盘：4 天');
+    expect(prompt).toContain('- 到期错题：2 道');
+    expect(prompt).toContain('用上面的本周数据具体肯定进展、点名薄弱处');
+    // The weekly notification body itself is unchanged; only the message is recapped.
+    expect(notification?.body).toBe('周日复盘时间到了，点开回顾本周并安排下周。');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('prepends the deterministic recap line to the weekly template', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getWeeklyOverview: async () => weeklyStats,
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    await service.check('weekly', '2026-11-01');
+
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    expect(conversation?.messages[0]?.text).toBe(
+      `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE}`
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('keeps the weekly message byte-identical when the provider fails', async () => {
+  const { dir, value } = await store();
+  try {
+    const client = new FakeModelClient(['周日好，回顾一下这一周。']);
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: client,
+      getWeeklyOverview: async () => {
+        throw new Error('vault unreadable');
+      },
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    const notification = await service.check('weekly', '2026-11-01');
+
+    expect(notification).not.toBeNull();
+    // The model still runs, but with the pre-stats prompt.
+    const prompt = client.calls[0]?.messages[0]?.content ?? '';
+    expect(prompt).not.toContain('本周数据：');
+    expect(prompt).toContain('先肯定这一周的投入，再请用户回顾本周末完成与卡点');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('keeps the weekly message byte-identical when no stats provider is wired', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    await service.check('weekly', '2026-11-01');
+
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    expect(conversation?.messages[0]?.text).toBe(WEEKLY_TEMPLATE);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('keeps the weekly message unchanged for an all-zero week', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getWeeklyOverview: async () => ({
+        tasksDone: 0,
+        tasksTotal: 0,
+        focusMinutes: 0,
+        answered: 0,
+        correct: 0,
+        reviewedDays: 0,
+        dueMistakes: 0
+      }),
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    await service.check('weekly', '2026-11-01');
+
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    expect(conversation?.messages[0]?.text).toBe(WEEKLY_TEMPLATE);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the morning check-in never reads weekly stats', async () => {
+  const { dir, value } = await store();
+  try {
+    let called = false;
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getWeeklyOverview: async () => {
+        called = true;
+        return weeklyStats;
+      },
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    await service.check('morning', '2026-11-01');
+
+    expect(called).toBe(false);
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    expect(conversation?.messages[0]?.text).toBe(
+      '早上好。今天有 1 个任务，先做「极限基础」怎么样？做完告诉我一声。'
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
