@@ -33,7 +33,7 @@ import { createKnowledgeService } from './knowledge/create-knowledge-service';
 import { createMemoryService } from './memory/create-memory-service';
 import { createLongPlanService } from './plans/long-plan-service';
 import { createPracticeService } from './practice';
-import { createWorkspacePlanner } from './planning';
+import { BUSY_DAY_MINUTES, createWorkspacePlanner } from './planning';
 import { createSearchService } from './search';
 import { createDefaultSettings } from './settings/defaults';
 import { InMemorySecretStore, SafeStorageSecretStore, type SecretStore } from './settings/secret-store';
@@ -46,6 +46,7 @@ import {
 } from './video-notes/jobs';
 import { createRecordingModelClient } from './usage/recording-model-client';
 import { UsageStore } from './usage/usage-store';
+import { createAvailabilityService, type AvailabilityService } from './availability/service';
 import { createWorkspaceService } from './workspace/create-workspace-service';
 import { listDirectories, listMarkdownFiles, readFileOrNull } from './workspace/fs-utils';
 import { assertSafeSegment, reviewsDir, workspacesDir } from './workspace/paths';
@@ -98,6 +99,8 @@ export interface ButlerFactoryDependencies {
   longPlans?: LongPlanService;
   practice?: PracticeService;
   commitments?: CommitmentService;
+  /** Days of a week the user said are packed; powers set_week_availability. */
+  weekAvailability?: AvailabilityService;
   modelClient?: ModelClient | null;
   modelClientFor?: (model: string) => ModelClient | null;
 }
@@ -197,6 +200,8 @@ interface ActiveServices {
   planner: WorkspacePlanner;
   longPlans: LongPlanService;
   checkIns: ProactiveCheckInService;
+  /** Days of a week the user said are packed (vault record, read-mostly). */
+  weekAvailability: AvailabilityService;
   /** Lazily constructed; only a search call starts the chokidar watcher. */
   readonly search: SearchService;
   dispose(): Promise<void>;
@@ -300,6 +305,9 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       ...(dependencies.commitments
         ? { commitmentService: dependencies.commitments }
         : {}),
+      ...(dependencies.weekAvailability
+        ? { weekAvailabilityService: dependencies.weekAvailability }
+        : {}),
       now,
       ...(dependencies.modelClient !== undefined ? { modelClient: dependencies.modelClient } : {}),
       ...(dependencies.modelClientFor ? { modelClientFor: dependencies.modelClientFor } : {})
@@ -341,6 +349,10 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     return createCommitmentService({ root, now });
   }
 
+  function createWeekAvailability(root: string): AvailabilityService {
+    return createAvailabilityService({ root, now });
+  }
+
   function createPlanner(
     root: string,
     workspaceService: WorkspaceService,
@@ -355,7 +367,8 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     root: string,
     workspaceService: WorkspaceService,
     modelClient: ModelClient | null,
-    knowledgeService: KnowledgeService
+    knowledgeService: KnowledgeService,
+    weekAvailability: AvailabilityService
   ): LongPlanService {
     if (options.longPlanService) return options.longPlanService;
     if (options.longPlanServiceFactory) {
@@ -366,6 +379,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       workspaceService,
       modelClient,
       knowledgeService,
+      availabilityService: weekAvailability,
       now
     });
   }
@@ -441,11 +455,15 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       return searchInstance;
     };
     const planner = createPlanner(nextSettings.vaultPath, workspace, modelClient);
+    // Which days of a week the user said are packed; read by the daily and
+    // long-term planners, written only through the butler tool.
+    const weekAvailability = createWeekAvailability(nextSettings.vaultPath);
     const longPlans = createLongPlans(
       nextSettings.vaultPath,
       workspace,
       modelClient,
-      knowledge
+      knowledge,
+      weekAvailability
     );
     // Built before the butler so chat tools can create practice sets.
     const practice = createPractice(nextSettings.vaultPath);
@@ -463,6 +481,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       longPlans,
       practice,
       commitments,
+      weekAvailability,
       modelClient,
       modelClientFor
     };
@@ -652,6 +671,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       planner,
       longPlans,
       checkIns,
+      weekAvailability,
       get search() {
         return getSearchService();
       },
@@ -1038,7 +1058,24 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       return readReviews(input);
     },
     async planWorkspace(input) {
-      return (await getServices()).planner.plan(input);
+      const services = await getServices();
+      // A day the user said is especially full gets one small task instead of
+      // a normal-sized plan — but only when this call does not pin the minutes
+      // itself. A broken availability record must never block planning.
+      let weekAvailabilityMinutes: number | undefined;
+      if (input.availableMinutes === undefined) {
+        try {
+          const date = input.date ?? today();
+          const busy = await services.weekAvailability.busyDatesBetween(date, date);
+          if (busy.includes(date)) weekAvailabilityMinutes = BUSY_DAY_MINUTES;
+        } catch {
+          // Stay without the week override.
+        }
+      }
+      return services.planner.plan({
+        ...input,
+        ...(weekAvailabilityMinutes !== undefined ? { weekAvailabilityMinutes } : {})
+      });
     },
     async listLongPlans(workspaceId) {
       return (await getServices()).longPlans.list(workspaceId);

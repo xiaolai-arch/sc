@@ -154,6 +154,21 @@ export function weeklyHonestLines(
   ];
 }
 
+/** The one Sunday-review question about which days next week are packed. */
+export const WEEK_AVAILABILITY_QUESTION =
+  '下周哪几天会特别满？回我一句就行，那几天我只给你排一件小事。';
+
+/**
+ * The availability question line, or '' when there is no workspace to plan
+ * for. Like the accountability clause it is appended to the delivered message
+ * and never handed to the model, which could reword or duplicate the ask.
+ */
+export function weekAvailabilityQuestion(
+  context: Pick<ButlerContext, 'workspaces'>
+): string {
+  return context.workspaces.length > 0 ? WEEK_AVAILABILITY_QUESTION : '';
+}
+
 /**
  * The prompt's 诚实数据 block, or [] when there is nothing honest to add. The
  * accountability clause is deliberately left out: it is a deterministic
@@ -290,7 +305,11 @@ export function buildCheckInTemplate(
     // The honest receipt ends the message, at most two lines. With neither
     // fact the template keeps its previous bytes for every existing fixture.
     const honest = weeklyHonestLines(weeklyHonest);
-    return honest.length === 0 ? base : `${base}\n${honest.join('\n')}`;
+    const withHonest = honest.length === 0 ? base : `${base}\n${honest.join('\n')}`;
+    // The availability question is the last line, and only when there is at
+    // least one workspace; otherwise the message keeps its previous bytes.
+    const availability = weekAvailabilityQuestion(context);
+    return availability ? `${withHonest}\n${availability}` : withHonest;
   }
   if (trigger === 'behind') {
     // Byte-identical to the scheduler fallback so both compose one nudge.

@@ -12,6 +12,7 @@ import type { MemoryService } from '../../shared/memory';
 import type { ProfileService } from '../../shared/profile';
 import type { PracticeService } from '../../shared/practice';
 import type { SearchService } from '../../shared/search';
+import type { AvailabilityService } from '../availability/service';
 import type { WorkspacePlanner } from '../../shared/planning';
 import type { LongPlanService } from '../../shared/plans';
 import type { CommitmentService } from '../commitments/service';
@@ -36,6 +37,8 @@ export interface CreateButlerServiceOptions {
   practiceService?: PracticeService | null;
   /** Lets the butler record and resolve the user's spoken promises. */
   commitmentService?: CommitmentService | null;
+  /** Lets the butler record which days of a week the user said are packed. */
+  weekAvailabilityService?: AvailabilityService | null;
   getSearchService?: (() => SearchService | null) | null;
   provider?: ProviderConfig;
   /** Kept in memory only; never logged, stored, or echoed in replies. */
@@ -85,6 +88,9 @@ export function createButlerService(
       : {}),
     ...(options.commitmentService !== undefined
       ? { commitmentService: options.commitmentService }
+      : {}),
+    ...(options.weekAvailabilityService !== undefined
+      ? { weekAvailabilityService: options.weekAvailabilityService }
       : {}),
     ...(options.getSearchService !== undefined
       ? { getSearchService: options.getSearchService }

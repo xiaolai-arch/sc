@@ -49,6 +49,8 @@ export interface LongPlanPromptInput {
   researchFacts?: string[];
   /** Active knowledge topics the user already has. */
   knownTopics?: LongPlanKnowledge[];
+  /** Days the user said are especially full; absent keeps the prompt unchanged. */
+  busyDates?: string[];
   /** Present when replacing the untouched tail of an existing plan. */
   recalibration?: LongPlanRecalibrationContext;
 }
@@ -63,6 +65,7 @@ export function buildLongPlanPrompt({
   workspace,
   researchFacts,
   knownTopics,
+  busyDates,
   recalibration
 }: LongPlanPromptInput): LongPlanPrompt {
   const mastered = (knownTopics ?? [])
@@ -93,6 +96,9 @@ export function buildLongPlanPrompt({
     `总周数：${input.weeks}`,
     `每周投入：约 ${input.weeklyHours ?? 10} 小时`,
     `起始日期：${input.startDate ?? '由系统决定'}`,
+    busyDates?.length
+      ? `用户说这些天会特别满，不要把新内容排在这些天（挪到相邻的日子）：${busyDates.join('、')}`
+      : null,
     input.notes?.trim() ? `补充背景：${clip(input.notes, MAX_NOTES_LENGTH)}` : null,
     recalibration ? `今天是：${recalibration.today}` : null,
     recalibration

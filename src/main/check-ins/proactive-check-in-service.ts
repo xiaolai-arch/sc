@@ -18,6 +18,7 @@ import {
   buildCheckInPrompt,
   buildCheckInTemplate,
   commitmentCheckInLine,
+  weekAvailabilityQuestion,
   weeklyHonestLines,
   type CheckInTrigger,
   type CommitmentLike,
@@ -307,12 +308,17 @@ export class ProactiveCheckInService {
         commitment
       );
       // A model-written weekly review still ends with the deterministic honest
-      // lines; the template path already carries them, so only append when the
-      // model actually replaced it. This keeps the two facts out of the model's
-      // hands while avoiding a duplicate paragraph on the fallback path.
+      // lines, then the availability question; the template path already
+      // carries both, so only append when the model actually replaced it. This
+      // keeps the facts out of the model's hands while avoiding a duplicate
+      // paragraph on the fallback path.
       if (trigger === 'weekly' && composed !== template) {
-        const lines = weeklyHonestLines(weeklyHonest);
-        return lines.length === 0 ? composed : `${composed}\n${lines.join('\n')}`;
+        const availability = weekAvailabilityQuestion(context);
+        const tail = [
+          ...weeklyHonestLines(weeklyHonest),
+          ...(availability ? [availability] : [])
+        ];
+        return tail.length === 0 ? composed : `${composed}\n${tail.join('\n')}`;
       }
       // A model-written morning reply must still ask about the promise; when the
       // model did not mention it, append the deterministic line so the ask is

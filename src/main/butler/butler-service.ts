@@ -19,6 +19,7 @@ import type { LongPlanService } from '../../shared/plans';
 import type { ProfileService } from '../../shared/profile';
 import type { PracticeService } from '../../shared/practice';
 import type { SearchService } from '../../shared/search';
+import type { AvailabilityService } from '../availability/service';
 import type { CommitmentService } from '../commitments/service';
 import type { ButlerReference, ButlerStreamListener } from '../../shared/butler-stream';
 import { butlerToolLabel } from '../../shared/butler-stream';
@@ -88,6 +89,8 @@ export interface ButlerServiceOptions {
   practiceService?: PracticeService | null;
   /** Lets the butler record and resolve the user's spoken promises. */
   commitmentService?: CommitmentService | null;
+  /** Lets the butler record which days of a week the user said are packed. */
+  weekAvailabilityService?: AvailabilityService | null;
   /** Lazy getter keeps the search watcher off until a turn actually searches. */
   getSearchService?: (() => SearchService | null) | null;
   now?: () => Date;
@@ -113,6 +116,7 @@ export class ButlerServiceImpl implements ButlerService {
   private readonly profileService: ProfileService | null;
   private readonly practiceService: PracticeService | null;
   private readonly commitmentService: CommitmentService | null;
+  private readonly weekAvailabilityService: AvailabilityService | null;
   private readonly getSearchService: (() => SearchService | null) | null;
   private readonly now: () => Date;
   private readonly maxToolSteps: number;
@@ -137,6 +141,7 @@ export class ButlerServiceImpl implements ButlerService {
     this.profileService = options.profileService ?? null;
     this.practiceService = options.practiceService ?? null;
     this.commitmentService = options.commitmentService ?? null;
+    this.weekAvailabilityService = options.weekAvailabilityService ?? null;
     this.getSearchService = options.getSearchService ?? null;
     this.now = options.now ?? (() => new Date());
     this.maxToolSteps = Math.max(
@@ -750,6 +755,7 @@ export class ButlerServiceImpl implements ButlerService {
       knowledge: this.knowledgeService,
       practice: this.practiceService,
       commitments: this.commitmentService,
+      weekAvailability: this.weekAvailabilityService,
       permissions,
       now: this.now,
       ...(signal ? { signal } : {})
@@ -878,7 +884,9 @@ function availableMinutesDetailFromToolResult(content: string): string | undefin
     const source = result['availableMinutesSource'];
     return availableMinutesLabel(
       typeof minutes === 'number' ? minutes : undefined,
-      source === 'input' || source === 'workspace' || source === 'default' ? source : undefined
+      source === 'input' || source === 'week' || source === 'workspace' || source === 'default'
+        ? source
+        : undefined
     );
   } catch {
     return undefined;

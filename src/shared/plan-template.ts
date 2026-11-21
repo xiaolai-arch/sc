@@ -62,6 +62,8 @@ export interface LongPlanGenerationInput {
   researchFacts?: string[];
   /** Topics the user has mastered or is learning; only the model can use them. */
   knownTopics?: LongPlanKnowledge[];
+  /** Days the user said are especially full; the plan routes around them. */
+  busyDates?: string[];
   /** Present when generating replacement weeks for an existing plan. */
   recalibration?: LongPlanRecalibrationContext;
 }

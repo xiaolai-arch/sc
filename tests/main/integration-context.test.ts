@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProviderConfig } from '../../src/shared/types';
@@ -8,6 +8,8 @@ import { createButlerService } from '../../src/main/butler/create-butler-service
 import { InMemorySecretStore } from '../../src/main/settings/secret-store';
 import { createWorkspaceService } from '../../src/main/workspace/create-workspace-service';
 import { createContextScheduler } from '../../src/main/scheduler/app-scheduler';
+import { serializeWeekAvailabilityFile } from '../../src/main/availability/records';
+import { BUSY_DAY_MINUTES } from '../../src/main/planning';
 
 const dirs: string[] = [];
 
@@ -114,6 +116,84 @@ describe('context integration with real vault and butler factories', () => {
     expect(userPrompt?.content).toContain('2026-10-31');
     expect(userPrompt?.content).toContain('考前冲刺');
     expect(userPrompt?.content).toContain('120 分钟');
+  });
+
+  test('plans a stored busy day as one small task without overriding an explicit budget', async () => {
+    const dir = await tempDir();
+    const model = new FakeModelClient([
+      JSON.stringify({
+        tasks: [
+          { title: '极限 10 题', subject: '数学', durationMin: 10, acceptance: '正确率 80%' }
+        ]
+      })
+    ]);
+    const context = await createAppContext({
+      userDataPath: join(dir, 'user-data'),
+      defaultVaultPath: join(dir, 'vault'),
+      secretStore: new InMemorySecretStore(),
+      modelClient: model,
+      now: fixedNow
+    });
+
+    await context.api.completeWorkspaceOnboarding({
+      name: '数学冲刺',
+      kind: 'study',
+      goal: '考前冲刺',
+      description: '每天两小时'
+    });
+    const workspace = (await context.api.listWorkspaces()).find(
+      (entry) => entry.name === '数学冲刺'
+    );
+    expect(workspace).toBeDefined();
+
+    // The Sunday answer: next week's Tuesday is packed (fixedNow = 2026-10-31,
+    // so the coming Monday is 2026-11-02).
+    await writeFile(
+      join(dir, 'vault', 'week-availability.md'),
+      serializeWeekAvailabilityFile([
+        {
+          id: 'wa-1',
+          weekStart: '2026-11-02',
+          busyDates: ['2026-11-03'],
+          createdAt: '2026-10-31T09:00:00.000Z'
+        }
+      ]),
+      'utf8'
+    );
+
+    const busy = await context.api.planWorkspace({
+      workspaceId: workspace!.id,
+      date: '2026-11-03'
+    });
+    expect(busy.availableMinutes).toBe(BUSY_DAY_MINUTES);
+    expect(busy.availableMinutesSource).toBe('week');
+    const busyPrompt = model.calls[0]?.messages.at(-1)?.content ?? '';
+    expect(busyPrompt).toContain('今日可用时间：约 10 分钟（来自你说的一周安排）');
+    expect(busyPrompt).toContain(
+      '这天用户说特别满：只安排 1 个不超过 10 分钟的小任务，不要凑满时间。'
+    );
+
+    // Another day of the same week keeps the default budget and prompt.
+    const normal = await context.api.planWorkspace({
+      workspaceId: workspace!.id,
+      date: '2026-11-04'
+    });
+    expect(normal.availableMinutes).toBe(120);
+    expect(normal.availableMinutesSource).toBe('default');
+    expect(model.calls[1]?.messages.at(-1)?.content ?? '').not.toContain('这天用户说特别满');
+    expect(model.calls[1]?.messages.at(-1)?.content ?? '').toContain('120 分钟');
+
+    // An explicit budget wins over the stored busy day.
+    const explicit = await context.api.planWorkspace({
+      workspaceId: workspace!.id,
+      date: '2026-11-03',
+      availableMinutes: 30
+    });
+    expect(explicit.availableMinutes).toBe(30);
+    expect(explicit.availableMinutesSource).toBe('input');
+    expect(model.calls[2]?.messages.at(-1)?.content ?? '').not.toContain(
+      '这天用户说特别满'
+    );
   });
 
   test('rebuilds workspace and butler services when vault, key or provider changes', async () => {

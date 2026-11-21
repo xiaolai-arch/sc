@@ -2,11 +2,14 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FakeModelClient } from '../../src/main/agent/model-client';
+import { createAvailabilityService } from '../../src/main/availability/service';
+import { serializeWeekAvailabilityFile } from '../../src/main/availability/records';
 import { createKnowledgeService } from '../../src/main/knowledge/create-knowledge-service';
 import { createWorkspaceService } from '../../src/main/workspace/create-workspace-service';
 import { createLongPlanService } from '../../src/main/plans/long-plan-service';
 import type { KnowledgeService } from '../../src/shared/knowledge';
 import { planWeekday, type LongPlan } from '../../src/shared/plans';
+import { weekAvailabilityFile } from '../../src/main/workspace/paths';
 
 const NOW = new Date('2026-11-01T09:00:00.000Z');
 
@@ -38,7 +41,10 @@ function modelReply(weeks = 1) {
 
 async function setup(
   modelClient: FakeModelClient | null = null,
-  options: { knowledgeService?: KnowledgeService | ((root: string) => KnowledgeService) } = {}
+  options: {
+    knowledgeService?: KnowledgeService | ((root: string) => KnowledgeService);
+    withAvailability?: boolean;
+  } = {}
 ) {
   const dir = await mkdtemp(join(tmpdir(), 'asaki-long-plan-'));
   const workspaceService = createWorkspaceService(dir, { seed: false });
@@ -60,6 +66,9 @@ async function setup(
     workspaceService,
     modelClient,
     ...(knowledgeService ? { knowledgeService } : {}),
+    ...(options.withAvailability
+      ? { availabilityService: createAvailabilityService({ root: dir, now: () => current }) }
+      : {}),
     now: () => current
   });
   return {
@@ -799,6 +808,69 @@ test('does not let a plan id escape the vault', async () => {
   const { dir, service } = await setup(null);
   try {
     await expect(service.get('../../etc/passwd')).resolves.toBeNull();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+
+test('threads stored busy days into the model prompt, bounded to the plan window', async () => {
+  const client = new FakeModelClient([modelReply(2)]);
+  const { dir, workspaceId, service } = await setup(client, { withAvailability: true });
+  try {
+    // Week 2026-11-09 overlaps the 2026-11-02..11-15 plan window; the October
+    // week does not and must stay out of the prompt.
+    await writeFile(
+      weekAvailabilityFile(dir),
+      serializeWeekAvailabilityFile([
+        {
+          id: 'wa-1',
+          weekStart: '2026-11-09',
+          busyDates: ['2026-11-12', '2026-11-10'],
+          createdAt: '2026-11-01T09:00:00.000Z'
+        },
+        {
+          id: 'wa-2',
+          weekStart: '2026-10-26',
+          busyDates: ['2026-10-27'],
+          createdAt: '2026-10-25T09:00:00.000Z'
+        }
+      ]),
+      'utf8'
+    );
+
+    await service.create({
+      workspaceId,
+      goal: '学会 AI Agent，能独立做项目',
+      startDate: '2026-11-02',
+      weeks: 2,
+      weeklyHours: 12
+    });
+
+    const prompt = client.calls[0]?.messages.at(-1)?.content ?? '';
+    expect(prompt).toContain(
+      '用户说这些天会特别满，不要把新内容排在这些天（挪到相邻的日子）：2026-11-10、2026-11-12'
+    );
+    expect(prompt).not.toContain('2026-10-27');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('without an availability service the long-plan prompt stays unchanged', async () => {
+  const client = new FakeModelClient([modelReply(1)]);
+  const { dir, workspaceId, service } = await setup(client);
+  try {
+    await service.create({
+      workspaceId,
+      goal: '学会 AI Agent，能独立做项目',
+      startDate: '2026-11-02',
+      weeks: 1,
+      weeklyHours: 12
+    });
+
+    const prompt = client.calls[0]?.messages.at(-1)?.content ?? '';
+    expect(prompt).not.toContain('特别满');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

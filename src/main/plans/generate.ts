@@ -141,6 +141,7 @@ export async function generateLongPlan(
         workspace: input.workspace,
         ...(input.researchFacts?.length ? { researchFacts: input.researchFacts } : {}),
         ...(input.knownTopics?.length ? { knownTopics: input.knownTopics } : {}),
+        ...(input.busyDates?.length ? { busyDates: input.busyDates } : {}),
         ...(input.recalibration ? { recalibration: input.recalibration } : {})
       });
       for (let attempt = 0; attempt < 2; attempt += 1) {
