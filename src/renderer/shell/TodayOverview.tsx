@@ -1,10 +1,13 @@
 import { useMemo, useState, type FormEvent } from 'react';
-import { formatLocalDate } from '../../shared/date';
+import { formatLocalDate, parseLocalDate } from '../../shared/date';
+import { quizOffer, type QuizOffer } from '../../main/practice/quiz-offer';
 import type { KnowledgeTopic } from '../../shared/knowledge';
+import type { PracticeAttempt, PracticeMistake } from '../../shared/practice';
 import { planProgress } from '../../shared/plans';
 import type { LongPlan } from '../../shared/plans';
 import type { Reminder, Workspace, WorkspaceTask } from '../../shared/workspace';
 import { daysUntilTarget, reminderState, targetCountdownLabel } from '../../shared/workspace';
+import { accuracyTrend } from './accuracy-trend';
 import { ChevronRightIcon, CheckIcon, SendIcon } from '../ui/icons';
 import { PageFrame } from './PageFrame';
 import { nextScheduledDay } from './schedule';
@@ -24,6 +27,8 @@ export type TodayOverviewProps = {
   today: string;
   /** Topics whose revisit day (revisitDue) is today or earlier. */
   revisits?: TodayRevisit[];
+  /** Proactive practice offer from the data itself, or null when silent. */
+  quizOffer?: QuizOffer | null;
   /** Compact form sits inside the chat home; the page form has its own frame. */
   compact?: boolean;
   onOpenSidebar?: () => void;
@@ -102,6 +107,36 @@ export function dueRevisitTopics(
     .map((topic) => ({ topicId: topic.id, name: topic.name }));
 }
 
+/**
+ * The proactive quiz offer, from the practice data the shell already holds:
+ * the 8-week accuracy window comes from the same aggregation the 复盘 trend
+ * uses, and `lastOfferDate` is the stored date the offer last showed (null
+ * when never). Pure, so the today page and its tests both call this directly;
+ * the decision rules live in `src/main/practice/quiz-offer.ts`.
+ */
+export function todayQuizOffer(
+  attempts: readonly PracticeAttempt[],
+  mistakes: readonly PracticeMistake[],
+  today: string,
+  lastOfferDate: string | null
+): QuizOffer | null {
+  const totals = accuracyTrend(attempts, new Date(`${today}T00:00:00`)).totals;
+  const daysSinceLastOffer =
+    lastOfferDate === null
+      ? null
+      : Math.round(
+          (parseLocalDate(today).getTime() - parseLocalDate(lastOfferDate).getTime()) /
+            86_400_000
+        );
+  return quizOffer({
+    today,
+    mistakes,
+    recentAccuracy: totals.accuracy === null ? null : Math.round(totals.accuracy * 100),
+    recentAnswered: totals.answered,
+    daysSinceLastOffer
+  });
+}
+
 /** The time a reminder will actually fire: its postpone target when it has one. */
 function reminderTime(reminder: Reminder): string {
   return reminderState(reminder) === 'postponed' && reminder.postponedTo
@@ -141,6 +176,7 @@ export function TodayOverview({
   longPlans,
   today,
   revisits = [],
+  quizOffer = null,
   compact = false,
   onOpenSidebar,
   onOpenWorkspace,
@@ -293,6 +329,20 @@ export function TodayOverview({
               </li>
             ))}
           </ul>
+        ) : null}
+        {quizOffer ? (
+          <div className="mt-2 flex items-center justify-between gap-2 border-t border-black/[0.06] pt-2 dark:border-white/10">
+            <span className="min-w-0 truncate text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
+              {quizOffer.text}
+            </span>
+            <button
+              type="button"
+              onClick={() => onPrompt('考考我，出 3 道题')}
+              className="shrink-0 rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-medium text-[#0071e3] transition-colors hover:bg-[#0071e3]/10 dark:bg-white/[0.08] dark:text-[#4da3ff] dark:hover:bg-[#4da3ff]/15"
+            >
+              开始 3 道
+            </button>
+          </div>
         ) : null}
       </section>
 
