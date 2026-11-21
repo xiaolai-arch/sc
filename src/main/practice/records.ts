@@ -19,6 +19,18 @@ function asInt(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) ? value : undefined;
 }
 
+/** Positive finite number, or undefined — keeps garbage out of the schedule. */
+function asPositiveNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+/** Number within `[min, max]`, or undefined. */
+function asRangedNumber(value: unknown, min: number, max: number): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
+    ? value
+    : undefined;
+}
+
 /** Validates one question object from frontmatter (or a create request). */
 export function coerceQuestion(value: unknown): PracticeQuestion | null {
   const record = asRecord(value);
@@ -182,6 +194,11 @@ function coerceMistake(value: unknown): PracticeMistake | null {
     return null;
   }
   const status: PracticeMistakeStatus = record.status === 'resolved' ? 'resolved' : 'active';
+  // `stability` is the stored name; the record exposes it as `stabilityDays`.
+  // The in-memory spelling is also accepted so a round-trip never depends on it.
+  const stabilityDays =
+    asPositiveNumber(record.stability) ?? asPositiveNumber(record.stabilityDays);
+  const difficulty = asRangedNumber(record.difficulty, 0, 1);
   return {
     id,
     workspaceId,
@@ -195,6 +212,8 @@ function coerceMistake(value: unknown): PracticeMistake | null {
     correctStreak: Math.max(0, asInt(record.correctStreak) ?? 0),
     priority: Math.min(3, Math.max(0, asInt(record.priority) ?? 0)),
     intervalDays: Math.max(1, asInt(record.intervalDays) ?? 1),
+    ...(stabilityDays !== undefined ? { stabilityDays } : {}),
+    ...(difficulty !== undefined ? { difficulty } : {}),
     due,
     status,
     createdAt,
@@ -222,10 +241,17 @@ export function serializeMistakesFile(
     kind: 'practice-mistakes',
     workspaceId,
     updated,
-    entries: mistakes.map((mistake) => ({
-      ...mistake,
-      options: [...mistake.options]
-    }))
+    entries: mistakes.map((mistake) => {
+      // Stored as `stability` for readability. Both fields are omitted entirely
+      // while the record has no evidence-based schedule yet, so files written
+      // before this feature existed round-trip byte-identically.
+      const { stabilityDays, ...rest } = mistake;
+      return {
+        ...rest,
+        ...(stabilityDays !== undefined ? { stability: stabilityDays } : {}),
+        options: [...mistake.options]
+      };
+    })
   };
   const sections = mistakes.map((mistake) => {
     const state = mistake.status === 'resolved' ? '已掌握' : `下次复习 ${mistake.due}`;

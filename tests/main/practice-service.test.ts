@@ -3,7 +3,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createPracticeService } from '../../src/main/practice';
-import { parseMistakesFile } from '../../src/main/practice/records';
+import { parseMistakesFile, serializeMistakesFile } from '../../src/main/practice/records';
+import type { PracticeMistake } from '../../src/shared/practice';
 import { serializeNote } from '../../src/main/vault/note';
 
 let root: string;
@@ -112,52 +113,90 @@ test('a wrong answer creates a mistake due tomorrow', async () => {
   expect(raw).toContain('q1');
 });
 
-test('repeated wrong answers advance the 1/3/7 day schedule', async () => {
+test('repeated wrong answers reset the interval to one day and raise difficulty', async () => {
   const first = await at('2026-11-01').submitAnswer({ questionId: 'q1', choice: 0 });
-  expect(first.mistake).toMatchObject({ intervalDays: 1, due: '2026-11-02', wrongCount: 1 });
+  expect(first.mistake).toMatchObject({
+    intervalDays: 1,
+    due: '2026-11-02',
+    wrongCount: 1,
+    stabilityDays: 1
+  });
+  expect(first.mistake?.difficulty).toBeCloseTo(0.4, 5);
   const mistakeId = first.mistake?.id;
 
   const second = await at('2026-11-02').submitAnswer({ questionId: 'q1', choice: 0 });
   expect(second.mistake).toMatchObject({
     id: mistakeId,
-    intervalDays: 3,
-    due: '2026-11-05',
+    intervalDays: 1,
+    due: '2026-11-03',
     wrongCount: 2,
-    priority: 2
+    priority: 2,
+    stabilityDays: 1
   });
+  expect(second.mistake?.difficulty).toBeCloseTo(0.5, 5);
 
-  const third = await at('2026-11-05').submitAnswer({ questionId: 'q1', choice: 0 });
+  const third = await at('2026-11-03').submitAnswer({ questionId: 'q1', choice: 0 });
   expect(third.mistake).toMatchObject({
     id: mistakeId,
-    intervalDays: 7,
-    due: '2026-11-12',
+    intervalDays: 1,
+    due: '2026-11-04',
     wrongCount: 3,
     priority: 3
   });
-
-  const fourth = await at('2026-11-12').submitAnswer({ questionId: 'q1', choice: 0 });
-  expect(fourth.mistake).toMatchObject({
-    intervalDays: 7,
-    due: '2026-11-19',
-    wrongCount: 4,
-    priority: 3
-  });
+  expect(third.mistake?.difficulty).toBeCloseTo(0.6, 5);
 });
 
-test('correct answers lower priority and resolve after a two-answer streak', async () => {
+test('correct answers grow the interval and move due forward', async () => {
+  const first = await at('2026-11-01').submitAnswer({ questionId: 'q1', choice: 0 });
+  const mistakeId = first.mistake?.id;
+
+  // Regression for the old bug: a correct answer used to leave `due` frozen a
+  // day out, so the mistake stayed due and the user mass-repeated it.
+  const correct = await at('2026-11-02').submitAnswer({ questionId: 'q1', choice: 1 });
+  expect(correct.correct).toBe(true);
+  expect(correct.mistake).toMatchObject({
+    id: mistakeId,
+    status: 'active',
+    correctStreak: 1,
+    intervalDays: 2,
+    due: '2026-11-04'
+  });
+  expect(correct.due).toBe('2026-11-04');
+  expect(correct.mistake?.difficulty).toBeCloseTo(0.35, 5);
+
+  const stored = (await at('2026-11-02').getMistakes('kaoyan'))[0];
+  expect(stored?.due).toBe('2026-11-04');
+  expect(await at('2026-11-02').getDue('kaoyan', '2026-11-02')).toEqual([]);
+});
+
+test('a correct streak produces strictly growing intervals beyond a week', async () => {
   await at('2026-11-01').submitAnswer({ questionId: 'q1', choice: 0 });
-  await at('2026-11-02').submitAnswer({ questionId: 'q1', choice: 0 });
-  expect((await at('2026-11-02').getMistakes('kaoyan'))[0]?.priority).toBe(2);
 
-  const firstCorrect = await at('2026-11-05').submitAnswer({ questionId: 'q1', choice: 1 });
-  expect(firstCorrect.correct).toBe(true);
-  expect(firstCorrect.mistake).toMatchObject({ priority: 1, status: 'active', correctStreak: 1 });
-  expect((await at('2026-11-05').getMistakes('kaoyan'))[0]?.priority).toBe(1);
+  const one = await at('2026-11-02').submitAnswer({ questionId: 'q1', choice: 1 });
+  const two = await at(one.mistake!.due).submitAnswer({ questionId: 'q1', choice: 1 });
+  const three = await at(two.mistake!.due).submitAnswer({ questionId: 'q1', choice: 1 });
 
-  const secondCorrect = await at('2026-11-05').submitAnswer({ questionId: 'q1', choice: 1 });
-  expect(secondCorrect.mistake).toMatchObject({ status: 'resolved', correctStreak: 2 });
-  expect(await at('2026-11-05').getMistakes('kaoyan')).toEqual([]);
-  expect(await at('2026-11-05').getDue('kaoyan', '2026-12-01')).toEqual([]);
+  const intervals = [one, two, three].map((result) => result.mistake!.intervalDays);
+  expect(intervals[0]).toBeGreaterThanOrEqual(2);
+  expect(intervals[1]).toBeGreaterThan(intervals[0]!);
+  expect(intervals[2]).toBeGreaterThan(intervals[1]!);
+  expect(intervals.reduce((sum, value) => sum + value, 0)).toBeGreaterThan(7);
+  expect(three.mistake?.status).toBe('resolved');
+
+  // Mastery is written to the vault and the record leaves the active list.
+  expect(await at('2026-12-01').getMistakes('kaoyan')).toEqual([]);
+});
+
+test('two same-day correct answers never resolve a mistake', async () => {
+  await at('2026-11-01').submitAnswer({ questionId: 'q1', choice: 0 });
+
+  const first = await at('2026-11-02').submitAnswer({ questionId: 'q1', choice: 1 });
+  expect(first.mistake).toMatchObject({ status: 'active', correctStreak: 1 });
+
+  const second = await at('2026-11-02').submitAnswer({ questionId: 'q1', choice: 1 });
+  expect(second.mistake).toMatchObject({ status: 'active', correctStreak: 2 });
+  expect(second.mistake?.due).toBe('2026-11-05');
+  expect((await at('2026-11-02').getMistakes('kaoyan'))[0]?.status).toBe('active');
 });
 
 test('mistakes and attempts survive a fresh service instance', async () => {
@@ -191,27 +230,146 @@ test('reviews a mistake even after its practice set is gone', async () => {
   expect(again.mistake).toMatchObject({
     id: mistakeId,
     wrongCount: 2,
-    intervalDays: 3,
-    due: '2026-11-05',
+    intervalDays: 1,
+    due: '2026-11-03',
     status: 'active'
   });
-  expect(await at('2026-11-02').getDue('kaoyan', '2026-11-05')).toHaveLength(1);
+  expect(await at('2026-11-02').getDue('kaoyan', '2026-11-03')).toHaveLength(1);
   const attempts = await at('2026-11-02').listAttempts('kaoyan');
   expect(attempts.at(-1)).toMatchObject({ questionId: 'q1', correct: false, setId: 'ps1' });
 });
 
-test('two correct mistake reviews resolve it', async () => {
+test('migrates a legacy record and persists the schedule on its first answer', async () => {
+  // A mistake written by the pre-scheduling code: no stability/difficulty.
+  const legacy: PracticeMistake = {
+    id: 'pm-legacy',
+    workspaceId: 'kaoyan',
+    setId: 'ps1',
+    questionId: 'q1',
+    prompt: '当 x→0 时，sin x / x 的极限是？',
+    options: ['0', '1', '∞'],
+    answer: 1,
+    explanation: '第一个重要极限。',
+    wrongCount: 1,
+    correctStreak: 0,
+    priority: 2,
+    intervalDays: 2,
+    due: '2026-11-01',
+    status: 'active',
+    createdAt: '2026-10-29T09:00:00.000Z',
+    updatedAt: '2026-10-29T09:00:00.000Z',
+    lastAnsweredAt: '2026-10-29T09:00:00.000Z'
+  };
+  const path = join(root, 'workspaces', 'kaoyan', 'practice', 'mistakes.md');
+  await fs.mkdir(join(root, 'workspaces', 'kaoyan', 'practice'), { recursive: true });
+  await fs.writeFile(path, serializeMistakesFile('kaoyan', [legacy], '2026-10-29T09:00:00.000Z'));
+
+  // Reading leaves the absent fields absent — nothing rewrites the file.
+  const before = await fs.readFile(path, 'utf8');
+  expect((await at('2026-11-01').getMistakes('kaoyan'))[0]?.stabilityDays).toBeUndefined();
+  expect(await fs.readFile(path, 'utf8')).toBe(before);
+
+  // First answer migrates stability 2 → difficulty 0.6, then applies the answer.
+  const reviewed = await at('2026-11-01').reviewMistake!({ mistakeId: 'pm-legacy', choice: 1 });
+  expect(reviewed.mistake).toMatchObject({
+    stabilityDays: 3,
+    intervalDays: 3,
+    due: '2026-11-04',
+    status: 'active'
+  });
+  expect(reviewed.mistake?.difficulty).toBeCloseTo(0.55, 5);
+
+  const after = await fs.readFile(path, 'utf8');
+  expect(after).toContain('stability: 3');
+  expect(after).toContain('difficulty: 0.55');
+  expect(parseMistakesFile(after)[0]).toMatchObject({ stabilityDays: 3, difficulty: 0.55 });
+});
+
+test('parses and serializes old mistake records byte-identically', () => {
+  const legacy: PracticeMistake = {
+    id: 'pm1',
+    workspaceId: 'kaoyan',
+    setId: 'ps1',
+    questionId: 'q1',
+    prompt: '题',
+    options: ['A', 'B'],
+    answer: 1,
+    explanation: '',
+    wrongCount: 2,
+    correctStreak: 0,
+    priority: 1,
+    intervalDays: 3,
+    due: '2026-11-05',
+    status: 'active',
+    createdAt: '2026-11-01T09:00:00.000Z',
+    updatedAt: '2026-11-02T09:00:00.000Z',
+    lastAnsweredAt: '2026-11-02T09:00:00.000Z'
+  };
+  const serialized = serializeMistakesFile('kaoyan', [legacy], '2026-11-02T09:00:00.000Z');
+  expect(serialized).not.toContain('stability');
+  expect(serialized).not.toContain('difficulty');
+
+  const parsed = parseMistakesFile(serialized);
+  expect(parsed).toEqual([legacy]);
+  expect(parseMistakesFile(serializeMistakesFile('kaoyan', parsed, '2026-11-02T09:00:00.000Z'))).toEqual(
+    [legacy]
+  );
+});
+
+test('new schedule fields round-trip through the mistake book', () => {
+  const scheduled: PracticeMistake = {
+    id: 'pm2',
+    workspaceId: 'kaoyan',
+    setId: 'ps1',
+    questionId: 'q2',
+    prompt: '题二',
+    options: ['A', 'B'],
+    answer: 0,
+    explanation: '',
+    wrongCount: 1,
+    correctStreak: 1,
+    priority: 0,
+    intervalDays: 9,
+    stabilityDays: 9,
+    difficulty: 0.35,
+    due: '2026-11-20',
+    status: 'active',
+    createdAt: '2026-11-01T09:00:00.000Z',
+    updatedAt: '2026-11-11T09:00:00.000Z',
+    lastAnsweredAt: '2026-11-11T09:00:00.000Z'
+  };
+  const serialized = serializeMistakesFile('kaoyan', [scheduled], '2026-11-11T09:00:00.000Z');
+  expect(serialized).toContain('stability: 9');
+  expect(serialized).toContain('difficulty: 0.35');
+  expect(parseMistakesFile(serialized)).toEqual([scheduled]);
+});
+
+test('a spaced correct mistake review resolves it', async () => {
   const first = await at('2026-11-01').submitAnswer({ questionId: 'q1', choice: 0 });
   const mistakeId = first.mistake?.id ?? '';
 
-  const correct = await at('2026-11-02').reviewMistake!({ mistakeId, choice: 1 });
-  expect(correct.correct).toBe(true);
-  expect(correct.mistake).toMatchObject({ status: 'active', correctStreak: 1, priority: 0 });
+  // The elapsed 1-day interval is not spaced, so this answer only grows the
+  // schedule; it must not declare the mistake mastered.
+  const grew = await at('2026-11-02').reviewMistake!({ mistakeId, choice: 1 });
+  expect(grew.correct).toBe(true);
+  expect(grew.mistake).toMatchObject({
+    status: 'active',
+    correctStreak: 1,
+    priority: 0,
+    intervalDays: 2,
+    due: '2026-11-04'
+  });
 
-  const resolved = await at('2026-11-02').reviewMistake!({ mistakeId, choice: 1 });
-  expect(resolved.mistake).toMatchObject({ status: 'resolved', correctStreak: 2 });
-  expect(await at('2026-11-02').getMistakes('kaoyan')).toEqual([]);
-  expect(await at('2026-11-02').getDue('kaoyan', '2026-12-01')).toEqual([]);
+  // Now the interval that elapsed (2 days) is still short…
+  const stillGrowing = await at('2026-11-04').reviewMistake!({ mistakeId, choice: 1 });
+  expect(stillGrowing.mistake).toMatchObject({ status: 'active', intervalDays: 3 });
+
+  // …and the one after it is ≥ 3 days, so the mistake is mastered.
+  const resolved = await at('2026-11-07').reviewMistake!({ mistakeId, choice: 1 });
+  expect(resolved.correct).toBe(true);
+  expect(resolved.mistake).toMatchObject({ status: 'resolved', correctStreak: 3 });
+  expect(await at('2026-11-07').getMistakes('kaoyan')).toEqual([]);
+  expect(await at('2026-11-07').getDue('kaoyan', '2026-12-01')).toEqual([]);
 });
 
 test('marks a mistake resolved without answering it', async () => {
