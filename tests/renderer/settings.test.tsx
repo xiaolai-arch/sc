@@ -589,3 +589,37 @@ test('settings group anchors still resolve to live sections', async () => {
     Reflect.deleteProperty(Element.prototype, 'scrollIntoView');
   }
 });
+
+test('saves the opt-in stricter-mastery switch with an honest label', async () => {
+  const update = vi.fn().mockResolvedValue({ ...settings, strictMastery: true });
+  window.studyCoach = {
+    getSettings: vi.fn().mockResolvedValue(settings),
+    updateSettings: update,
+    setApiKey: vi.fn()
+  } as never;
+
+  render(<SettingsPage onClose={() => {}} />);
+  const checkbox = await screen.findByRole('checkbox', {
+    name: /更严的掌握判定/
+  });
+  expect(checkbox).not.toBeChecked();
+  expect(
+    screen.getByText('默认关闭。打开后选择题答对不再直接判掌握。')
+  ).toBeInTheDocument();
+
+  await userEvent.click(checkbox);
+  await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+
+  expect(update).toHaveBeenCalledWith(expect.objectContaining({ strictMastery: true }));
+});
+
+test('reflects a stored strictMastery value when the page loads', async () => {
+  window.studyCoach = {
+    getSettings: vi.fn().mockResolvedValue({ ...settings, strictMastery: true }),
+    updateSettings: vi.fn().mockResolvedValue({ ...settings, strictMastery: true }),
+    setApiKey: vi.fn()
+  } as never;
+
+  render(<SettingsPage onClose={() => {}} />);
+  expect(await screen.findByRole('checkbox', { name: /更严的掌握判定/ })).toBeChecked();
+});

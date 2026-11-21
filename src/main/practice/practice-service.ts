@@ -44,6 +44,12 @@ import { buildSeedSets } from './seed';
 export interface PracticeServiceOptions {
   /** Injectable clock for deterministic spaced-repetition tests. */
   now?: () => Date;
+  /**
+   * The opt-in stricter-mastery setting, read for each answered attempt so a
+   * settings change applies without rebuilding the service. Absent or false is
+   * today's behaviour; a read failure falls back to the default.
+   */
+  strictMastery?: () => boolean | Promise<boolean>;
 }
 
 function practiceDir(root: string, workspaceId: string): string {
@@ -176,6 +182,10 @@ interface MistakeSource {
  * the learner marked `有把握` raises difficulty by one extra step; `不确定` and
  * an unmarked answer behave exactly as before, and a correct answer is never
  * affected by confidence.
+ *
+ * `strict` is the opt-in stricter-mastery setting: it only withholds
+ * `resolved` for a correct proof that was not free recall. Scheduling and the
+ * wrong-answer path are identical either way.
  */
 function applyMistakeAnswer(
   existing: PracticeMistake | undefined,
@@ -183,8 +193,10 @@ function applyMistakeAnswer(
   correct: boolean,
   confidence: PracticeConfidence | undefined,
   answeredAt: string,
-  today: string
+  today: string,
+  strict = false
 ): PracticeMistake | null {
+  const kind = source.kind === 'short' ? 'short' : 'choice';
   if (!correct) {
     const schedule = nextSchedule(
       existing === undefined ? { intervalDays: 1, due: today } : existing,
@@ -216,7 +228,12 @@ function applyMistakeAnswer(
     };
   }
   if (existing === undefined) return null;
-  const schedule = nextSchedule(existing, { correct: true, today });
+  const schedule = nextSchedule(existing, {
+    correct: true,
+    kind,
+    ...(strict ? { strict: true } : {}),
+    today
+  });
   return {
     ...existing,
     priority: Math.max(0, existing.priority - 1),
@@ -244,6 +261,19 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
   const now = options.now ?? (() => new Date());
   const runExclusively = createMutex();
   let seedChecked = false;
+
+  /**
+   * The opt-in stricter-mastery flag for this answer. Absent option, a false
+   * value or a failed lookup all mean today's behaviour.
+   */
+  async function strictMasteryEnabled(): Promise<boolean> {
+    if (options.strictMastery === undefined) return false;
+    try {
+      return (await options.strictMastery()) === true;
+    } catch {
+      return false;
+    }
+  }
 
   async function ensureSeeded(): Promise<void> {
     if (seedChecked) return;
@@ -481,6 +511,7 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
       const today = formatLocalDate(answeredAtDate);
       const correct = choice === found.question.answer;
       const { workspaceId, set, question } = found;
+      const strict = await strictMasteryEnabled();
 
       return runExclusively(async () => {
         const attempt: PracticeAttempt = {
@@ -516,7 +547,8 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
           correct,
           confidence,
           answeredAt,
-          today
+          today,
+          strict
         );
 
         if (mistake !== null) {
@@ -562,6 +594,7 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
       const answeredAt = answeredAtDate.toISOString();
       const today = formatLocalDate(answeredAtDate);
       const { workspaceId, set, question } = found;
+      const strict = await strictMasteryEnabled();
 
       return runExclusively(async () => {
         // `choice` stays 0: a free-recall attempt has no option index, and the
@@ -602,7 +635,8 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
           correct,
           confidence,
           answeredAt,
-          today
+          today,
+          strict
         );
 
         if (mistake !== null) {
@@ -668,6 +702,7 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
       const answeredAtDate = now();
       const answeredAt = answeredAtDate.toISOString();
       const today = formatLocalDate(answeredAtDate);
+      const strict = await strictMasteryEnabled();
 
       return runExclusively(async () => {
         const attempt: PracticeAttempt = {
@@ -709,7 +744,8 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
           correct,
           confidence,
           answeredAt,
-          today
+          today,
+          strict
         );
         if (updated === null) throw new Error(`Mistake not found: ${mistakeId}`);
         mistakes[index] = updated;
@@ -802,6 +838,7 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
       if (typeof dueOnly !== 'boolean') throw new Error('dueOnly must be a boolean');
       await ensureSeeded();
       const today = formatLocalDate(now());
+      const strict = await strictMasteryEnabled();
       const target = reviewSheetFile(vaultRoot, workspaceId, today);
       return runExclusively(async () => {
         // Read under the same lock so an answer landing mid-export cannot leave
@@ -817,7 +854,7 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
           );
         await writeFileAtomic(
           target,
-          buildMistakeSheet({ workspaceId, date: today, mistakes })
+          buildMistakeSheet({ workspaceId, date: today, mistakes, strict })
         );
         return {
           path: `workspaces/${workspaceId}/practice/review-sheets/${today}.md`,

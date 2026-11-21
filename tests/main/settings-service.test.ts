@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDefaultAppState } from '../../src/main/context';
@@ -293,4 +293,59 @@ test('fills weekly defaults for settings written before the feature existed', as
     weekly: '20:00',
     weeklyEnabled: true
   });
+});
+
+test('serializes strictMastery only when it is true', async () => {
+  const dir = await tempDir();
+  try {
+    const filePath = join(dir, 'state.json');
+    const store = new JsonStateStore({
+      filePath,
+      createDefault: () => createDefaultAppState('/tmp/strict-vault')
+    });
+    const service = new SettingsService(store);
+
+    // Absent by default: nothing about the flag reaches the document.
+    expect((await service.get()).strictMastery).toBeUndefined();
+    const on = await service.update({ strictMastery: true });
+    expect(on.strictMastery).toBe(true);
+    expect(await readFile(filePath, 'utf8')).toContain('"strictMastery": true');
+
+    // Turning it off removes the key entirely rather than writing `false`.
+    const off = await service.update({ strictMastery: false });
+    expect(off.strictMastery).toBeUndefined();
+    const raw = await readFile(filePath, 'utf8');
+    expect(raw).not.toContain('strictMastery');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('legacy settings without strictMastery round-trip byte-identically', async () => {
+  const dir = await tempDir();
+  try {
+    const filePath = join(dir, 'state.json');
+    const defaults = createDefaultSettings('/tmp/legacy-vault');
+    const legacy = `${JSON.stringify({ onboarded: true, settings: defaults }, null, 2)}\n`;
+    await writeFile(filePath, legacy, 'utf8');
+
+    const store = new JsonStateStore({
+      filePath,
+      createDefault: () => createDefaultAppState('/tmp/ignored')
+    });
+    const service = new SettingsService(store);
+    // A read must not introduce the key.
+    expect((await service.get()).strictMastery).toBeUndefined();
+    expect(await readFile(filePath, 'utf8')).toBe(legacy);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('rejects a non-boolean strictMastery', async () => {
+  const { service } = memorySettings();
+  await expect(service.update({ strictMastery: 'yes' } as never)).rejects.toThrow(
+    '严格掌握设置必须是布尔值。'
+  );
+  expect((await service.get()).strictMastery).toBeUndefined();
 });

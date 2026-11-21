@@ -16,10 +16,22 @@
  * parameter training, no retrievability model, just the monotone shape the
  * research supports. Legacy records carry no stability/difficulty, so
  * `migrateSchedule` derives them from the old `intervalDays`/`priority`.
+ *
+ * Mastery rule: by default a correct answer on a spaced interval (≥3 days) on a
+ * later day resolves the mistake, whatever the question kind. The opt-in
+ * `strict` flag raises that bar to free recall — the resolving proof must be a
+ * `short` answer — because recognizing an answer is not the same as producing
+ * it (看得懂 ≠ 说得出). Strict mode never changes scheduling: a correct answer
+ * still grows the interval and moves `due`, and a wrong one still resets.
  */
 
 import { parseLocalDate, formatLocalDate } from '../../shared/date';
-import type { PracticeConfidence, PracticeMistakeStatus } from '../../shared/practice';
+import {
+  STRICT_MASTERY_NOTE,
+  type PracticeConfidence,
+  type PracticeMistakeStatus,
+  type PracticeQuestionKind
+} from '../../shared/practice';
 
 export const MIN_DIFFICULTY = 0.1;
 export const MAX_DIFFICULTY = 0.9;
@@ -66,6 +78,17 @@ export interface NextScheduleInput {
    * confidently wrong answer adds {@link SURE_WRONG_EXTRA_STEP} difficulty.
    */
   confidence?: PracticeConfidence;
+  /**
+   * How the attempt was answered. Absent means `choice`, matching the records.
+   * Only consulted in strict mode, where mastery needs a free-recall proof.
+   */
+  kind?: PracticeQuestionKind;
+  /**
+   * Opt-in stricter mastery. When true a correct answer still grows the
+   * interval and moves `due`, but only a correct *short* answer may resolve
+   * the mistake; a correct choice answer leaves it active.
+   */
+  strict?: boolean;
   /** Local calendar date (`YYYY-MM-DD`) of the answer. */
   today: string;
 }
@@ -146,10 +169,14 @@ export function migrateSchedule(mistake: ScheduleSource): {
  * - Resolved only when the answer is correct, the interval that just elapsed
  *   was at least 3 days, and today is a later day than the last answer.
  *   Two correct answers in one sitting therefore never mark a mistake mastered.
+ *   With `strict` (the opt-in 更严判定), the correctness proof must also be free
+ *   recall: `kind === 'short'`. A correct choice answer is still scheduled and
+ *   never resets, but it cannot resolve the record — only a spaced short answer
+ *   can. The scheduler stays pure: the flag is an input, not stored state.
  */
 export function nextSchedule(
   current: ScheduleState,
-  { correct, confidence, today }: NextScheduleInput
+  { correct, confidence, kind, strict, today }: NextScheduleInput
 ): ScheduleResult {
   const base = migrateSchedule(current);
   if (!correct) {
@@ -176,25 +203,37 @@ export function nextSchedule(
   const lastAnsweredOn = addDays(current.due, -current.intervalDays);
   const spaced = current.intervalDays >= SPACED_THRESHOLD_DAYS;
   const laterDay = today > lastAnsweredOn;
+  const freeRecall = kind === 'short';
+  const resolved = spaced && laterDay && (!strict || freeRecall);
   return {
     stabilityDays: intervalDays,
     difficulty,
     intervalDays,
     due: addDays(today, intervalDays),
-    status: spaced && laterDay ? 'resolved' : 'active'
+    status: resolved ? 'resolved' : 'active'
   };
 }
 
 /**
  * Compact Chinese schedule line for the UI, e.g. `下次复习 11月24日 · 间隔 3 天`.
  * Reads only the record, so it works for legacy entries too.
+ *
+ * A strict-mode workspace appends the one clause stating the raised bar
+ * (`更严判定生效中：需要简答题复证`); with strict off the output is unchanged.
  */
-export function scheduleLabel(mistake: {
-  status: PracticeMistakeStatus;
-  due: string;
-  intervalDays: number;
-}): string {
-  if (mistake.status === 'resolved') return '已掌握';
+export function scheduleLabel(
+  mistake: {
+    status: PracticeMistakeStatus;
+    due: string;
+    intervalDays: number;
+  },
+  options: { strict?: boolean } = {}
+): string {
+  const base = mistake.status === 'resolved' ? '已掌握' : nextReviewLabel(mistake);
+  return options.strict === true ? `${base} · ${STRICT_MASTERY_NOTE}` : base;
+}
+
+function nextReviewLabel(mistake: { due: string; intervalDays: number }): string {
   const [, month, day] = mistake.due.split('-').map(Number);
   return `下次复习 ${month}月${day}日 · 间隔 ${mistake.intervalDays} 天`;
 }

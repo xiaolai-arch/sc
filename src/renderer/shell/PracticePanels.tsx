@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { formatLocalDate } from '../../shared/date';
 import { friendlyErrorMessage } from '../../shared/errors';
 import { buildMistakeSheet } from '../../shared/practice-sheet';
-import type {
-  CreatePracticeQuestionInput,
-  CreatePracticeSetInput,
-  ExportMistakeSheetResult,
-  PracticeAttempt,
-  PracticeMistake,
-  PracticeSet
+import {
+  STRICT_MASTERY_NOTE,
+  type CreatePracticeQuestionInput,
+  type CreatePracticeSetInput,
+  type ExportMistakeSheetResult,
+  type PracticeAttempt,
+  type PracticeMistake,
+  type PracticeSet
 } from '../../shared/practice';
 
 type MistakeBookProps = {
@@ -17,6 +18,8 @@ type MistakeBookProps = {
   workspaceId?: string;
   /** Mistake ids that are due today. */
   dueIds?: ReadonlySet<string>;
+  /** Opt-in stricter mastery: states the rule once; off renders nothing extra. */
+  strict?: boolean;
   onReview?: (mistake: PracticeMistake) => void;
   onReviewAll?: () => void;
   onResolve?: (mistake: PracticeMistake) => void;
@@ -129,11 +132,16 @@ export function singleQuestionSetInput(
 }
 
 /** Renders the sheet for the mistakes currently on screen so copy matches export. */
-function sheetFor(mistakes: readonly PracticeMistake[], workspaceId: string): string {
+function sheetFor(
+  mistakes: readonly PracticeMistake[],
+  workspaceId: string,
+  strict: boolean
+): string {
   return buildMistakeSheet({
     workspaceId,
     date: formatLocalDate(new Date()),
-    mistakes
+    mistakes,
+    strict
   });
 }
 
@@ -195,6 +203,7 @@ export function MistakeBook({
   mistakes,
   workspaceId,
   dueIds,
+  strict = false,
   onReview,
   onReviewAll,
   onResolve,
@@ -235,7 +244,7 @@ export function MistakeBook({
   async function copySheet() {
     try {
       await navigator.clipboard?.writeText(
-        sheetFor(mistakes, workspaceId ?? mistakes[0]?.workspaceId ?? '')
+        sheetFor(mistakes, workspaceId ?? mistakes[0]?.workspaceId ?? '', strict)
       );
       setCopied(true);
       if (copyTimer.current !== null) clearTimeout(copyTimer.current);
@@ -290,6 +299,10 @@ export function MistakeBook({
           ) : null}
         </div>
       </div>
+
+      {strict ? (
+        <p className="mt-2 text-[11px] text-gray-400 dark:text-[#8e8e93]">{STRICT_MASTERY_NOTE}</p>
+      ) : null}
 
       {savedPath ? (
         <p

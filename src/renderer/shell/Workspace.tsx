@@ -279,6 +279,8 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
   const [provider, setProvider] = useState<ProviderConfig | null>(null);
   const cliModels = useLocalCliModels();
   const [displayName, setDisplayName] = useState('xiaolai');
+  /** Opt-in stricter mastery; mirrors the setting so the surfaces can state it. */
+  const [strictMastery, setStrictMastery] = useState(false);
   const retryTurnRef = useRef<{
     text: string;
     conversation: Conversation;
@@ -435,6 +437,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
       );
       setDisplayName(settings.displayName?.trim() || 'xiaolai');
       setSnoozedUntil(settings.notifications.snoozedUntil ?? null);
+      setStrictMastery(settings.strictMastery === true);
     } catch {
       setModelLabel('模板计划');
     }
@@ -1880,6 +1883,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
                   dueMistakes={practiceDue.filter(
                     (mistake) => !projectId || mistake.workspaceId === projectId
                   )}
+                  strictMastery={strictMastery}
                   onReviewMistake={(mistake) => {
                     const due = practiceDue.filter(
                       (entry) =>

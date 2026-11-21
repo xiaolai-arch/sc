@@ -1381,6 +1381,20 @@ function requireListReviews(value: unknown): { workspaceId?: string; limit?: num
 }
 
 /**
+ * Settings crossing IPC. The nested objects keep their existing shapes; the
+ * opt-in `strictMastery` flag is the one optional top-level switch added here,
+ * and it must be a real boolean so a renderer typo cannot quietly flip the
+ * learner's mastery rule.
+ */
+function requireSettingsPatch(value: unknown): SettingsPatch {
+  const input = requireObject(value, '更新设置');
+  if (input.strictMastery !== undefined && typeof input.strictMastery !== 'boolean') {
+    throw new Error('严格掌握设置必须是布尔值。');
+  }
+  return input as SettingsPatch;
+}
+
+/**
  * Builds the channel handlers around a StudyCoachApi. Kept separate from
  * Electron so the same table can be exercised in unit tests.
  */
@@ -1392,8 +1406,7 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
         requireObject(input, '完成 workspace 引导') as unknown as WorkspaceOnboardingInput
       ),
     getSettings: async () => api.getSettings(),
-    updateSettings: async (input) =>
-      api.updateSettings(requireObject(input, '更新设置') as SettingsPatch),
+    updateSettings: async (input) => api.updateSettings(requireSettingsPatch(input)),
     scanLocalClis: async () => api.scanLocalClis(),
     setApiKey: async (input) => api.setApiKey(requireApiKey(input)),
     listWorkspaces: async () => api.listWorkspaces(),

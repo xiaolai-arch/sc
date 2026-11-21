@@ -77,6 +77,13 @@ export interface PracticeAttempt {
 export type PracticeMistakeStatus = 'active' | 'resolved';
 
 /**
+ * The one clause a strict-mode surface states, verbatim, so the setting reads
+ * the same wherever the mastery rule is printed. It is never shown when the
+ * setting is off.
+ */
+export const STRICT_MASTERY_NOTE = '更严判定生效中：需要简答题复证';
+
+/**
  * The learner's own confidence *before* seeing the verdict: `有把握` or
  * `不确定`. Optional everywhere so an answer without a choice stays valid and
  * older records keep their meaning. It exists because illusions of competence

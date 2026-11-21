@@ -224,6 +224,76 @@ describe('nextSchedule', () => {
   });
 });
 
+describe('nextSchedule strict mastery', () => {
+  it('keeps the default resolve behaviour when strict is off or absent', () => {
+    const spaced = { intervalDays: 3, due: '2026-11-05', stabilityDays: 3, difficulty: 0.3 };
+    const absent = nextSchedule(spaced, { correct: true, kind: 'choice', today: '2026-11-05' });
+    const off = nextSchedule(spaced, {
+      correct: true,
+      kind: 'choice',
+      strict: false,
+      today: '2026-11-05'
+    });
+    expect(absent.status).toBe('resolved');
+    expect(off).toEqual(absent);
+  });
+
+  it('withholds mastery for a spaced correct choice answer but still grows the interval', () => {
+    const strictChoice = nextSchedule(
+      { intervalDays: 3, due: '2026-11-05', stabilityDays: 3, difficulty: 0.3 },
+      { correct: true, kind: 'choice', strict: true, today: '2026-11-05' }
+    );
+    const looseChoice = nextSchedule(
+      { intervalDays: 3, due: '2026-11-05', stabilityDays: 3, difficulty: 0.3 },
+      { correct: true, kind: 'choice', today: '2026-11-05' }
+    );
+    expect(strictChoice.status).toBe('active');
+    // Scheduling is untouched by the flag: interval, due, difficulty identical.
+    expect(strictChoice.intervalDays).toBe(looseChoice.intervalDays);
+    expect(strictChoice.intervalDays).toBeGreaterThan(3);
+    expect(strictChoice.due).toBe(looseChoice.due);
+    expect(strictChoice.difficulty).toBe(looseChoice.difficulty);
+    expect(strictChoice.stabilityDays).toBe(looseChoice.stabilityDays);
+  });
+
+  it('an absent kind counts as choice in strict mode', () => {
+    const next = nextSchedule(
+      { intervalDays: 4, due: '2026-11-06', stabilityDays: 4, difficulty: 0.3 },
+      { correct: true, strict: true, today: '2026-11-06' }
+    );
+    expect(next.status).toBe('active');
+    expect(next.intervalDays).toBeGreaterThan(4);
+  });
+
+  it('resolves a spaced correct short answer exactly as before', () => {
+    const strict = nextSchedule(
+      { intervalDays: 3, due: '2026-11-05', stabilityDays: 3, difficulty: 0.3 },
+      { correct: true, kind: 'short', strict: true, today: '2026-11-05' }
+    );
+    const loose = nextSchedule(
+      { intervalDays: 3, due: '2026-11-05', stabilityDays: 3, difficulty: 0.3 },
+      { correct: true, kind: 'short', today: '2026-11-05' }
+    );
+    expect(strict.status).toBe('resolved');
+    expect(strict).toEqual(loose);
+  });
+
+  it('a short answer on an unspaced interval stays active even in strict mode', () => {
+    const next = nextSchedule(
+      { intervalDays: 1, due: '2026-11-02', stabilityDays: 1, difficulty: 0.3 },
+      { correct: true, kind: 'short', strict: true, today: '2026-11-02' }
+    );
+    expect(next.status).toBe('active');
+  });
+
+  it('the flag never changes a wrong answer', () => {
+    const base = { intervalDays: 7, due: '2026-11-20', stabilityDays: 7, difficulty: 0.4 };
+    const loose = nextSchedule(base, { correct: false, today: '2026-11-20' });
+    const strict = nextSchedule(base, { correct: false, strict: true, today: '2026-11-20' });
+    expect(strict).toEqual(loose);
+  });
+});
+
 describe('scheduleLabel', () => {
   it('renders a compact Chinese review line', () => {
     expect(
@@ -234,6 +304,19 @@ describe('scheduleLabel', () => {
   it('renders mastery for a resolved record', () => {
     expect(scheduleLabel({ status: 'resolved', due: '2026-11-24', intervalDays: 3 })).toBe(
       '已掌握'
+    );
+  });
+
+  it('appends the strict clause only when strict is on', () => {
+    const active = { status: 'active' as const, due: '2026-11-24', intervalDays: 3 };
+    expect(scheduleLabel(active, { strict: true })).toBe(
+      '下次复习 11月24日 · 间隔 3 天 · 更严判定生效中：需要简答题复证'
+    );
+    // Off (or non-strict) renders exactly the legacy line, byte for byte.
+    expect(scheduleLabel(active)).toBe('下次复习 11月24日 · 间隔 3 天');
+    expect(scheduleLabel(active, { strict: false })).toBe('下次复习 11月24日 · 间隔 3 天');
+    expect(scheduleLabel({ status: 'resolved', due: '2026-11-24', intervalDays: 3 }, { strict: true })).toBe(
+      '已掌握 · 更严判定生效中：需要简答题复证'
     );
   });
 });

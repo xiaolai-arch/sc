@@ -177,6 +177,8 @@ export interface SettingsPatch {
   notifications?: Partial<NotificationSettings>;
   budget?: Partial<AppSettings['budget']>;
   launchAtLogin?: boolean;
+  /** Opt-in stricter mastery; `false` clears it from the stored document. */
+  strictMastery?: boolean;
 }
 
 /** Local-only usage accounting; nothing leaves this machine. */

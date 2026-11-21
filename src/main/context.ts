@@ -300,7 +300,13 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
   function createPractice(root: string): PracticeService {
     if (options.practiceService) return options.practiceService;
     if (options.practiceServiceFactory) return options.practiceServiceFactory(root);
-    return createPracticeService(root, { now });
+    // Read the opt-in flag at answer time: a settings write must not require a
+    // service rebuild, and the practice service is only rebuilt on vault or
+    // provider changes.
+    return createPracticeService(root, {
+      now,
+      strictMastery: async () => (await settings.get()).strictMastery === true
+    });
   }
 
   function createProfile(root: string): ProfileService {

@@ -863,3 +863,42 @@ describe('one-question import from the mistake book', () => {
     expect(screen.queryByRole('button', { name: /转为练习/ })).not.toBeInTheDocument();
   });
 });
+
+describe('strict mastery surfaces', () => {
+  it('states the strict clause in the mistake book only when strict is on', () => {
+    const { rerender } = render(
+      <MistakeBook mistakes={[mistake(1)]} workspaceId="kaoyan" onReview={() => undefined} />
+    );
+    expect(screen.queryByText('更严判定生效中：需要简答题复证')).not.toBeInTheDocument();
+
+    rerender(
+      <MistakeBook
+        mistakes={[mistake(1)]}
+        workspaceId="kaoyan"
+        strict
+        onReview={() => undefined}
+      />
+    );
+    expect(screen.getByText('更严判定生效中：需要简答题复证')).toBeInTheDocument();
+  });
+
+  it('carries the strict clause into the copied sheet only when strict is on', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText }
+    });
+
+    const strictView = render(
+      <MistakeBook mistakes={[mistake(1)]} workspaceId="kaoyan" strict onReview={() => undefined} />
+    );
+    await user.click(screen.getByRole('button', { name: '复制清单' }));
+    expect(String(writeText.mock.calls[0]?.[0])).toContain('更严判定生效中：需要简答题复证');
+    strictView.unmount();
+
+    render(<MistakeBook mistakes={[mistake(1)]} workspaceId="kaoyan" onReview={() => undefined} />);
+    await user.click(screen.getByRole('button', { name: '复制清单' }));
+    expect(String(writeText.mock.calls[1]?.[0])).not.toContain('更严判定');
+  });
+});

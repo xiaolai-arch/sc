@@ -48,9 +48,13 @@ function normalizeSettings(settings: AppSettings): AppSettings {
     typeof settings.displayName === 'string' && settings.displayName.trim().length > 0
       ? settings.displayName.trim()
       : createDefaultSettings('').displayName;
+  // `strictMastery` is opt-in, so it is only carried (and later serialized)
+  // when literally true. Absent, false or a junk value all mean the default.
+  const { strictMastery, ...rest } = settings;
   return {
-    ...settings,
+    ...rest,
     displayName,
+    ...(strictMastery === true ? { strictMastery: true } : {}),
     notifications: normalizeNotifications(settings.notifications)
   };
 }
@@ -199,12 +203,23 @@ function mergeSettings(current: AppSettings, patch: unknown): AppSettings {
     launchAtLogin:
       patch.launchAtLogin === undefined ? current.launchAtLogin : validateBoolean(patch.launchAtLogin)
   };
-  return next;
+  // Only `true` is stored; turning it off removes the key so a file written
+  // without the setting round-trips byte-identically.
+  const strictMastery =
+    patch.strictMastery === undefined
+      ? current.strictMastery
+      : validateStrictMastery(patch.strictMastery);
+  return strictMastery === true ? { ...next, strictMastery: true } : next;
 }
 
 function validateBoolean(value: unknown): boolean {
   if (typeof value !== 'boolean') throw new Error('启动设置必须是布尔值。');
   return value;
+}
+
+function validateStrictMastery(value: unknown): boolean | undefined {
+  if (typeof value !== 'boolean') throw new Error('严格掌握设置必须是布尔值。');
+  return value ? true : undefined;
 }
 
 /**

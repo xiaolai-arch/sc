@@ -191,6 +191,7 @@ export function SettingsPage({
     dndEnd: '07:30'
   });
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
+  const [strictMastery, setStrictMastery] = useState(false);
   const [displayName, setDisplayName] = useState('xiaolai');
   const baselineRef = useRef<string | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -211,6 +212,7 @@ export function SettingsPage({
       outputPrice,
       notifications,
       launchAtLogin,
+      strictMastery,
       displayName,
       apiKeyValue
     ]);
@@ -241,6 +243,7 @@ export function SettingsPage({
     outputPrice,
     notifications,
     launchAtLogin,
+    strictMastery,
     displayName,
     apiKey
   ]);
@@ -305,6 +308,7 @@ export function SettingsPage({
         dndEnd: value.notifications.dndEnd ?? '07:30'
       });
       setLaunchAtLogin(value.launchAtLogin);
+      setStrictMastery(value.strictMastery === true);
       setDisplayName(value.displayName?.trim() || 'xiaolai');
       setLoaded(true);
     } catch (cause) {
@@ -479,7 +483,8 @@ export function SettingsPage({
           outputPricePerMillion: outputPriceNumber
         },
         notifications,
-        launchAtLogin
+        launchAtLogin,
+        strictMastery
       });
       if (apiKey.trim()) {
         await api.setApiKey(apiKey.trim());
@@ -1223,6 +1228,29 @@ export function SettingsPage({
                 />
               </div>
             </div>
+          </Card>
+
+          <Card id="settings-learning">
+            <h3 className="text-[17px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
+              学习与练习
+            </h3>
+            <p className="mt-2 text-gray-500 dark:text-[#a1a1a6]">
+              默认按间隔答对就算掌握。想让判定更严格一点，可以打开下面这一项。
+            </p>
+            <label className="mt-4 flex items-start gap-3 text-sm font-medium text-gray-500 dark:text-[#a1a1a6]">
+              <input
+                type="checkbox"
+                checked={strictMastery}
+                onChange={(event) => setStrictMastery(event.target.checked)}
+                className="mt-0.5 h-5 w-5 shrink-0 rounded-[4px] accent-[#0071e3]"
+              />
+              <span>
+                更严的掌握判定：只有隔了至少 3 天后，在简答题上再答对一次，错题才算掌握
+                <span className="mt-1 block text-xs font-normal text-gray-500 dark:text-[#8e8e93]">
+                  默认关闭。打开后选择题答对不再直接判掌握。
+                </span>
+              </span>
+            </label>
           </Card>
 
           <Card id="settings-usage">

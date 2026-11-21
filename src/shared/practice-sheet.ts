@@ -13,7 +13,9 @@
  * `kind`, so `parseMistakesFile` never mistakes a sheet for the mistake book.
  */
 
-import type { PracticeMistake } from './practice';
+// `STRICT_MASTERY_NOTE` lives in `practice.ts` so the strict clause reads the
+// same here and in the UI and cannot drift between surfaces.
+import { STRICT_MASTERY_NOTE, type PracticeMistake } from './practice';
 
 /** Frontmatter `kind` that marks a review sheet; never `practice-mistakes`. */
 export const MISTAKE_SHEET_KIND = 'practice-review-sheet';
@@ -23,6 +25,12 @@ export interface MistakeSheetInput {
   /** Local calendar date (`YYYY-MM-DD`) shown in the title and frontmatter. */
   date: string;
   mistakes: readonly PracticeMistake[];
+  /**
+   * The opt-in stricter-mastery setting. When true the sheet states the rule
+   * once under the title; false/absent renders nothing extra, so sheets written
+   * before this setting stay byte-identical.
+   */
+  strict?: boolean;
 }
 
 // js-yaml quotes plain scalars that would otherwise resolve to another type
@@ -75,7 +83,8 @@ function mistakeSection(mistake: PracticeMistake, index: number): string {
 export function buildMistakeSheet({
   workspaceId,
   date,
-  mistakes
+  mistakes,
+  strict = false
 }: MistakeSheetInput): string {
   const frontmatter = [
     '---',
@@ -89,8 +98,11 @@ export function buildMistakeSheet({
   ].join('\n');
   const sections = mistakes.map((mistake, index) => mistakeSection(mistake, index));
   const title = `# 错题复习单 · ${date}`;
+  // The strict note is the only difference between modes; with it off the body
+  // is exactly what earlier versions wrote.
+  const heading = strict ? `${title}\n\n> ${STRICT_MASTERY_NOTE}` : title;
   // A blank line before every `##` keeps the sections apart when printed.
   const body =
-    sections.length === 0 ? `${title}\n\n` : `${title}\n\n${sections.join('\n\n')}\n`;
+    sections.length === 0 ? `${heading}\n\n` : `${heading}\n\n${sections.join('\n\n')}\n`;
   return `${frontmatter}\n${body}`;
 }
