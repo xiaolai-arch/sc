@@ -185,7 +185,8 @@ test('locks the public channel names', () => {
     updatePracticeSet: 'study-coach:practice:update-set',
     deletePracticeSet: 'study-coach:practice:delete-set',
     reviewPracticeMistake: 'study-coach:practice:review-mistake',
-    setPracticeMistakeResolved: 'study-coach:practice:set-mistake-resolved'
+    setPracticeMistakeResolved: 'study-coach:practice:set-mistake-resolved',
+    exportMistakeSheet: 'study-coach:practice:export-mistake-sheet'
   });
 });
 
@@ -313,6 +314,7 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
   await bridge.deletePracticeSet?.({ setId: 'ps-1' });
   await bridge.reviewPracticeMistake?.({ mistakeId: 'pm-1', choice: 1 });
   await bridge.setPracticeMistakeResolved?.({ mistakeId: 'pm-1', resolved: true });
+  await bridge.exportMistakeSheet?.({ workspaceId: 'ws-1', dueOnly: true });
   await bridge.listProfile();
   await bridge.createProfileEntry({ category: 'identity', text: '早上效率高' });
   await bridge.updateProfileEntry({ id: 'pf-1', confidence: 'confirmed' });
@@ -355,53 +357,57 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
     args: [{ planId: 'lp-1', weekId: 'w1', itemId: 'w1d1', kind: 'day', done: true }]
   });
   expect(calls[24]).toEqual({ channel: IPC_CHANNELS.deleteLongPlan, args: ['lp-1'] });
-  expect(calls.at(-17)).toEqual({
+  expect(calls.at(-18)).toEqual({
     channel: IPC_CHANNELS.searchAll,
     args: [{ query: '极限', limit: 5 }]
   });
-  expect(calls.at(-16)).toEqual({
+  expect(calls.at(-17)).toEqual({
     channel: IPC_CHANNELS.deleteTask,
     args: [{ taskId: 't1' }]
   });
-  expect(calls.at(-15)).toEqual({
+  expect(calls.at(-16)).toEqual({
     channel: IPC_CHANNELS.deleteReminder,
     args: [{ id: 'r1' }]
   });
-  expect(calls.at(-14)).toEqual({
+  expect(calls.at(-15)).toEqual({
     channel: IPC_CHANNELS.createMemory,
     args: [{ workspaceId: 'ws-1', text: '更喜欢早上学习', kind: 'preference' }]
   });
-  expect(calls.at(-13)).toEqual({
+  expect(calls.at(-14)).toEqual({
     channel: IPC_CHANNELS.deleteWorkspace,
     args: [{ workspaceId: 'ws-1' }]
   });
-  expect(calls.at(-12)).toEqual({
+  expect(calls.at(-13)).toEqual({
     channel: IPC_CHANNELS.updateLongPlan,
     args: [{ planId: 'lp-1', goal: '学会 LangGraph', weeklyHours: 8 }]
   });
-  expect(calls.at(-11)).toEqual({
+  expect(calls.at(-12)).toEqual({
     channel: IPC_CHANNELS.mergeKnowledgeTopics,
     args: [{ sourceId: 'kt-1', targetId: 'kt-2' }]
   });
-  expect(calls.at(-10)).toEqual({
+  expect(calls.at(-11)).toEqual({
     channel: IPC_CHANNELS.deleteNote,
     args: [{ noteId: 'n1' }]
   });
-  expect(calls.at(-9)).toEqual({
+  expect(calls.at(-10)).toEqual({
     channel: IPC_CHANNELS.updatePracticeSet,
     args: [{ setId: 'ps-1', title: '线代冲刺' }]
   });
-  expect(calls.at(-8)).toEqual({
+  expect(calls.at(-9)).toEqual({
     channel: IPC_CHANNELS.deletePracticeSet,
     args: [{ setId: 'ps-1' }]
   });
-  expect(calls.at(-7)).toEqual({
+  expect(calls.at(-8)).toEqual({
     channel: IPC_CHANNELS.reviewPracticeMistake,
     args: [{ mistakeId: 'pm-1', choice: 1 }]
   });
-  expect(calls.at(-6)).toEqual({
+  expect(calls.at(-7)).toEqual({
     channel: IPC_CHANNELS.setPracticeMistakeResolved,
     args: [{ mistakeId: 'pm-1', resolved: true }]
+  });
+  expect(calls.at(-6)).toEqual({
+    channel: IPC_CHANNELS.exportMistakeSheet,
+    args: [{ workspaceId: 'ws-1', dueOnly: true }]
   });
   expect(calls.at(-1)).toEqual({
     channel: IPC_CHANNELS.setConversationPermissions,

@@ -5,6 +5,8 @@ import {
   PRACTICE_INTERVALS,
   type CreatePracticeSetInput,
   type DeletePracticeSetInput,
+  type ExportMistakeSheetInput,
+  type ExportMistakeSheetResult,
   type PracticeAttempt,
   type PracticeMistake,
   type PracticeQuestion,
@@ -26,6 +28,7 @@ import {
 } from '../workspace/fs-utils';
 import { newId } from '../workspace/ids';
 import { assertIsoDate, assertSafeSegment, workspaceDir, workspacesDir } from '../workspace/paths';
+import { buildMistakeSheet } from '../../shared/practice-sheet';
 import {
   parseAttemptFile,
   parseMistakesFile,
@@ -63,6 +66,14 @@ function attemptFile(root: string, workspaceId: string, date: string): string {
 
 function mistakesFile(root: string, workspaceId: string): string {
   return join(practiceDir(root, workspaceId), 'mistakes.md');
+}
+
+function reviewSheetsDir(root: string, workspaceId: string): string {
+  return join(practiceDir(root, workspaceId), 'review-sheets');
+}
+
+function reviewSheetFile(root: string, workspaceId: string, date: string): string {
+  return join(reviewSheetsDir(root, workspaceId), `${date}.md`);
 }
 
 function requireString(value: unknown, label: string): string {
@@ -601,6 +612,42 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
           b.priority - a.priority ||
           a.questionId.localeCompare(b.questionId)
       );
+    },
+
+    async exportMistakeSheet(
+      input: ExportMistakeSheetInput
+    ): Promise<ExportMistakeSheetResult> {
+      if (typeof input !== 'object' || input === null) {
+        throw new Error('Review sheet is required');
+      }
+      const workspaceId = assertWorkspaceId(requireString(input.workspaceId, 'workspace id'));
+      const dueOnly = input.dueOnly ?? false;
+      if (typeof dueOnly !== 'boolean') throw new Error('dueOnly must be a boolean');
+      await ensureSeeded();
+      const today = formatLocalDate(now());
+      const target = reviewSheetFile(vaultRoot, workspaceId, today);
+      return runExclusively(async () => {
+        // Read under the same lock so an answer landing mid-export cannot leave
+        // the sheet describing a mistake list that never existed on disk.
+        const mistakes = (await readMistakes(workspaceId))
+          .filter((entry) => entry.status === 'active')
+          .filter((entry) => !dueOnly || entry.due <= today)
+          .sort(
+            (a, b) =>
+              b.priority - a.priority ||
+              a.due.localeCompare(b.due) ||
+              a.questionId.localeCompare(b.questionId)
+          );
+        await writeFileAtomic(
+          target,
+          buildMistakeSheet({ workspaceId, date: today, mistakes })
+        );
+        return {
+          path: `workspaces/${workspaceId}/practice/review-sheets/${today}.md`,
+          count: mistakes.length,
+          date: today
+        };
+      });
     },
 
     async listAttempts(workspaceId: string): Promise<PracticeAttempt[]> {

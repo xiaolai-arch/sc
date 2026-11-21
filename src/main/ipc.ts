@@ -43,6 +43,7 @@ import type {
   CreatePracticeQuestionInput,
   CreatePracticeSetInput,
   DeletePracticeSetInput,
+  ExportMistakeSheetInput,
   ReviewMistakeInput,
   SetMistakeResolvedInput,
   SubmitAnswerInput,
@@ -165,6 +166,7 @@ export const IPC_CHANNELS = {
   deletePracticeSet: 'study-coach:practice:delete-set',
   reviewPracticeMistake: 'study-coach:practice:review-mistake',
   setPracticeMistakeResolved: 'study-coach:practice:set-mistake-resolved',
+  exportMistakeSheet: 'study-coach:practice:export-mistake-sheet',
   // Profile channels are appended so existing channel order stays stable.
   listProfile: 'study-coach:profile:list',
   createProfileEntry: 'study-coach:profile:create',
@@ -783,6 +785,18 @@ function requireSetMistakeResolved(value: unknown): SetMistakeResolvedInput {
   return {
     mistakeId: requireString(input.mistakeId, '错题 ID'),
     resolved: input.resolved
+  };
+}
+
+function requireExportMistakeSheet(value: unknown): ExportMistakeSheetInput {
+  const input = requireObject(value, '导出复习单');
+  const workspaceId = requireString(input.workspaceId, '工作区 ID');
+  if (input.dueOnly !== undefined && typeof input.dueOnly !== 'boolean') {
+    throw new Error('导出范围参数无效。');
+  }
+  return {
+    workspaceId,
+    ...(input.dueOnly !== undefined ? { dueOnly: input.dueOnly } : {})
   };
 }
 
@@ -1437,6 +1451,11 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
       const parsed = requireSetMistakeResolved(input);
       if (!api.setPracticeMistakeResolved) throw new Error('当前存储不支持更新错题。');
       return api.setPracticeMistakeResolved(parsed);
+    },
+    exportMistakeSheet: async (input) => {
+      const parsed = requireExportMistakeSheet(input);
+      if (!api.exportMistakeSheet) throw new Error('当前存储不支持导出复习单。');
+      return api.exportMistakeSheet(parsed);
     }
   };
 
@@ -1834,6 +1853,7 @@ export function createStudyCoachBridge(
     deletePracticeSet: (input) => call(IPC_CHANNELS.deletePracticeSet, input),
     reviewPracticeMistake: (input) => call(IPC_CHANNELS.reviewPracticeMistake, input),
     setPracticeMistakeResolved: (input) => call(IPC_CHANNELS.setPracticeMistakeResolved, input),
+    exportMistakeSheet: (input) => call(IPC_CHANNELS.exportMistakeSheet, input),
     async stream(input, onEvent) {
       const requestId = createRequestId();
       const unsubscribe = subscribe?.(BUTLER_STREAM_CHANNELS.event, (payload) => {

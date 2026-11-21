@@ -156,6 +156,44 @@ test('updates and deletes practice sets through the practice service', async () 
   expect(deleteSet).toHaveBeenCalledWith({ setId: 'ps-1' });
 });
 
+test('exports the mistake review sheet through the practice service', async () => {
+  const exportMistakeSheet = vi.fn().mockResolvedValue({
+    path: 'workspaces/kaoyan/practice/review-sheets/2026-11-01.md',
+    count: 2,
+    date: '2026-11-01'
+  });
+  const practice = {
+    listSets: vi.fn(),
+    getSet: vi.fn(),
+    createSet: vi.fn(),
+    submitAnswer: vi.fn(),
+    getMistakes: vi.fn(),
+    getDue: vi.fn(),
+    listAttempts: vi.fn(),
+    exportMistakeSheet
+  } as unknown as PracticeService;
+  const { context } = await makeContext(fakeWorkspace(), fakeButler(), practice);
+  const handlers = createIpcHandlers(context.api);
+
+  const result = await handlers.exportMistakeSheet({ workspaceId: 'kaoyan' });
+  expect(result).toMatchObject({ count: 2 });
+
+  await handlers.exportMistakeSheet({ workspaceId: 'kaoyan', dueOnly: true });
+  expect(exportMistakeSheet).toHaveBeenLastCalledWith({
+    workspaceId: 'kaoyan',
+    dueOnly: true
+  });
+
+  // The empty id and the bad dueOnly never reach the service.
+  await expect(handlers.exportMistakeSheet({ workspaceId: '' })).rejects.toThrow(
+    '工作区 ID不能为空。'
+  );
+  await expect(
+    handlers.exportMistakeSheet({ workspaceId: 'kaoyan', dueOnly: 'yes' })
+  ).rejects.toThrow('导出范围参数无效。');
+  expect(exportMistakeSheet).toHaveBeenCalledTimes(2);
+});
+
 test('rejects malformed handler parameters before they reach services', async () => {
   const { context, workspace } = await makeContext();
   const handlers = createIpcHandlers(context.api);

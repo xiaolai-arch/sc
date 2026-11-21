@@ -3,12 +3,14 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type {
   CreatePracticeSetInput,
+  ExportMistakeSheetResult,
   PracticeAttempt,
   PracticeMistake,
   PracticeSet
 } from '../../src/shared/practice';
 import type { Workspace } from '../../src/shared/workspace';
 import { LearningPane } from '../../src/renderer/shell/LearningPane';
+import { MistakeBook } from '../../src/renderer/shell/PracticePanels';
 import { pickOption } from './select-option';
 
 type PaneProps = Parameters<typeof LearningPane>[0];
@@ -265,5 +267,104 @@ describe('LearningPane practice UI', () => {
 
     renderPane({ attempts: [] });
     expect(screen.queryByText('答题历史')).not.toBeInTheDocument();
+  });
+});
+
+describe('mistake review sheet', () => {
+  function stubClipboard(): ReturnType<typeof vi.fn> {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText }
+    });
+    return writeText;
+  }
+
+  const savedResult: ExportMistakeSheetResult = {
+    path: 'workspaces/kaoyan/practice/review-sheets/2026-11-02.md',
+    count: 2,
+    date: '2026-11-02'
+  };
+
+  function mistakes(): PracticeMistake[] {
+    return [mistake(1), mistake(2)];
+  }
+
+  it('hides both sheet actions until there are mistakes to export', () => {
+    renderPane();
+    expect(screen.queryByRole('button', { name: '导出复习单' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '复制清单' })).not.toBeInTheDocument();
+  });
+
+  it('exports the sheet and shows the saved path in a polite live region', async () => {
+    const user = userEvent.setup();
+    const onExportMistakeSheet = vi.fn(async () => savedResult);
+
+    renderPane({ mistakes: mistakes(), onExportMistakeSheet });
+
+    const button = screen.getByRole('button', { name: '导出复习单' });
+    expect(
+      screen.queryByText(/已保存：/)
+    ).not.toBeInTheDocument();
+
+    await user.click(button);
+
+    await waitFor(() =>
+      expect(onExportMistakeSheet).toHaveBeenCalledWith({ workspaceId: 'kaoyan', dueOnly: false })
+    );
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent(`已保存：${savedResult.path}`);
+    expect(status).toHaveAttribute('aria-live', 'polite');
+    // A second export reuses the same button and stays idempotent from the UI's view.
+    await user.click(button);
+    await waitFor(() => expect(onExportMistakeSheet).toHaveBeenCalledTimes(2));
+  });
+
+  it('shows the error line when the export is rejected', async () => {
+    const user = userEvent.setup();
+    const onExportMistakeSheet = vi.fn(async () => {
+      throw new Error('工作区不存在');
+    });
+
+    renderPane({ mistakes: mistakes(), onExportMistakeSheet });
+    await user.click(screen.getByRole('button', { name: '导出复习单' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('工作区不存在');
+    expect(screen.queryByText(/已保存：/)).not.toBeInTheDocument();
+  });
+
+  it('copies the same markdown the shared builder renders and flips its label', async () => {
+    const user = userEvent.setup();
+    const writeText = stubClipboard();
+    renderPane({ mistakes: mistakes(), onExportMistakeSheet: vi.fn(async () => savedResult) });
+
+    await user.click(screen.getByRole('button', { name: '复制清单' }));
+
+    expect(writeText).toHaveBeenCalledTimes(1);
+    const text = String(writeText.mock.calls[0]?.[0]);
+    expect(text).toContain('# 错题复习单 · ');
+    expect(text).toContain('kind: practice-review-sheet');
+    expect(text).toContain('## 1. 错题 1');
+    expect(text).toContain('## 2. 错题 2');
+    expect(text).toContain('答案：A');
+
+    expect(await screen.findByRole('button', { name: '已复制' })).toBeInTheDocument();
+    await waitFor(
+      () => expect(screen.getByRole('button', { name: '复制清单' })).toBeInTheDocument(),
+      { timeout: 2500 }
+    );
+  });
+
+  it('renders the sheet actions without an export handler as long as mistakes exist', () => {
+    render(
+      <MistakeBook
+        mistakes={mistakes()}
+        workspaceId="kaoyan"
+        onReview={() => undefined}
+      />
+    );
+    expect(screen.queryByRole('button', { name: '导出复习单' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '复制清单' })).toBeInTheDocument();
   });
 });

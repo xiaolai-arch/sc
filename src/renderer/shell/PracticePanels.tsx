@@ -1,5 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { formatLocalDate } from '../../shared/date';
+import { friendlyErrorMessage } from '../../shared/errors';
+import { buildMistakeSheet } from '../../shared/practice-sheet';
 import type {
+  ExportMistakeSheetResult,
   PracticeAttempt,
   PracticeMistake,
   PracticeSet
@@ -7,11 +11,15 @@ import type {
 
 type MistakeBookProps = {
   mistakes: PracticeMistake[];
+  /** Workspace the listed mistakes belong to; stamped into the copied sheet. */
+  workspaceId?: string;
   /** Mistake ids that are due today. */
   dueIds?: ReadonlySet<string>;
   onReview?: (mistake: PracticeMistake) => void;
   onReviewAll?: () => void;
   onResolve?: (mistake: PracticeMistake) => void;
+  /** Writes the printable sheet to the vault; its path is shown afterwards. */
+  onExport?: () => Promise<ExportMistakeSheetResult>;
 };
 
 type MistakeRowProps = {
@@ -23,6 +31,18 @@ type MistakeRowProps = {
 
 const rowActionClass =
   'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium text-[#0071e3] transition-colors duration-200 hover:bg-[#0071e3]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:text-[#4da3ff] dark:hover:bg-[#0a84ff]/20';
+
+const quietActionClass =
+  'rounded-full px-1 text-[12px] font-medium text-[#0071e3] transition-colors duration-200 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:text-[#4da3ff]';
+
+/** Renders the sheet for the mistakes currently on screen so copy matches export. */
+function sheetFor(mistakes: readonly PracticeMistake[], workspaceId: string): string {
+  return buildMistakeSheet({
+    workspaceId,
+    date: formatLocalDate(new Date()),
+    mistakes
+  });
+}
 
 function MistakeRow({ mistake, due, onReview, onResolve }: MistakeRowProps) {
   return (
@@ -65,15 +85,56 @@ function MistakeRow({ mistake, due, onReview, onResolve }: MistakeRowProps) {
 /** Compact mistake preview that can expand into the full review list. */
 export function MistakeBook({
   mistakes,
+  workspaceId,
   dueIds,
   onReview,
   onReviewAll,
-  onResolve
+  onResolve,
+  onExport
 }: MistakeBookProps) {
   const [expanded, setExpanded] = useState(false);
+  const [savedPath, setSavedPath] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimer.current !== null) clearTimeout(copyTimer.current);
+    };
+  }, []);
 
   if (mistakes.length === 0) return null;
   const dueCount = dueIds ? mistakes.filter((mistake) => dueIds.has(mistake.id)).length : 0;
+
+  async function exportSheet() {
+    if (!onExport || exporting) return;
+    setExporting(true);
+    setExportError(null);
+    setSavedPath(null);
+    try {
+      const result = await onExport();
+      setSavedPath(result.path);
+    } catch (cause) {
+      setExportError(friendlyErrorMessage(cause, '导出复习单失败，请重试。'));
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function copySheet() {
+    try {
+      await navigator.clipboard?.writeText(
+        sheetFor(mistakes, workspaceId ?? mistakes[0]?.workspaceId ?? '')
+      );
+      setCopied(true);
+      if (copyTimer.current !== null) clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard access can be unavailable in tests or restricted webviews.
+    }
+  }
 
   return (
     <div className="mt-6 rounded-2xl bg-[#f5f5f7] p-5 dark:bg-white/[0.06]">
@@ -96,17 +157,45 @@ export function MistakeBook({
               复习今天到期的 {dueCount} 道
             </button>
           ) : null}
+          {onExport ? (
+            <button
+              type="button"
+              disabled={exporting}
+              onClick={() => void exportSheet()}
+              className={quietActionClass}
+            >
+              {exporting ? '正在导出…' : '导出复习单'}
+            </button>
+          ) : null}
+          <button type="button" onClick={() => void copySheet()} className={quietActionClass}>
+            {copied ? '已复制' : '复制清单'}
+          </button>
           {mistakes.length > 4 ? (
             <button
               type="button"
               onClick={() => setExpanded((current) => !current)}
-              className="rounded-full px-1 text-[12px] font-medium text-[#0071e3] transition-colors duration-200 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:text-[#4da3ff]"
+              className={quietActionClass}
             >
               {expanded ? '收起' : '查看全部错题'}
             </button>
           ) : null}
         </div>
       </div>
+
+      {savedPath ? (
+        <p
+          role="status"
+          aria-live="polite"
+          className="mt-2 text-[11px] text-gray-400 dark:text-[#8e8e93]"
+        >
+          已保存：{savedPath}
+        </p>
+      ) : null}
+      {exportError ? (
+        <p role="alert" className="mt-2 text-[11px] text-[#d70015] dark:text-[#ff7b72]">
+          {exportError}
+        </p>
+      ) : null}
 
       <ul className="mt-2 space-y-2.5">
         {(expanded ? mistakes : mistakes.slice(0, 4)).map((mistake) => (

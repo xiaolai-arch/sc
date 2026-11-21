@@ -64,6 +64,8 @@ import {
 import type {
   CreatePracticeSetInput,
   DeletePracticeSetInput,
+  ExportMistakeSheetInput,
+  ExportMistakeSheetResult,
   PracticeAttempt,
   PracticeMistake,
   PracticeSet,
@@ -1455,6 +1457,26 @@ export function createMockApi(
               a.due.localeCompare(b.due) || b.priority - a.priority || a.questionId.localeCompare(b.questionId)
           )
       );
+    },
+
+    async exportMistakeSheet(
+      input: ExportMistakeSheetInput
+    ): Promise<ExportMistakeSheetResult> {
+      requireWorkspace(input.workspaceId);
+      const date = today();
+      // The browser prototype has no vault to write into; the renderer's copy
+      // button renders the same markdown itself through the shared builder.
+      const count = state.practiceMistakes.filter(
+        (entry) =>
+          entry.workspaceId === input.workspaceId &&
+          entry.status === 'active' &&
+          (!input.dueOnly || entry.due <= date)
+      ).length;
+      return {
+        path: `workspaces/${input.workspaceId}/practice/review-sheets/${date}.md`,
+        count,
+        date
+      };
     },
 
     async reviewPracticeMistake(input: ReviewMistakeInput): Promise<SubmitAnswerResult> {

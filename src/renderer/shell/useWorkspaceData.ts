@@ -26,6 +26,8 @@ import type {
 import type {
   CreatePracticeSetInput,
   DeletePracticeSetInput,
+  ExportMistakeSheetInput,
+  ExportMistakeSheetResult,
   PracticeAttempt,
   PracticeMistake,
   PracticeSet,
@@ -108,6 +110,7 @@ export type WorkspaceData = WorkspaceDataState & {
   submitPracticeAnswer: (input: SubmitAnswerInput) => Promise<SubmitAnswerResult>;
   reviewPracticeMistake: (input: ReviewMistakeInput) => Promise<SubmitAnswerResult>;
   resolvePracticeMistake: (input: SetMistakeResolvedInput) => Promise<PracticeMistake>;
+  exportMistakeSheet: (input: ExportMistakeSheetInput) => Promise<ExportMistakeSheetResult>;
   generatePlan: (workspaceId: string) => Promise<WorkspacePlan>;
   searchWorkspace: (workspaceId: string, query: string, limit?: number) => Promise<SearchResult[]>;
   searchAll: (query: string, limit?: number) => Promise<SearchResult[]>;
@@ -618,6 +621,15 @@ export function useWorkspaceData(): WorkspaceData {
     return mistake;
   }, []);
 
+  const exportMistakeSheet = useCallback(
+    async (input: ExportMistakeSheetInput) => {
+      const api = apiOrThrow();
+      if (!api.exportMistakeSheet) throw new Error('当前存储不支持导出复习单。');
+      return api.exportMistakeSheet(input);
+    },
+    []
+  );
+
   const generatePlan = useCallback(async (workspaceId: string) => {
     const api = apiOrThrow();
     const plan = await api.planWorkspace({ workspaceId });
@@ -844,6 +856,7 @@ export function useWorkspaceData(): WorkspaceData {
     submitPracticeAnswer,
     reviewPracticeMistake,
     resolvePracticeMistake,
+    exportMistakeSheet,
     generatePlan,
     searchWorkspace,
     searchAll,
