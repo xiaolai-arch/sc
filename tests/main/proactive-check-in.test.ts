@@ -965,3 +965,176 @@ test('the morning check-in never reads weekly stats', async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+const HONEST = {
+  calibration: '有把握但错 2 道 · 没把握但对 1 道',
+  nextStep: '下周先练「三角函数」的到期错题（3 道）'
+};
+
+const HONEST_LINES = [
+  '有把握但错 2 道 · 没把握但对 1 道',
+  '下一步：下周先练「三角函数」的到期错题（3 道）'
+].join('\n');
+
+test('appends the honest calibration and next step to the weekly message', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getWeeklyOverview: async () => weeklyStats,
+      getWeeklyHonest: async (today) => {
+        // Keyed to the check-in's own date, not the wall clock.
+        expect(today.getDate()).toBe(1);
+        return HONEST;
+      },
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    const notification = await service.check('weekly', '2026-11-01');
+
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    expect(conversation?.messages[0]?.text).toBe(
+      `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE}\n${HONEST_LINES}`
+    );
+    // The surfaced banner stays generic; only the review message carries it.
+    expect(notification?.body).toBe('周日复盘时间到了，点开回顾本周并安排下周。');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the honest lines still end a model-written weekly review', async () => {
+  const { dir, value } = await store();
+  try {
+    const client = new FakeModelClient(['这一周你完成了 3 个任务，稳中有进。']);
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: client,
+      getWeeklyOverview: async () => weeklyStats,
+      getWeeklyHonest: async () => HONEST,
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    await service.check('weekly', '2026-11-01');
+
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    expect(conversation?.messages[0]?.text).toBe(
+      `这一周你完成了 3 个任务，稳中有进。\n${HONEST_LINES}`
+    );
+    const prompt = client.calls[0]?.messages[0]?.content ?? '';
+    expect(prompt).toContain('本周诚实数据：');
+    expect(prompt).toContain('- 有把握但错 2 道 · 没把握但对 1 道');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('only the non-null honest line is appended', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getWeeklyHonest: async () => ({ calibration: null, nextStep: HONEST.nextStep }),
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    await service.check('weekly', '2026-11-01');
+
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    expect(conversation?.messages[0]?.text).toBe(
+      `${WEEKLY_TEMPLATE}\n下一步：${HONEST.nextStep}`
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the weekly message stays byte-identical when there is no honest provider', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getWeeklyOverview: async () => weeklyStats,
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    await service.check('weekly', '2026-11-01');
+
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    expect(conversation?.messages[0]?.text).toBe(
+      `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE}`
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a failing honest provider leaves the weekly message unchanged', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getWeeklyOverview: async () => weeklyStats,
+      getWeeklyHonest: async () => {
+        throw new Error('practice unreadable');
+      },
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    const notification = await service.check('weekly', '2026-11-01');
+
+    expect(notification).not.toBeNull();
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    expect(conversation?.messages[0]?.text).toBe(
+      `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE}`
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the morning check-in never reads the honest provider', async () => {
+  const { dir, value } = await store();
+  try {
+    let called = false;
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getWeeklyHonest: async () => {
+        called = true;
+        return HONEST;
+      },
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    await service.check('morning', '2026-11-01');
+
+    expect(called).toBe(false);
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    expect(conversation?.messages[0]?.text).not.toContain('有把握但错');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

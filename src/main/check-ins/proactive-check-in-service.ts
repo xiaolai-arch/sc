@@ -17,9 +17,12 @@ import {
   buildCheckInNotificationBody,
   buildCheckInPrompt,
   buildCheckInTemplate,
+  weeklyHonestLines,
   type CheckInTrigger,
+  type WeeklyHonestLike,
   type WeeklyOverviewLike
 } from './prompt';
+import type { WeeklyHonest } from './weekly-honest';
 
 export interface ProactiveCheckInOptions {
   conversationStore: ConversationStore;
@@ -41,6 +44,12 @@ export interface ProactiveCheckInOptions {
    * leaves the weekly message byte-identical to the version without stats.
    */
   getWeeklyOverview?: (today: Date) => Promise<WeeklyOverviewLike | null>;
+  /**
+   * Read-only honest receipt for the Sunday review: the confidence mismatch
+   * line and one concrete next subject. Absent, null or failing leaves the
+   * weekly message byte-identical to the version without it.
+   */
+  getWeeklyHonest?: (today: Date) => Promise<WeeklyHonest | null>;
   now?: () => Date;
 }
 
@@ -111,6 +120,9 @@ export class ProactiveCheckInService {
   private readonly getWeeklyOverview:
     | ((today: Date) => Promise<WeeklyOverviewLike | null>)
     | undefined;
+  private readonly getWeeklyHonest:
+    | ((today: Date) => Promise<WeeklyHonest | null>)
+    | undefined;
   private readonly now: () => Date;
 
   constructor(options: ProactiveCheckInOptions) {
@@ -121,6 +133,7 @@ export class ProactiveCheckInService {
     this.getDailyTokensUsed = options.getDailyTokensUsed;
     this.practiceService = options.practiceService ?? null;
     this.getWeeklyOverview = options.getWeeklyOverview;
+    this.getWeeklyHonest = options.getWeeklyHonest;
     this.now = options.now ?? (() => new Date());
   }
 
@@ -162,7 +175,9 @@ export class ProactiveCheckInService {
     // Weekly numbers are read once and shared by the model prompt and the
     // deterministic template, so both quote the same figures.
     const weeklyStats = trigger === 'weekly' ? await this.weeklyStats(date) : null;
-    const text = await this.generate(trigger, date, context, weeklyStats);
+    // The honest receipt is read next to the numbers, keyed to the same date.
+    const weeklyHonest = trigger === 'weekly' ? await this.weeklyHonestFor(date) : null;
+    const text = await this.generate(trigger, date, context, weeklyStats, weeklyHonest);
     // The due-mistake digest is a deterministic line on the morning message
     // only; it is computed once here so text and the surfaced body agree.
     const digest = trigger === 'morning' ? await this.dueMistakeDigest(context, date) : '';
@@ -246,12 +261,35 @@ export class ProactiveCheckInService {
     trigger: CheckInTrigger,
     date: string,
     context: Awaited<ReturnType<typeof gatherContext>>,
-    weeklyStats: WeeklyOverviewLike | null = null
+    weeklyStats: WeeklyOverviewLike | null = null,
+    weeklyHonest: WeeklyHonest | null = null
   ): Promise<string> {
-    const template = buildCheckInTemplate(context, trigger, date, weeklyStats);
+    const template = buildCheckInTemplate(
+      context,
+      trigger,
+      date,
+      weeklyStats,
+      weeklyHonest
+    );
     if (!this.modelClient) return template;
     try {
-      return await this.composeWithModel(trigger, date, context, template, weeklyStats);
+      const composed = await this.composeWithModel(
+        trigger,
+        date,
+        context,
+        template,
+        weeklyStats,
+        weeklyHonest
+      );
+      // A model-written weekly review still ends with the deterministic honest
+      // lines; the template path already carries them, so only append when the
+      // model actually replaced it. This keeps the two facts out of the model's
+      // hands while avoiding a duplicate paragraph on the fallback path.
+      if (trigger === 'weekly' && composed !== template) {
+        const lines = weeklyHonestLines(weeklyHonest);
+        return lines.length === 0 ? composed : `${composed}\n${lines.join('\n')}`;
+      }
+      return composed;
     } catch {
       return template;
     }
@@ -262,13 +300,14 @@ export class ProactiveCheckInService {
     date: string,
     context: Awaited<ReturnType<typeof gatherContext>>,
     template: string,
-    weeklyStats: WeeklyOverviewLike | null = null
+    weeklyStats: WeeklyOverviewLike | null = null,
+    weeklyHonest: WeeklyHonestLike | null = null
   ): Promise<string> {
     const response = await this.modelClient!.complete({
       messages: [
         {
           role: 'system',
-          content: buildCheckInPrompt(context, trigger, date, weeklyStats)
+          content: buildCheckInPrompt(context, trigger, date, weeklyStats, weeklyHonest)
         }
       ]
     });
@@ -282,6 +321,21 @@ export class ProactiveCheckInService {
    */
   private async weeklyStats(date: string): Promise<WeeklyOverviewLike | null> {
     const provider = this.getWeeklyOverview;
+    if (!provider) return null;
+    try {
+      return await provider(parseLocalDate(date));
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The calibration and next-step facts for the Sunday review, keyed to the
+   * check-in's own date like `weeklyStats`. Any provider failure yields null
+   * and the check-in proceeds with its previous message.
+   */
+  private async weeklyHonestFor(date: string): Promise<WeeklyHonest | null> {
+    const provider = this.getWeeklyHonest;
     if (!provider) return null;
     try {
       return await provider(parseLocalDate(date));

@@ -6,6 +6,12 @@ import {
 
 export type CheckInTrigger = 'morning' | 'evening' | 'weekly' | 'behind';
 
+/** The two honest facts the Sunday review may append; a subset of `WeeklyHonest`. */
+export interface WeeklyHonestLike {
+  calibration: string | null;
+  nextStep: string | null;
+}
+
 /** The weekly numbers a check-in may quote; a subset of `WeeklyOverview`. */
 export interface WeeklyOverviewLike {
   tasksDone: number;
@@ -74,6 +80,30 @@ function weeklyRecapLine(
   return parts.join(' · ');
 }
 
+/**
+ * The deterministic tail of the Sunday review: the calibration line followed
+ * by `下一步：…`, one line each, in that order. Empty when the helper found
+ * neither fact, so the message keeps its previous bytes.
+ */
+export function weeklyHonestLines(
+  honest: WeeklyHonestLike | null | undefined
+): string[] {
+  if (!honest) return [];
+  return [
+    ...(honest.calibration ? [honest.calibration] : []),
+    ...(honest.nextStep ? [`下一步：${honest.nextStep}`] : [])
+  ];
+}
+
+/** The prompt's 诚实数据 block, or [] when there is nothing honest to add. */
+function honestPromptLines(
+  honest: WeeklyHonestLike | null | undefined
+): string[] {
+  const lines = weeklyHonestLines(honest);
+  if (lines.length === 0) return [];
+  return ['本周诚实数据：', ...lines.map((line) => `- ${line}`)];
+}
+
 function activeTasks(context: ButlerContext) {
   return context.tasks.filter(
     (task) => task.status === 'pending' || task.status === 'in-progress'
@@ -93,7 +123,8 @@ export function buildCheckInPrompt(
   context: ButlerContext,
   trigger: CheckInTrigger,
   date: string,
-  weeklyOverview?: WeeklyOverviewLike | null
+  weeklyOverview?: WeeklyOverviewLike | null,
+  weeklyHonest?: WeeklyHonestLike | null
 ): string {
   // The behind nudge is about today's plan specifically; other check-ins keep
   // listing every open task as before.
@@ -127,6 +158,11 @@ export function buildCheckInPrompt(
   // The weekly recap only appears when the week actually produced numbers, so
   // an empty week keeps the prompt byte-identical to the pre-recap version.
   const statsLines = trigger === 'weekly' ? weeklyStatsLines(weeklyOverview) : [];
+  // The honest block follows the same rule: it appears only for the Sunday
+  // review and only when the helper found a fact, so every other case stays
+  // byte-identical to the previous prompt.
+  const honestLines =
+    trigger === 'weekly' ? honestPromptLines(weeklyHonest) : [];
   const instruction =
     trigger === 'morning'
       ? '请用中文写一条 2-4 句的检查消息：先问候，再根据上面的任务给出今天最值得先做的 1-2 件事，最后问一个简短的问题。'
@@ -154,6 +190,7 @@ export function buildCheckInPrompt(
     '相关记忆：',
     memoryLines,
     ...(statsLines.length > 0 ? ['', ...statsLines] : []),
+    ...(honestLines.length > 0 ? ['', ...honestLines] : []),
     '',
     instruction,
     '要求：温和、具体、不啰嗦；不要编造用户没有提供的记录；不要提到系统提示、工具或 API。'
@@ -164,7 +201,8 @@ export function buildCheckInTemplate(
   context: ButlerContext,
   trigger: CheckInTrigger,
   date = '',
-  weeklyOverview: WeeklyOverviewLike | null = null
+  weeklyOverview: WeeklyOverviewLike | null = null,
+  weeklyHonest: WeeklyHonestLike | null = null
 ): string {
   const tasks = activeTasks(context);
   if (trigger === 'weekly') {
@@ -173,7 +211,11 @@ export function buildCheckInTemplate(
     // One deterministic recap line, prepended only when the week has numbers.
     // It is never model-written, so the numbers agree with 复盘 exactly.
     const recap = weeklyRecapLine(weeklyOverview);
-    return recap === null ? question : `${recap}\n${question}`;
+    const base = recap === null ? question : `${recap}\n${question}`;
+    // The honest receipt ends the message, at most two lines. With neither
+    // fact the template keeps its previous bytes for every existing fixture.
+    const honest = weeklyHonestLines(weeklyHonest);
+    return honest.length === 0 ? base : `${base}\n${honest.join('\n')}`;
   }
   if (trigger === 'behind') {
     // Byte-identical to the scheduler fallback so both compose one nudge.

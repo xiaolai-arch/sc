@@ -18,6 +18,12 @@ import { scanLocalClis } from './agent/local-cli-discovery';
 import { createModelClient, NoApiKeyError, type ModelClient } from './agent/model-client';
 import { createButlerService } from './butler/create-butler-service';
 import { ProactiveCheckInService } from './check-ins/proactive-check-in-service';
+import {
+  weeklyAccuracyBySubject,
+  weeklyHonest,
+  type WeeklyHonest,
+  type WeeklyHonestMistake
+} from './check-ins/weekly-honest';
 import { ConversationStore } from './conversations/conversation-store';
 import { createKnowledgeService } from './knowledge/create-knowledge-service';
 import { createMemoryService } from './memory/create-memory-service';
@@ -476,6 +482,73 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       }
     }
 
+    /**
+     * The Sunday review's honest receipt. Practice subjects live on the set,
+     * so each workspace's attempts/mistakes are joined through its own set map
+     * (seed set ids repeat across workspaces). Projects opted out of check-ins
+     * are excluded; any read failure means null and the weekly message keeps
+     * its previous shape.
+     */
+    async function readWeeklyHonest(today: Date): Promise<WeeklyHonest | null> {
+      try {
+        const workspaces = (await workspace.listWorkspaces()).filter(
+          (entry) => entry.checkIn !== 'off'
+        );
+        const perWorkspace = await Promise.all(
+          workspaces.map(async (entry) => {
+            const [sets, attempts, mistakes] = await Promise.all([
+              practice.listSets(entry.id),
+              practice.listAttempts(entry.id),
+              practice.getMistakes(entry.id)
+            ]);
+            return { sets, attempts, mistakes };
+          })
+        );
+        const todayKey = formatLocalDate(today);
+        const attempts = perWorkspace.flatMap((entry) => entry.attempts);
+        const accuracyBySubject: Record<
+          string,
+          { answered: number; correct: number }
+        > = {};
+        const mistakes: WeeklyHonestMistake[] = [];
+        for (const entry of perWorkspace) {
+          const subjectBySetId = new Map<string, string>();
+          for (const set of entry.sets) {
+            const subject = set.subject.trim();
+            if (subject !== '') subjectBySetId.set(set.id, subject);
+          }
+          const partial = weeklyAccuracyBySubject(
+            entry.attempts,
+            subjectBySetId,
+            todayKey
+          );
+          for (const [subject, stats] of Object.entries(partial)) {
+            const bucket = accuracyBySubject[subject] ?? {
+              answered: 0,
+              correct: 0
+            };
+            bucket.answered += stats.answered;
+            bucket.correct += stats.correct;
+            accuracyBySubject[subject] = bucket;
+          }
+          for (const mistake of entry.mistakes) {
+            const subject = subjectBySetId.get(mistake.setId);
+            mistakes.push(
+              subject === undefined ? mistake : { ...mistake, subject }
+            );
+          }
+        }
+        return weeklyHonest({
+          attempts,
+          mistakes,
+          today: todayKey,
+          accuracyBySubject
+        });
+      } catch {
+        return null;
+      }
+    }
+
     const checkIns = new ProactiveCheckInService({
       conversationStore,
       workspaceService: workspace,
@@ -487,6 +560,8 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       practiceService: practice,
       // Read-only recap: the Sunday review quotes the week's real numbers.
       getWeeklyOverview: readWeeklyOverview,
+      // Read-only honest receipt: calibration and one next subject.
+      getWeeklyHonest: readWeeklyHonest,
       now
     });
 
