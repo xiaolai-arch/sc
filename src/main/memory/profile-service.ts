@@ -4,6 +4,7 @@ import {
   isProfileSource,
   isProfileStatus,
   MAX_PROFILE_TEXT,
+  pushProfileHistory,
   type ProfileConfidence,
   type ProfileEntry,
   type ProfileService
@@ -178,6 +179,7 @@ export function createProfileService(options: ProfileServiceOptions): ProfileSer
         // Editing a model guess is the user's own statement; retyping the same
         // text (e.g. only fixing the category) must not silently confirm it.
         const userEdited = text !== undefined && text !== current.text;
+        const timestamp = now().toISOString();
         const next: ProfileEntry = {
           ...current,
           ...(input.category !== undefined ? { category: input.category } : {}),
@@ -192,7 +194,21 @@ export function createProfileService(options: ProfileServiceOptions): ProfileSer
               }
             : {}),
           ...(input.status !== undefined ? { status: input.status } : {}),
-          updatedAt: now().toISOString()
+          // A replaced value is archived before it disappears, so an edit can
+          // never silently destroy the fact the user once stated. Category-only
+          // moves keep the same value and record nothing: the history describes
+          // replaced texts, and a record would just repeat the current text.
+          ...(userEdited
+            ? {
+                history: pushProfileHistory(current.history, {
+                  text: current.text,
+                  origin: current.origin,
+                  source: current.source,
+                  replacedAt: timestamp
+                })
+              }
+            : {}),
+          updatedAt: timestamp
         };
         const updated = [...entries];
         updated[index] = next;

@@ -43,6 +43,8 @@ export function ProfilePage({ onOpenSidebar }: ProfilePageProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
   const [showExpired, setShowExpired] = useState(false);
+  /** Entries whose replaced-value list is expanded, keyed by entry id. */
+  const [openHistory, setOpenHistory] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
     try {
@@ -117,6 +119,9 @@ export function ProfilePage({ onOpenSidebar }: ProfilePageProps) {
       if (!window.confirm(`删除这条资料？\n\n${entry.text}`)) return;
       await api().deleteProfileEntry({ id: entry.id });
     });
+
+  const toggleHistory = (id: string) =>
+    setOpenHistory((previous) => ({ ...previous, [id]: !previous[id] }));
 
   const active = entries.filter((entry) => entry.status === 'active');
   const expired = entries.filter((entry) => entry.status === 'expired');
@@ -249,6 +254,46 @@ export function ProfilePage({ onOpenSidebar }: ProfilePageProps) {
                                 </span>
                               ) : null}
                             </p>
+                            {entry.history && entry.history.length > 0 ? (
+                              <div className="mt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleHistory(entry.id)}
+                                  className="text-[11px] text-gray-400 hover:text-gray-600 hover:underline dark:text-[#8e8e93] dark:hover:text-[#c7c7cc]"
+                                >
+                                  {openHistory[entry.id]
+                                    ? '收起修改历史'
+                                    : `曾被修改 ${entry.history.length} 次`}
+                                </button>
+                                {openHistory[entry.id] ? (
+                                  <ul className="mt-1 space-y-1">
+                                    {entry.history.map((record, index) => (
+                                      <li
+                                        key={`${entry.id}:${index}`}
+                                        className="text-[11px] leading-5 text-gray-400 dark:text-[#8e8e93]"
+                                      >
+                                        <p className="break-words">原：{record.text}</p>
+                                        <p className="flex flex-wrap items-center gap-1.5">
+                                          <span>
+                                            {record.source === 'user' ? '你提供' : '模型推测'}
+                                          </span>
+                                          {record.origin ? (
+                                            <>
+                                              <span>·</span>
+                                              <span>{record.origin}</span>
+                                            </>
+                                          ) : null}
+                                          <span>·</span>
+                                          <span>
+                                            {formatUpdatedAt(record.replacedAt)} 替换
+                                          </span>
+                                        </p>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : null}
+                              </div>
+                            ) : null}
                           </div>
                           <div className="flex shrink-0 flex-wrap justify-end gap-1">
                             {entry.confidence === 'candidate' ? (
