@@ -2113,6 +2113,7 @@ export function createMockApi(
         acceptance: input.acceptance,
         status: 'pending',
         due: input.due,
+        ...(input.cue ? { cue: input.cue } : {}),
         ...(input.startAt ? { startAt: input.startAt } : {}),
         ...(input.repeat ? { repeat: input.repeat } : {}),
         ...(input.planId ? { planId: input.planId } : {}),
@@ -2145,6 +2146,12 @@ export function createMockApi(
       }
       if (input.due === null) delete task.due;
       else if (input.due !== undefined) task.due = input.due;
+      if (input.cue === null) delete task.cue;
+      else if (input.cue !== undefined) {
+        const cue = input.cue.trim();
+        if (cue) task.cue = cue;
+        else delete task.cue;
+      }
       if (input.status !== undefined) task.status = input.status;
       if (input.startAt === null) delete task.startAt;
       else if (input.startAt !== undefined) task.startAt = input.startAt;

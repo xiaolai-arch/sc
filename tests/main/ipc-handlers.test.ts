@@ -381,6 +381,59 @@ test('lets a task with an empty optional acceptance standard through', async () 
   });
 });
 
+test('validates and forwards a task cue through the task handlers', async () => {
+  const { context, workspace } = await makeContext(
+    fakeWorkspace({
+      updateWorkspaceTask: vi
+        .fn()
+        .mockResolvedValue({ id: 't1', status: 'pending', planId: undefined })
+    })
+  );
+  const handlers = createIpcHandlers(context.api);
+
+  await handlers.createTask({
+    workspaceId: 'ws-1',
+    title: 't',
+    subject: '数学',
+    durationMin: 30,
+    acceptance: '',
+    cue: '  晚饭后  '
+  });
+  expect(workspace.createTask).toHaveBeenLastCalledWith({
+    workspaceId: 'ws-1',
+    title: 't',
+    subject: '数学',
+    durationMin: 30,
+    acceptance: '',
+    cue: '晚饭后'
+  });
+
+  await handlers.updateWorkspaceTask({ taskId: 't1', cue: null });
+  expect(workspace.updateWorkspaceTask).toHaveBeenLastCalledWith({ taskId: 't1', cue: null });
+
+  await expect(
+    handlers.createTask({
+      workspaceId: 'ws-1',
+      title: 't',
+      subject: '数学',
+      durationMin: 30,
+      acceptance: '',
+      cue: '晚'.repeat(41)
+    })
+  ).rejects.toThrow('触发时机不能超过 40 个字符。');
+
+  await expect(
+    handlers.createTask({
+      workspaceId: 'ws-1',
+      title: 't',
+      subject: '数学',
+      durationMin: 30,
+      acceptance: '',
+      cue: '晚饭\n后'
+    })
+  ).rejects.toThrow('触发时机不能包含换行。');
+});
+
 test('serializes service errors and redacts secret-like values', async () => {
   const workspace = fakeWorkspace({
     getReminders: vi

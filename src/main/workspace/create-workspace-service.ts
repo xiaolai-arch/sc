@@ -27,9 +27,12 @@ import type {
 import {
   applyReminderStatePatch,
   MAX_DAILY_AVAILABLE_MINUTES,
+  MAX_TASK_CUE_LENGTH,
   MIN_DAILY_AVAILABLE_MINUTES,
+  normalizeTaskCue,
   REMINDER_STATES,
-  isTargetDate
+  isTargetDate,
+  taskCueLength
 } from '../../shared/workspace';
 import { createMutex, listDirectories, listMarkdownFiles, pathExists, readFileOrNull, writeFileAtomic } from './fs-utils';
 import { newId, slugify, uniqueFileName } from './ids';
@@ -127,6 +130,16 @@ function optionalString(value: unknown): string | undefined {
 function optionalStringArray(value: unknown): string[] | undefined {
   if (value === undefined) return undefined;
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+}
+
+/** Normalizes a cue and enforces the shared 40-character bound. */
+function assertTaskCue(value: string): string | undefined {
+  const cue = normalizeTaskCue(value);
+  if (cue === undefined) return undefined;
+  if (taskCueLength(cue) > MAX_TASK_CUE_LENGTH) {
+    throw new Error(`Task cue must be at most ${MAX_TASK_CUE_LENGTH} characters`);
+  }
+  return cue;
 }
 
 /**
@@ -417,6 +430,7 @@ export function createWorkspaceService(
       await readWorkspaceOrThrow(workspaceId);
       const title = requireString(input?.title, 'Task title');
       const due = input?.due === undefined ? undefined : assertIsoDate(input.due, 'task due date');
+      const cue = assertTaskCue(optionalString(input?.cue) ?? '');
       const startAt =
         input?.startAt === undefined
           ? undefined
@@ -439,6 +453,7 @@ export function createWorkspaceService(
         acceptance: optionalString(input?.acceptance) ?? '',
         status: 'pending',
         due,
+        ...(cue ? { cue } : {}),
         ...(startAt ? { startAt } : {}),
         ...(input?.repeat ? { repeat: input.repeat } : {}),
         ...(planId ? { planId } : {}),
@@ -489,6 +504,7 @@ export function createWorkspaceService(
       const hasDuration = input?.durationMin !== undefined;
       const hasAcceptance = input?.acceptance !== undefined;
       const hasDue = input?.due !== undefined;
+      const hasCue = input?.cue !== undefined;
       const hasRepeat = input?.repeat !== undefined;
       if (
         !hasStatus &&
@@ -498,6 +514,7 @@ export function createWorkspaceService(
         !hasDuration &&
         !hasAcceptance &&
         !hasDue &&
+        !hasCue &&
         !hasRepeat
       ) {
         throw new Error('No task fields to update');
@@ -535,6 +552,11 @@ export function createWorkspaceService(
         input?.due === undefined || input.due === null
           ? input?.due
           : assertIsoDate(input.due, 'task due date');
+      // null clears, a non-empty string replaces, and '' also clears.
+      const cue =
+        input?.cue === undefined || input.cue === null
+          ? input?.cue
+          : assertTaskCue(input.cue) ?? null;
       return runExclusively(async () => {
         const found = await findTaskFile(taskId);
         if (found === null) throw new Error(`Task not found: ${taskId}`);
@@ -550,6 +572,8 @@ export function createWorkspaceService(
         if (durationMin !== undefined) record.durationMin = durationMin;
         if (due === null) delete record.due;
         else if (due !== undefined) record.due = due;
+        if (cue === null) delete record.cue;
+        else if (cue !== undefined) record.cue = cue;
         if (input?.repeat === null) delete record.repeat;
         else if (input?.repeat !== undefined && isTaskRepeat(input.repeat)) {
           record.repeat = input.repeat;

@@ -13,6 +13,23 @@ export type WorkspaceCheckIn = 'daily' | 'off';
 export const MIN_DAILY_AVAILABLE_MINUTES = 5;
 export const MAX_DAILY_AVAILABLE_MINUTES = 24 * 60;
 
+/**
+ * Upper bound for a task's implementation-intention cue ("if situation X,
+ * then I will do Y"): a short trigger such as 晚饭后 or 到自习室.
+ */
+export const MAX_TASK_CUE_LENGTH = 40;
+
+/** Counts user-perceived characters, so an emoji trigger costs one. */
+export function taskCueLength(value: string): number {
+  return [...value].length;
+}
+
+/** Trims a cue and folds line breaks into spaces; undefined when empty. */
+export function normalizeTaskCue(value: string): string | undefined {
+  const text = value.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
+  return text.length > 0 ? text : undefined;
+}
+
 export interface Workspace {
   id: string;
   name: string;
@@ -84,6 +101,11 @@ export interface WorkspaceTask {
   status: WorkspaceTaskStatus;
   actualMin?: number;
   due?: string;
+  /**
+   * Implementation intention ("if situation X, then I will do Y"): a short
+   * trigger such as 晚饭后 or 到自习室. Displayed as an if-then plan.
+   */
+  cue?: string;
   /** Completing the task schedules its next occurrence from the due date. */
   repeat?: TaskRepeat;
   /** Id of the completed occurrence that spawned this copy; internal. */
@@ -236,6 +258,8 @@ export interface CreateTaskInput {
   durationMin: number;
   acceptance: string;
   due?: string;
+  /** Optional implementation-intention trigger, at most 40 characters. */
+  cue?: string;
   /** Local start time (YYYY-MM-DDTHH:mm) to pin on the daily schedule. */
   startAt?: string;
   repeat?: TaskRepeat;
@@ -253,6 +277,8 @@ export interface UpdateWorkspaceTaskInput {
   acceptance?: string;
   /** Local ISO date (YYYY-MM-DD); null clears the due date. */
   due?: string | null;
+  /** Implementation-intention trigger; null (or an empty string) clears it. */
+  cue?: string | null;
   status?: WorkspaceTaskStatus;
   actualMin?: number;
   /** Local start time to pin; null clears the pin. */

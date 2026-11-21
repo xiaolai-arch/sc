@@ -375,6 +375,66 @@ test('reschedules a task without changing its status', async () => {
   });
 });
 
+test('create_task passes an optional cue to the service', async () => {
+  const createTask = vi.fn(
+    async (input: { workspaceId: string; title: string; cue?: string }) => ({
+      id: 'task-1',
+      ...input,
+      status: 'pending'
+    })
+  );
+  const result = await executeButlerTool(
+    {
+      id: 'c2d',
+      name: 'create_task',
+      arguments: { title: '真题', subject: '数学', durationMin: 45, cue: '到自习室' }
+    },
+    tools,
+    {
+      ...context,
+      workspace: { ...workspaceService, createTask } as unknown as WorkspaceService
+    }
+  );
+
+  expect(result.ok).toBe(true);
+  expect(createTask).toHaveBeenCalledWith(
+    expect.objectContaining({ title: '真题', cue: '到自习室' })
+  );
+});
+
+test('update_task sets and clears the cue', async () => {
+  const updateWorkspaceTask = vi.fn(
+    async (input: { taskId: string; cue?: string | null }) => ({
+      id: input.taskId,
+      status: 'pending',
+      ...(input.cue !== undefined ? { cue: input.cue } : {})
+    })
+  );
+  const toolContext = {
+    ...context,
+    workspace: {
+      ...workspaceService,
+      updateWorkspaceTask
+    } as unknown as WorkspaceService
+  };
+
+  const set = await executeButlerTool(
+    { id: 'c2e', name: 'update_task', arguments: { taskId: 't-1', cue: '晚饭后' } },
+    tools,
+    toolContext
+  );
+  expect(set.ok).toBe(true);
+  expect(updateWorkspaceTask).toHaveBeenLastCalledWith({ taskId: 't-1', cue: '晚饭后' });
+
+  const clear = await executeButlerTool(
+    { id: 'c2f', name: 'update_task', arguments: { taskId: 't-1', cue: null } },
+    tools,
+    toolContext
+  );
+  expect(clear.ok).toBe(true);
+  expect(updateWorkspaceTask).toHaveBeenLastCalledWith({ taskId: 't-1', cue: null });
+});
+
 test('does not create planned tasks when Stop arrives during planning', async () => {
   const controller = new AbortController();
   const createTask = vi.fn();

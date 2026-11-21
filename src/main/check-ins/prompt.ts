@@ -107,7 +107,7 @@ export function buildCheckInPrompt(
       : tasks
           .map(
             (task) =>
-              `- [${workspaceName(context, task.workspaceId)}] ${task.title}（${task.subject}，${task.durationMin} 分钟；验收：${task.acceptance}）`
+              `- [${workspaceName(context, task.workspaceId)}] ${task.title}（${task.subject}，${task.durationMin} 分钟；验收：${task.acceptance}${task.cue ? `；触发：${task.cue}` : ''}）`
           )
           .join('\n');
   const memoryLines =

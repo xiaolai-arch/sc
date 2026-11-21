@@ -160,6 +160,11 @@ export function createButlerTools(): ButlerToolDefinition[] {
           durationMin: { type: 'number', minimum: 1, description: '预计时长（分钟）' },
           acceptance: { type: 'string', description: '验收标准' },
           due: { type: 'string', description: '可选截止日期，YYYY-MM-DD' },
+          cue: {
+            type: 'string',
+            description:
+              '可选：这件事在什么情境下做，例如「晚饭后」「到自习室」；会作为 if-then 计划显示在今日页'
+          },
           startAt: {
             type: 'string',
             description: '可选开始时间，YYYY-MM-DDTHH:mm（本地时间），用于固定到今日时间表'
@@ -178,6 +183,7 @@ export function createButlerTools(): ButlerToolDefinition[] {
         const durationMin = requiredPositiveNumber(input, 'durationMin');
         const acceptance = optionalString(input, 'acceptance') ?? '完成并记录结果';
         const due = optionalString(input, 'due');
+        const cue = optionalString(input, 'cue');
         const startAt = optionalString(input, 'startAt');
         return context.workspace.createTask({
           workspaceId,
@@ -186,6 +192,7 @@ export function createButlerTools(): ButlerToolDefinition[] {
           durationMin,
           acceptance,
           ...(due ? { due } : {}),
+          ...(cue ? { cue } : {}),
           ...(startAt ? { startAt } : {})
         });
       }
@@ -586,6 +593,11 @@ export function createButlerTools(): ButlerToolDefinition[] {
             description: '新的任务状态'
           },
           actualMin: { type: 'number', minimum: 0, description: '实际用时（分钟）' },
+          cue: {
+            type: 'string',
+            description:
+              '可选：这件事在什么情境下做，例如「晚饭后」「到自习室」；会作为 if-then 计划显示在今日页。省略保持不变，传 null 清除'
+          },
           startAt: {
             type: 'string',
             description: '开始时间，YYYY-MM-DDTHH:mm（本地时间）；传 null 清除固定时间'
@@ -598,17 +610,24 @@ export function createButlerTools(): ButlerToolDefinition[] {
         const taskId = requiredString(input, 'taskId');
         const status = input.status === undefined ? undefined : requiredTaskStatus(input);
         const actualMin = optionalNumber(input, 'actualMin');
+        const cue = input.cue === null ? null : optionalString(input, 'cue');
         const startAt =
           input.startAt === null ? null : optionalString(input, 'startAt');
-        if (status === undefined && startAt === undefined && actualMin === undefined) {
-          throw new ToolInputError('请提供 status、startAt 或 actualMin 中的至少一项。');
+        if (
+          status === undefined &&
+          startAt === undefined &&
+          actualMin === undefined &&
+          cue === undefined
+        ) {
+          throw new ToolInputError('请提供 status、startAt、actualMin 或 cue 中的至少一项。');
         }
 
         const task = await context.workspace.updateWorkspaceTask({
           taskId,
           ...(status !== undefined ? { status } : {}),
           ...(startAt !== undefined ? { startAt } : {}),
-          ...(actualMin !== undefined ? { actualMin } : {})
+          ...(actualMin !== undefined ? { actualMin } : {}),
+          ...(cue !== undefined ? { cue } : {})
         });
         if (task.status === 'done' && context.knowledge) {
           const knowledge = context.knowledge;
