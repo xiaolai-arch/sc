@@ -3,6 +3,7 @@ import type { ConversationRunSnapshot } from '../../src/shared/butler-run';
 import {
   ConversationRunStore,
   applyRunEvent,
+  runStatus,
   runToChatMessage,
   type ConversationRun
 } from '../../src/renderer/shell/conversation-runs';
@@ -126,6 +127,58 @@ describe('applyRunEvent', () => {
     run = applyRunEvent(run, { type: 'done', text: '写到一半', canceled: true });
     expect(run.canceled).toBe(true);
     expect(run.text).toBe('写到一半');
+  });
+});
+
+describe('runStatus', () => {
+  test('a run canceled mid-stream reads as interrupted, never completed', () => {
+    const store = new ConversationRunStore();
+    startRun(store);
+    store.applyEvent('a1', { type: 'text', text: '写到一半' });
+    store.applyEvent('a1', { type: 'done', text: '写到一半', canceled: true });
+    // A stop settles through the same `complete()` path as a normal end; only
+    // `canceled` tells them apart, and the sidebar badge must read it.
+    store.complete('a1');
+    const run = store.get('a1')!;
+    expect(run.phase).toBe('completed');
+    expect(run.canceled).toBe(true);
+    expect(runStatus(run)).toBe('interrupted');
+  });
+
+  test('a normal completion stays completed and a failure stays failed', () => {
+    const store = new ConversationRunStore();
+    startRun(store, 'a1', 'c1');
+    store.applyEvent('a1', { type: 'text', text: '完整回答' });
+    store.applyEvent('a1', { type: 'done', text: '完整回答' });
+    store.complete('a1');
+    const done = store.get('a1')!;
+    expect(done.canceled).toBe(false);
+    expect(runStatus(done)).toBe('completed');
+
+    startRun(store, 'a2', 'c2');
+    store.fail('a2', '网络断开');
+    expect(runStatus(store.get('a2')!)).toBe('failed');
+  });
+
+  test('a canceled run that then errors keeps reporting the failure', () => {
+    const store = new ConversationRunStore();
+    startRun(store, 'a1', 'c1');
+    store.applyEvent('a1', { type: 'done', text: '', canceled: true });
+    store.fail('a1', '网络断开');
+    const run = store.get('a1')!;
+    expect(run.canceled).toBe(true);
+    expect(runStatus(run)).toBe('failed');
+  });
+
+  test('a stopped run restored from disk reads as interrupted', async () => {
+    const store = new ConversationRunStore();
+    await store.hydrate({
+      cancelStream: async () => undefined,
+      listConversationRuns: async () => [snapshot({ status: 'cancelled' })]
+    });
+    const run = store.get('a1')!;
+    expect(run.canceled).toBe(true);
+    expect(runStatus(run)).toBe('interrupted');
   });
 });
 
