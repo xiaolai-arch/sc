@@ -13,6 +13,7 @@ import type {
   PracticeSet
 } from '../../src/shared/practice';
 import type { WorkspaceService } from '../../src/shared/workspace';
+import type { CommitmentService } from '../../src/main/commitments/service';
 
 function knowledgeStub(overrides: Partial<KnowledgeService> = {}): KnowledgeService {
   return {
@@ -1325,4 +1326,190 @@ test('get_today_plan omits revisits entirely without due topics or a knowledge s
     { workspace, now: () => new Date('2026-11-21T09:00:00') }
   );
   expect(JSON.parse(noService.content).result.revisits).toBeUndefined();
+});
+
+// --- commitment tools -------------------------------------------------------
+
+function commitmentStub(
+  overrides: Partial<CommitmentService> = {}
+): CommitmentService {
+  return {
+    list: async () => [],
+    create: async (input) => ({
+      id: 'cm-new',
+      text: input.text,
+      due: input.due ?? '2026-11-23',
+      status: 'open',
+      createdAt: '2026-11-22T08:00:00.000Z'
+    }),
+    resolve: async (input) => ({
+      id: input.id ?? 'cm-1',
+      text: input.text ?? '背单词',
+      due: input.newDue ?? '2026-11-22',
+      status: input.outcome ?? 'open',
+      createdAt: '2026-11-22T08:00:00.000Z'
+    }),
+    pending: async () => [],
+    ...overrides
+  };
+}
+
+const NOW_22 = () => new Date('2026-11-22T09:00:00');
+
+test('record_commitment defaults to tomorrow and confirms in Chinese', async () => {
+  const create = vi.fn(commitmentStub().create);
+  const service = commitmentStub({ create: create as unknown as CommitmentService['create'] });
+  const result = await executeButlerTool(
+    { id: 'c1', name: 'record_commitment', arguments: { text: '背 20 个单词' } },
+    tools,
+    { workspace: workspaceService, commitments: service, now: NOW_22 }
+  );
+
+  expect(result.ok).toBe(true);
+  expect(create).toHaveBeenCalledWith({ text: '背 20 个单词' });
+  const payload = JSON.parse(result.content) as {
+    result: { message: string; commitment: { due: string } };
+  };
+  expect(payload.result.message).toBe(
+    '已记下「背 20 个单词」（明天），到那天只问一次。'
+  );
+  expect(payload.result.commitment.due).toBe('2026-11-23');
+});
+
+test('record_commitment resolves a spoken due phrase', async () => {
+  const create = vi.fn(commitmentStub().create);
+  const service = commitmentStub({ create: create as unknown as CommitmentService['create'] });
+  const result = await executeButlerTool(
+    {
+      id: 'c2',
+      name: 'record_commitment',
+      arguments: { text: '写完论文', due: '这周内' }
+    },
+    tools,
+    { workspace: workspaceService, commitments: service, now: NOW_22 }
+  );
+
+  expect(result.ok).toBe(true);
+  // 2026-11-22 is a Sunday, so 这周内 is today.
+  expect(create).toHaveBeenCalledWith({ text: '写完论文', due: '2026-11-22' });
+});
+
+test('record_commitment rejects empty text and text over 200 chars', async () => {
+  const service = commitmentStub();
+  const empty = await executeButlerTool(
+    { id: 'c3', name: 'record_commitment', arguments: { text: '   ' } },
+    tools,
+    { workspace: workspaceService, commitments: service, now: NOW_22 }
+  );
+  expect(empty.ok).toBe(false);
+  expect(empty.content).toContain('缺少参数 text');
+
+  const tooLong = await executeButlerTool(
+    {
+      id: 'c4',
+      name: 'record_commitment',
+      arguments: { text: '长'.repeat(201) }
+    },
+    tools,
+    { workspace: workspaceService, commitments: service, now: NOW_22 }
+  );
+  expect(tooLong.ok).toBe(false);
+  expect(tooLong.content).toContain('承诺内容不能超过 200 字');
+});
+
+test('commitment tools refuse without a commitment service', async () => {
+  const record = await executeButlerTool(
+    { id: 'c5', name: 'record_commitment', arguments: { text: '背单词' } },
+    tools,
+    { workspace: workspaceService, now: NOW_22 }
+  );
+  expect(record.ok).toBe(false);
+  expect(record.content).toContain('不支持记录承诺');
+
+  const resolve = await executeButlerTool(
+    { id: 'c6', name: 'resolve_commitment', arguments: { id: 'cm-1', outcome: 'done' } },
+    tools,
+    { workspace: workspaceService, now: NOW_22 }
+  );
+  expect(resolve.ok).toBe(false);
+  expect(resolve.content).toContain('不支持记录承诺');
+});
+
+test('resolve_commitment handles done, dropped and newDue', async () => {
+  const resolve = vi.fn(commitmentStub().resolve);
+  const service = commitmentStub({ resolve: resolve as unknown as CommitmentService['resolve'] });
+
+  const done = await executeButlerTool(
+    { id: 'r1', name: 'resolve_commitment', arguments: { id: 'cm-1', outcome: 'done' } },
+    tools,
+    { workspace: workspaceService, commitments: service, now: NOW_22 }
+  );
+  expect(resolve).toHaveBeenLastCalledWith({ id: 'cm-1', outcome: 'done' });
+  expect(done.content).toContain('已结案');
+
+  const dropped = await executeButlerTool(
+    { id: 'r2', name: 'resolve_commitment', arguments: { text: '背单词', outcome: 'dropped' } },
+    tools,
+    { workspace: workspaceService, commitments: service, now: NOW_22 }
+  );
+  expect(resolve).toHaveBeenLastCalledWith({ text: '背单词', outcome: 'dropped' });
+  expect(dropped.content).toContain('已放下');
+
+  const moved = await executeButlerTool(
+    { id: 'r3', name: 'resolve_commitment', arguments: { id: 'cm-1', newDue: '明天' } },
+    tools,
+    { workspace: workspaceService, commitments: service, now: NOW_22 }
+  );
+  expect(resolve).toHaveBeenLastCalledWith({ id: 'cm-1', newDue: '2026-11-23' });
+  expect(moved.content).toContain('已改到明天');
+});
+
+test('resolve_commitment surfaces an unknown id as a Chinese error', async () => {
+  const service = commitmentStub({
+    resolve: async (input) => {
+      throw new Error(`没有找到承诺：「${input.id ?? input.text ?? ''}」。`);
+    }
+  });
+  const result = await executeButlerTool(
+    { id: 'r4', name: 'resolve_commitment', arguments: { id: 'cm-nope', outcome: 'done' } },
+    tools,
+    { workspace: workspaceService, commitments: service, now: NOW_22 }
+  );
+  expect(result.ok).toBe(false);
+  expect(result.content).toContain('没有找到承诺：「cm-nope」');
+});
+
+test('resolve_commitment needs an id or text and an outcome or newDue', async () => {
+  const service = commitmentStub();
+  const noTarget = await executeButlerTool(
+    { id: 'r5', name: 'resolve_commitment', arguments: { outcome: 'done' } },
+    tools,
+    { workspace: workspaceService, commitments: service, now: NOW_22 }
+  );
+  expect(noTarget.ok).toBe(false);
+  expect(noTarget.content).toContain('请提供 id 或 text');
+
+  const noAction = await executeButlerTool(
+    { id: 'r6', name: 'resolve_commitment', arguments: { id: 'cm-1' } },
+    tools,
+    { workspace: workspaceService, commitments: service, now: NOW_22 }
+  );
+  expect(noAction.ok).toBe(false);
+  expect(noAction.content).toContain('请提供 outcome（done / dropped）或 newDue');
+});
+
+test('the commitment write tools are gated by write permissions', async () => {
+  const service = commitmentStub();
+  const result = await executeButlerTool(
+    { id: 'p1', name: 'record_commitment', arguments: { text: '背单词' } },
+    tools,
+    {
+      workspace: workspaceService,
+      commitments: service,
+      permissions: { web: true, write: false, shell: false },
+      now: NOW_22
+    }
+  );
+  expect(result.ok).toBe(false);
+  expect(result.content).toContain('仅可查看');
 });

@@ -14,6 +14,7 @@ import type { PracticeService } from '../../shared/practice';
 import type { SearchService } from '../../shared/search';
 import type { WorkspacePlanner } from '../../shared/planning';
 import type { LongPlanService } from '../../shared/plans';
+import type { CommitmentService } from '../commitments/service';
 
 export interface CreateButlerServiceOptions {
   /**
@@ -33,6 +34,8 @@ export interface CreateButlerServiceOptions {
   knowledgeService?: KnowledgeService | null;
   profileService?: ProfileService | null;
   practiceService?: PracticeService | null;
+  /** Lets the butler record and resolve the user's spoken promises. */
+  commitmentService?: CommitmentService | null;
   getSearchService?: (() => SearchService | null) | null;
   provider?: ProviderConfig;
   /** Kept in memory only; never logged, stored, or echoed in replies. */
@@ -79,6 +82,9 @@ export function createButlerService(
       : {}),
     ...(options.practiceService !== undefined
       ? { practiceService: options.practiceService }
+      : {}),
+    ...(options.commitmentService !== undefined
+      ? { commitmentService: options.commitmentService }
       : {}),
     ...(options.getSearchService !== undefined
       ? { getSearchService: options.getSearchService }

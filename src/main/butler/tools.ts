@@ -7,6 +7,12 @@ import {
 } from '../../shared/knowledge';
 import type { MemoryService } from '../../shared/memory';
 import { isProfileCategory, type ProfileService } from '../../shared/profile';
+import type { CommitmentService } from '../commitments/service';
+import type { Commitment } from '../commitments/records';
+import {
+  MAX_COMMITMENT_TEXT,
+  resolveCommitmentDue
+} from '../commitments/records';
 import type {
   CreatePracticeQuestionInput,
   PracticeService
@@ -32,6 +38,8 @@ export interface ButlerToolContext {
   knowledge?: KnowledgeService | null;
   /** Practice sets/attempts/mistakes; absent in tests without a practice vault. */
   practice?: PracticeService | null;
+  /** Promises the user made in their own words; absent disables both tools. */
+  commitments?: CommitmentService | null;
   /**
    * The turn's permission level. When present, write tools are refused without
    * `write`; tools marked `requiresWeb` also need `web`. Absent means the caller
@@ -858,6 +866,119 @@ export function createButlerTools(): ButlerToolDefinition[] {
       }
     },
     {
+      name: 'record_commitment',
+      description:
+        '记录用户亲口说出的一条承诺（例如「我明天做 X」「这周内写完 Y」），到期后晨检只问一次。只有用户用自己话说出具体要做的事时才调用；不要替用户承诺，也不要安排用户没有说过的事。',
+      requiresWrite: true,
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: '承诺内容，用用户的原话，最多 200 字' },
+          due: {
+            type: 'string',
+            description:
+              '承诺的日期；可传 YYYY-MM-DD，也可传「明天」「这周内」等说法；省略为明天'
+          },
+          workspaceId: { type: 'string', description: '可选：承诺属于哪个项目' }
+        },
+        required: ['text'],
+        additionalProperties: false
+      },
+      async execute(input, context) {
+        const commitments = context.commitments;
+        if (!commitments) {
+          throw new ToolInputError('当前版本不支持记录承诺。');
+        }
+        const text = requiredString(input, 'text');
+        if (text.length > MAX_COMMITMENT_TEXT) {
+          throw new ToolInputError(`承诺内容不能超过 ${MAX_COMMITMENT_TEXT} 字。`);
+        }
+        const now = context.now();
+        const rawDue = optionalString(input, 'due');
+        let due: string | undefined;
+        if (rawDue !== undefined) {
+          due = resolveCommitmentDue(rawDue, now);
+          if (due === undefined) {
+            throw new ToolInputError('due 必须是 YYYY-MM-DD 或「明天」「这周内」这类日期。');
+          }
+        }
+        const workspaceId = optionalString(input, 'workspaceId') ?? context.workspaceId;
+        const commitment = await commitments.create({
+          text,
+          ...(due !== undefined ? { due } : {}),
+          ...(workspaceId ? { workspaceId } : {})
+        });
+        throwIfAborted(context.signal);
+        return {
+          ok: true,
+          commitment,
+          message: `已记下「${commitment.text}」（${commitmentDueLabel(commitment.due, now)}），到那天只问一次。`
+        };
+      }
+    },
+    {
+      name: 'resolve_commitment',
+      description:
+        '结掉一条承诺：用户说「做了」用 outcome=done，说「不做了 / 先放一放」用 outcome=dropped；用户说「挪到明天」时用 newDue 改期。用 id 精确匹配，或传用户提到的那句承诺原文。',
+      requiresWrite: true,
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: '承诺 ID；优先使用' },
+          text: { type: 'string', description: '承诺原文（或其中一小段），用于匹配' },
+          outcome: {
+            type: 'string',
+            enum: ['done', 'dropped'],
+            description: 'done 表示做到了；dropped 表示先放下'
+          },
+          newDue: {
+            type: 'string',
+            description: '改期到哪天；可传 YYYY-MM-DD 或「明天」等说法'
+          }
+        },
+        additionalProperties: false
+      },
+      async execute(input, context) {
+        const commitments = context.commitments;
+        if (!commitments) {
+          throw new ToolInputError('当前版本不支持记录承诺。');
+        }
+        const id = optionalString(input, 'id');
+        const text = optionalString(input, 'text');
+        if (id === undefined && text === undefined) {
+          throw new ToolInputError('请提供 id 或 text 以定位承诺。');
+        }
+        const outcome = input.outcome;
+        if (outcome !== undefined && outcome !== 'done' && outcome !== 'dropped') {
+          throw new ToolInputError('outcome 只能是 done 或 dropped。');
+        }
+        const now = context.now();
+        const rawNewDue = optionalString(input, 'newDue');
+        let newDue: string | undefined;
+        if (rawNewDue !== undefined) {
+          newDue = resolveCommitmentDue(rawNewDue, now);
+          if (newDue === undefined) {
+            throw new ToolInputError('newDue 必须是 YYYY-MM-DD 或「明天」这类日期。');
+          }
+        }
+        if (outcome === undefined && newDue === undefined) {
+          throw new ToolInputError('请提供 outcome（done / dropped）或 newDue。');
+        }
+        const updated = await commitments.resolve({
+          ...(id !== undefined ? { id } : {}),
+          ...(text !== undefined ? { text } : {}),
+          ...(outcome !== undefined ? { outcome } : {}),
+          ...(newDue !== undefined ? { newDue } : {})
+        });
+        throwIfAborted(context.signal);
+        return {
+          ok: true,
+          commitment: updated,
+          message: commitmentResolveMessage(updated, now)
+        };
+      }
+    },
+    {
       name: 'save_profile',
       description:
         '记录一条跨项目长期有效的个人信息（身份、偏好与约束、能力经验、近期变化）。只有用户明确说过或明确要求记住时才调用；从对话里推断的信息会保存为待确认，不会当成事实。',
@@ -1394,6 +1515,21 @@ function requiredPracticeQuestions(
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** `今天` / `明天` / the ISO day, for a confirmation the model can quote. */
+function commitmentDueLabel(due: string, now: Date): string {
+  const today = formatLocalDate(now);
+  if (due === today) return '今天';
+  if (due === addLocalDays(now, 1)) return '明天';
+  return due;
+}
+
+/** Short honest confirmation of a resolve, never a judgment. */
+function commitmentResolveMessage(commitment: Commitment, now: Date): string {
+  if (commitment.status === 'done') return `已结案：做到了「${commitment.text}」。`;
+  if (commitment.status === 'dropped') return `已放下：「${commitment.text}」，不追问了。`;
+  return `已改到${commitmentDueLabel(commitment.due, now)}：「${commitment.text}」。`;
 }
 
 function toJson(value: unknown): string {

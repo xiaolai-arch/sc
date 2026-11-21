@@ -17,8 +17,10 @@ import {
   buildCheckInNotificationBody,
   buildCheckInPrompt,
   buildCheckInTemplate,
+  commitmentCheckInLine,
   weeklyHonestLines,
   type CheckInTrigger,
+  type CommitmentLike,
   type WeeklyHonestLike,
   type WeeklyOverviewLike
 } from './prompt';
@@ -50,6 +52,11 @@ export interface ProactiveCheckInOptions {
    * weekly message byte-identical to the version without it.
    */
   getWeeklyHonest?: (today: Date) => Promise<WeeklyHonest | null>;
+  /**
+   * The oldest promise due yesterday, today or earlier, for the morning line.
+   * Absent, null or failing leaves the morning message byte-identical.
+   */
+  getDueCommitment?: (today: Date) => Promise<CommitmentLike | null>;
   now?: () => Date;
 }
 
@@ -123,6 +130,9 @@ export class ProactiveCheckInService {
   private readonly getWeeklyHonest:
     | ((today: Date) => Promise<WeeklyHonest | null>)
     | undefined;
+  private readonly getDueCommitment:
+    | ((today: Date) => Promise<CommitmentLike | null>)
+    | undefined;
   private readonly now: () => Date;
 
   constructor(options: ProactiveCheckInOptions) {
@@ -134,6 +144,7 @@ export class ProactiveCheckInService {
     this.practiceService = options.practiceService ?? null;
     this.getWeeklyOverview = options.getWeeklyOverview;
     this.getWeeklyHonest = options.getWeeklyHonest;
+    this.getDueCommitment = options.getDueCommitment;
     this.now = options.now ?? (() => new Date());
   }
 
@@ -177,7 +188,18 @@ export class ProactiveCheckInService {
     const weeklyStats = trigger === 'weekly' ? await this.weeklyStats(date) : null;
     // The honest receipt is read next to the numbers, keyed to the same date.
     const weeklyHonest = trigger === 'weekly' ? await this.weeklyHonestFor(date) : null;
-    const text = await this.generate(trigger, date, context, weeklyStats, weeklyHonest);
+    // The promise revisit belongs to the morning only; a day without one keeps
+    // the prompt and template at their previous bytes.
+    const commitment =
+      trigger === 'morning' ? await this.dueCommitmentFor(date) : null;
+    const text = await this.generate(
+      trigger,
+      date,
+      context,
+      weeklyStats,
+      weeklyHonest,
+      commitment
+    );
     // The due-mistake digest is a deterministic line on the morning message
     // only; it is computed once here so text and the surfaced body agree.
     const digest = trigger === 'morning' ? await this.dueMistakeDigest(context, date) : '';
@@ -262,14 +284,16 @@ export class ProactiveCheckInService {
     date: string,
     context: Awaited<ReturnType<typeof gatherContext>>,
     weeklyStats: WeeklyOverviewLike | null = null,
-    weeklyHonest: WeeklyHonest | null = null
+    weeklyHonest: WeeklyHonest | null = null,
+    commitment: CommitmentLike | null = null
   ): Promise<string> {
     const template = buildCheckInTemplate(
       context,
       trigger,
       date,
       weeklyStats,
-      weeklyHonest
+      weeklyHonest,
+      commitment
     );
     if (!this.modelClient) return template;
     try {
@@ -279,7 +303,8 @@ export class ProactiveCheckInService {
         context,
         template,
         weeklyStats,
-        weeklyHonest
+        weeklyHonest,
+        commitment
       );
       // A model-written weekly review still ends with the deterministic honest
       // lines; the template path already carries them, so only append when the
@@ -288,6 +313,18 @@ export class ProactiveCheckInService {
       if (trigger === 'weekly' && composed !== template) {
         const lines = weeklyHonestLines(weeklyHonest);
         return lines.length === 0 ? composed : `${composed}\n${lines.join('\n')}`;
+      }
+      // A model-written morning reply must still ask about the promise; when the
+      // model did not mention it, append the deterministic line so the ask is
+      // never lost in a rewrite. A reply that already names it is left alone.
+      const promiseLine = trigger === 'morning' ? commitmentCheckInLine(commitment, date) : '';
+      if (
+        promiseLine &&
+        composed !== template &&
+        commitment &&
+        !composed.includes(commitment.text)
+      ) {
+        return `${composed}\n${promiseLine}`;
       }
       return composed;
     } catch {
@@ -301,13 +338,21 @@ export class ProactiveCheckInService {
     context: Awaited<ReturnType<typeof gatherContext>>,
     template: string,
     weeklyStats: WeeklyOverviewLike | null = null,
-    weeklyHonest: WeeklyHonestLike | null = null
+    weeklyHonest: WeeklyHonestLike | null = null,
+    commitment: CommitmentLike | null = null
   ): Promise<string> {
     const response = await this.modelClient!.complete({
       messages: [
         {
           role: 'system',
-          content: buildCheckInPrompt(context, trigger, date, weeklyStats, weeklyHonest)
+          content: buildCheckInPrompt(
+            context,
+            trigger,
+            date,
+            weeklyStats,
+            weeklyHonest,
+            commitment
+          )
         }
       ]
     });
@@ -336,6 +381,22 @@ export class ProactiveCheckInService {
    */
   private async weeklyHonestFor(date: string): Promise<WeeklyHonest | null> {
     const provider = this.getWeeklyHonest;
+    if (!provider) return null;
+    try {
+      return await provider(parseLocalDate(date));
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The oldest promise due by the check-in's own date, for the morning line.
+   * Keyed to `date` rather than the wall clock so a late tick still asks the
+   * right question. Any provider failure yields null and the message is
+   * unchanged; only an open promise due yesterday or today produces a line.
+   */
+  private async dueCommitmentFor(date: string): Promise<CommitmentLike | null> {
+    const provider = this.getDueCommitment;
     if (!provider) return null;
     try {
       return await provider(parseLocalDate(date));

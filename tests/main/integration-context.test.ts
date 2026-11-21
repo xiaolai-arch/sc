@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProviderConfig } from '../../src/shared/types';
@@ -367,4 +367,47 @@ test('skips proactive check-ins once the daily token budget is spent', async () 
 
   expect(await context.checkIns.check('morning', '2026-10-31')).toBeNull();
   expect(model.calls).toHaveLength(0);
+});
+
+test('a butler-recorded promise comes back once on the next morning check-in', async () => {
+  const dir = await tempDir();
+  const model = new FakeModelClient([
+    // 1) the chat turn records the promise
+    {
+      text: '',
+      usage: { inputTokens: 0, outputTokens: 0 },
+      toolCalls: [
+        {
+          id: 'c1',
+          name: 'record_commitment',
+          arguments: { text: '背 20 个单词', due: '2026-11-01' }
+        }
+      ]
+    },
+    { text: '记下了，明天见。', usage: { inputTokens: 0, outputTokens: 0 } },
+    // 2) the morning check-in of the due day
+    '早上好，今天先做极限基础。'
+  ]);
+  const context = await createAppContext({
+    userDataPath: join(dir, 'user-data'),
+    defaultVaultPath: join(dir, 'vault'),
+    secretStore: new InMemorySecretStore(),
+    modelClient: model,
+    now: fixedNow
+  });
+
+  await context.butler.send({ message: '我明天背 20 个单词' });
+
+  const notification = await context.checkIns.check('morning', '2026-11-01');
+  expect(notification).not.toBeNull();
+  const conversation = await context.conversationStore.get(notification!.conversationId!);
+  expect(conversation?.messages[0]?.text).toBe(
+    '早上好，今天先做极限基础。\n你说今天要做「背 20 个单词」，做了吗？'
+  );
+
+  // Recorded in the vault, readable and open.
+  const raw = await readFile(join(dir, 'vault', 'commitments.md'), 'utf8');
+  expect(raw).toContain('背 20 个单词');
+  expect(raw).toContain("due: '2026-11-01'");
+  expect(raw).toContain('status: open');
 });

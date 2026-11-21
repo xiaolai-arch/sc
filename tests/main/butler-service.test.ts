@@ -333,6 +333,8 @@ describe('ButlerServiceImpl replies', () => {
       'get_memory',
       'record_knowledge',
       'schedule_revisit',
+      'record_commitment',
+      'resolve_commitment',
       'save_profile',
       'create_practice_set',
       'get_practice_overview'

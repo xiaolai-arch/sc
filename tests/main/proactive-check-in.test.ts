@@ -1138,3 +1138,187 @@ test('the morning check-in never reads the honest provider', async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+// --- the promise revisit (morning only) ------------------------------------
+
+function dueCommitment(text: string, due: string) {
+  return async () => ({ text, due });
+}
+
+test('the morning message appends the promise line for a yesterday-due promise', async () => {
+  const { dir, value } = await store();
+  try {
+    const client = new FakeModelClient(['早上好。今天先做极限基础，做完告诉我。']);
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: client,
+      getDueCommitment: dueCommitment('背 20 个单词', '2026-10-31'),
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    const notification = await service.check('morning', '2026-11-01');
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+
+    // 2026-10-31 is yesterday relative to the check-in date.
+    expect(conversation?.messages[0]?.text).toBe(
+      '早上好。今天先做极限基础，做完告诉我。\n昨天你说要做「背 20 个单词」，做了吗？没做的话，挪到今天还是先放一放？'
+    );
+    // No new notification surface: the banner keeps its generic line.
+    expect(notification?.body).toBe('今天还有 1 个任务没完成，点开看看。');
+    // The prompt the model saw carries the same ask once.
+    expect(client.calls[0]?.messages[0]?.content).toContain(
+      '承诺回访：昨天你说要做「背 20 个单词」'
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the morning message asks once about a today-due promise', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getDueCommitment: dueCommitment('背 20 个单词', '2026-11-01'),
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    await service.check('morning', '2026-11-01');
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    expect(conversation?.messages[0]?.text).toBe(
+      '早上好。今天有 1 个任务，先做「极限基础」怎么样？做完告诉我一声。\n你说今天要做「背 20 个单词」，做了吗？'
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the model reply that already asks about the promise is not duplicated', async () => {
+  const { dir, value } = await store();
+  try {
+    const client = new FakeModelClient([
+      '早上好。昨天你说要做背 20 个单词，今天做吗？'
+    ]);
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: client,
+      getDueCommitment: dueCommitment('背 20 个单词', '2026-10-31'),
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    await service.check('morning', '2026-11-01');
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    expect(conversation?.messages[0]?.text).toBe(
+      '早上好。昨天你说要做背 20 个单词，今天做吗？'
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('no due commitment leaves the morning message byte-identical', async () => {
+  const { dir, value } = await store();
+  try {
+    const client = new FakeModelClient(['早上好。今天先做极限基础，做完告诉我。']);
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: client,
+      getDueCommitment: dueCommitment('背 20 个单词', '2026-11-05'),
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    const notification = await service.check('morning', '2026-11-01');
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    expect(conversation?.messages[0]?.text).toBe('早上好。今天先做极限基础，做完告诉我。');
+    expect(notification?.body).toBe('今天还有 1 个任务没完成，点开看看。');
+    expect(client.calls[0]?.messages[0]?.content).not.toContain('承诺回访');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a failing commitment provider leaves the morning message unchanged', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getDueCommitment: async () => {
+        throw new Error('vault unreadable');
+      },
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    await service.check('morning', '2026-11-01');
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    expect(conversation?.messages[0]?.text).toBe(
+      '早上好。今天有 1 个任务，先做「极限基础」怎么样？做完告诉我一声。'
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the evening check-in never reads or asks about a promise', async () => {
+  const { dir, value } = await store();
+  try {
+    const getDueCommitment = vi.fn(dueCommitment('背 20 个单词', '2026-10-31'));
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getDueCommitment,
+      getSettings: async () => settings(),
+      now: () => new Date('2026-11-01T13:30:00.000Z')
+    });
+
+    await service.check('evening', '2026-11-01');
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    expect(conversation?.messages[0]?.text).toBe(
+      '晚上好。今天还有 1 个任务没完成，最卡的是哪一步？'
+    );
+    expect(getDueCommitment).not.toHaveBeenCalled();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('without a commitment provider the morning check-in still works unchanged', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    const notification = await service.check('morning', '2026-11-01');
+    expect(notification).not.toBeNull();
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    expect(conversation?.messages[0]?.text).toBe(
+      '早上好。今天有 1 个任务，先做「极限基础」怎么样？做完告诉我一声。'
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

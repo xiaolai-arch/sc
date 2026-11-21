@@ -297,3 +297,110 @@ test('honest facts never enter the morning, evening or behind prompts', () => {
   expect(buildCheckInPrompt(context, 'evening', DATE, null, honest)).not.toContain('本周诚实数据');
   expect(buildCheckInPrompt(context, 'behind', DATE, null, honest)).not.toContain('本周诚实数据');
 });
+
+// --- the promise revisit line ----------------------------------------------
+
+// 2026-11-08 is a Sunday; yesterday is 2026-11-07.
+test('the morning prompt appends one line for a yesterday-due promise', () => {
+  const prompt = buildCheckInPrompt(context, 'morning', DATE, null, null, {
+    text: '背 20 个单词',
+    due: '2026-11-07'
+  });
+  expect(prompt).toBe(
+    MORNING_PROMPT_BEFORE_STATS.replace(
+      '\n\n请用中文写一条 2-4 句',
+      '\n\n承诺回访：昨天你说要做「背 20 个单词」，做了吗？没做的话，挪到今天还是先放一放？（只问这一件，不评价、不催促。）\n\n请用中文写一条 2-4 句'
+    )
+  );
+});
+
+test('the morning prompt asks once about a promise due today', () => {
+  const prompt = buildCheckInPrompt(context, 'morning', DATE, null, null, {
+    text: '背 20 个单词',
+    due: DATE
+  });
+  expect(prompt).toContain(
+    '承诺回访：你说今天要做「背 20 个单词」，做了吗？（只问这一件，不评价、不催促。）'
+  );
+});
+
+test('the morning prompt keeps an older open promise, without debt wording', () => {
+  const prompt = buildCheckInPrompt(context, 'morning', DATE, null, null, {
+    text: '背 20 个单词',
+    due: '2026-11-01'
+  });
+  expect(prompt).toContain('你之前说要做「背 20 个单词」，后来做了吗？');
+  expect(prompt).not.toContain('昨天你说要做');
+});
+
+test('no due promise leaves the morning prompt byte-identical', () => {
+  expect(
+    buildCheckInPrompt(context, 'morning', DATE, null, null, null)
+  ).toBe(MORNING_PROMPT_BEFORE_STATS);
+  // A promise due tomorrow is not asked about today.
+  expect(
+    buildCheckInPrompt(context, 'morning', DATE, null, null, {
+      text: '背 20 个单词',
+      due: '2026-11-09'
+    })
+  ).toBe(MORNING_PROMPT_BEFORE_STATS);
+});
+
+test('a promise never enters the evening, behind or weekly prompts', () => {
+  const promise = { text: '背 20 个单词', due: DATE };
+  expect(
+    buildCheckInPrompt(context, 'evening', DATE, null, null, promise)
+  ).toBe(buildCheckInPrompt(context, 'evening', DATE));
+  expect(
+    buildCheckInPrompt(context, 'weekly', DATE, stats, null, promise)
+  ).toBe(buildCheckInPrompt(context, 'weekly', DATE, stats));
+  for (const trigger of ['evening', 'weekly', 'behind'] as const) {
+    expect(
+      buildCheckInPrompt(context, trigger, DATE, null, null, promise)
+    ).not.toContain('承诺回访');
+  }
+});
+
+test('the morning template appends the exact promise line', () => {
+  expect(
+    buildCheckInTemplate(context, 'morning', DATE, null, null, {
+      text: '背 20 个单词',
+      due: '2026-11-07'
+    })
+  ).toBe(
+    '早上好。今天有 1 个任务，先做「极限基础」怎么样？做完告诉我一声。\n昨天你说要做「背 20 个单词」，做了吗？没做的话，挪到今天还是先放一放？'
+  );
+  expect(
+    buildCheckInTemplate(context, 'morning', DATE, null, null, {
+      text: '背 20 个单词',
+      due: DATE
+    })
+  ).toBe(
+    '早上好。今天有 1 个任务，先做「极限基础」怎么样？做完告诉我一声。\n你说今天要做「背 20 个单词」，做了吗？'
+  );
+});
+
+test('no due promise leaves the morning template byte-identical', () => {
+  expect(buildCheckInTemplate(context, 'morning', DATE, null, null, null)).toBe(
+    '早上好。今天有 1 个任务，先做「极限基础」怎么样？做完告诉我一声。'
+  );
+  expect(
+    buildCheckInTemplate(context, 'morning', DATE, null, null, {
+      text: '背 20 个单词',
+      due: '2026-11-09'
+    })
+  ).toBe('早上好。今天有 1 个任务，先做「极限基础」怎么样？做完告诉我一声。');
+});
+
+test('the empty-plan morning template also carries the promise line', () => {
+  const empty: ButlerContext = { ...context, tasks: [] };
+  expect(
+    buildCheckInTemplate(empty, 'morning', DATE, null, null, {
+      text: '背 20 个单词',
+      due: DATE
+    })
+  ).toBe('早上好。今天还没有安排任务，想先做点什么？\n你说今天要做「背 20 个单词」，做了吗？');
+  expect(buildCheckInTemplate(empty, 'morning', DATE, null, null, null)).toBe(
+    '早上好。今天还没有安排任务，想先做点什么？'
+  );
+});

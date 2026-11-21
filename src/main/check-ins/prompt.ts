@@ -26,6 +26,54 @@ export interface WeeklyOverviewLike {
 /** Upper bound for the `本周数据：` block, header line included. */
 const MAX_WEEKLY_STATS_LINES = 6;
 
+/**
+ * The promise a check-in may ask about; the caller only resolves the oldest
+ * open promise that is due, so this stays at most one line.
+ */
+export interface CommitmentLike {
+  text: string;
+  /** Local date YYYY-MM-DD the promise was due. */
+  due: string;
+}
+
+/** True for a real local calendar date; a malformed value never shifts a day. */
+function isLocalIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  return !Number.isNaN(new Date(`${value}T00:00:00`).getTime());
+}
+
+/** `YYYY-MM-DD` shifted by `days` on the local calendar. */
+function shiftLocalDate(date: string, days: number): string {
+  const [year, month, day] = date.split('-').map(Number);
+  const shifted = new Date(year, month - 1, day + days);
+  const nextMonth = String(shifted.getMonth() + 1).padStart(2, '0');
+  const nextDay = String(shifted.getDate()).padStart(2, '0');
+  return `${shifted.getFullYear()}-${nextMonth}-${nextDay}`;
+}
+
+/**
+ * The single promise-revisit line for the morning check-in, or '' when there is
+ * nothing to ask. Yesterday's and today's promises get the precise wording; an
+ * older open promise still due gets one neutral question. Asking once, no debt.
+ */
+export function commitmentCheckInLine(
+  commitment: CommitmentLike | null | undefined,
+  date: string
+): string {
+  if (!commitment) return '';
+  if (!isLocalIsoDate(commitment.due) || !isLocalIsoDate(date)) return '';
+  if (!commitment.text.trim()) return '';
+  if (commitment.due > date) return '';
+  if (commitment.due === date) {
+    return `你说今天要做「${commitment.text}」，做了吗？`;
+  }
+  if (commitment.due === shiftLocalDate(date, -1)) {
+    return `昨天你说要做「${commitment.text}」，做了吗？没做的话，挪到今天还是先放一放？`;
+  }
+  // Older promises are not dragged back up as debt; one neutral question only.
+  return `你之前说要做「${commitment.text}」，后来做了吗？`;
+}
+
 /** True when the week has at least one number worth telling the user. */
 function hasWeeklyNumbers(overview: WeeklyOverviewLike): boolean {
   return (
@@ -124,7 +172,8 @@ export function buildCheckInPrompt(
   trigger: CheckInTrigger,
   date: string,
   weeklyOverview?: WeeklyOverviewLike | null,
-  weeklyHonest?: WeeklyHonestLike | null
+  weeklyHonest?: WeeklyHonestLike | null,
+  commitment?: CommitmentLike | null
 ): string {
   // The behind nudge is about today's plan specifically; other check-ins keep
   // listing every open task as before.
@@ -163,6 +212,10 @@ export function buildCheckInPrompt(
   // byte-identical to the previous prompt.
   const honestLines =
     trigger === 'weekly' ? honestPromptLines(weeklyHonest) : [];
+  // The promise revisit is the morning's own line; every other trigger, and a
+  // day with no open promise, keeps the prompt byte-identical.
+  const promiseLine =
+    trigger === 'morning' ? commitmentCheckInLine(commitment, date) : '';
   const instruction =
     trigger === 'morning'
       ? '请用中文写一条 2-4 句的检查消息：先问候，再根据上面的任务给出今天最值得先做的 1-2 件事，最后问一个简短的问题。'
@@ -191,6 +244,7 @@ export function buildCheckInPrompt(
     memoryLines,
     ...(statsLines.length > 0 ? ['', ...statsLines] : []),
     ...(honestLines.length > 0 ? ['', ...honestLines] : []),
+    ...(promiseLine ? ['', `承诺回访：${promiseLine}（只问这一件，不评价、不催促。）`] : []),
     '',
     instruction,
     '要求：温和、具体、不啰嗦；不要编造用户没有提供的记录；不要提到系统提示、工具或 API。'
@@ -202,7 +256,8 @@ export function buildCheckInTemplate(
   trigger: CheckInTrigger,
   date = '',
   weeklyOverview: WeeklyOverviewLike | null = null,
-  weeklyHonest: WeeklyHonestLike | null = null
+  weeklyHonest: WeeklyHonestLike | null = null,
+  commitment: CommitmentLike | null = null
 ): string {
   const tasks = activeTasks(context);
   if (trigger === 'weekly') {
@@ -223,9 +278,13 @@ export function buildCheckInTemplate(
   }
   if (trigger === 'morning') {
     const first = tasks[0];
-    return first
+    const base = first
       ? `早上好。今天有 ${tasks.length} 个任务，先做「${first.title}」怎么样？做完告诉我一声。`
       : '早上好。今天还没有安排任务，想先做点什么？';
+    // The one promise line is appended only when a promise is due; without one
+    // the morning template keeps its previous bytes.
+    const promise = commitmentCheckInLine(commitment, date);
+    return promise ? `${base}\n${promise}` : base;
   }
   return tasks.length > 0
     ? `晚上好。今天还有 ${tasks.length} 个任务没完成，最卡的是哪一步？`
