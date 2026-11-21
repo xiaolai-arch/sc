@@ -45,6 +45,7 @@ import { PracticeSetDialog } from './PracticeSetDialog';
 import { PracticeReviewChip } from './PracticePanels';
 import { ProfilePage } from './ProfilePage';
 import { TodayOverview, dueRevisitTopics, todayQuizOffer } from './TodayOverview';
+import type { OneThingPreference, OneThingStore } from './TodayOverview';
 import {
   NavigationSidebar,
   type ChatScope,
@@ -130,6 +131,46 @@ function recordQuizOfferDate(today: string): void {
     // Storage unavailable; the worst case is the offer appearing again.
   }
 }
+
+/**
+ * 今日只做一件 lives beside the quiz-offer date in the same lightweight-prefs
+ * store. Only the mode, the local day it was chosen on, and the chosen task
+ * id are kept: a restart therefore keeps the mode, and a new local day keeps
+ * the mode but drops the choice (the Today page reconciles that on load).
+ * Malformed or unavailable storage degrades to "mode off".
+ */
+const ONE_THING_KEY = 'asaki:today-one-thing';
+
+function readOneThingPreference(): OneThingPreference | null {
+  try {
+    const raw = window.localStorage.getItem(ONE_THING_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<OneThingPreference> | null;
+    if (!parsed || typeof parsed.enabled !== 'boolean' || typeof parsed.date !== 'string') {
+      return null;
+    }
+    return {
+      enabled: parsed.enabled,
+      date: parsed.date,
+      taskId: typeof parsed.taskId === 'string' ? parsed.taskId : null
+    };
+  } catch {
+    return null;
+  }
+}
+
+function recordOneThingPreference(preference: OneThingPreference): void {
+  try {
+    window.localStorage.setItem(ONE_THING_KEY, JSON.stringify(preference));
+  } catch {
+    // Storage unavailable; the mode still works for this run.
+  }
+}
+
+const oneThingStore: OneThingStore = {
+  load: readOneThingPreference,
+  save: recordOneThingPreference
+};
 
 function WorkspaceStatus({
   title,
@@ -1692,6 +1733,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
               today={today}
               revisits={dueRevisits}
               quizOffer={todayQuiz}
+              oneThingStore={oneThingStore}
               onOpenSidebar={openSidebar}
               onOpenWorkspace={(workspaceId) => {
                 selectWorkspace(workspaceId);

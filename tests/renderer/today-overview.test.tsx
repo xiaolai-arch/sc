@@ -2,10 +2,55 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Workspace } from '../../src/renderer/shell/Workspace';
+import { TodayOverview } from '../../src/renderer/shell/TodayOverview';
 import { buildDailySchedule } from '../../src/renderer/shell/schedule';
 import { formatLocalDate } from '../../src/shared/date';
 import { DAILY_WORKSPACE_ID } from '../../src/shared/conversations';
+import type { Workspace as WorkspaceRecord, WorkspaceTask } from '../../src/shared/workspace';
 import { createMockApi } from '../../web/mock-api';
+import { TODAY_CARD_BASELINE } from './fixtures/today-card-baseline';
+
+/** Exactly the tasks the pinned baseline fixture was captured with. */
+const BASELINE_TASKS: WorkspaceTask[] = [
+  {
+    id: 't1',
+    workspaceId: 'ws-exam',
+    title: '极限基础',
+    subject: '数学',
+    durationMin: 45,
+    acceptance: '完成 10 题',
+    status: 'in-progress',
+    startAt: '2026-11-21T09:00'
+  },
+  {
+    id: 't2',
+    workspaceId: 'ws-exam',
+    title: '阅读理解',
+    subject: '英语',
+    durationMin: 30,
+    acceptance: '精读 1 篇',
+    status: 'pending',
+    startAt: '2026-11-21T10:30'
+  },
+  {
+    id: 't3',
+    workspaceId: 'ws-exam',
+    title: '408 数据结构',
+    subject: '专业课',
+    durationMin: 60,
+    acceptance: '完成第一章框架',
+    status: 'pending'
+  }
+];
+
+const BASELINE_WORKSPACE: WorkspaceRecord = {
+  id: 'ws-exam',
+  name: '考研',
+  kind: 'exam',
+  color: '#0071e3',
+  goal: '2027 上岸',
+  description: ''
+};
 
 function setup() {
   localStorage.clear();
@@ -19,6 +64,31 @@ function setup() {
 function nav() {
   return within(screen.getByRole('navigation', { name: '主导航' }));
 }
+
+test('今日只做一件 off renders the 接下来 card byte-identical to before it existed', () => {
+  localStorage.clear();
+  // No oneThingStore, so the mode is not even offered; the card must be the
+  // pinned markup from before 今日只做一件 was added, character for character.
+  const { container } = render(
+    <TodayOverview
+      tasks={BASELINE_TASKS}
+      workspaces={[BASELINE_WORKSPACE]}
+      reminders={[]}
+      longPlans={[]}
+      today="2026-11-21"
+      onOpenWorkspace={vi.fn()}
+      onOpenSchedule={vi.fn()}
+      onOpenPlan={vi.fn()}
+      onOpenReminders={vi.fn()}
+      onToggleTask={vi.fn()}
+      onPrompt={vi.fn()}
+    />
+  );
+
+  expect(container.querySelector('section[aria-label="接下来"]')?.outerHTML).toBe(
+    TODAY_CARD_BASELINE
+  );
+});
 
 test('the home screen answers what is next and what reminds you', async () => {
   setup();
