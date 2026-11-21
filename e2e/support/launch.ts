@@ -86,8 +86,12 @@ export type LaunchedStudyCoach = {
   close(): Promise<void>;
 };
 
-export async function launchStudyCoach(): Promise<LaunchedStudyCoach> {
-  const environment = await createIsolatedEnvironment();
+export async function launchStudyCoach(
+  precreated?: IsolatedEnvironment
+): Promise<LaunchedStudyCoach> {
+  // A spec that seeds vault files before launch passes its environment in;
+  // everyone else gets a fresh one created here.
+  const environment = precreated ?? (await createIsolatedEnvironment());
   const linuxFlags = process.platform === 'linux' ? ['--no-sandbox', '--disable-gpu'] : [];
   const app = await electron.launch({
     args: [...linuxFlags, PROJECT_ROOT],
