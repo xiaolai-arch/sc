@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { DEFAULT_DISPLAY_NAME } from '../src/main/settings/defaults';
 import {
   createIsolatedEnvironment,
   launchStudyCoach,
@@ -43,7 +44,9 @@ const CHOICE_PROMPT = '更严判定：间隔复习的选择题，答对就掌握
 const SHORT_PROMPT = '用自己的话说说为什么更严判定要求简答题复证。';
 const CHOICE_EXPLANATION = '默认答对就掌握；更严判定要求隔过几天后再用简答复证。';
 const SHORT_REFERENCE = '因为再认比回忆容易，只有自己说出来才算真的记得。';
-const GREETING = /^(早上好|中午好|下午好|晚上好|夜深了)，xiaolai。$/;
+const GREETING = new RegExp(
+  `^(早上好|中午好|下午好|晚上好|夜深了)，${DEFAULT_DISPLAY_NAME}。$`
+);
 /** The one verbatim clause shared by every strict-mode surface. */
 const STRICT_NOTE = '更严判定生效中：需要简答题复证';
 /** The model-inferred fact seeded into profile.md. */

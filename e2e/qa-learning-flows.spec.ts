@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { DEFAULT_DISPLAY_NAME } from '../src/main/settings/defaults';
 import {
   createIsolatedEnvironment,
   launchStudyCoach,
@@ -34,7 +35,9 @@ import {
 
 const WORKSPACE_ID = 'qa-learning';
 const WORKSPACE_NAME = '学习流演练';
-const GREETING = /^(早上好|中午好|下午好|晚上好|夜深了)，xiaolai。$/;
+const GREETING = new RegExp(
+  `^(早上好|中午好|下午好|晚上好|夜深了)，${DEFAULT_DISPLAY_NAME}。$`
+);
 
 /** Local calendar date `YYYY-MM-DD`, offset by whole days from today. */
 function localDate(offsetDays: number): string {

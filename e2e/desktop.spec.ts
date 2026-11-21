@@ -1,7 +1,13 @@
 import { expect, test } from '@playwright/test';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { DEFAULT_DISPLAY_NAME } from '../src/main/settings/defaults';
 import { launchStudyCoach, type LaunchedStudyCoach } from './support/launch';
+
+/** Home greeting; the 称呼 comes from the same default the app ships with. */
+const HOME_GREETING = new RegExp(
+  `^(早上好|中午好|下午好|晚上好|夜深了)，${DEFAULT_DISPLAY_NAME}。$`
+);
 
 test.describe('ASAKI desktop', () => {
   test('conversation-first project creation and persistence', async () => {
@@ -11,7 +17,7 @@ test.describe('ASAKI desktop', () => {
     try {
       await test.step('starts in the conversation shell', async () => {
         await expect(
-          page.getByText(/^(早上好|中午好|下午好|晚上好|夜深了)，xiaolai。$/)
+          page.getByText(HOME_GREETING)
         ).toBeVisible();
         await expect(page.getByRole('button', { name: '新对话' })).toBeVisible();
         await page.getByRole('button', { name: '新对话' }).click();
@@ -37,7 +43,7 @@ test.describe('ASAKI desktop', () => {
         await page.reload();
         await page.waitForLoadState('domcontentloaded');
         await expect(
-          page.getByText(/^(早上好|中午好|下午好|晚上好|夜深了)，xiaolai。$/)
+          page.getByText(HOME_GREETING)
         ).toBeVisible();
 
         await page.getByRole('button', { name: '考研', exact: true }).click();

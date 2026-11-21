@@ -1,4 +1,5 @@
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
+import { DEFAULT_DISPLAY_NAME } from '../src/main/settings/defaults';
 import { launchStudyCoach, type LaunchedStudyCoach } from './support/launch';
 
 /**
@@ -45,7 +46,9 @@ type LayoutProbe = {
 };
 
 /** Greeting of the conversation home, as in desktop.spec.ts. */
-const HOME_GREETING = /^(早上好|中午好|下午好|晚上好|夜深了)，xiaolai。$/;
+const HOME_GREETING = new RegExp(
+  `^(早上好|中午好|下午好|晚上好|夜深了)，${DEFAULT_DISPLAY_NAME}。$`
+);
 
 function closeTo(actual: number, expected: number, tolerance: number): boolean {
   return Math.abs(actual - expected) <= tolerance;
