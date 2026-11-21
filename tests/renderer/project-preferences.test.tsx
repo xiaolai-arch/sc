@@ -3,7 +3,7 @@ import { homeGreeting } from '../../src/shared/greeting';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Workspace } from '../../src/renderer/shell/Workspace';
-import { formatLocalDate } from '../../src/shared/date';
+import { addLocalDays, formatLocalDate, formatMonthDay } from '../../src/shared/date';
 import { createMockApi } from '../../web/mock-api';
 import { pickOption } from './select-option';
 
@@ -54,6 +54,50 @@ test('snoozes proactive check-ins for today', async () => {
   expect((await api.getSettings()).notifications.snoozedUntil).toBe(
     formatLocalDate(new Date())
   );
+});
+
+test('pauses check-ins for three days and shows the end date', async () => {
+  const api = setup();
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
+  await userEvent.click(screen.getByRole('button', { name: '提醒' }));
+
+  const today = formatLocalDate(new Date());
+  const target = addLocalDays(today, 3);
+  await userEvent.click(screen.getByRole('button', { name: '暂停 3 天' }));
+
+  expect(await screen.findByText(`已静音至 ${formatMonthDay(target)}`)).toBeInTheDocument();
+  expect((await api.getSettings()).notifications.snoozedUntil).toBe(target);
+  expect(screen.queryByRole('button', { name: '今天别再提醒我' })).not.toBeInTheDocument();
+});
+
+test('pauses check-ins for seven days and shows the end date', async () => {
+  const api = setup();
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
+  await userEvent.click(screen.getByRole('button', { name: '提醒' }));
+
+  const today = formatLocalDate(new Date());
+  const target = addLocalDays(today, 7);
+  await userEvent.click(screen.getByRole('button', { name: '暂停 7 天' }));
+
+  expect(await screen.findByText(`已静音至 ${formatMonthDay(target)}`)).toBeInTheDocument();
+  expect((await api.getSettings()).notifications.snoozedUntil).toBe(target);
+});
+
+test('resumes check-ins and brings the buttons back', async () => {
+  const api = setup();
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
+  await userEvent.click(screen.getByRole('button', { name: '提醒' }));
+
+  await userEvent.click(screen.getByRole('button', { name: '暂停 7 天' }));
+  await screen.findByText(/已静音至/);
+  await userEvent.click(screen.getByRole('button', { name: '恢复提醒' }));
+
+  expect(
+    await screen.findByRole('button', { name: '今天别再提醒我' })
+  ).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '暂停 3 天' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '暂停 7 天' })).toBeInTheDocument();
+  expect((await api.getSettings()).notifications.snoozedUntil).toBe('');
 });
 
 test('shows the muted state when today is already snoozed', async () => {

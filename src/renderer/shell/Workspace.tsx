@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { formatChineseDate, formatLocalDate } from '../../shared/date';
+import { addLocalDays, formatChineseDate, formatLocalDate } from '../../shared/date';
 import {
   DAILY_WORKSPACE_ID,
   type Conversation,
@@ -1053,15 +1053,32 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     }
   }
 
-  async function snoozeCheckIns() {
+  async function snoozeCheckIns(days: number) {
+    const api = window.studyCoach;
+    if (!api) {
+      setActionError('应用桥接不可用，请刷新页面重试。');
+      return;
+    }
+    // Days are counted from the local calendar day, so 0 keeps today muted and
+    // 3/7 cover a trip in one click.
+    const target = addLocalDays(today, days);
+    try {
+      const settings = await api.updateSettings({ notifications: { snoozedUntil: target } });
+      setSnoozedUntil(settings.notifications.snoozedUntil ?? target);
+    } catch (cause) {
+      setActionError(messageOf(cause));
+    }
+  }
+
+  async function resumeCheckIns() {
     const api = window.studyCoach;
     if (!api) {
       setActionError('应用桥接不可用，请刷新页面重试。');
       return;
     }
     try {
-      const settings = await api.updateSettings({ notifications: { snoozedUntil: today } });
-      setSnoozedUntil(settings.notifications.snoozedUntil ?? today);
+      const settings = await api.updateSettings({ notifications: { snoozedUntil: '' } });
+      setSnoozedUntil(settings.notifications.snoozedUntil ?? '');
     } catch (cause) {
       setActionError(messageOf(cause));
     }
@@ -1777,8 +1794,9 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
               onCreateReminder={createReminder}
               onUpdateReminder={updateReminder}
               onDeleteReminder={deleteReminder}
-              snoozedToday={snoozedUntil === today}
-              onSnoozeCheckIns={() => void snoozeCheckIns()}
+              snoozedUntil={snoozedUntil ?? ''}
+              onSnoozeCheckIns={(days) => void snoozeCheckIns(days)}
+              onResumeCheckIns={() => void resumeCheckIns()}
               onOpenSidebar={openSidebar}
               onPrompt={promptButler}
             />

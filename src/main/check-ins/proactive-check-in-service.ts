@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { formatLocalDate, parseLocalDate } from '../../shared/date';
+import { formatLocalDate, isMutedOn, parseLocalDate } from '../../shared/date';
 import type { PracticeService } from '../../shared/practice';
 import type { AppSettings } from '../../shared/types';
 import type { WorkspaceService } from '../../shared/workspace';
@@ -155,7 +155,9 @@ export class ProactiveCheckInService {
   ): Promise<SchedulerNotification | null> {
     const settings = await this.getSettings();
     if (!settings.notifications.enabled) return null;
-    if (settings.notifications.snoozedUntil === date) return null;
+    // The stored date is the last muted day, so one click can cover a trip.
+    // An empty, junk or past date mutes nothing.
+    if (isMutedOn(settings.notifications.snoozedUntil, date)) return null;
 
     // The limit includes manual usage, matching the global daily budget. A
     // failed usage read must not block the check; zero disables proactive calls.

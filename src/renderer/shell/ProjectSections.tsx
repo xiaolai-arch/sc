@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { formatLocalDate, formatMonthDay, isMutedOn } from '../../shared/date';
 import { friendlyErrorMessage } from '../../shared/errors';
 import { cn } from '../ui/cn';
 import { CheckIcon } from '../ui/icons';
@@ -1532,8 +1533,9 @@ type RemindersSectionProps = {
   onCreateReminder: (input: CreateReminderInput) => Promise<Reminder>;
   onUpdateReminder: (input: UpdateReminderInput) => Promise<Reminder>;
   onDeleteReminder?: (input: DeleteReminderInput) => Promise<void>;
-  snoozedToday: boolean;
-  onSnoozeCheckIns: () => void;
+  snoozedUntil: string;
+  onSnoozeCheckIns: (days: number) => void;
+  onResumeCheckIns: () => void;
   onPrompt: (prompt: string) => void;
 };
 
@@ -1542,8 +1544,9 @@ export function RemindersSection({
   onCreateReminder,
   onUpdateReminder,
   onDeleteReminder,
-  snoozedToday,
+  snoozedUntil,
   onSnoozeCheckIns,
+  onResumeCheckIns,
   onPrompt
 }: RemindersSectionProps) {
   const [reminderTime, setReminderTime] = useState(() => nextReminderTime());
@@ -1557,6 +1560,10 @@ export function RemindersSection({
   const [editLabel, setEditLabel] = useState('');
   const [editRepeat, setEditRepeat] = useState<ReminderRepeat>('daily');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  // The stored date is the last muted day; today is only used to choose the
+  // copy, never to re-derive the target date.
+  const today = formatLocalDate(new Date());
+  const muted = isMutedOn(snoozedUntil, today);
 
   async function addReminder() {
     const label = reminderLabel.trim();
@@ -1918,16 +1925,45 @@ export function RemindersSection({
         <p className="mt-1 text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
           仅暂停主动检查，不影响你设的提醒。
         </p>
-        {snoozedToday ? (
-          <p className="mt-2 text-[12px] text-gray-500 dark:text-[#a1a1a6]">今天已静音，明天恢复</p>
+        {muted ? (
+          <>
+            <p className="mt-2 text-[12px] text-gray-500 dark:text-[#a1a1a6]">
+              {snoozedUntil === today
+                ? '今天已静音，明天恢复'
+                : `已静音至 ${formatMonthDay(snoozedUntil)}`}
+            </p>
+            <button
+              type="button"
+              onClick={onResumeCheckIns}
+              className="mt-3 rounded-full bg-black/[0.05] px-3 py-1.5 text-[13px] font-medium text-[#1d1d1f] transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:bg-white/10 dark:text-[#f5f5f7]"
+            >
+              恢复提醒
+            </button>
+          </>
         ) : (
-          <button
-            type="button"
-            onClick={onSnoozeCheckIns}
-            className="mt-3 rounded-full bg-[#0071e3] px-3 py-1.5 text-[13px] font-medium text-white transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100"
-          >
-            今天别再提醒我
-          </button>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onSnoozeCheckIns(0)}
+              className="rounded-full bg-[#0071e3] px-3 py-1.5 text-[13px] font-medium text-white transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100"
+            >
+              今天别再提醒我
+            </button>
+            <button
+              type="button"
+              onClick={() => onSnoozeCheckIns(3)}
+              className="rounded-full bg-black/[0.05] px-3 py-1.5 text-[13px] font-medium text-[#1d1d1f] transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:bg-white/10 dark:text-[#f5f5f7]"
+            >
+              暂停 3 天
+            </button>
+            <button
+              type="button"
+              onClick={() => onSnoozeCheckIns(7)}
+              className="rounded-full bg-black/[0.05] px-3 py-1.5 text-[13px] font-medium text-[#1d1d1f] transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:bg-white/10 dark:text-[#f5f5f7]"
+            >
+              暂停 7 天
+            </button>
+          </div>
         )}
       </div>
     </div>

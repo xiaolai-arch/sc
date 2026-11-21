@@ -461,11 +461,11 @@ test('still creates a check-in when no projects exist', async () => {
   }
 });
 
-test('skips check-ins for the snoozed day and resumes the next day', async () => {
+test('skips check-ins through the snoozed date and resumes the next day', async () => {
   const { dir, value } = await store();
   try {
     const snoozed = settings({
-      notifications: { ...settings().notifications, snoozedUntil: '2026-11-01' }
+      notifications: { ...settings().notifications, snoozedUntil: '2026-11-03' }
     });
     const service = new ProactiveCheckInService({
       conversationStore: value,
@@ -475,18 +475,50 @@ test('skips check-ins for the snoozed day and resumes the next day', async () =>
       now: () => NOW
     });
 
+    // Every day up to and including the stored date is muted.
     expect(await service.check('morning', '2026-11-01')).toBeNull();
     expect(await service.check('weekly', '2026-11-01')).toBeNull();
+    expect(await service.check('morning', '2026-11-02')).toBeNull();
+    expect(await service.check('evening', '2026-11-03')).toBeNull();
     expect(await value.list()).toEqual([]);
 
+    // The day after the stored date the checks resume.
     const nextDay = new ProactiveCheckInService({
       conversationStore: value,
       workspaceService,
       modelClient: null,
       getSettings: async () => snoozed,
-      now: () => new Date('2026-11-02T08:00:00.000Z')
+      now: () => new Date('2026-11-04T08:00:00.000Z')
     });
-    expect(await nextDay.check('morning', '2026-11-02')).not.toBeNull();
+    expect(await nextDay.check('morning', '2026-11-04')).not.toBeNull();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('an empty or past snooze date mutes nothing', async () => {
+  const { dir, value } = await store();
+  try {
+    const empty = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () =>
+        settings({ notifications: { ...settings().notifications, snoozedUntil: '' } }),
+      now: () => NOW
+    });
+    expect(await empty.check('morning', '2026-11-01')).not.toBeNull();
+    expect((await value.list()).length).toBeGreaterThan(0);
+
+    const past = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () =>
+        settings({ notifications: { ...settings().notifications, snoozedUntil: '2026-10-20' } }),
+      now: () => NOW
+    });
+    expect(await past.check('evening', '2026-11-01')).not.toBeNull();
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
