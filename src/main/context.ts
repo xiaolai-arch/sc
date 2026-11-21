@@ -17,6 +17,10 @@ import type { ButlerService, SendMessageInput, WorkspaceService } from '../share
 import { scanLocalClis } from './agent/local-cli-discovery';
 import { createModelClient, NoApiKeyError, type ModelClient } from './agent/model-client';
 import { createButlerService } from './butler/create-butler-service';
+import {
+  createCommitmentService,
+  type CommitmentService
+} from './commitments/service';
 import { ProactiveCheckInService } from './check-ins/proactive-check-in-service';
 import {
   weeklyAccuracyBySubject,
@@ -93,6 +97,7 @@ export interface ButlerFactoryDependencies {
   planner?: WorkspacePlanner;
   longPlans?: LongPlanService;
   practice?: PracticeService;
+  commitments?: CommitmentService;
   modelClient?: ModelClient | null;
   modelClientFor?: (model: string) => ModelClient | null;
 }
@@ -111,6 +116,7 @@ export interface CreateAppContextOptions {
   workspaceService?: WorkspaceService;
   butlerService?: ButlerService;
   practiceService?: PracticeService;
+  commitmentService?: CommitmentService;
   memoryService?: MemoryService;
   knowledgeService?: KnowledgeService;
   profileService?: ProfileService;
@@ -291,6 +297,9 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       ...(dependencies.planner ? { planner: dependencies.planner } : {}),
       ...(dependencies.longPlans ? { longPlanService: dependencies.longPlans } : {}),
       ...(dependencies.practice ? { practiceService: dependencies.practice } : {}),
+      ...(dependencies.commitments
+        ? { commitmentService: dependencies.commitments }
+        : {}),
       now,
       ...(dependencies.modelClient !== undefined ? { modelClient: dependencies.modelClient } : {}),
       ...(dependencies.modelClientFor ? { modelClientFor: dependencies.modelClientFor } : {})
@@ -325,6 +334,11 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
   function createKnowledge(root: string): KnowledgeService {
     if (options.knowledgeService) return options.knowledgeService;
     return createKnowledgeService({ root, now });
+  }
+
+  function createCommitments(root: string): CommitmentService {
+    if (options.commitmentService) return options.commitmentService;
+    return createCommitmentService({ root, now });
   }
 
   function createPlanner(
@@ -435,6 +449,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     );
     // Built before the butler so chat tools can create practice sets.
     const practice = createPractice(nextSettings.vaultPath);
+    const commitments = createCommitments(nextSettings.vaultPath);
     const dependencies: ButlerFactoryDependencies = {
       workspaceService: workspace,
       provider: nextSettings.provider,
@@ -447,6 +462,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       planner,
       longPlans,
       practice,
+      commitments,
       modelClient,
       modelClientFor
     };
@@ -555,6 +571,28 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       }
     }
 
+    /**
+     * The oldest promise due by `today`, for the morning line. Projects with
+     * check-in off are skipped, matching the rest of the check-in. Any read
+     * failure means null and the morning message keeps its previous shape.
+     */
+    async function readDueCommitment(today: Date): Promise<{ text: string; due: string } | null> {
+      try {
+        const off = new Set(
+          (await workspace.listWorkspaces())
+            .filter((entry) => entry.checkIn === 'off')
+            .map((entry) => entry.id)
+        );
+        const pending = await commitments.pending(formatLocalDate(today));
+        const match = pending.find(
+          (entry) => entry.workspaceId === undefined || !off.has(entry.workspaceId)
+        );
+        return match === undefined ? null : { text: match.text, due: match.due };
+      } catch {
+        return null;
+      }
+    }
+
     const checkIns = new ProactiveCheckInService({
       conversationStore,
       workspaceService: workspace,
@@ -568,6 +606,8 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       getWeeklyOverview: readWeeklyOverview,
       // Read-only honest receipt: calibration and one next subject.
       getWeeklyHonest: readWeeklyHonest,
+      // Read-only promise revisit: at most one line, only on the morning.
+      getDueCommitment: readDueCommitment,
       now
     });
 

@@ -19,6 +19,7 @@ import type { LongPlanService } from '../../shared/plans';
 import type { ProfileService } from '../../shared/profile';
 import type { PracticeService } from '../../shared/practice';
 import type { SearchService } from '../../shared/search';
+import type { CommitmentService } from '../commitments/service';
 import type { ButlerReference, ButlerStreamListener } from '../../shared/butler-stream';
 import { butlerToolLabel } from '../../shared/butler-stream';
 import {
@@ -85,6 +86,8 @@ export interface ButlerServiceOptions {
   profileService?: ProfileService | null;
   /** Lets the butler create practice sets (the 学习页练习) through the service. */
   practiceService?: PracticeService | null;
+  /** Lets the butler record and resolve the user's spoken promises. */
+  commitmentService?: CommitmentService | null;
   /** Lazy getter keeps the search watcher off until a turn actually searches. */
   getSearchService?: (() => SearchService | null) | null;
   now?: () => Date;
@@ -109,6 +112,7 @@ export class ButlerServiceImpl implements ButlerService {
   private readonly knowledgeService: KnowledgeService | null;
   private readonly profileService: ProfileService | null;
   private readonly practiceService: PracticeService | null;
+  private readonly commitmentService: CommitmentService | null;
   private readonly getSearchService: (() => SearchService | null) | null;
   private readonly now: () => Date;
   private readonly maxToolSteps: number;
@@ -132,6 +136,7 @@ export class ButlerServiceImpl implements ButlerService {
     this.knowledgeService = options.knowledgeService ?? null;
     this.profileService = options.profileService ?? null;
     this.practiceService = options.practiceService ?? null;
+    this.commitmentService = options.commitmentService ?? null;
     this.getSearchService = options.getSearchService ?? null;
     this.now = options.now ?? (() => new Date());
     this.maxToolSteps = Math.max(
@@ -744,6 +749,7 @@ export class ButlerServiceImpl implements ButlerService {
       longPlans: this.longPlanService,
       knowledge: this.knowledgeService,
       practice: this.practiceService,
+      commitments: this.commitmentService,
       permissions,
       now: this.now,
       ...(signal ? { signal } : {})

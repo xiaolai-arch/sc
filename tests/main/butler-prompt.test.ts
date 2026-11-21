@@ -211,3 +211,11 @@ test('renders mastered and learning topics from the knowledge base', () => {
   expect(prompt).toContain('正在学：LangGraph');
   expect(prompt).toContain('最近证据：');
 });
+
+test('teaches the promise-only commitment rule with both tools', () => {
+  expect(BUTLER_SYSTEM_PROMPT).toContain('record_commitment');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('resolve_commitment');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('当用户用自己话说出具体承诺');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('不要替用户承诺');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('不要安排用户没说过的事');
+});

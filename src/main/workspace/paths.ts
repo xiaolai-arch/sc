@@ -15,6 +15,7 @@ import { isLocalDateTime } from '../../shared/date';
  *   <root>/knowledge/notes/*.md              user-authored note per knowledge topic
  *   <root>/reminders.md                      reminders are vault-global
  *   <root>/profile.md                        personal profile (vault-global)
+ *   <root>/commitments.md                    promises in the user's own words
  *
  * Frontmatter is the machine-readable source of truth; the markdown body is a
  * human-friendly rendering that may be edited freely in Obsidian.
@@ -107,6 +108,14 @@ export function remindersFile(root: string): string {
 /** Vault-wide personal profile (not tied to one workspace). */
 export function profileFile(root: string): string {
   return join(root, 'profile.md');
+}
+
+/**
+ * Promises the user made in their own words. Vault-global because a promise
+ * does not have to belong to a project (its `workspaceId` is optional).
+ */
+export function commitmentsFile(root: string): string {
+  return join(root, 'commitments.md');
 }
 
 export function knowledgeDir(root: string): string {
