@@ -36,32 +36,23 @@ export function ReviewRecords({
   if (filteredReviews.length === 0) {
     const hasOtherWorkspaces = Boolean(workspace) && reviews.length > 0;
     return (
-      <div>
-        <div className="rounded-2xl border border-dashed border-gray-300/80 px-4 py-6 text-center dark:border-white/10">
-          <p className="text-[13px] leading-6 text-gray-500 dark:text-[#8e8e93]">
-            {hasOtherWorkspaces && workspace
-              ? `「${workspace.name}」还没有复盘记录。`
-              : '还没有复盘记录。'}
+      <div className="rounded-2xl border border-dashed border-gray-300/80 px-4 py-6 text-center dark:border-white/10">
+        <p className="text-[13px] leading-6 text-gray-500 dark:text-[#8e8e93]">
+          {hasOtherWorkspaces && workspace
+            ? `「${workspace.name}」还没有复盘记录。`
+            : '还没有复盘记录。'}
+        </p>
+        {hasOtherWorkspaces ? (
+          <p className="mt-1 text-[12px] leading-5 text-gray-400 dark:text-[#8e8e93]">
+            其他工作区还有 {reviews.length} 条复盘，切换上方筛选即可查看。
           </p>
-          {hasOtherWorkspaces ? (
-            <p className="mt-1 text-[12px] leading-5 text-gray-400 dark:text-[#8e8e93]">
-              其他工作区还有 {reviews.length} 条复盘，切换上方筛选即可查看。
-            </p>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => onPrompt('我们开始今天复盘')}
-            className={cn('mt-3', linkButtonClass)}
-          >
-            开始今天复盘
-          </button>
-        </div>
+        ) : null}
         <button
           type="button"
           onClick={() => onPrompt('我们开始今天复盘')}
           className={cn('mt-3', linkButtonClass)}
         >
-          开始复盘
+          开始今天复盘
         </button>
       </div>
     );

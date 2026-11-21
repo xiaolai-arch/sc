@@ -3,6 +3,7 @@ import { formatLocalDate } from '../../shared/date';
 import { planProgress } from '../../shared/plans';
 import type { LongPlan } from '../../shared/plans';
 import type { Reminder, Workspace, WorkspaceTask } from '../../shared/workspace';
+import { reminderState } from '../../shared/workspace';
 import { ChevronRightIcon, CheckIcon, SendIcon } from '../ui/icons';
 import { PageFrame } from './PageFrame';
 import { nextScheduledDay } from './schedule';
@@ -54,6 +55,13 @@ export function nextTasks(tasks: WorkspaceTask[], today: string): WorkspaceTask[
     .slice(0, 3);
 }
 
+/** The time a reminder will actually fire: its postpone target when it has one. */
+function reminderTime(reminder: Reminder): string {
+  return reminderState(reminder) === 'postponed' && reminder.postponedTo
+    ? reminder.postponedTo.slice(11, 16)
+    : reminder.time;
+}
+
 function upcomingReminders(reminders: Reminder[]): Reminder[] {
   const now = new Date();
   const minutes = now.getHours() * 60 + now.getMinutes();
@@ -62,11 +70,14 @@ function upcomingReminders(reminders: Reminder[]): Reminder[] {
     return (hour ?? 0) * 60 + (minute ?? 0);
   };
   return reminders
-    .filter((reminder) => reminder.enabled)
+    // `done` means the user finished it, so it is no longer upcoming.
+    .filter((reminder) => reminder.enabled && reminderState(reminder) !== 'done')
     .sort((a, b) => {
-      const aNext = toMinutes(a.time) >= minutes ? 0 : 1;
-      const bNext = toMinutes(b.time) >= minutes ? 0 : 1;
-      return aNext - bNext || toMinutes(a.time) - toMinutes(b.time);
+      const aTime = reminderTime(a);
+      const bTime = reminderTime(b);
+      const aNext = toMinutes(aTime) >= minutes ? 0 : 1;
+      const bNext = toMinutes(bTime) >= minutes ? 0 : 1;
+      return aNext - bNext || toMinutes(aTime) - toMinutes(bTime);
     })
     .slice(0, 3);
 }
@@ -223,7 +234,7 @@ export function TodayOverview({
                     {reminder.label}
                   </span>
                   <span className="shrink-0 tabular-nums text-gray-400 dark:text-[#8e8e93]">
-                    {reminder.time}
+                    {reminderTime(reminder)}
                   </span>
                 </li>
               ))}

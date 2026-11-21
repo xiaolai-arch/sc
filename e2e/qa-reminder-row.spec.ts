@@ -6,17 +6,14 @@ import { launchStudyCoach, type LaunchedStudyCoach } from './support/launch';
  *
  * Guards two layout defects seen at the app's default 900x680 window, where the
  * reminder row is its widest at the narrowest supported layout:
- *   D4 — the reminder's text ("喝水") collapses to 0px width: the row shows
- *        only the time, the state chip and the action buttons.
+ *   D1 — the reminder's text ("喝水") collapses to 0px width: the row shows
+ *        only the time, the state chip and the action buttons, and overflows
+ *        horizontally because the buttons cannot fit.
  *   D5 — with no reminders, "让阿咲设提醒" is rendered twice, and it is still
  *        rendered when reminders do exist.
- *
- * Marked `fixme` on purpose: both assertions describe the intended behaviour
- * and fail against the current build, so they are skipped rather than breaking
- * CI. Remove the `fixme` when the row is fixed.
  */
 test.describe('reminder row layout (runtime QA guard)', () => {
-  test.fixme('keeps the reminder text readable at the default window size', async () => {
+  test('keeps the reminder text readable at the default window size', async () => {
     const launched: LaunchedStudyCoach = await launchStudyCoach();
     const { page } = launched;
 
@@ -35,6 +32,17 @@ test.describe('reminder row layout (runtime QA guard)', () => {
       await expect(label).toBeVisible({ timeout: 15_000 });
       const width = await label.evaluate((node) => node.getBoundingClientRect().width);
       expect(width, 'the reminder text must keep a readable width').toBeGreaterThan(24);
+
+      // The row must wrap its actions rather than overflow horizontally.
+      const row = label.locator('xpath=..');
+      const geometry = await row.evaluate((node) => ({
+        clientWidth: node.clientWidth,
+        scrollWidth: node.scrollWidth
+      }));
+      expect(
+        geometry.scrollWidth,
+        'the reminder row must not overflow horizontally'
+      ).toBeLessThanOrEqual(geometry.clientWidth + 1);
 
       // With one reminder on screen, the list-level CTA must not also show.
       await expect(page.getByRole('button', { name: '让阿咲设提醒' })).toHaveCount(0);
