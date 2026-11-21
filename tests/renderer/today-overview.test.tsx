@@ -170,6 +170,39 @@ test('the suggestion composes into the input instead of firing', async () => {
   await screen.findByText(/收到。目前是原型模式/, {}, { timeout: 3000 });
 });
 
+test('shows a postponed reminder at its new time and hides completed ones today', async () => {
+  const api = setup();
+  await screen.findByRole('region', { name: '接下来' });
+
+  await userEvent.click(nav().getByRole('button', { name: '提醒' }));
+  await userEvent.type(screen.getByLabelText('提醒内容'), '喝水');
+  await userEvent.click(screen.getByRole('button', { name: '添加提醒' }));
+  expect(await screen.findByRole('switch', { name: '喝水 提醒开关' })).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: '延后 10 分钟：喝水' }));
+  const reminderRow = () =>
+    within(screen.getByRole('switch', { name: '喝水 提醒开关' }).closest('div') as HTMLElement);
+  await waitFor(() => expect(reminderRow().getByText(/已延后 · \d{2}:\d{2}/)).toBeInTheDocument());
+
+  const postponed = (await api.getReminders()).find((entry) => entry.label === '喝水');
+  const postponedTime = postponed!.postponedTo!.slice(11, 16);
+
+  // 今日 lists the reminder at the time it will actually fire.
+  await userEvent.click(nav().getByRole('button', { name: '今日' }));
+  const upcoming = within(await screen.findByRole('region', { name: '最近提醒' }));
+  const upcomingItem = upcoming.getByText('喝水').closest('li') as HTMLElement;
+  expect(within(upcomingItem).getByText(postponedTime)).toBeInTheDocument();
+
+  // A completed reminder is no longer "upcoming".
+  await userEvent.click(nav().getByRole('button', { name: '提醒' }));
+  await userEvent.click(screen.getByRole('button', { name: '标为完成：喝水' }));
+  await waitFor(() => expect(reminderRow().getByText('已完成')).toBeInTheDocument());
+
+  await userEvent.click(nav().getByRole('button', { name: '今日' }));
+  const afterDone = within(await screen.findByRole('region', { name: '最近提醒' }));
+  expect(afterDone.queryByText('喝水')).not.toBeInTheDocument();
+});
+
 test('settings expose the four groups', async () => {
   setup();
   await screen.findByRole('region', { name: '接下来' });

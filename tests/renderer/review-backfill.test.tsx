@@ -57,6 +57,13 @@ function renderPage(props: {
   return { ...view, onPrompt };
 }
 
+test('offers a single entry from the empty review state', () => {
+  renderPage({ reviews: [] });
+
+  expect(screen.getAllByRole('button', { name: /^开始/ })).toHaveLength(1);
+  expect(screen.getByRole('button', { name: '开始今天复盘' })).toBeInTheDocument();
+});
+
 test('renders the backfill button only when onSubmitReview is provided', () => {
   const { rerender } = render(
     <ReviewPage

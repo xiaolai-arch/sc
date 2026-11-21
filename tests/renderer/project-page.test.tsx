@@ -4,6 +4,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { sendPrompt } from './send-prompt';
 import { Workspace } from '../../src/renderer/shell/Workspace';
+import { RemindersSection, ReviewSection } from '../../src/renderer/shell/ProjectSections';
 import { FOCUS_DURATION_MS } from '../../src/renderer/shell/focus-timer';
 import { createMockApi } from '../../web/mock-api';
 import { pickOption } from './select-option';
@@ -397,11 +398,15 @@ test('shows reminder lifecycle chips and postpones, completes and re-enables', a
   expect(screen.getByRole('button', { name: '标为完成：早间计划' })).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole('button', { name: '延后 10 分钟：早间计划' }));
-  await waitFor(() => expect(row().getByText('已延后')).toBeInTheDocument());
+  await waitFor(() => expect(row().getByText(/已延后/)).toBeInTheDocument());
   await waitFor(async () => {
     const reminder = (await api.getReminders()).find((entry) => entry.id === 'r1');
     expect(reminder?.state).toBe('postponed');
     expect(reminder?.postponedTo).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
+    // The new time is visible in the badge itself, not hidden in a tooltip.
+    expect(row().getByText(/已延后/)).toHaveTextContent(
+      `已延后 · ${reminder!.postponedTo!.slice(11, 16)}`
+    );
   });
 
   await userEvent.click(screen.getByRole('button', { name: '标为完成：早间计划' }));
@@ -420,6 +425,48 @@ test('shows reminder lifecycle chips and postpones, completes and re-enables', a
     expect(reminder?.state).toBe('pending');
     expect(reminder?.enabled).toBe(true);
   });
+});
+
+test('offers one reminder CTA in the empty state and none when reminders exist', () => {
+  const onCreateReminder = vi.fn(async () => ({
+    id: 'r-new',
+    time: '09:30',
+    label: '喝水',
+    enabled: true
+  }));
+  const onUpdateReminder = vi.fn(async () => ({
+    id: 'r1',
+    time: '09:30',
+    label: '喝水',
+    enabled: true
+  }));
+  const props = {
+    onCreateReminder,
+    onUpdateReminder,
+    snoozedToday: false,
+    onSnoozeCheckIns: vi.fn(),
+    onPrompt: vi.fn()
+  };
+  const { rerender } = render(<RemindersSection reminders={[]} {...props} />);
+
+  // One empty-state CTA — not a card CTA plus a list-level duplicate.
+  expect(screen.getAllByRole('button', { name: '让阿咲设提醒' })).toHaveLength(1);
+
+  rerender(
+    <RemindersSection
+      reminders={[{ id: 'r1', time: '09:30', label: '喝水', enabled: true }]}
+      {...props}
+    />
+  );
+  // Once a reminder exists the empty-state CTA (and its duplicate) is gone.
+  expect(screen.queryByRole('button', { name: '让阿咲设提醒' })).not.toBeInTheDocument();
+});
+
+test('the project review empty state offers a single entry', () => {
+  render(<ReviewSection workspace={null} reviews={[]} onPrompt={vi.fn()} />);
+
+  expect(screen.getAllByRole('button', { name: /^开始/ })).toHaveLength(1);
+  expect(screen.getByRole('button', { name: '开始今天复盘' })).toBeInTheDocument();
 });
 
 test('routes a project prompt to the selected project, not the open chat', async () => {

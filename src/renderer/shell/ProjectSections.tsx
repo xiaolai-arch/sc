@@ -1409,20 +1409,11 @@ export function ReviewSection({ workspace, reviews, onPrompt }: ReviewSectionPro
 
   if (filteredReviews.length === 0) {
     return (
-      <div>
-        <Empty
-          text="还没有复盘记录。"
-          action="开始今天复盘"
-          onAction={() => onPrompt('我们开始今天复盘')}
-        />
-        <button
-          type="button"
-          onClick={() => onPrompt('我们开始今天复盘')}
-          className="mt-3 rounded-full px-3 py-1.5 text-[13px] font-medium text-[#0071e3] transition-all duration-300 hover:bg-[#0071e3]/10 hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#4da3ff] dark:hover:bg-[#0a84ff]/20"
-        >
-          开始复盘
-        </button>
-      </div>
+      <Empty
+        text="还没有复盘记录。"
+        action="开始今天复盘"
+        onAction={() => onPrompt('我们开始今天复盘')}
+      />
     );
   }
 
@@ -1491,22 +1482,28 @@ export function ReviewSection({ workspace, reviews, onPrompt }: ReviewSectionPro
 function ReminderStateChip({ reminder }: { reminder: Reminder }) {
   const state = reminderStateOf(reminder);
   const chip = REMINDER_STATE_CHIPS[state];
-  const detail =
+  // The postponed time belongs in the badge itself: a tooltip is not visible at
+  // a glance, and users need to know when the reminder will actually fire.
+  const postponedTime =
     state === 'postponed' && reminder.postponedTo
-      ? `（${shortLocalDateTime(reminder.postponedTo)}）`
-      : state === 'failed' && reminder.lastError
-        ? `（${reminder.lastError}）`
-        : '';
+      ? reminder.postponedTo.slice(11, 16)
+      : null;
+  const failedReason = state === 'failed' && reminder.lastError ? reminder.lastError : null;
+  const detail = postponedTime ?? failedReason;
   return (
     <span
       data-reminder-state={state}
-      title={detail ? detail.slice(1, -1) : chip.label}
+      title={
+        postponedTime && reminder.postponedTo
+          ? shortLocalDateTime(reminder.postponedTo)
+          : detail ?? chip.label
+      }
       className={cn(
         'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium leading-4',
         chip.className
       )}
     >
-      {chip.label}
+      {detail ? `${chip.label} · ${detail}` : chip.label}
     </span>
   );
 }
@@ -1766,7 +1763,7 @@ export function RemindersSection({
                   </button>
                 </form>
               ) : (
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
                   <span
                     aria-hidden="true"
                     className={cn(
@@ -1777,7 +1774,10 @@ export function RemindersSection({
                   <span className="w-10 shrink-0 text-[12px] tabular-nums text-gray-500 dark:text-[#a1a1a6]">
                     {reminder.time}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-[13px] text-[#1d1d1f] dark:text-[#f5f5f7]">
+                  {/* A real minimum width keeps the reminder readable when the
+                      six actions need room at the default 890px window; the row
+                      wraps the actions instead of squeezing this column to 0. */}
+                  <span className="min-w-[6rem] flex-1 truncate text-[13px] text-[#1d1d1f] dark:text-[#f5f5f7]">
                     {reminder.label}
                     <span className="ml-1.5 text-[11px] text-gray-400 dark:text-[#8e8e93]">
                       {repeatLabel(reminder.days)}
@@ -1798,7 +1798,7 @@ export function RemindersSection({
                           enabled: true
                         })
                       }
-                      className={actionClass}
+                      className={cn(actionClass, 'shrink-0 whitespace-nowrap')}
                     >
                       重新启用
                     </button>
@@ -1811,7 +1811,7 @@ export function RemindersSection({
                         onClick={() =>
                           void changeReminderLifecycle(reminder, { postponeMinutes: 10 })
                         }
-                        className={actionClass}
+                        className={cn(actionClass, 'shrink-0 whitespace-nowrap')}
                       >
                         延后 10 分钟
                       </button>
@@ -1822,7 +1822,7 @@ export function RemindersSection({
                         onClick={() =>
                           void changeReminderLifecycle(reminder, { postponeMinutes: 60 })
                         }
-                        className={actionClass}
+                        className={cn(actionClass, 'shrink-0 whitespace-nowrap')}
                       >
                         延后 1 小时
                       </button>
@@ -1831,7 +1831,7 @@ export function RemindersSection({
                         aria-label={`标为完成：${reminder.label}`}
                         disabled={pendingReminderId === reminder.id}
                         onClick={() => void changeReminderLifecycle(reminder, { state: 'done' })}
-                        className={actionClass}
+                        className={cn(actionClass, 'shrink-0 whitespace-nowrap')}
                       >
                         标为完成
                       </button>
@@ -1842,7 +1842,7 @@ export function RemindersSection({
                     aria-label={`编辑提醒：${reminder.label}`}
                     disabled={pendingReminderId === reminder.id}
                     onClick={() => startReminderEdit(reminder)}
-                    className={actionClass}
+                    className={cn(actionClass, 'shrink-0 whitespace-nowrap')}
                   >
                     编辑
                   </button>
@@ -1858,6 +1858,7 @@ export function RemindersSection({
                       onClick={() => void deleteReminder(reminder)}
                       className={cn(
                         actionClass,
+                        'shrink-0 whitespace-nowrap',
                         confirmDeleteId === reminder.id
                           ? 'text-[#d70015] dark:text-[#ff7b72]'
                           : ''
@@ -1892,13 +1893,6 @@ export function RemindersSection({
           ))}
         </div>
       )}
-      <button
-        type="button"
-        onClick={() => onPrompt('帮我设一个提醒：')}
-        className="mt-3 rounded-full px-3 py-1.5 text-[13px] font-medium text-[#0071e3] transition-all duration-300 hover:bg-[#0071e3]/10 hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#4da3ff] dark:hover:bg-[#0a84ff]/20"
-      >
-        让阿咲设提醒
-      </button>
 
       <div className="mt-5 rounded-2xl bg-[#f5f5f7] p-4 dark:bg-white/[0.06]">
         <p className="text-[13px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">主动检查</p>
