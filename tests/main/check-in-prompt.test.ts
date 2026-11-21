@@ -218,3 +218,82 @@ test('the cue never leaks into the morning, evening or behind templates', () => 
     '今天还有 1 个任务没完成，下一项是「极限基础」。要不要一起调整一下今天的安排？'
   );
 });
+
+const honest = {
+  calibration: '有把握但错 2 道 · 没把握但对 1 道',
+  nextStep: '下周先练「三角函数」的到期错题（3 道）'
+};
+
+test('the weekly template ends with the two honest lines', () => {
+  expect(buildCheckInTemplate(context, 'weekly', DATE, stats, honest)).toBe(
+    [
+      '本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%',
+      WEEKLY_TEMPLATE_BEFORE_STATS,
+      '有把握但错 2 道 · 没把握但对 1 道',
+      '下一步：下周先练「三角函数」的到期错题（3 道）'
+    ].join('\n')
+  );
+});
+
+test('honest lines stand alone when the week has no recap numbers', () => {
+  expect(buildCheckInTemplate(context, 'weekly', DATE, null, honest)).toBe(
+    [
+      WEEKLY_TEMPLATE_BEFORE_STATS,
+      '有把握但错 2 道 · 没把握但对 1 道',
+      '下一步：下周先练「三角函数」的到期错题（3 道）'
+    ].join('\n')
+  );
+});
+
+test('only the non-null honest line is appended', () => {
+  expect(
+    buildCheckInTemplate(context, 'weekly', DATE, null, {
+      calibration: null,
+      nextStep: '下周先练「三角函数」的到期错题（3 道）'
+    })
+  ).toBe(`${WEEKLY_TEMPLATE_BEFORE_STATS}\n下一步：下周先练「三角函数」的到期错题（3 道）`);
+  expect(
+    buildCheckInTemplate(context, 'weekly', DATE, null, {
+      calibration: '有把握但错 2 道 · 没把握但对 1 道',
+      nextStep: null
+    })
+  ).toBe(`${WEEKLY_TEMPLATE_BEFORE_STATS}\n有把握但错 2 道 · 没把握但对 1 道`);
+});
+
+test('no honest facts leaves the weekly template byte-identical', () => {
+  expect(buildCheckInTemplate(context, 'weekly', DATE, stats, null)).toBe(
+    `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE_BEFORE_STATS}`
+  );
+  expect(
+    buildCheckInTemplate(context, 'weekly', DATE, stats, {
+      calibration: null,
+      nextStep: null
+    })
+  ).toBe(`本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE_BEFORE_STATS}`);
+});
+
+test('the weekly prompt carries the honest facts in their own block', () => {
+  const prompt = buildCheckInPrompt(context, 'weekly', DATE, stats, honest);
+
+  expect(prompt).toContain(
+    [
+      '本周诚实数据：',
+      '- 有把握但错 2 道 · 没把握但对 1 道',
+      '- 下一步：下周先练「三角函数」的到期错题（3 道）'
+    ].join('\n')
+  );
+  expect(prompt.indexOf('本周数据：')).toBeLessThan(prompt.indexOf('本周诚实数据：'));
+  expect(prompt.indexOf('本周诚实数据：')).toBeLessThan(prompt.indexOf('请用中文写一条 3-5 句'));
+  // Without honest facts the prompt keeps its previous bytes.
+  expect(buildCheckInPrompt(context, 'weekly', DATE, stats)).toBe(
+    buildCheckInPrompt(context, 'weekly', DATE, stats, null)
+  );
+});
+
+test('honest facts never enter the morning, evening or behind prompts', () => {
+  expect(buildCheckInPrompt(context, 'morning', DATE, stats, honest)).toBe(
+    MORNING_PROMPT_BEFORE_STATS
+  );
+  expect(buildCheckInPrompt(context, 'evening', DATE, null, honest)).not.toContain('本周诚实数据');
+  expect(buildCheckInPrompt(context, 'behind', DATE, null, honest)).not.toContain('本周诚实数据');
+});
