@@ -219,3 +219,27 @@ test('teaches the promise-only commitment rule with both tools', () => {
   expect(BUTLER_SYSTEM_PROMPT).toContain('不要替用户承诺');
   expect(BUTLER_SYSTEM_PROMPT).toContain('不要安排用户没说过的事');
 });
+
+test('replies to 「我卡住了」 with exactly one smallest next action', () => {
+  // One action, not a plan: the stuck signal is about starting, not knowing.
+  expect(BUTLER_SYSTEM_PROMPT).toContain('只回一个最小的下一步动作');
+  // Concrete and startable right now: it must fit in two minutes.
+  expect(BUTLER_SYSTEM_PROMPT).toContain('2 分钟内能做完');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('先把文档打开');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('把杯子放进水槽');
+  // No explanation, no list, no interrogation, no pep talk, no tools.
+  expect(BUTLER_SYSTEM_PROMPT).toContain('不解释、不列清单、不追问原因、不打气，也不调用工具');
+});
+
+test('shrinks once more when the user is still stuck, and plans only on request', () => {
+  // Repeating 「还是卡着」 shrinks the action instead of re-explaining.
+  expect(BUTLER_SYSTEM_PROMPT).toContain('把动作再缩小一格');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('不要重复解释');
+  // Asking for the whole arrangement steps back to normal planning.
+  expect(BUTLER_SYSTEM_PROMPT).toContain('给我整个安排');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('恢复正常规划');
+  // The only case a task is added: the user asks for it, through create_task.
+  expect(BUTLER_SYSTEM_PROMPT).toContain('这一步只是聊天里的句子');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('除非用户明确让你把它记成任务（才调用 create_task）');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('否则不要新建任务');
+});
