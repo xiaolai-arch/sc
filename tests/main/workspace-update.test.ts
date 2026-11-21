@@ -1,8 +1,9 @@
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createWorkspaceService } from '../../src/main/workspace/create-workspace-service';
 import { workspacesDir } from '../../src/main/workspace/paths';
+import { parseNote } from '../../src/main/vault/note';
 
 test('updates workspace name, goal and description', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'study-coach-workspace-update-'));
@@ -36,6 +37,66 @@ test('updates workspace name, goal and description', async () => {
     await expect(
       service.updateWorkspace?.({ workspaceId: 'missing', goal: 'x' })
     ).rejects.toThrow(/not found/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('round-trips a project target date and clears it without touching other fields', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'study-coach-target-date-'));
+  try {
+    const service = createWorkspaceService(dir, { seed: false });
+    const workspace = await service.createWorkspace({
+      name: '考研',
+      kind: 'exam',
+      goal: '2027 上岸',
+      description: '每天四小时'
+    });
+    expect(workspace.targetDate).toBeUndefined();
+    const raw = await readFile(
+      join(workspacesDir(dir), workspace.id, 'workspace.md'),
+      'utf8'
+    );
+    expect(raw).not.toContain('targetDate');
+
+    const set = await service.updateWorkspace?.({
+      workspaceId: workspace.id,
+      targetDate: '2027-12-19'
+    });
+    expect(set?.targetDate).toBe('2027-12-19');
+    // Setting one field never disturbs the rest.
+    expect(set).toMatchObject({ name: '考研', goal: '2027 上岸', description: '每天四小时' });
+    const persisted = await readFile(
+      join(workspacesDir(dir), workspace.id, 'workspace.md'),
+      'utf8'
+    );
+    expect(parseNote(persisted).meta.targetDate).toBe('2027-12-19');
+    expect((await service.getWorkspaceSnapshot(workspace.id)).workspace.targetDate).toBe(
+      '2027-12-19'
+    );
+
+    const cleared = await service.updateWorkspace?.({
+      workspaceId: workspace.id,
+      targetDate: null
+    });
+    expect(cleared).not.toHaveProperty('targetDate');
+    const clearedRaw = await readFile(
+      join(workspacesDir(dir), workspace.id, 'workspace.md'),
+      'utf8'
+    );
+    expect(clearedRaw).not.toContain('targetDate');
+
+    // Omitting the field keeps whatever is stored.
+    await service.updateWorkspace?.({ workspaceId: workspace.id, targetDate: '2028-06-07' });
+    const kept = await service.updateWorkspace?.({
+      workspaceId: workspace.id,
+      goal: '复试也准备了'
+    });
+    expect(kept?.targetDate).toBe('2028-06-07');
+
+    await expect(
+      service.updateWorkspace?.({ workspaceId: workspace.id, targetDate: '2027-02-31' })
+    ).rejects.toThrow(/target date/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

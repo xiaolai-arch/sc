@@ -3,7 +3,7 @@ import { formatLocalDate } from '../../shared/date';
 import { planProgress } from '../../shared/plans';
 import type { LongPlan } from '../../shared/plans';
 import type { Reminder, Workspace, WorkspaceTask } from '../../shared/workspace';
-import { reminderState } from '../../shared/workspace';
+import { daysUntilTarget, reminderState, targetCountdownLabel } from '../../shared/workspace';
 import { ChevronRightIcon, CheckIcon, SendIcon } from '../ui/icons';
 import { PageFrame } from './PageFrame';
 import { nextScheduledDay } from './schedule';
@@ -28,6 +28,30 @@ export type TodayOverviewProps = {
 
 function workspaceName(workspaces: Workspace[], id: string): string {
   return workspaces.find((workspace) => workspace.id === id)?.name ?? '未分组';
+}
+
+/**
+ * The target date the Today page counts down to: the soonest deadline still
+ * ahead, or the most recent one once every deadline has passed. Projects
+ * without a target date are ignored, so nothing renders when none is set.
+ */
+export function countdownWorkspace(
+  workspaces: Workspace[],
+  today: string
+): Workspace | null {
+  const dated = workspaces
+    .map((workspace) => ({
+      workspace,
+      days: workspace.targetDate ? daysUntilTarget(workspace.targetDate, today) : null
+    }))
+    .filter(
+      (entry): entry is { workspace: Workspace; days: number } => entry.days !== null
+    );
+  if (dated.length === 0) return null;
+  const upcoming = dated.filter((entry) => entry.days >= 0);
+  const pool = upcoming.length > 0 ? upcoming : dated;
+  pool.sort((a, b) => (upcoming.length > 0 ? a.days - b.days : b.days - a.days));
+  return pool[0]?.workspace ?? null;
 }
 
 /** The old quick-ask button, kept as a suggestion that fills the input. */
@@ -111,6 +135,20 @@ export function TodayOverview({
     [priorities, tasks, workspaces, today]
   );
   const upcoming = useMemo(() => upcomingReminders(reminders), [reminders]);
+  // recomputed from `today` on every render, never cached at plan time.
+  // The countdown belongs to the Today page, not the compact chat-home card.
+  const countdown = useMemo(() => {
+    if (compact) return null;
+    const workspace = countdownWorkspace(workspaces, today);
+    if (!workspace) return null;
+    const label = targetCountdownLabel(workspace.targetDate, today);
+    if (!label) return null;
+    // Name the project only when several deadlines compete for the line.
+    const dated = workspaces.filter(
+      (entry) => entry.targetDate && daysUntilTarget(entry.targetDate, today) !== null
+    );
+    return { label, name: dated.length > 1 ? workspace.name : null };
+  }, [workspaces, today, compact]);
   const activePlans = useMemo(
     () =>
       longPlans
@@ -134,6 +172,16 @@ export function TodayOverview({
 
   const body = (
     <div className={compact ? 'space-y-4' : 'space-y-6'}>
+      {countdown ? (
+        <p
+          role="status"
+          aria-label="目标倒计时"
+          className="text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]"
+        >
+          {countdown.label}
+          {countdown.name ? `（${countdown.name}）` : ''}
+        </p>
+      ) : null}
       <section
         aria-label="接下来"
         className="rounded-2xl border border-black/[0.06] bg-white p-4 dark:border-white/10 dark:bg-[#1c1c1e]"

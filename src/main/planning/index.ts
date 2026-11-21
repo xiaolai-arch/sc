@@ -12,6 +12,7 @@ export {
 } from './parse';
 export {
   buildWorkspacePlanPrompt,
+  targetCountdownLines,
   WORKSPACE_PLAN_SYSTEM_PROMPT,
   type WorkspacePlanPrompt,
   type WorkspacePlanPromptInput

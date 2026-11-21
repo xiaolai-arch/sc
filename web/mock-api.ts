@@ -1900,6 +1900,8 @@ export function createMockApi(
       if (input.availableMinutes !== undefined) {
         workspace.availableMinutes = Math.round(input.availableMinutes);
       }
+      if (input.targetDate === null) delete workspace.targetDate;
+      else if (input.targetDate !== undefined) workspace.targetDate = input.targetDate;
       workspace.updatedAt = new Date().toISOString();
       persist();
       return structuredClone(workspace);

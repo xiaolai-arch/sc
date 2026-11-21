@@ -28,7 +28,8 @@ import {
   applyReminderStatePatch,
   MAX_DAILY_AVAILABLE_MINUTES,
   MIN_DAILY_AVAILABLE_MINUTES,
-  REMINDER_STATES
+  REMINDER_STATES,
+  isTargetDate
 } from '../../shared/workspace';
 import { createMutex, listDirectories, listMarkdownFiles, pathExists, readFileOrNull, writeFileAtomic } from './fs-utils';
 import { newId, slugify, uniqueFileName } from './ids';
@@ -342,12 +343,21 @@ export function createWorkspaceService(
         }
         availableMinutes = Math.round(rawAvailable);
       }
+      // undefined keeps the current date, null clears it.
+      const rawTarget = (input as { targetDate?: unknown } | undefined)?.targetDate;
+      let targetDate: string | null | undefined;
+      if (rawTarget !== undefined) {
+        if (rawTarget === null) targetDate = null;
+        else if (isTargetDate(rawTarget)) targetDate = rawTarget;
+        else throw new Error('Invalid target date: expected a YYYY-MM-DD date');
+      }
       if (
         name === undefined &&
         goal === undefined &&
         description === undefined &&
         checkIn === undefined &&
-        availableMinutes === undefined
+        availableMinutes === undefined &&
+        targetDate === undefined
       ) {
         throw new Error('No workspace fields to update');
       }
@@ -362,6 +372,8 @@ export function createWorkspaceService(
           ...(availableMinutes !== undefined ? { availableMinutes } : {}),
           updatedAt: new Date().toISOString()
         };
+        if (targetDate === null) delete next.targetDate;
+        else if (targetDate !== undefined) next.targetDate = targetDate;
         await writeFileAtomic(
           workspaceFile(vaultRoot, workspaceId),
           serializeWorkspaceFile(next)

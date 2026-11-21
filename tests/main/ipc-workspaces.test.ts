@@ -38,6 +38,24 @@ test('routes workspace update and validates payloads', async () => {
   ).rejects.toThrow(/工作区名称/);
 });
 
+test('routes a project target date and rejects malformed ones', async () => {
+  const { api, calls } = fakeApi();
+  const handlers = createIpcHandlers(api);
+
+  await handlers.updateWorkspace({ workspaceId: 'ws-1', targetDate: '2027-12-19' });
+  expect(calls).toEqual([['update', { workspaceId: 'ws-1', targetDate: '2027-12-19' }]]);
+
+  await handlers.updateWorkspace({ workspaceId: 'ws-1', targetDate: null });
+  expect(calls[1]).toEqual(['update', { workspaceId: 'ws-1', targetDate: null }]);
+
+  await expect(
+    handlers.updateWorkspace({ workspaceId: 'ws-1', targetDate: '2027-02-31' })
+  ).rejects.toThrow(/目标日期/);
+  await expect(
+    handlers.updateWorkspace({ workspaceId: 'ws-1', targetDate: '2027/12/19' })
+  ).rejects.toThrow(/目标日期/);
+});
+
 test('reports unsupported workspace updates clearly', async () => {
   const handlers = createIpcHandlers({} as StudyCoachApi);
 

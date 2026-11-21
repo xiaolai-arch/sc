@@ -2,6 +2,7 @@ import type { NoteMeta } from '../../../shared/types';
 import {
   MAX_DAILY_AVAILABLE_MINUTES,
   MIN_DAILY_AVAILABLE_MINUTES,
+  isTargetDate,
   type Workspace,
   type WorkspaceKind
 } from '../../../shared/workspace';
@@ -47,6 +48,7 @@ export function parseWorkspaceFile(raw: string, workspaceId: string): Workspace 
     Math.round(meta.availableMinutes) <= MAX_DAILY_AVAILABLE_MINUTES
       ? { availableMinutes: Math.round(meta.availableMinutes) }
       : {}),
+    ...(isTargetDate(meta.targetDate) ? { targetDate: meta.targetDate } : {}),
     createdAt: asString(meta.createdAt),
     updatedAt: asString(meta.updatedAt)
   };
@@ -66,6 +68,7 @@ export function serializeWorkspaceFile(workspace: Workspace): string {
     ...(workspace.availableMinutes !== undefined
       ? { availableMinutes: workspace.availableMinutes }
       : {}),
+    ...(workspace.targetDate !== undefined ? { targetDate: workspace.targetDate } : {}),
     createdAt: workspace.createdAt,
     updatedAt: workspace.updatedAt
   };

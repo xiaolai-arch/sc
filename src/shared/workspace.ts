@@ -2,6 +2,7 @@ import type { ReviewAnswers, TaskStatus } from './types';
 import type { ButlerStreamEvent } from './butler-stream';
 import type { TaskRepeat } from './recurrence';
 import type { AgentPermissions, ChatAttachment } from './attachments';
+import { parseLocalDate } from './date';
 
 export type WorkspaceKind = 'exam' | 'study' | 'project' | 'life';
 export type WorkspaceTaskStatus = TaskStatus;
@@ -22,8 +23,55 @@ export interface Workspace {
   checkIn?: WorkspaceCheckIn;
   /** Default minutes the user can study per day; planning starts from it. */
   availableMinutes?: number;
+  /**
+   * The deadline the project counts down to (目标日期 / 考试日期), as a local
+   * `YYYY-MM-DD` date. Absent means no target date has been set.
+   */
+  targetDate?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** True for a readable local calendar date such as `2027-12-19`. */
+export function isTargetDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !ISO_DATE.test(value)) return false;
+  const date = parseLocalDate(value);
+  if (Number.isNaN(date.getTime())) return false;
+  // Reject dates the calendar rolls over, such as 2027-02-31.
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}` === value;
+}
+
+/**
+ * Whole local days from `today` to `targetDate`. Negative once the target has
+ * passed, null when either date is unreadable. Computed from the calendar
+ * dates, so a daylight-saving change never shifts the count by a day.
+ */
+export function daysUntilTarget(targetDate: string, today: string): number | null {
+  if (!isTargetDate(targetDate) || !isTargetDate(today)) return null;
+  const target = parseLocalDate(targetDate);
+  const start = parseLocalDate(today);
+  const utc = (date: Date): number =>
+    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+  return Math.round((utc(target) - utc(start)) / 86_400_000);
+}
+
+/**
+ * The quiet one-line countdown for a project's target date:
+ * `距离目标 2027-12-19 还有 343 天`, or `目标日已过` once the deadline passed.
+ * Undefined when no usable target date is set, so the UI renders nothing.
+ */
+export function targetCountdownLabel(
+  targetDate: string | undefined,
+  today: string
+): string | undefined {
+  if (!targetDate) return undefined;
+  const days = daysUntilTarget(targetDate, today);
+  if (days === null) return undefined;
+  return days >= 0 ? `距离目标 ${targetDate} 还有 ${days} 天` : '目标日已过';
 }
 
 export interface WorkspaceTask {
@@ -169,6 +217,8 @@ export interface UpdateWorkspaceInput {
   checkIn?: WorkspaceCheckIn;
   /** Daily minutes the planner should assume; omit to keep the current value. */
   availableMinutes?: number;
+  /** Local `YYYY-MM-DD` target date; null clears it, omit to keep it. */
+  targetDate?: string | null;
 }
 
 export interface WorkspaceOnboardingInput {

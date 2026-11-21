@@ -2,7 +2,7 @@ import { isAbsolute } from 'node:path';
 import { isLocalDateTime } from '../shared/date';
 import { isTaskRepeat } from '../shared/recurrence';
 import type { AppSettings } from '../shared/types';
-import { REMINDER_STATES, type ReminderState } from '../shared/workspace';
+import { REMINDER_STATES, isTargetDate, type ReminderState } from '../shared/workspace';
 import type {
   BackupResult,
   RestoreResult,
@@ -312,13 +312,21 @@ function requireUpdateWorkspace(value: unknown): UpdateWorkspaceInput {
     }
     availableMinutes = input.availableMinutes;
   }
+  // null clears the target date; a string must be a real YYYY-MM-DD date.
+  let targetDate: string | null | undefined;
+  if (input.targetDate !== undefined) {
+    if (input.targetDate === null) targetDate = null;
+    else if (isTargetDate(input.targetDate)) targetDate = input.targetDate;
+    else throw new Error('目标日期需为 YYYY-MM-DD 格式的日期。');
+  }
   return {
     workspaceId: requireString(input.workspaceId, '工作区 ID'),
     ...(input.name !== undefined ? { name: requireString(input.name, '工作区名称') } : {}),
     ...(input.goal !== undefined ? { goal: goal ?? '' } : {}),
     ...(input.description !== undefined ? { description: description ?? '' } : {}),
     ...(checkIn !== undefined ? { checkIn: checkIn as 'daily' | 'off' } : {}),
-    ...(availableMinutes !== undefined ? { availableMinutes } : {})
+    ...(availableMinutes !== undefined ? { availableMinutes } : {}),
+    ...(targetDate !== undefined ? { targetDate } : {})
   };
 }
 
