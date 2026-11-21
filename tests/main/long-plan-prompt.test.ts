@@ -48,3 +48,42 @@ test('the long-plan user prompt keeps its existing framing', () => {
   expect(prompt.user).toContain('每周投入：约 10 小时');
   expect(prompt.user).toContain('请按以上时长制定 6 周的完整计划，只输出 JSON。');
 });
+
+test('stored busy days add exactly one avoid-these-days line', () => {
+  const prompt = buildLongPlanPrompt({
+    input: {
+      workspaceId: workspace.id,
+      goal: '系统学习 AI Agent',
+      weeks: 6,
+      weeklyHours: 10,
+      startDate: '2026-11-21'
+    },
+    workspace,
+    busyDates: ['2026-11-24', '2026-11-26']
+  });
+
+  expect(prompt.user).toContain(
+    '用户说这些天会特别满，不要把新内容排在这些天（挪到相邻的日子）：2026-11-24、2026-11-26'
+  );
+  // The line appears once, right after the start date.
+  expect(prompt.user.split('不要把新内容排在这些天')).toHaveLength(2);
+  expect(prompt.user.indexOf('不要把新内容排在这些天')).toBeGreaterThan(
+    prompt.user.indexOf('起始日期：')
+  );
+});
+
+test('without busy dates the long-plan prompt keeps its previous bytes', () => {
+  const withField = buildLongPlanPrompt({
+    input: {
+      workspaceId: workspace.id,
+      goal: '系统学习 AI Agent',
+      weeks: 6,
+      weeklyHours: 10,
+      startDate: '2026-11-21'
+    },
+    workspace,
+    busyDates: []
+  });
+  expect(withField.user).not.toContain('特别满');
+  expect(withField.user).toBe(promptForLongPlan().user);
+});

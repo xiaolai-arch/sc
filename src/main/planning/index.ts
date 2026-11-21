@@ -1,6 +1,7 @@
 export {
   createWorkspacePlanner,
   WorkspacePlannerImpl,
+  BUSY_DAY_MINUTES,
   type WorkspacePlannerOptions
 } from './workspace-planner';
 export {

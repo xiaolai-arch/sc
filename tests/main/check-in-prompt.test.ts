@@ -1,6 +1,8 @@
 import {
   buildCheckInPrompt,
   buildCheckInTemplate,
+  WEEK_AVAILABILITY_QUESTION,
+  weekAvailabilityQuestion,
   type WeeklyOverviewLike
 } from '../../src/main/check-ins/prompt';
 import type { ButlerContext } from '../../src/main/butler/context';
@@ -149,21 +151,34 @@ test('the morning prompt ignores weekly stats and stays byte-identical', () => {
 
 test('the weekly template prepends one deterministic recap line', () => {
   expect(buildCheckInTemplate(context, 'weekly', DATE, stats)).toBe(
-    `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE_BEFORE_STATS}`
+    `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`
   );
 });
 
 test('the recap line omits accuracy before the first answer', () => {
   expect(
     buildCheckInTemplate(context, 'weekly', DATE, { ...stats, answered: 0, correct: 0 })
-  ).toBe(`本周完成 3 个任务 · 专注 135 分钟\n${WEEKLY_TEMPLATE_BEFORE_STATS}`);
+  ).toBe(
+    `本周完成 3 个任务 · 专注 135 分钟\n${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`
+  );
+});
+
+test('the weekly template asks the availability question exactly once, last', () => {
+  const weekly = buildCheckInTemplate(context, 'weekly', DATE, stats, {
+    calibration: '有把握但错 2 道 · 没把握但对 1 道',
+    nextStep: '下周先练「三角函数」的到期错题（3 道）'
+  });
+  expect(weekly.split(WEEK_AVAILABILITY_QUESTION)).toHaveLength(2);
+  expect(weekly.endsWith(WEEK_AVAILABILITY_QUESTION)).toBe(true);
 });
 
 test('the weekly template is unchanged without stats or with an all-zero week', () => {
   expect(buildCheckInTemplate(context, 'weekly', DATE, null)).toBe(
-    WEEKLY_TEMPLATE_BEFORE_STATS
+    `${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`
   );
-  expect(buildCheckInTemplate(context, 'weekly', DATE)).toBe(WEEKLY_TEMPLATE_BEFORE_STATS);
+  expect(buildCheckInTemplate(context, 'weekly', DATE)).toBe(
+    `${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`
+  );
   expect(
     buildCheckInTemplate(context, 'weekly', DATE, {
       tasksDone: 0,
@@ -174,7 +189,7 @@ test('the weekly template is unchanged without stats or with an all-zero week', 
       reviewedDays: 0,
       dueMistakes: 0
     })
-  ).toBe(WEEKLY_TEMPLATE_BEFORE_STATS);
+  ).toBe(`${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`);
 });
 
 test('morning, evening and behind templates ignore weekly stats', () => {
@@ -230,7 +245,8 @@ test('the weekly template ends with the two honest lines', () => {
       '本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%',
       WEEKLY_TEMPLATE_BEFORE_STATS,
       '有把握但错 2 道 · 没把握但对 1 道',
-      '下一步：下周先练「三角函数」的到期错题（3 道）'
+      '下一步：下周先练「三角函数」的到期错题（3 道）',
+      WEEK_AVAILABILITY_QUESTION
     ].join('\n')
   );
 });
@@ -240,7 +256,8 @@ test('honest lines stand alone when the week has no recap numbers', () => {
     [
       WEEKLY_TEMPLATE_BEFORE_STATS,
       '有把握但错 2 道 · 没把握但对 1 道',
-      '下一步：下周先练「三角函数」的到期错题（3 道）'
+      '下一步：下周先练「三角函数」的到期错题（3 道）',
+      WEEK_AVAILABILITY_QUESTION
     ].join('\n')
   );
 });
@@ -251,25 +268,31 @@ test('only the non-null honest line is appended', () => {
       calibration: null,
       nextStep: '下周先练「三角函数」的到期错题（3 道）'
     })
-  ).toBe(`${WEEKLY_TEMPLATE_BEFORE_STATS}\n下一步：下周先练「三角函数」的到期错题（3 道）`);
+  ).toBe(
+    `${WEEKLY_TEMPLATE_BEFORE_STATS}\n下一步：下周先练「三角函数」的到期错题（3 道）\n${WEEK_AVAILABILITY_QUESTION}`
+  );
   expect(
     buildCheckInTemplate(context, 'weekly', DATE, null, {
       calibration: '有把握但错 2 道 · 没把握但对 1 道',
       nextStep: null
     })
-  ).toBe(`${WEEKLY_TEMPLATE_BEFORE_STATS}\n有把握但错 2 道 · 没把握但对 1 道`);
+  ).toBe(
+    `${WEEKLY_TEMPLATE_BEFORE_STATS}\n有把握但错 2 道 · 没把握但对 1 道\n${WEEK_AVAILABILITY_QUESTION}`
+  );
 });
 
 test('no honest facts leaves the weekly template byte-identical', () => {
   expect(buildCheckInTemplate(context, 'weekly', DATE, stats, null)).toBe(
-    `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE_BEFORE_STATS}`
+    `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`
   );
   expect(
     buildCheckInTemplate(context, 'weekly', DATE, stats, {
       calibration: null,
       nextStep: null
     })
-  ).toBe(`本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE_BEFORE_STATS}`);
+  ).toBe(
+    `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`
+  );
 });
 
 test('the weekly prompt carries the honest facts in their own block', () => {
@@ -304,9 +327,13 @@ test('the accountability clause trails the honest lines exactly once', () => {
 
   const weekly = buildCheckInTemplate(context, 'weekly', DATE, stats, withClause);
   expect(weekly.split(clause)).toHaveLength(2);
-  expect(weekly.endsWith(clause)).toBe(true);
+  // The clause ends before the deterministic availability question.
+  expect(weekly.endsWith(`${clause}\n${WEEK_AVAILABILITY_QUESTION}`)).toBe(true);
   expect(weekly).toBe(
-    buildCheckInTemplate(context, 'weekly', DATE, stats, honest) + `\n${clause}`
+    buildCheckInTemplate(context, 'weekly', DATE, stats, honest).replace(
+      WEEK_AVAILABILITY_QUESTION,
+      `${clause}\n${WEEK_AVAILABILITY_QUESTION}`
+    )
   );
 
   // An empty or null clause keeps the message byte-identical.
@@ -435,4 +462,54 @@ test('the empty-plan morning template also carries the promise line', () => {
   expect(buildCheckInTemplate(empty, 'morning', DATE, null, null, null)).toBe(
     '早上好。今天还没有安排任务，想先做点什么？'
   );
+});
+
+// --- the weekly availability question ---------------------------------------
+
+const NO_WORKSPACE: ButlerContext = { ...context, workspaces: [] };
+
+test('the weekly template asks which days next week are packed', () => {
+  const weekly = buildCheckInTemplate(context, 'weekly', DATE);
+  expect(weekly.endsWith(WEEK_AVAILABILITY_QUESTION)).toBe(true);
+  expect(weekly).toBe(
+    `${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`
+  );
+});
+
+test('no workspace leaves the weekly template byte-identical', () => {
+  expect(buildCheckInTemplate(NO_WORKSPACE, 'weekly', DATE)).toBe(
+    WEEKLY_TEMPLATE_BEFORE_STATS
+  );
+  expect(buildCheckInTemplate(NO_WORKSPACE, 'weekly', DATE, stats, honest)).toBe(
+    [
+      '本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%',
+      WEEKLY_TEMPLATE_BEFORE_STATS,
+      '有把握但错 2 道 · 没把握但对 1 道',
+      '下一步：下周先练「三角函数」的到期错题（3 道）'
+    ].join('\n')
+  );
+});
+
+test('the question never enters the model prompt or other triggers', () => {
+  // Like the accountability clause, the ask is deterministic and delivered
+  // after the message; the model must not restate it in its own words.
+  expect(buildCheckInPrompt(context, 'weekly', DATE, stats, honest)).not.toContain(
+    WEEK_AVAILABILITY_QUESTION
+  );
+  expect(buildCheckInPrompt(context, 'weekly', DATE, stats, honest)).not.toContain(
+    '特别满'
+  );
+  expect(buildCheckInPrompt(context, 'morning', DATE)).not.toContain(
+    WEEK_AVAILABILITY_QUESTION
+  );
+  for (const trigger of ['morning', 'evening', 'behind'] as const) {
+    expect(buildCheckInTemplate(context, trigger, DATE, stats, honest)).not.toContain(
+      WEEK_AVAILABILITY_QUESTION
+    );
+  }
+});
+
+test('weekAvailabilityQuestion is empty without a workspace', () => {
+  expect(weekAvailabilityQuestion(context)).toBe(WEEK_AVAILABILITY_QUESTION);
+  expect(weekAvailabilityQuestion(NO_WORKSPACE)).toBe('');
 });

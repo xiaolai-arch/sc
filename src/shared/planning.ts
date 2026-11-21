@@ -8,14 +8,22 @@
 export type WorkspacePlanGeneratedBy = 'agent' | 'template';
 
 /** Which input supplied the daily minute budget the plan was built around. */
-export type AvailableMinutesSource = 'input' | 'workspace' | 'default';
+export type AvailableMinutesSource = 'input' | 'week' | 'workspace' | 'default';
 
 /** Plain-Chinese provenance shown next to the planned daily minutes. */
 export const AVAILABLE_MINUTES_SOURCE_LABELS: Record<AvailableMinutesSource, string> = {
   input: '本次指定',
+  week: '来自你说的一周安排',
   workspace: '来自项目设置',
   default: '默认值'
 };
+
+/**
+ * One small task, not a target: the whole daily budget for a day the user
+ * said is especially full, so the plan stays honest instead of filling the
+ * day anyway.
+ */
+export const BUSY_DAY_MINUTES = 10;
 
 /**
  * Deterministic one-line label for a plan's daily budget, e.g.
@@ -56,6 +64,11 @@ export interface PlanWorkspaceInput {
   date?: string;
   /** Total minutes available today. Defaults to 120. */
   availableMinutes?: number;
+  /**
+   * Minute budget for a day the user said is especially full. Wins over the
+   * workspace setting but never over an explicit `availableMinutes`.
+   */
+  weekAvailabilityMinutes?: number;
   /** Aborting must stop the model call instead of returning a template plan. */
   signal?: AbortSignal;
 }

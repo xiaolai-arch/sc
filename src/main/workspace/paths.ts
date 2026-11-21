@@ -16,6 +16,7 @@ import { isLocalDateTime } from '../../shared/date';
  *   <root>/reminders.md                      reminders are vault-global
  *   <root>/profile.md                        personal profile (vault-global)
  *   <root>/commitments.md                    promises in the user's own words
+ *   <root>/week-availability.md              days of a week the user said are packed
  *
  * Frontmatter is the machine-readable source of truth; the markdown body is a
  * human-friendly rendering that may be edited freely in Obsidian.
@@ -116,6 +117,15 @@ export function profileFile(root: string): string {
  */
 export function commitmentsFile(root: string): string {
   return join(root, 'commitments.md');
+}
+
+/**
+ * Which days of one week the user said are especially full. Vault-global like
+ * `commitments.md`: the packed days constrain every project's daily and
+ * long-term plans, not just one workspace.
+ */
+export function weekAvailabilityFile(root: string): string {
+  return join(root, 'week-availability.md');
 }
 
 export function knowledgeDir(root: string): string {

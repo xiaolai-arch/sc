@@ -1,4 +1,5 @@
 import { daysUntilTarget } from '../../shared/workspace';
+import { BUSY_DAY_MINUTES, type AvailableMinutesSource } from '../../shared/planning';
 import type {
   MemoryItem,
   Workspace,
@@ -18,7 +19,7 @@ export interface WorkspacePlanPromptInput {
   date: string;
   availableMinutes: number;
   /** Where the number came from, so the model can mention it honestly. */
-  availableMinutesSource?: 'input' | 'workspace' | 'default';
+  availableMinutesSource?: AvailableMinutesSource;
 }
 
 export interface WorkspacePlanPrompt {
@@ -43,6 +44,12 @@ export function buildWorkspacePlanPrompt(input: WorkspacePlanPromptInput): Works
     `今日可用时间：约 ${input.availableMinutes} 分钟（${availableSourceLabel(
       input.availableMinutesSource
     )}）`,
+    // Only on a day the user said is packed: keep the plan to one small task.
+    ...(input.availableMinutesSource === 'week'
+      ? [
+          `这天用户说特别满：只安排 1 个不超过 ${BUSY_DAY_MINUTES} 分钟的小任务，不要凑满时间。`
+        ]
+      : []),
     `工作区：${input.workspace.name}（${input.workspace.kind}）`
   ];
 
@@ -148,8 +155,9 @@ function passedTargetInstruction(kind: WorkspaceKind | undefined): string {
   return '请重新压缩剩余安排：收尾未完成的部分，优先里程碑。';
 }
 
-function availableSourceLabel(source: 'input' | 'workspace' | 'default' | undefined): string {
+function availableSourceLabel(source: AvailableMinutesSource | undefined): string {
   if (source === 'input') return '用户本次说明';
+  if (source === 'week') return '来自你说的一周安排';
   if (source === 'workspace') return '来自项目设置的每天可用时间';
   return '未设置时使用的默认值';
 }

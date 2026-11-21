@@ -5,11 +5,15 @@ import type {
   WorkspacePlan,
   WorkspacePlanner
 } from '../../shared/planning';
+import { BUSY_DAY_MINUTES } from '../../shared/planning';
 import type { WorkspaceService } from '../../shared/workspace';
 import type { ModelClient } from '../agent/model-client';
 import { parseWorkspacePlanReply } from './parse';
 import { buildWorkspacePlanPrompt } from './prompt';
 import { buildTemplatePlan } from './template';
+
+/** One small task, not a target: re-exported so callers size a packed day. */
+export { BUSY_DAY_MINUTES };
 
 const DEFAULT_AVAILABLE_MINUTES = 120;
 const MIN_AVAILABLE_MINUTES = 5;
@@ -45,9 +49,10 @@ export class WorkspacePlannerImpl implements WorkspacePlanner {
     throwIfAborted(input.signal);
     const date = resolveDate(input.date, this.now());
     const snapshot = await this.workspaceService.getWorkspaceSnapshot(input.workspaceId);
-    // Precedence: the caller's number for today, then the project's saved daily
-    // time, then the generic default. The UI shows which one was used — an
-    // invalid value must not be labelled as if it had been used.
+    // Precedence: the caller's number for today, then a packed-day budget the
+    // user answered in the Sunday review, then the project's saved daily time,
+    // then the generic default. The UI shows which one was used — an invalid
+    // value must not be labelled as if it had been used.
     const usable = (value: number | undefined): value is number =>
       value !== undefined && Number.isFinite(value) && value > 0;
     let availableMinutesSource: AvailableMinutesSource = 'default';
@@ -55,6 +60,9 @@ export class WorkspacePlannerImpl implements WorkspacePlanner {
     if (usable(input.availableMinutes)) {
       availableMinutesSource = 'input';
       requestedMinutes = input.availableMinutes;
+    } else if (usable(input.weekAvailabilityMinutes)) {
+      availableMinutesSource = 'week';
+      requestedMinutes = input.weekAvailabilityMinutes;
     } else if (usable(snapshot.workspace.availableMinutes)) {
       availableMinutesSource = 'workspace';
       requestedMinutes = snapshot.workspace.availableMinutes;

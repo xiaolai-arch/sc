@@ -17,7 +17,8 @@ import { FakeModelClient } from '../../src/main/agent/model-client';
 import {
   buildTemplatePlan,
   createWorkspacePlanner,
-  parseWorkspacePlanReply
+  parseWorkspacePlanReply,
+  BUSY_DAY_MINUTES
 } from '../../src/main/planning';
 import { parseJsonLenient } from '../../src/main/planning/parse';
 
@@ -317,6 +318,89 @@ describe('WorkspacePlanner', () => {
     await expect(planner.plan({ workspaceId: 'ws-exam', date: '11/01/2026' })).rejects.toThrow(
       'Invalid plan date'
     );
+  });
+});
+
+describe('week availability minutes', () => {
+  test('an explicit input still beats a packed-day budget', async () => {
+    const planner = createWorkspacePlanner({
+      modelClient: null,
+      workspaceService: makeWorkspaceService({ availableMinutes: 45 })
+    });
+
+    const plan = await planner.plan({
+      workspaceId: 'ws-exam',
+      availableMinutes: 90,
+      weekAvailabilityMinutes: BUSY_DAY_MINUTES
+    });
+
+    expect(plan.availableMinutes).toBe(90);
+    expect(plan.availableMinutesSource).toBe('input');
+  });
+
+  test('a packed-day budget beats the workspace setting and carries its own label', async () => {
+    const planner = createWorkspacePlanner({
+      modelClient: null,
+      workspaceService: makeWorkspaceService({ availableMinutes: 45 })
+    });
+
+    const plan = await planner.plan({
+      workspaceId: 'ws-exam',
+      weekAvailabilityMinutes: BUSY_DAY_MINUTES
+    });
+
+    expect(plan.availableMinutes).toBe(BUSY_DAY_MINUTES);
+    expect(plan.availableMinutesSource).toBe('week');
+  });
+
+  test('without a packed-day budget the workspace setting and default still apply', async () => {
+    const withSetting = await createWorkspacePlanner({
+      modelClient: null,
+      workspaceService: makeWorkspaceService({ availableMinutes: 45 })
+    }).plan({ workspaceId: 'ws-exam' });
+    expect(withSetting.availableMinutesSource).toBe('workspace');
+
+    const withoutSetting = await createWorkspacePlanner({
+      modelClient: null,
+      workspaceService: makeWorkspaceService()
+    }).plan({ workspaceId: 'ws-exam' });
+    expect(withoutSetting.availableMinutes).toBe(120);
+    expect(withoutSetting.availableMinutesSource).toBe('default');
+  });
+
+  test('only a week day prompt names the source and adds the one-small-task line', async () => {
+    const client = new FakeModelClient(['{"tasks":[]}']);
+    const planner = createWorkspacePlanner({
+      modelClient: client,
+      workspaceService: makeWorkspaceService()
+    });
+
+    await planner.plan({
+      workspaceId: 'ws-exam',
+      date: '2026-11-01',
+      weekAvailabilityMinutes: BUSY_DAY_MINUTES
+    });
+
+    const prompt = joinPrompt(client);
+    expect(prompt).toContain('今日可用时间：约 10 分钟（来自你说的一周安排）');
+    expect(prompt).toContain(
+      '这天用户说特别满：只安排 1 个不超过 10 分钟的小任务，不要凑满时间。'
+    );
+  });
+
+  test('other sources keep the prompt free of the packed-day line', async () => {
+    const client = new FakeModelClient(['{"tasks":[]}']);
+    const planner = createWorkspacePlanner({
+      modelClient: client,
+      workspaceService: makeWorkspaceService({ availableMinutes: 45 })
+    });
+
+    await planner.plan({ workspaceId: 'ws-exam', date: '2026-11-01' });
+
+    const prompt = joinPrompt(client);
+    expect(prompt).toContain('今日可用时间：约 45 分钟（来自项目设置的每天可用时间）');
+    expect(prompt).not.toContain('来自你说的一周安排');
+    expect(prompt).not.toContain('这天用户说特别满');
   });
 });
 

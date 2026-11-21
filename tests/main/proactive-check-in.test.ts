@@ -791,6 +791,9 @@ test('respects snooze, disabled notifications and the daily cap for the behind n
 const WEEKLY_TEMPLATE =
   '周日好。花三分钟回顾一下这一周：完成了什么，卡在哪里，下周最重要的一件事是什么？说完我来帮你整理，并排下周的计划。';
 
+const AVAILABILITY_QUESTION =
+  '下周哪几天会特别满？回我一句就行，那几天我只给你排一件小事。';
+
 const weeklyStats = {
   tasksDone: 3,
   tasksTotal: 5,
@@ -852,7 +855,7 @@ test('prepends the deterministic recap line to the weekly template', async () =>
     const summaries = await value.list();
     const conversation = await value.get(summaries[0]!.id);
     expect(conversation?.messages[0]?.text).toBe(
-      `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE}`
+      `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE}\n${AVAILABILITY_QUESTION}`
     );
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -901,7 +904,9 @@ test('keeps the weekly message byte-identical when no stats provider is wired', 
 
     const summaries = await value.list();
     const conversation = await value.get(summaries[0]!.id);
-    expect(conversation?.messages[0]?.text).toBe(WEEKLY_TEMPLATE);
+    expect(conversation?.messages[0]?.text).toBe(
+      `${WEEKLY_TEMPLATE}\n${AVAILABILITY_QUESTION}`
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -923,6 +928,29 @@ test('keeps the weekly message unchanged for an all-zero week', async () => {
         reviewedDays: 0,
         dueMistakes: 0
       }),
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    await service.check('weekly', '2026-11-01');
+
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    expect(conversation?.messages[0]?.text).toBe(
+      `${WEEKLY_TEMPLATE}\n${AVAILABILITY_QUESTION}`
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the weekly review skips the availability question without projects', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService: workspaceServiceFor([]),
+      modelClient: null,
       getSettings: async () => settings(),
       now: () => NOW
     });
@@ -998,7 +1026,7 @@ test('appends the honest calibration and next step to the weekly message', async
     const summaries = await value.list();
     const conversation = await value.get(summaries[0]!.id);
     expect(conversation?.messages[0]?.text).toBe(
-      `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE}\n${HONEST_LINES}`
+      `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE}\n${HONEST_LINES}\n${AVAILABILITY_QUESTION}`
     );
     // The surfaced banner stays generic; only the review message carries it.
     expect(notification?.body).toBe('周日复盘时间到了，点开回顾本周并安排下周。');
@@ -1026,11 +1054,13 @@ test('the honest lines still end a model-written weekly review', async () => {
     const summaries = await value.list();
     const conversation = await value.get(summaries[0]!.id);
     expect(conversation?.messages[0]?.text).toBe(
-      `这一周你完成了 3 个任务，稳中有进。\n${HONEST_LINES}`
+      `这一周你完成了 3 个任务，稳中有进。\n${HONEST_LINES}\n${AVAILABILITY_QUESTION}`
     );
     const prompt = client.calls[0]?.messages[0]?.content ?? '';
     expect(prompt).toContain('本周诚实数据：');
     expect(prompt).toContain('- 有把握但错 2 道 · 没把握但对 1 道');
+    // The availability question is delivered, never composed by the model.
+    expect(prompt).not.toContain(AVAILABILITY_QUESTION);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -1053,7 +1083,7 @@ test('only the non-null honest line is appended', async () => {
     const summaries = await value.list();
     const conversation = await value.get(summaries[0]!.id);
     expect(conversation?.messages[0]?.text).toBe(
-      `${WEEKLY_TEMPLATE}\n下一步：${HONEST.nextStep}`
+      `${WEEKLY_TEMPLATE}\n下一步：${HONEST.nextStep}\n${AVAILABILITY_QUESTION}`
     );
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -1077,7 +1107,7 @@ test('the weekly message stays byte-identical when there is no honest provider',
     const summaries = await value.list();
     const conversation = await value.get(summaries[0]!.id);
     expect(conversation?.messages[0]?.text).toBe(
-      `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE}`
+      `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE}\n${AVAILABILITY_QUESTION}`
     );
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -1105,7 +1135,7 @@ test('a failing honest provider leaves the weekly message unchanged', async () =
     const summaries = await value.list();
     const conversation = await value.get(summaries[0]!.id);
     expect(conversation?.messages[0]?.text).toBe(
-      `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE}`
+      `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE}\n${AVAILABILITY_QUESTION}`
     );
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -1159,11 +1189,15 @@ test('the weekly message carries the accountability clause once, and the prompt 
     const conversation = await value.get(summaries[0]!.id);
     const text = conversation?.messages[0]?.text ?? '';
     expect(text).toBe(
-      `这一周你完成了 3 个任务，稳中有进。\n${HONEST_LINES}\n${clause}`
+      `这一周你完成了 3 个任务，稳中有进。\n${HONEST_LINES}\n${clause}\n${AVAILABILITY_QUESTION}`
     );
     // Exactly once, and never inside the model's prompt.
     expect(text.split(clause)).toHaveLength(2);
+    expect(text.split(AVAILABILITY_QUESTION)).toHaveLength(2);
     expect(client.calls[0]?.messages[0]?.content ?? '').not.toContain(clause);
+    expect(client.calls[0]?.messages[0]?.content ?? '').not.toContain(
+      AVAILABILITY_QUESTION
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

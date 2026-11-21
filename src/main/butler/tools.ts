@@ -1,5 +1,7 @@
 import { formatLocalDate } from '../../shared/date';
 import type { AgentPermissions } from '../../shared/attachments';
+import type { AvailabilityService } from '../availability/service';
+import { isMonday, weekdayWord, type WeekAvailability } from '../availability/records';
 import {
   resolveKnowledgeLink,
   type KnowledgeService,
@@ -40,6 +42,8 @@ export interface ButlerToolContext {
   practice?: PracticeService | null;
   /** Promises the user made in their own words; absent disables both tools. */
   commitments?: CommitmentService | null;
+  /** Days of a week the user said are packed; absent disables the tool. */
+  weekAvailability?: AvailabilityService | null;
   /**
    * The turn's permission level. When present, write tools are refused without
    * `write`; tools marked `requiresWeb` also need `web`. Absent means the caller
@@ -979,6 +983,59 @@ export function createButlerTools(): ButlerToolDefinition[] {
       }
     },
     {
+      name: 'set_week_availability',
+      description:
+        '记录用户亲口说出的「下周哪几天会特别满」，那几天每天的计划只排一件小事。weekStart 传那一周的周一（YYYY-MM-DD，接下来两周内），busyDays 传 ISO 星期数（1=周一…7=周日），只传用户点名的日子；用户没回答时不要调用，也不要问第二遍。',
+      requiresWrite: true,
+      parameters: {
+        type: 'object',
+        properties: {
+          weekStart: { type: 'string', description: '那一周的周一，YYYY-MM-DD' },
+          busyDays: {
+            type: 'array',
+            items: { type: 'number', minimum: 1, maximum: 7 },
+            description: '特别满的日子，ISO 星期数：1=周一 … 7=周日'
+          },
+          note: { type: 'string', description: '可选备注，最多 100 字' }
+        },
+        required: ['weekStart', 'busyDays'],
+        additionalProperties: false
+      },
+      async execute(input, context) {
+        const availability = context.weekAvailability;
+        if (!availability) {
+          throw new ToolInputError('当前版本不支持记录一周安排。');
+        }
+        const now = context.now();
+        const today = formatLocalDate(now);
+        const weekStart = requiredString(input, 'weekStart');
+        if (
+          !isMonday(weekStart) ||
+          weekStart < today ||
+          weekStart > addLocalDays(now, 14)
+        ) {
+          throw new ToolInputError('日期必须是接下来两周内的周一（YYYY-MM-DD）。');
+        }
+        const busyDays = normalizeBusyDays(input['busyDays']);
+        const note = optionalString(input, 'note');
+        const busyDates = busyDays.map((day) =>
+          addLocalDays(new Date(`${weekStart}T00:00:00`), day - 1)
+        );
+        const record = await availability.set({
+          weekStart,
+          busyDates,
+          ...(note !== undefined ? { note } : {})
+        });
+        throwIfAborted(context.signal);
+        return {
+          ok: true,
+          weekStart: record.weekStart,
+          busyDates: record.busyDates,
+          message: weekAvailabilityMessage(record, now)
+        };
+      }
+    },
+    {
       name: 'save_profile',
       description:
         '记录一条跨项目长期有效的个人信息（身份、偏好与约束、能力经验、近期变化）。只有用户明确说过或明确要求记住时才调用；从对话里推断的信息会保存为待确认，不会当成事实。',
@@ -1530,6 +1587,36 @@ function commitmentResolveMessage(commitment: Commitment, now: Date): string {
   if (commitment.status === 'done') return `已结案：做到了「${commitment.text}」。`;
   if (commitment.status === 'dropped') return `已放下：「${commitment.text}」，不追问了。`;
   return `已改到${commitmentDueLabel(commitment.due, now)}：「${commitment.text}」。`;
+}
+
+/** ISO weekdays 1-7 (Mon=1..Sun=7), deduplicated, at least one, ascending. */
+function normalizeBusyDays(value: unknown): number[] {
+  if (!Array.isArray(value)) {
+    throw new ToolInputError('请说出下周特别满的是哪几天（周一至周日）。');
+  }
+  const days = new Set<number>();
+  for (const entry of value) {
+    if (typeof entry !== 'number' || !Number.isInteger(entry) || entry < 1 || entry > 7) {
+      throw new ToolInputError('请说出下周特别满的是哪几天（周一至周日）。');
+    }
+    days.add(entry);
+  }
+  if (days.size === 0) {
+    throw new ToolInputError('请说出下周特别满的是哪几天（周一至周日）。');
+  }
+  return [...days].sort((a, b) => a - b);
+}
+
+/** The Monday starting the week that contains `date`, on the local calendar. */
+function mondayOf(date: Date): string {
+  return addLocalDays(date, -((date.getDay() + 6) % 7));
+}
+
+/** Deterministic confirmation naming the actual weekdays the user named. */
+function weekAvailabilityMessage(record: WeekAvailability, now: Date): string {
+  const days = record.busyDates.map((date) => weekdayWord(date) ?? date).join('、');
+  const week = record.weekStart === mondayOf(now) ? '本周' : '下周';
+  return `已记下：${week} ${days} 会特别满，那几天我只给你排一件小事。`;
 }
 
 function toJson(value: unknown): string {

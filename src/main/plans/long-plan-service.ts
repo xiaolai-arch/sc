@@ -1,8 +1,9 @@
 import { promises as fs } from 'node:fs';
 import { resolve } from 'node:path';
-import { formatLocalDate } from '../../shared/date';
+import { formatLocalDate, parseLocalDate } from '../../shared/date';
 import type { KnowledgeService } from '../../shared/knowledge';
 import { isActiveKnowledgeTopic } from '../../shared/knowledge';
+import type { AvailabilityService } from '../availability/service';
 import type {
   CreateLongPlanInput,
   LongPlan,
@@ -51,6 +52,11 @@ export interface LongPlanServiceOptions {
   modelClient?: ModelClient | null;
   /** Supplying active topics keeps the model from re-planning what is learned. */
   knowledgeService?: KnowledgeService | null;
+  /**
+   * Read-only source for the days the user said are packed, so the prompt can
+   * route new content around them. Absent leaves the prompt byte-identical.
+   */
+  availabilityService?: AvailabilityService | null;
   now?: () => Date;
 }
 
@@ -140,6 +146,13 @@ function renumberWeekTitle(title: string, number: number): string {
   return /^第\s*\d+\s*周/.test(title)
     ? title.replace(/^第\s*\d+\s*周/, `第 ${number} 周`)
     : title;
+}
+
+/** `YYYY-MM-DD` shifted by `days` on the local calendar. */
+function shiftLocalDate(date: string, days: number): string {
+  const value = parseLocalDate(date);
+  value.setDate(value.getDate() + days);
+  return formatLocalDate(value);
 }
 
 function buildProgressSummary(
@@ -245,8 +258,24 @@ export function createLongPlanService(options: LongPlanServiceOptions): LongPlan
   const vaultRoot = resolve(options.root);
   const modelClient = options.modelClient ?? null;
   const knowledgeService = options.knowledgeService ?? null;
+  const availabilityService = options.availabilityService ?? null;
   const now = options.now ?? (() => new Date());
   const runExclusively = createMutex();
+
+  /**
+   * Stored busy days inside the plan's window, so the model avoids packing new
+   * content onto days the user said are full. Best-effort: an unreadable
+   * availability record just means the prompt line is absent.
+   */
+  async function planBusyDates(startDate: string, weeks: number): Promise<string[]> {
+    if (availabilityService === null) return [];
+    try {
+      const lastDay = shiftLocalDate(startDate, weeks * 7 - 1);
+      return await availabilityService.busyDatesBetween(startDate, lastDay);
+    } catch {
+      return [];
+    }
+  }
 
   /** Mastered first, then most recently touched; a broken vault means no context. */
   async function selectKnownTopics(workspaceId: string): Promise<LongPlanKnowledge[]> {
@@ -351,6 +380,7 @@ export function createLongPlanService(options: LongPlanServiceOptions): LongPlan
             modelClient
           )
         : { sources: [], facts: [] };
+      const busyDates = await planBusyDates(startDate, weeks);
 
       const generation: LongPlanGenerationInput = {
         workspace,
@@ -361,7 +391,8 @@ export function createLongPlanService(options: LongPlanServiceOptions): LongPlan
         ...(notes ? { notes } : {}),
         ...(references ? { references } : {}),
         ...(findings.facts.length ? { researchFacts: findings.facts } : {}),
-        ...(knownTopics.length ? { knownTopics } : {})
+        ...(knownTopics.length ? { knownTopics } : {}),
+        ...(busyDates.length ? { busyDates } : {})
       };
       const generated = await generateLongPlan(generation, modelClient);
       const timestamp = now().toISOString();
@@ -465,6 +496,7 @@ export function createLongPlanService(options: LongPlanServiceOptions): LongPlan
       const workspace = await readWorkspace(plan.workspaceId);
       const knownTopics = await selectKnownTopics(workspace.id);
       const nextWeeklyHours = weeklyHours ?? plan.weeklyHours;
+      const busyDates = await planBusyDates(fromWeek.startDate, remainingWeeks.length);
 
       const generation: LongPlanGenerationInput = {
         workspace,
@@ -475,6 +507,7 @@ export function createLongPlanService(options: LongPlanServiceOptions): LongPlan
         ...(notes ? { notes: clipText(notes, MAX_RECALIBRATION_NOTES) } : {}),
         ...(plan.references ? { references: plan.references } : {}),
         ...(knownTopics.length ? { knownTopics } : {}),
+        ...(busyDates.length ? { busyDates } : {}),
         recalibration: {
           fromWeekNumber: fromWeek.number,
           totalWeeks: plan.weeks,

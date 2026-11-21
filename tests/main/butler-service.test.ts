@@ -335,6 +335,7 @@ describe('ButlerServiceImpl replies', () => {
       'schedule_revisit',
       'record_commitment',
       'resolve_commitment',
+      'set_week_availability',
       'save_profile',
       'create_practice_set',
       'get_practice_overview'
