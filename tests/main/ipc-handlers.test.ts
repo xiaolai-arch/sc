@@ -149,10 +149,18 @@ test('updates and deletes practice sets through the practice service', async () 
   await handlers.updatePracticeSet({ setId: 'ps-1', title: '线代冲刺' });
   const questions = [{ prompt: '矩阵可逆的条件？', options: ['A', 'B'], answer: 1 }];
   await handlers.updatePracticeSet({ setId: 'ps-1', questions });
+  await handlers.updatePracticeSet({
+    setId: 'ps-1',
+    reviewedAt: '2026-11-21T10:00:00.000Z'
+  });
   await handlers.deletePracticeSet({ setId: 'ps-1' });
 
   expect(updateSet).toHaveBeenCalledWith({ setId: 'ps-1', title: '线代冲刺' });
   expect(updateSet).toHaveBeenCalledWith({ setId: 'ps-1', questions });
+  expect(updateSet).toHaveBeenCalledWith({
+    setId: 'ps-1',
+    reviewedAt: '2026-11-21T10:00:00.000Z'
+  });
   expect(deleteSet).toHaveBeenCalledWith({ setId: 'ps-1' });
 });
 
@@ -311,6 +319,17 @@ test('rejects malformed handler parameters before they reach services', async ()
   await expect(handlers.updatePracticeSet({ setId: 'ps-1', questions: [] })).rejects.toThrow(
     '练习题目不能为空。'
   );
+  await expect(
+    handlers.updatePracticeSet({ setId: 'ps-1', reviewedAt: 'not-a-date' })
+  ).rejects.toThrow('复习确认时间无效。');
+  await expect(
+    handlers.createPracticeSet({
+      workspaceId: 'ws-1',
+      title: '题',
+      source: 'robot',
+      questions: [{ prompt: '题？', options: ['A', 'B'], answer: 0 }]
+    })
+  ).rejects.toThrow('练习来源无效。');
   await expect(handlers.deletePracticeSet({ setId: '' })).rejects.toThrow('练习 ID不能为空。');
   await expect(handlers.submitReview({ date: '2026-10-31' })).rejects.toThrow(
     '复盘答案参数无效。'

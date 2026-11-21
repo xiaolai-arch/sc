@@ -7,7 +7,7 @@ export interface NoteMeta {
   status?: string;
   created?: string;
   updated?: string;
-  source?: 'user' | 'agent' | 'imported';
+  source?: 'user' | 'agent' | 'imported' | 'model';
   userTouched?: boolean;
   tags?: string[];
   review?: { next: string; interval_days: number; ease: number };

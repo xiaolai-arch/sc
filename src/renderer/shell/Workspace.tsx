@@ -42,6 +42,7 @@ import { LongPlanPage } from './LongPlanPage';
 import { MemoryPage } from './MemoryPage';
 import { ModelPickerDialog } from './ModelPickerDialog';
 import { PracticeSetDialog } from './PracticeSetDialog';
+import { PracticeReviewChip } from './PracticePanels';
 import { ProfilePage } from './ProfilePage';
 import { TodayOverview, dueRevisitTopics, todayQuizOffer } from './TodayOverview';
 import {
@@ -1385,6 +1386,16 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     setRenameSetId(set.id);
   }
 
+  /** 我看过了: stamps reviewedAt so the 待核对 chip disappears. */
+  async function reviewPracticeSet(setId: string): Promise<void> {
+    setPracticeError(null);
+    try {
+      await updatePracticeSet({ setId, reviewedAt: new Date().toISOString() });
+    } catch (cause) {
+      setPracticeError(messageOf(cause));
+    }
+  }
+
   async function removePracticeSet(set: PracticeSet) {
     if (confirmDeleteSetId !== set.id) {
       setConfirmDeleteSetId(set.id);
@@ -1775,24 +1786,36 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
                 </p>
               ) : (
                 filteredPracticeSets.map((set) => (
-                  <button
+                  <div
                     key={set.id}
-                    type="button"
-                    onClick={() => setPracticeSetId(set.id)}
-                    aria-current={selectedPracticeSet?.id === set.id ? 'page' : undefined}
-                    className={`mb-1 flex w-full flex-col rounded-xl px-3 py-2 text-left transition-colors duration-200 ${
+                    className={`mb-1 rounded-xl transition-colors duration-200 ${
                       selectedPracticeSet?.id === set.id
                         ? 'bg-black/[0.06] dark:bg-white/[0.1]'
                         : 'hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'
                     }`}
                   >
-                    <span className="truncate text-[13px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
-                      {set.title}
-                    </span>
-                    <span className="mt-0.5 text-[12px] text-gray-500 dark:text-[#8e8e93]">
-                      {set.subject} · {set.questions.length} 题
-                    </span>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => setPracticeSetId(set.id)}
+                      aria-current={selectedPracticeSet?.id === set.id ? 'page' : undefined}
+                      className="flex w-full flex-col rounded-xl px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+                    >
+                      <span className="truncate text-[13px] font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
+                        {set.title}
+                      </span>
+                      <span className="mt-0.5 text-[12px] text-gray-500 dark:text-[#8e8e93]">
+                        {set.subject} · {set.questions.length} 题
+                      </span>
+                    </button>
+                    {/* The chip keeps its own row under the button so the
+                        title column is never squeezed to zero at the default
+                        window width (the D1 overflow lesson). */}
+                    {set.source === 'model' && set.reviewedAt === undefined ? (
+                      <div className="flex items-center gap-1.5 px-3 pb-2">
+                        <PracticeReviewChip set={set} onReviewed={() => reviewPracticeSet(set.id)} />
+                      </div>
+                    ) : null}
+                  </div>
                 ))
               )}
               {selectedPracticeSet ? (
@@ -1888,6 +1911,9 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
                       !projectId || attempt.workspaceId === projectId
                   )}
                   onCreateSet={createPracticeSet}
+                  onReviewSet={async (setId) => {
+                    await reviewPracticeSet(setId);
+                  }}
                   onOpenChat={() => {
                     setPracticeOpen(false);
                     changeSection('chat');

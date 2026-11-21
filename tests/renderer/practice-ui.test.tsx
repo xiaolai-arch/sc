@@ -725,3 +725,141 @@ describe('confidence picker while answering', () => {
     expect(screen.getByRole('button', { name: '有把握' })).toHaveAttribute('aria-pressed', 'false');
   });
 });
+
+describe('provenance marking on practice sets', () => {
+  const modelSet: PracticeSet = { ...practiceSet, source: 'model' };
+  const reviewedModelSet: PracticeSet = {
+    ...practiceSet,
+    source: 'model',
+    reviewedAt: '2026-11-21T10:00:00.000Z'
+  };
+
+  it('shows 待核对 and 我看过了 only for an unreviewed model set', () => {
+    const view = renderPane({ set: modelSet, onReviewSet: vi.fn(async () => undefined) });
+
+    expect(screen.getByText('待核对')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '确认已看过：极限基础' })).toHaveTextContent(
+      '我看过了'
+    );
+
+    view.unmount();
+    renderPane({ set: practiceSet, onReviewSet: vi.fn(async () => undefined) });
+    expect(screen.queryByText('待核对')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '我看过了' })).not.toBeInTheDocument();
+  });
+
+  it('hides both marks once the set is reviewed', () => {
+    renderPane({ set: reviewedModelSet, onReviewSet: vi.fn(async () => undefined) });
+    expect(screen.queryByText('待核对')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /我看过了|记录中/ })).not.toBeInTheDocument();
+  });
+
+  it('records the review and the chip disappears when the parent updates', async () => {
+    const user = userEvent.setup();
+    const onReviewSet = vi.fn(async () => undefined);
+    const view = renderPane({ set: modelSet, onReviewSet });
+
+    await user.click(screen.getByRole('button', { name: '确认已看过：极限基础' }));
+    expect(onReviewSet).toHaveBeenCalledTimes(1);
+    expect(onReviewSet).toHaveBeenCalledWith('ps1');
+
+    // The parent owns the record; re-rendering with the reviewed set hides it.
+    view.unmount();
+    renderPane({ set: reviewedModelSet, onReviewSet });
+    expect(screen.queryByText('待核对')).not.toBeInTheDocument();
+  });
+
+  it('renders the chip without a handler when review is unavailable', () => {
+    renderPane({ set: modelSet });
+    expect(screen.getByText('待核对')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '我看过了' })).not.toBeInTheDocument();
+  });
+});
+
+describe('one-question import from the mistake book', () => {
+  it('turns a choice mistake into exactly one single-question set', async () => {
+    const user = userEvent.setup();
+    const choiceMistake = {
+      ...mistake(1),
+      prompt: '当 x→0 时 sin x / x 的极限是？',
+      options: ['0', '1', '∞'],
+      answer: 1,
+      explanation: '重要极限。'
+    };
+    const onCreateSet = vi.fn(
+      async (_input: CreatePracticeSetInput): Promise<PracticeSet> => ({
+        ...practiceSet,
+        id: 'ps-single',
+        title: '单题 · 当 x→0 时 sin x / x 的极限是？'
+      })
+    );
+
+    renderPane({ mistakes: [choiceMistake], sets: [practiceSet], onCreateSet });
+
+    await user.click(
+      screen.getByRole('button', { name: '转为练习：当 x→0 时 sin x / x 的极限是？' })
+    );
+
+    await waitFor(() => expect(onCreateSet).toHaveBeenCalledTimes(1));
+    expect(onCreateSet).toHaveBeenCalledWith({
+      workspaceId: 'kaoyan',
+      title: '单题 · 当 x→0 时 sin x / x 的极限是？',
+      subject: '数学',
+      questions: [
+        {
+          prompt: '当 x→0 时 sin x / x 的极限是？',
+          options: ['0', '1', '∞'],
+          answer: 1,
+          explanation: '重要极限。'
+        }
+      ]
+    });
+    expect(await screen.findByRole('status')).toHaveTextContent('已生成单题练习');
+  });
+
+  it('keeps a short mistake a short question and truncates a long title', async () => {
+    const user = userEvent.setup();
+    const prompt = '用自己的话完整说明第一个重要极限为什么成立并给出推导过程';
+    const shortMistake = {
+      ...mistake(2),
+      kind: 'short' as const,
+      prompt,
+      options: [],
+      answer: 0,
+      referenceAnswer: 'x→0 时 sin x / x → 1。'
+    };
+    const onCreateSet = vi.fn(
+      async (_input: CreatePracticeSetInput): Promise<PracticeSet> => practiceSet
+    );
+
+    renderPane({ mistakes: [shortMistake], onCreateSet });
+    await user.click(screen.getByRole('button', { name: `转为练习：${prompt}` }));
+
+    await waitFor(() => expect(onCreateSet).toHaveBeenCalledTimes(1));
+    const input = onCreateSet.mock.calls[0]![0];
+    expect(input.title).toBe(`单题 · ${prompt.slice(0, 24)}…`);
+    expect(input.subject).toBe('考研');
+    expect(input.questions).toEqual([
+      {
+        kind: 'short',
+        prompt,
+        referenceAnswer: 'x→0 时 sin x / x → 1。',
+        explanation: ''
+      }
+    ]);
+    // The mistake history is never rewritten by the import.
+    expect(shortMistake.wrongCount).toBe(2);
+    expect(shortMistake.status).toBe('active');
+  });
+
+  it('has no bulk-import surface next to the single-question action', () => {
+    renderPane({ mistakes: [mistake(1)], onCreateSet: vi.fn(async () => practiceSet) });
+    expect(screen.queryByRole('button', { name: /整课成卡|全部转为练习|批量/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^转为练习/ })).toHaveLength(1);
+  });
+
+  it('hides 转为练习 when no create handler is supplied', () => {
+    renderPane({ mistakes: [mistake(1)] });
+    expect(screen.queryByRole('button', { name: /转为练习/ })).not.toBeInTheDocument();
+  });
+});

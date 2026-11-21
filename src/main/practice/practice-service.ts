@@ -90,6 +90,23 @@ function optionalConfidence(value: unknown): PracticeConfidence | undefined {
   return value;
 }
 
+/** Only `model` carries provenance; `user` and absent both mean hand-made. */
+function optionalSetSource(value: unknown): 'model' | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (value === 'user') return undefined;
+  if (value !== 'model') throw new Error('Invalid practice set source');
+  return 'model';
+}
+
+/** A caller-supplied review timestamp; the stored value is always an ISO date. */
+function optionalReviewTimestamp(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string' || Number.isNaN(new Date(value).getTime())) {
+    throw new Error('Invalid practice set reviewedAt');
+  }
+  return value;
+}
+
 function normalizeQuestions(input: unknown): PracticeQuestion[] {
   if (!Array.isArray(input) || input.length === 0) {
     throw new Error('Practice set needs at least one question');
@@ -361,6 +378,7 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
       const workspaceId = assertWorkspaceId(requireString(input.workspaceId, 'workspace id'));
       const title = requireString(input.title, 'Practice set title');
       const subject = typeof input.subject === 'string' ? input.subject : '';
+      const source = optionalSetSource(input.source);
       const questions = normalizeQuestions(input.questions);
       const timestamp = now().toISOString();
       const set: PracticeSet = {
@@ -369,6 +387,9 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
         title,
         subject,
         questions,
+        // Only a model set carries provenance; a hand-made set stays absent so
+        // its file is byte-identical to sets written before this field existed.
+        ...(source !== undefined ? { source } : {}),
         createdAt: timestamp,
         updatedAt: timestamp
       };
@@ -391,12 +412,19 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
       const hasTitle = input.title !== undefined;
       const hasSubject = input.subject !== undefined;
       const hasQuestions = input.questions !== undefined;
-      if (!hasTitle && !hasSubject && !hasQuestions) {
+      const hasReviewedAt = input.reviewedAt !== undefined;
+      if (!hasTitle && !hasSubject && !hasQuestions && !hasReviewedAt) {
         throw new Error('No practice set fields to update');
       }
       const title = hasTitle ? requireString(input.title, 'Practice set title') : undefined;
       const subject = hasSubject ? (typeof input.subject === 'string' ? input.subject : '') : undefined;
       const questions = hasQuestions ? normalizeQuestions(input.questions) : undefined;
+      // 我看过了 records the learner's own verdict; the timestamp comes from
+      // the renderer, so a hand-edited vault value can never claim a review
+      // that did not happen.
+      const reviewedAt = hasReviewedAt
+        ? optionalReviewTimestamp(input.reviewedAt)
+        : undefined;
       await ensureSeeded();
       return runExclusively(async () => {
         const found = await findSet(setId);
@@ -406,6 +434,7 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
           ...(title !== undefined ? { title } : {}),
           ...(subject !== undefined ? { subject } : {}),
           ...(questions !== undefined ? { questions } : {}),
+          ...(reviewedAt !== undefined ? { reviewedAt } : {}),
           updatedAt: now().toISOString()
         };
         await writeFileAtomic(

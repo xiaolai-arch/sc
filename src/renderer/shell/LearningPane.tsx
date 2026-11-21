@@ -19,7 +19,12 @@ import type {
 } from '../../shared/practice';
 import { ConfidencePicker } from './CalibrationCard';
 import { buildMixedPracticeSet, type MixedPracticeSet } from './interleave';
-import { AttemptHistory, MistakeBook } from './PracticePanels';
+import {
+  AttemptHistory,
+  MistakeBook,
+  PracticeReviewChip,
+  singleQuestionSetInput
+} from './PracticePanels';
 import { PracticeSetDialog } from './PracticeSetDialog';
 
 type LearningPaneProps = {
@@ -44,6 +49,8 @@ type LearningPaneProps = {
   /** Free-recall answers; the learner's self-assessment is the verdict. */
   onSubmitShortAnswer?: (input: SubmitShortAnswerInput) => Promise<SubmitAnswerResult>;
   onCreateSet?: (input: CreatePracticeSetInput) => Promise<PracticeSet>;
+  /** Records the learner's 我看过了 verdict on a model-generated set. */
+  onReviewSet?: (setId: string) => Promise<void>;
   /** Writes the printable sheet; omitted callers simply do not show the button. */
   onExportMistakeSheet?: (
     input: ExportMistakeSheetInput
@@ -67,6 +74,7 @@ export function LearningPane({
   onSubmitAnswer,
   onSubmitShortAnswer,
   onCreateSet,
+  onReviewSet,
   onExportMistakeSheet,
   onOpenChat,
   onOpenNote
@@ -85,6 +93,8 @@ export function LearningPane({
   const [finished, setFinished] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  /** Quiet confirmation after a mistake becomes a one-question set. */
+  const [setNotice, setSetNotice] = useState<string | null>(null);
   /** An in-memory round-robin session; null means the real selected set. */
   const [mix, setMix] = useState<MixedPracticeSet | null>(null);
 
@@ -136,6 +146,29 @@ export function LearningPane({
   const dueIds = new Set((dueMistakes ?? []).map((mistake) => mistake.id));
   const mistakeBookWorkspaceId =
     workspace?.id ?? set?.workspaceId ?? mistakes[0]?.workspaceId ?? '';
+  /** One question, one set: the book never bulk-imports. */
+  async function makeSetFromMistake(mistake: PracticeMistake) {
+    if (!onCreateSet) return;
+    setSetNotice(null);
+    setError(null);
+    // The set lands wherever the mistake lives. The source set's subject is
+    // closest to "the mistake's subject"; the project name is the fallback
+    // when that set is gone.
+    const sourceSet = sets?.find((entry) => entry.id === mistake.setId);
+    const owner = workspaces?.find((entry) => entry.id === mistake.workspaceId);
+    try {
+      const created = await onCreateSet(
+        singleQuestionSetInput(
+          mistake,
+          mistake.workspaceId,
+          sourceSet?.subject || owner?.name || workspace?.name || ''
+        )
+      );
+      setSetNotice(`已生成单题练习：${created.title}`);
+    } catch (cause) {
+      setError(friendlyErrorMessage(cause, '生成单题练习失败，请重试。'));
+    }
+  }
   const mistakeBook = (
     <MistakeBook
       mistakes={mistakes}
@@ -144,6 +177,7 @@ export function LearningPane({
       {...(onReviewMistake ? { onReview: onReviewMistake } : {})}
       {...(onReviewAllMistakes ? { onReviewAll: onReviewAllMistakes } : {})}
       {...(onResolveMistake ? { onResolve: onResolveMistake } : {})}
+      {...(onCreateSet ? { onMakeSet: (mistake: PracticeMistake) => void makeSetFromMistake(mistake) } : {})}
       {...(onExportMistakeSheet
         ? {
             onExport: () =>
@@ -171,6 +205,20 @@ export function LearningPane({
                 去问阿咲
               </Button>
             </div>
+            {setNotice ? (
+              <p
+                role="status"
+                aria-live="polite"
+                className="mt-3 text-[12px] text-gray-500 dark:text-[#8e8e93]"
+              >
+                {setNotice}
+              </p>
+            ) : null}
+            {error ? (
+              <p role="alert" className="mt-3 text-[13px] text-[#d70015] dark:text-[#ff7b72]">
+                {error}
+              </p>
+            ) : null}
             {mistakeBook}
             <AttemptHistory attempts={attempts} set={set} mistakes={mistakes} />
             {notes.length > 0 ? (
@@ -301,6 +349,16 @@ export function LearningPane({
           <span className="text-[14px] font-medium text-black dark:text-[#f5f5f7]">学习</span>
           <span className="text-[11px] text-gray-400 dark:text-[#8e8e93]">/</span>
           <span className="truncate text-[12px] text-gray-500 dark:text-[#8e8e93]">{activeSet.title}</span>
+          <PracticeReviewChip
+            set={activeSet}
+            {...(onReviewSet
+              ? {
+                  onReviewed: async () => {
+                    await onReviewSet(activeSet.id);
+                  }
+                }
+              : {})}
+          />
         </div>
         <div className="flex items-center gap-2">
           {createButton}
@@ -312,6 +370,15 @@ export function LearningPane({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-6">
         <div className="mx-auto w-full max-w-[720px]">
+          {setNotice ? (
+            <p
+              role="status"
+              aria-live="polite"
+              className="mb-4 text-[12px] text-gray-500 dark:text-[#8e8e93]"
+            >
+              {setNotice}
+            </p>
+          ) : null}
           {mixable ? (
             <div className="mb-4 flex items-center justify-between gap-3 rounded-xl bg-[#f5f5f7] px-4 py-2.5 dark:bg-white/[0.06]">
               <p className="min-w-0 text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">

@@ -37,12 +37,24 @@ export interface PracticeQuestion {
   explanation: string;
 }
 
+/**
+ * Who wrote the questions: absent or `user` means the learner made the set;
+ * `model` means the butler generated it. A model set stays 待核对 until the
+ * learner confirms they read it (`reviewedAt`), because generated questions
+ * are not trusted wholesale.
+ */
+export type PracticeSetSource = 'user' | 'model';
+
 export interface PracticeSet {
   id: string;
   workspaceId: string;
   title: string;
   subject: string;
   questions: PracticeQuestion[];
+  /** Absent/`user` = hand-made (the default); `model` = AI-generated. */
+  source?: PracticeSetSource;
+  /** ISO timestamp of the learner's 我看过了 confirmation. */
+  reviewedAt?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -174,6 +186,8 @@ export interface CreatePracticeSetInput {
   workspaceId: string;
   title: string;
   subject?: string;
+  /** `model` marks an AI-generated set, which stays 待核对 until reviewed. */
+  source?: PracticeSetSource;
   questions: CreatePracticeQuestionInput[];
 }
 
@@ -181,6 +195,11 @@ export interface UpdatePracticeSetInput {
   setId: string;
   title?: string;
   subject?: string;
+  /**
+   * ISO timestamp marking the learner's review (the 我看过了 button). Once set,
+   * a model set no longer shows the 待核对 chip.
+   */
+  reviewedAt?: string;
   /** Replaces the whole question list; provided question ids are preserved. */
   questions?: CreatePracticeQuestionInput[];
 }
