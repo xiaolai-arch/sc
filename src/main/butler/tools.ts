@@ -94,6 +94,33 @@ const KNOWLEDGE_STATUS_LABELS: Record<KnowledgeStatus, string> = {
   paused: '暂停'
 };
 
+/** Practice overview window: the current Monday week plus the seven before it. */
+const PRACTICE_OVERVIEW_WEEKS = 8;
+const UNKNOWN_PRACTICE_SUBJECT = '未分类';
+
+/** Running per-subject totals while the overview is assembled. */
+interface PracticeOverviewRow {
+  subject: string;
+  setCount: number;
+  attemptCount: number;
+  recentAnswered: number;
+  recentCorrect: number;
+  activeMistakes: number;
+}
+
+/** Same Monday-based week the renderer's accuracy trend uses. */
+function startOfPracticeWeek(date: Date): Date {
+  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  // getDay(): 0 = Sunday; shift so Monday starts the week.
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+  return start;
+}
+
+function practiceSubject(subject: string | undefined): string {
+  const trimmed = (subject ?? '').trim();
+  return trimmed === '' ? UNKNOWN_PRACTICE_SUBJECT : trimmed;
+}
+
 /** Evidence linking is additive; a broken knowledge file must not fail the tool. */
 async function linkKnowledge(run: () => Promise<void>): Promise<void> {
   try {
@@ -845,6 +872,111 @@ export function createButlerTools(): ButlerToolDefinition[] {
           title: set.title,
           questionCount: set.questions.length,
           message: `已出题：${set.title}（${set.questions.length} 题，${workspaceName}）· 去学习页作答，错题会自动进错题本`
+        };
+      }
+    },
+    {
+      name: 'get_practice_overview',
+      description:
+        '只读：读取各科目的练习掌握情况——练习集数、答题次数、最近 8 周正确率（百分比，没答过为 null）和待复习错题数。讲解前先调用它判断掌握度：几乎没有答题或没有错题的主题用「示例先行」，先给完整 worked example 再让学习者自己做；已有大量答题或错题的主题反过来「先练后讲」，先让学习者做，做错再给示例对照。workspaceId 省略时使用当前项目。',
+      requiresWrite: false,
+      parameters: {
+        type: 'object',
+        properties: {
+          workspaceId: { type: 'string', description: '项目 ID；省略时使用当前项目' }
+        },
+        additionalProperties: false
+      },
+      async execute(input, context) {
+        const workspaceId = optionalString(input, 'workspaceId') ?? context.workspaceId;
+        if (!workspaceId) {
+          throw new ToolInputError('缺少 workspaceId：请先创建或选择项目。');
+        }
+        const practice = context.practice;
+        if (!practice) {
+          return {
+            available: false,
+            workspaceId,
+            message:
+              '练习数据不可用：当前没有连接练习服务，无法读取练习集、答题和错题；先按学习者的自述判断掌握度。'
+          };
+        }
+
+        const [sets, attempts, mistakes] = await Promise.all([
+          practice.listSets(workspaceId),
+          practice.listAttempts(workspaceId),
+          practice.getMistakes(workspaceId)
+        ]);
+        throwIfAborted(context.signal);
+
+        const subjectBySet = new Map<string, string>();
+        const rows = new Map<string, PracticeOverviewRow>();
+        const ensureRow = (subject: string): PracticeOverviewRow => {
+          const existing = rows.get(subject);
+          if (existing) return existing;
+          const row: PracticeOverviewRow = {
+            subject,
+            setCount: 0,
+            attemptCount: 0,
+            recentAnswered: 0,
+            recentCorrect: 0,
+            activeMistakes: 0
+          };
+          rows.set(subject, row);
+          return row;
+        };
+
+        for (const set of sets) {
+          const subject = practiceSubject(set.subject);
+          subjectBySet.set(set.id, subject);
+          ensureRow(subject).setCount += 1;
+        }
+
+        // Accuracy shares the renderer trend's Monday window, so the butler and
+        // the 学习页 chart quote the same slice of attempts.
+        const currentMonday = startOfPracticeWeek(context.now());
+        const weekMs = 7 * 24 * 60 * 60 * 1000;
+        for (const attempt of attempts) {
+          const subject = subjectBySet.get(attempt.setId) ?? UNKNOWN_PRACTICE_SUBJECT;
+          const row = ensureRow(subject);
+          row.attemptCount += 1;
+          const date = new Date(attempt.answeredAt);
+          if (Number.isNaN(date.getTime())) continue;
+          const offset = Math.round(
+            (currentMonday.getTime() - startOfPracticeWeek(date).getTime()) / weekMs
+          );
+          if (offset < 0 || offset >= PRACTICE_OVERVIEW_WEEKS) continue;
+          row.recentAnswered += 1;
+          if (attempt.correct) row.recentCorrect += 1;
+        }
+
+        // `getMistakes` returns active records only, so this is the review load.
+        for (const mistake of mistakes) {
+          const subject = subjectBySet.get(mistake.setId) ?? UNKNOWN_PRACTICE_SUBJECT;
+          ensureRow(subject).activeMistakes += 1;
+        }
+
+        const subjects = Array.from(rows.values())
+          .sort((a, b) => a.subject.localeCompare(b.subject))
+          .map((row) => ({
+            subject: row.subject,
+            setCount: row.setCount,
+            attemptCount: row.attemptCount,
+            recentAnswered: row.recentAnswered,
+            recentCorrect: row.recentCorrect,
+            accuracy:
+              row.recentAnswered === 0
+                ? null
+                : Math.round((row.recentCorrect / row.recentAnswered) * 100),
+            activeMistakes: row.activeMistakes
+          }));
+
+        return {
+          available: true,
+          workspaceId,
+          windowWeeks: PRACTICE_OVERVIEW_WEEKS,
+          subjects,
+          ...(subjects.length === 0 ? { message: '这个项目还没有练习记录。' } : {})
         };
       }
     }

@@ -7,6 +7,8 @@ import type { KnowledgeService } from '../../src/shared/knowledge';
 import type { ProfileService } from '../../src/shared/profile';
 import type {
   CreatePracticeSetInput,
+  PracticeAttempt,
+  PracticeMistake,
   PracticeService,
   PracticeSet
 } from '../../src/shared/practice';
@@ -919,4 +921,206 @@ test('create_practice_set is gated by write permissions like other write tools',
   expect(result.ok).toBe(false);
   expect(result.content).toContain('仅可查看');
   expect(createSet).not.toHaveBeenCalled();
+});
+
+function overviewSet(id: string, subject: string, title = id): PracticeSet {
+  return {
+    id,
+    workspaceId: 'ws-exam',
+    title,
+    subject,
+    questions: [
+      {
+        id: `${id}-q1`,
+        prompt: `${id} 的题目`,
+        options: ['A', 'B'],
+        answer: 0,
+        explanation: ''
+      }
+    ]
+  };
+}
+
+function attempt(
+  id: string,
+  setId: string,
+  correct: boolean,
+  answeredAt: string
+): PracticeAttempt {
+  return {
+    id,
+    workspaceId: 'ws-exam',
+    setId,
+    questionId: `${setId}-q1`,
+    choice: correct ? 0 : 1,
+    correct,
+    answeredAt
+  };
+}
+
+function activeMistake(id: string, setId: string): PracticeMistake {
+  return {
+    id,
+    workspaceId: 'ws-exam',
+    setId,
+    questionId: `${setId}-q1`,
+    prompt: `${setId} 的题目`,
+    options: ['A', 'B'],
+    answer: 0,
+    explanation: '',
+    wrongCount: 1,
+    correctStreak: 0,
+    priority: 1,
+    intervalDays: 1,
+    due: '2026-11-21',
+    status: 'active',
+    createdAt: '2026-11-01T00:00:00.000Z',
+    updatedAt: '2026-11-01T00:00:00.000Z',
+    lastAnsweredAt: '2026-11-01T00:00:00.000Z'
+  };
+}
+
+function overviewPractice(options: {
+  sets: PracticeSet[];
+  attempts: PracticeAttempt[];
+  mistakes: PracticeMistake[];
+}): PracticeService {
+  return {
+    listSets: async () => options.sets,
+    listAttempts: async () => options.attempts,
+    getMistakes: async () => options.mistakes,
+    getDue: async () => [],
+    getSet: async () => null,
+    createSet: async () => {
+      throw new Error('unused');
+    },
+    submitAnswer: async () => {
+      throw new Error('unused');
+    },
+    submitShortAnswer: async () => {
+      throw new Error('unused');
+    }
+  } as unknown as PracticeService;
+}
+
+test('get_practice_overview reports per-subject sets, attempts, accuracy and mistakes', async () => {
+  const now = new Date('2026-11-21T12:00:00.000Z');
+  const practice = overviewPractice({
+    sets: [
+      overviewSet('ms1', '数学'),
+      overviewSet('ms2', '数学'),
+      overviewSet('en1', '英语')
+    ],
+    attempts: [
+      attempt('a1', 'ms1', true, '2026-11-17T09:00:00.000Z'),
+      attempt('a2', 'ms1', true, '2026-11-18T09:00:00.000Z'),
+      attempt('a3', 'ms1', false, '2026-11-19T09:00:00.000Z'),
+      // Outside the 8-week window: counts toward the all-time attempt total.
+      attempt('a4', 'ms2', true, '2026-08-01T09:00:00.000Z'),
+      attempt('a5', 'en1', true, '2026-11-20T09:00:00.000Z')
+    ],
+    mistakes: [activeMistake('m1', 'ms1'), activeMistake('m2', 'en1'), activeMistake('m3', 'en1')]
+  });
+
+  const result = await executeButlerTool(
+    {
+      id: 'po1',
+      name: 'get_practice_overview',
+      arguments: {}
+    },
+    tools,
+    { workspace: workspaceService, workspaceId: 'ws-exam', practice, now: () => now }
+  );
+
+  expect(result.ok).toBe(true);
+  const payload = JSON.parse(result.content) as {
+    ok: boolean;
+    result: {
+      available: boolean;
+      workspaceId: string;
+      windowWeeks: number;
+      subjects: Array<Record<string, unknown>>;
+    };
+  };
+  expect(payload.result.available).toBe(true);
+  expect(payload.result.workspaceId).toBe('ws-exam');
+  expect(payload.result.windowWeeks).toBe(8);
+  expect(payload.result.subjects).toEqual([
+    {
+      subject: '数学',
+      setCount: 2,
+      attemptCount: 4,
+      recentAnswered: 3,
+      recentCorrect: 2,
+      accuracy: 67,
+      activeMistakes: 1
+    },
+    {
+      subject: '英语',
+      setCount: 1,
+      attemptCount: 1,
+      recentAnswered: 1,
+      recentCorrect: 1,
+      accuracy: 100,
+      activeMistakes: 2
+    }
+  ]);
+});
+
+test('get_practice_overview says practice data is unavailable without a service', async () => {
+  const result = await executeButlerTool(
+    { id: 'po2', name: 'get_practice_overview', arguments: {} },
+    tools,
+    {
+      workspace: workspaceService,
+      workspaceId: 'ws-exam',
+      practice: null,
+      now: () => new Date()
+    }
+  );
+
+  expect(result.ok).toBe(true);
+  const payload = JSON.parse(result.content) as {
+    result: { available: boolean; message: string };
+  };
+  expect(payload.result.available).toBe(false);
+  expect(payload.result.message).toContain('练习数据不可用');
+});
+
+test('get_practice_overview is read-only and allowed under view-only permissions', async () => {
+  const practice = overviewPractice({
+    sets: [overviewSet('ms1', '数学')],
+    attempts: [],
+    mistakes: []
+  });
+
+  const result = await executeButlerTool(
+    { id: 'po3', name: 'get_practice_overview', arguments: {} },
+    tools,
+    {
+      workspace: workspaceService,
+      workspaceId: 'ws-exam',
+      practice,
+      permissions: { web: true, write: false, shell: false },
+      now: () => new Date()
+    }
+  );
+
+  expect(result.ok).toBe(true);
+  expect(result.content).toContain('"available":true');
+});
+
+test('get_practice_overview requires a workspace id', async () => {
+  const tool = createButlerTools().find((entry) => entry.name === 'get_practice_overview');
+  if (!tool) throw new Error('get_practice_overview tool is missing');
+  await expect(
+    tool.execute(
+      {},
+      {
+        workspace: workspaceService,
+        practice: overviewPractice({ sets: [], attempts: [], mistakes: [] }),
+        now: () => new Date()
+      }
+    )
+  ).rejects.toThrow('缺少 workspaceId');
 });

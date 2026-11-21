@@ -333,7 +333,8 @@ describe('ButlerServiceImpl replies', () => {
       'get_memory',
       'record_knowledge',
       'save_profile',
-      'create_practice_set'
+      'create_practice_set',
+      'get_practice_overview'
     ]);
   });
 

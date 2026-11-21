@@ -494,6 +494,108 @@ describe('mistake review sheet', () => {
   });
 });
 
+describe('interleaved mixed practice', () => {
+  const secondSet: PracticeSet = {
+    id: 'ps2',
+    workspaceId: 'kaoyan',
+    title: '导数入门',
+    subject: '数学',
+    questions: [
+      {
+        id: 'q2',
+        prompt: '导数定义中的差商是？',
+        options: ['f(x+h)-f(x)', '(f(x+h)-f(x))/h', 'f(x)/h'],
+        answer: 1,
+        explanation: '差商。'
+      }
+    ]
+  };
+
+  it('hides the entry when fewer than two sets share a subject', () => {
+    renderPane({ set: practiceSet, sets: [practiceSet] });
+    expect(screen.queryByRole('button', { name: '交错混练' })).not.toBeInTheDocument();
+
+    const englishSet: PracticeSet = { ...secondSet, id: 'ps-en', subject: '英语' };
+    renderPane({ set: practiceSet, sets: [practiceSet, englishSet] });
+    expect(screen.queryByRole('button', { name: '交错混练' })).not.toBeInTheDocument();
+  });
+
+  it('shows the entry for two same-subject sets and starts a mixed session', async () => {
+    const user = userEvent.setup();
+    const onSubmitAnswer = vi.fn(async () => ({
+      questionId: 'q1',
+      setId: 'ps1',
+      workspaceId: 'kaoyan',
+      choice: 1,
+      correct: true,
+      answer: 1,
+      explanation: '第一个重要极限。',
+      attempt: {
+        id: 'pa1',
+        workspaceId: 'kaoyan',
+        setId: 'ps1',
+        questionId: 'q1',
+        choice: 1,
+        correct: true,
+        answeredAt: '2026-11-01T09:00:00.000Z'
+      },
+      mistake: null
+    }));
+
+    renderPane({ set: practiceSet, sets: [practiceSet, secondSet], onSubmitAnswer });
+
+    expect(screen.getByText('1 / 1')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '交错混练' }));
+
+    // The synthetic set drives the same flow: two questions, and the source
+    // of the card currently shown is printed quietly above the prompt.
+    expect(screen.getByText('交错混练 · 数学')).toBeInTheDocument();
+    expect(screen.getByText('1 / 2')).toBeInTheDocument();
+    expect(screen.getByText('来自：极限基础')).toBeInTheDocument();
+
+    // Answers still resolve the real question, so attempts land on the real set.
+    await user.click(screen.getByRole('button', { name: 'B. 1' }));
+    await user.click(screen.getByRole('button', { name: '检查答案' }));
+    await waitFor(() =>
+      expect(onSubmitAnswer).toHaveBeenCalledWith({ questionId: 'q1', choice: 1 })
+    );
+  });
+
+  it('shows the source of the second set on the next mixed question', async () => {
+    const user = userEvent.setup();
+    const onSubmitAnswer = vi.fn(async () => ({
+      questionId: 'q1',
+      setId: 'ps1',
+      workspaceId: 'kaoyan',
+      choice: 1,
+      correct: true,
+      answer: 1,
+      explanation: '第一个重要极限。',
+      attempt: {
+        id: 'pa1',
+        workspaceId: 'kaoyan',
+        setId: 'ps1',
+        questionId: 'q1',
+        choice: 1,
+        correct: true,
+        answeredAt: '2026-11-01T09:00:00.000Z'
+      },
+      mistake: null
+    }));
+
+    renderPane({ set: practiceSet, sets: [practiceSet, secondSet], onSubmitAnswer });
+    await user.click(screen.getByRole('button', { name: '交错混练' }));
+    await user.click(screen.getByRole('button', { name: 'B. 1' }));
+    await user.click(screen.getByRole('button', { name: '检查答案' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '下一题' })).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: '下一题' }));
+
+    expect(screen.getByText('2 / 2')).toBeInTheDocument();
+    expect(screen.getByText('来自：导数入门')).toBeInTheDocument();
+  });
+});
+
 describe('confidence picker while answering', () => {
   function choiceResult(correct: boolean): SubmitAnswerResult {
     return {
