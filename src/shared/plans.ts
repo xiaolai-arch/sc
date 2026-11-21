@@ -69,6 +69,26 @@ export interface LongPlanPhase {
   weeks: LongPlanWeek[];
 }
 
+/**
+ * What the last recalibration actually changed, computed from the plan before
+ * and after it ran. All numbers are counts of day tasks plus weekly checks.
+ */
+export interface LongPlanRecalibrationSummary {
+  /** First week number the recalibration rewrote. */
+  fromWeek: number;
+  /** Total weeks in the plan before and after the recalibration. */
+  weeksBefore: number;
+  weeksAfter: number;
+  /** Total tasks + checks in the whole plan before and after. */
+  itemsBefore: number;
+  itemsAfter: number;
+  /** Items in the rewritten weeks that are new / no longer present. */
+  addedItems: number;
+  removedItems: number;
+  /** Checked items in the preserved (untouched) weeks. */
+  keptDoneItems: number;
+}
+
 export interface LongPlan {
   id: string;
   workspaceId: string;
@@ -88,6 +108,8 @@ export interface LongPlan {
   recalibratedAt?: string;
   /** First week number the last recalibration rewrote. */
   recalibratedFrom?: number;
+  /** Deterministic diff of the last recalibration; absent on older plans. */
+  recalibration?: LongPlanRecalibrationSummary;
   createdAt: string;
   updatedAt: string;
   phases: LongPlanPhase[];

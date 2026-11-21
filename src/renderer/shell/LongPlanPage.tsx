@@ -71,6 +71,32 @@ function dateRangeLabel(week: LongPlanWeek): string {
   return `${planMonthDay(week.startDate)} — ${planMonthDay(week.endDate)}`;
 }
 
+/**
+ * The recalibration note: plans written before summaries existed keep the
+ * plain one-line note, and a summary only shows the numbers that changed.
+ */
+function formatRecalibration(plan: LongPlan): { line: string; detail?: string } | null {
+  const summary = plan.recalibration;
+  const fromWeek = summary?.fromWeek ?? plan.recalibratedFrom;
+  if (fromWeek === undefined) return null;
+  const parts = [`已按进度重排第 ${fromWeek} 周起的安排`];
+  if (summary === undefined) return { line: parts[0]! };
+  if (summary.weeksAfter !== summary.weeksBefore) {
+    parts.push(`周数 ${summary.weeksBefore}→${summary.weeksAfter}`);
+  }
+  if (summary.itemsAfter !== summary.itemsBefore) {
+    parts.push(`任务 ${summary.itemsBefore}→${summary.itemsAfter}`);
+  }
+  const detail: string[] = [];
+  if (summary.addedItems > 0) detail.push(`新增 ${summary.addedItems}`);
+  if (summary.removedItems > 0) detail.push(`移除 ${summary.removedItems}`);
+  if (summary.keptDoneItems > 0) detail.push(`保留已完成 ${summary.keptDoneItems}`);
+  return {
+    line: parts.join(' · '),
+    ...(detail.length > 0 ? { detail: detail.join(' · ') } : {})
+  };
+}
+
 function planRangeLabel(plan: LongPlan): string {
   const weeks = plan.phases.flatMap((phase) => phase.weeks);
   const first = weeks[0];
@@ -434,6 +460,7 @@ export function LongPlanPage({
   }, [workspaces]);
   const progress = selectedPlan ? planProgress(selectedPlan) : null;
   const basis = selectedPlan ? planBasis(selectedPlan) : 'model';
+  const recalibration = selectedPlan ? formatRecalibration(selectedPlan) : null;
 
   useEffect(() => {
     if (!focusPlanId) return;
@@ -711,10 +738,17 @@ export function LongPlanPage({
                   {workspaceName(selectedPlan.workspaceId)} · {planRangeLabel(selectedPlan)} · 每周约{' '}
                   {selectedPlan.weeklyHours} 小时
                 </p>
-                {selectedPlan.recalibratedFrom !== undefined ? (
-                  <p className="mt-1 text-[12px] text-gray-500 dark:text-[#8e8e93]">
-                    已按进度重排第 {selectedPlan.recalibratedFrom} 周起的安排
-                  </p>
+                {recalibration ? (
+                  <>
+                    <p className="mt-1 text-[12px] text-gray-500 dark:text-[#8e8e93]">
+                      {recalibration.line}
+                    </p>
+                    {recalibration.detail ? (
+                      <p className="mt-0.5 line-clamp-1 text-[12px] text-gray-400 dark:text-[#8e8e93]">
+                        {recalibration.detail}
+                      </p>
+                    ) : null}
+                  </>
                 ) : null}
                 {selectedPlan.generatedBy === 'template' ? (
                   <p className="mt-2 rounded-xl bg-[#ff9f0a]/10 px-3 py-2 text-[12px] leading-5 text-[#8a5a00] dark:bg-[#ff9f0a]/15 dark:text-[#ffb340]">

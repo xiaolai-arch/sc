@@ -330,6 +330,41 @@ test('recalibrates the remaining weeks with the current hours and notes', async 
   expect(await screen.findByText('已重排剩余安排。')).toBeInTheDocument();
 });
 
+test('shows the real numbers stored by a recalibration summary', () => {
+  renderPage({
+    plans: [
+      {
+        ...plan,
+        recalibratedFrom: 2,
+        recalibration: {
+          fromWeek: 2,
+          weeksBefore: 3,
+          weeksAfter: 2,
+          itemsBefore: 24,
+          itemsAfter: 21,
+          addedItems: 2,
+          removedItems: 5,
+          keptDoneItems: 7
+        }
+      }
+    ]
+  });
+
+  expect(
+    screen.getByText('已按进度重排第 2 周起的安排 · 周数 3→2 · 任务 24→21')
+  ).toBeInTheDocument();
+  expect(screen.getByText('新增 2 · 移除 5 · 保留已完成 7')).toBeInTheDocument();
+});
+
+test('keeps the plain note and invents no numbers for older recalibrated plans', () => {
+  renderPage({ plans: [{ ...plan, recalibratedFrom: 2 }] });
+
+  expect(screen.getByText('已按进度重排第 2 周起的安排')).toBeInTheDocument();
+  expect(
+    screen.queryByText(/新增 \d|移除 \d|保留已完成|周数 \d/)
+  ).not.toBeInTheDocument();
+});
+
 test('shows recalibration progress and keeps the dialog open on failure', async () => {
   let reject!: (cause: Error) => void;
   const onRecalibrate = vi.fn(

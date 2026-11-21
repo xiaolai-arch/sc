@@ -591,6 +591,56 @@ test('recalibrates the untouched remaining weeks from actual progress', async ()
   }
 });
 
+test('stores a deterministic summary of what a recalibration changed', async () => {
+  const client = new FakeModelClient([modelReply(4), modelReply(3)]);
+  const { dir, workspaceId, service, setNow } = await setup(client);
+  try {
+    const plan = await service.create({
+      workspaceId,
+      goal: '学会 AI Agent',
+      startDate: '2026-11-02',
+      weeks: 4
+    });
+    const weeks = plan.phases.flatMap((phase) => phase.weeks);
+    await service.setItemDone({
+      planId: plan.id,
+      weekId: weeks[0]!.id,
+      itemId: weeks[0]!.days[0]!.id,
+      kind: 'day',
+      done: true
+    });
+    setNow(new Date('2026-11-11T09:00:00.000Z'));
+
+    const updated = await service.recalibrate({ planId: plan.id });
+
+    // 4 weeks × (7 tasks + 3 checks) before and after; week 2 was rewritten
+    // and week 1 (with one checked day) preserved.
+    expect(updated.recalibration).toEqual({
+      fromWeek: 2,
+      weeksBefore: 4,
+      weeksAfter: 4,
+      itemsBefore: 40,
+      itemsAfter: 40,
+      addedItems: 9,
+      removedItems: 9,
+      keptDoneItems: 1
+    });
+    expect((await service.get(plan.id))?.recalibration).toEqual(updated.recalibration);
+
+    const file = await readFile(
+      join(dir, 'workspaces', workspaceId, 'plans', `${plan.id}.md`),
+      'utf8'
+    );
+    expect(file).toContain('recalibration:');
+    expect(file).toContain('fromWeek: 2');
+    expect(file).toContain('addedItems: 9');
+    expect(file).toContain('removedItems: 9');
+    expect(file).toContain('keptDoneItems: 1');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('does not rewrite a week that already has completed work', async () => {
   const client = new FakeModelClient([modelReply(3), modelReply(2)]);
   const { dir, workspaceId, service, setNow } = await setup(client);

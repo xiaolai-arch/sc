@@ -6,6 +6,7 @@ import type {
   LongPlanGeneratedBy,
   LongPlanKnowledge,
   LongPlanPhase,
+  LongPlanRecalibrationSummary,
   LongPlanSource,
   LongPlanWeek
 } from '../../shared/plans';
@@ -53,6 +54,53 @@ function coerceSources(value: unknown): LongPlanSource[] {
     if (sources.length >= 8) break;
   }
   return sources;
+}
+
+/**
+ * Older plan files predate the summary, so a missing or partial record simply
+ * reads as "no summary" and the page keeps its plain one-line note.
+ */
+function coerceRecalibration(value: unknown): LongPlanRecalibrationSummary | undefined {
+  const record = asRecord(value);
+  if (record === null) return undefined;
+  const fromWeek = asInt(record.fromWeek);
+  const weeksBefore = asInt(record.weeksBefore);
+  const weeksAfter = asInt(record.weeksAfter);
+  const itemsBefore = asInt(record.itemsBefore);
+  const itemsAfter = asInt(record.itemsAfter);
+  const addedItems = asInt(record.addedItems);
+  const removedItems = asInt(record.removedItems);
+  const keptDoneItems = asInt(record.keptDoneItems);
+  if (
+    fromWeek === undefined ||
+    weeksBefore === undefined ||
+    weeksAfter === undefined ||
+    itemsBefore === undefined ||
+    itemsAfter === undefined ||
+    addedItems === undefined ||
+    removedItems === undefined ||
+    keptDoneItems === undefined ||
+    fromWeek < 1 ||
+    weeksBefore < 0 ||
+    weeksAfter < 0 ||
+    itemsBefore < 0 ||
+    itemsAfter < 0 ||
+    addedItems < 0 ||
+    removedItems < 0 ||
+    keptDoneItems < 0
+  ) {
+    return undefined;
+  }
+  return {
+    fromWeek,
+    weeksBefore,
+    weeksAfter,
+    itemsBefore,
+    itemsAfter,
+    addedItems,
+    removedItems,
+    keptDoneItems
+  };
 }
 
 function coerceKnowledge(value: unknown): LongPlanKnowledge[] {
@@ -167,6 +215,7 @@ export function parseLongPlanFile(raw: string, fallbackId: string): LongPlan | n
   const knowledge = coerceKnowledge(meta.knowledge);
   const recalibratedAt = asString(meta.recalibratedAt);
   const recalibratedFrom = asInt(meta.recalibratedFrom);
+  const recalibration = coerceRecalibration(meta.recalibration);
   return {
     id,
     workspaceId,
@@ -184,6 +233,7 @@ export function parseLongPlanFile(raw: string, fallbackId: string): LongPlan | n
     ...(recalibratedFrom !== undefined && recalibratedFrom > 0
       ? { recalibratedFrom }
       : {}),
+    ...(recalibration ? { recalibration } : {}),
     createdAt: asString(meta.created) ?? '',
     updatedAt: asString(meta.updated) ?? '',
     phases
@@ -218,6 +268,7 @@ export function serializeLongPlanFile(plan: LongPlan): string {
     ...(plan.recalibratedFrom !== undefined
       ? { recalibratedFrom: plan.recalibratedFrom }
       : {}),
+    ...(plan.recalibration ? { recalibration: { ...plan.recalibration } } : {}),
     created: plan.createdAt,
     updated: plan.updatedAt,
     phases: plan.phases.map((phase) => ({
