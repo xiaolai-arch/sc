@@ -1,11 +1,12 @@
-import { useMemo } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import { formatLocalDate } from '../../shared/date';
 import { planProgress } from '../../shared/plans';
 import type { LongPlan } from '../../shared/plans';
 import type { Reminder, Workspace, WorkspaceTask } from '../../shared/workspace';
-import { ChevronRightIcon, CheckIcon } from '../ui/icons';
+import { ChevronRightIcon, CheckIcon, SendIcon } from '../ui/icons';
 import { PageFrame } from './PageFrame';
 import { nextScheduledDay } from './schedule';
+import { TodaySchedule } from './TodaySchedule';
 
 export type TodayOverviewProps = {
   tasks: WorkspaceTask[];
@@ -27,6 +28,9 @@ export type TodayOverviewProps = {
 function workspaceName(workspaces: Workspace[], id: string): string {
   return workspaces.find((workspace) => workspace.id === id)?.name ?? '未分组';
 }
+
+/** The old quick-ask button, kept as a suggestion that fills the input. */
+const TODAY_SUGGESTION = '帮我看今天最重要的三件事，并给出具体下一步。';
 
 function timeOf(startAt: string | undefined): string | null {
   const match = /T(\d{2}:\d{2})/.exec(startAt ?? '');
@@ -105,6 +109,17 @@ export function TodayOverview({
         .slice(0, compact ? 1 : 3),
     [longPlans, compact]
   );
+  // One-line ask draft; the window-level chat composer owns its own draft, so
+  // this one never autofocuses on mount.
+  const [askDraft, setAskDraft] = useState('');
+
+  function submitAsk(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const text = askDraft.trim();
+    if (!text) return;
+    setAskDraft('');
+    onPrompt(text);
+  }
 
   const body = (
     <div className={compact ? 'space-y-4' : 'space-y-6'}>
@@ -166,14 +181,16 @@ export function TodayOverview({
             })}
           </ul>
         )}
-        <button
-          type="button"
-          onClick={() => onPrompt('帮我看今天最重要的三件事，并给出具体下一步。')}
-          className="mt-2 text-[12px] text-[#0071e3] hover:underline"
-        >
-          问阿咲今天怎么安排
-        </button>
       </section>
+
+      {!compact ? (
+        <TodaySchedule
+          tasks={tasks}
+          workspaces={workspaces}
+          today={today}
+          onOpenSchedule={onOpenSchedule}
+        />
+      ) : null}
 
       <div className={compact ? 'grid gap-4' : 'grid gap-6 md:grid-cols-2'}>
         <section
@@ -264,6 +281,41 @@ export function TodayOverview({
           )}
         </section>
       </div>
+
+      {!compact ? (
+        <form
+          onSubmit={submitAsk}
+          className="rounded-2xl border border-black/[0.06] bg-white p-3 shadow-sm dark:border-white/10 dark:bg-[#1c1c1e]"
+        >
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={askDraft}
+              onChange={(event) => setAskDraft(event.target.value)}
+              placeholder="问阿咲今天怎么安排…"
+              aria-label="问阿咲今天怎么安排"
+              className="min-w-0 flex-1 bg-transparent py-1 text-[14px] text-[#1d1d1f] outline-none placeholder:text-gray-400 dark:text-[#f5f5f7] dark:placeholder:text-[#6e6e73]"
+            />
+            <button
+              type="submit"
+              aria-label="发送"
+              disabled={!askDraft.trim()}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#0071e3] text-white transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:opacity-80 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100"
+            >
+              <SendIcon className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setAskDraft(TODAY_SUGGESTION)}
+              className="rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] text-gray-600 transition-colors hover:bg-black/[0.08] dark:bg-white/[0.08] dark:text-[#c7c7cc] dark:hover:bg-white/[0.12]"
+            >
+              今天最重要的三件事
+            </button>
+          </div>
+        </form>
+      ) : null}
     </div>
   );
 
