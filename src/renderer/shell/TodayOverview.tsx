@@ -234,6 +234,11 @@ export function TodayOverview({
                     {start ? ` · ${start} 开始` : ` · ${task.durationMin} 分钟`}
                     {task.due ? ` · 截止 ${task.due.slice(5)}` : ''}
                   </p>
+                  {task.cue ? (
+                    <p className="mt-0.5 truncate text-[11px] text-gray-500 dark:text-[#8e8e93]">
+                      如果 {task.cue}，就先做「{task.title}」
+                    </p>
+                  ) : null}
                 </div>
               </li>
               );

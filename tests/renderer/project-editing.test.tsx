@@ -35,17 +35,21 @@ test('creates, edits and deletes a task from the plan section', async () => {
   await userEvent.type(screen.getByLabelText('新任务标题'), '线性代数专题');
   await userEvent.clear(screen.getByLabelText('新任务时长'));
   await userEvent.type(screen.getByLabelText('新任务时长'), '45');
+  await userEvent.type(screen.getByLabelText('新任务触发时机'), '晚饭后');
   await userEvent.click(screen.getByRole('button', { name: '保存任务' }));
 
   expect(await screen.findByText('线性代数专题')).toBeInTheDocument();
+  // The cue is both persisted and shown as a quiet chip on the task row.
+  expect(screen.getByText('晚饭后')).toBeInTheDocument();
   let snapshot = await api.getWorkspaceSnapshot('kaoyan');
   const created = snapshot.tasks.find((task) => task.title === '线性代数专题');
-  expect(created).toMatchObject({ durationMin: 45, status: 'pending' });
+  expect(created).toMatchObject({ durationMin: 45, status: 'pending', cue: '晚饭后' });
 
   await userEvent.click(
     screen.getByRole('button', { name: '编辑任务：线性代数专题' })
   );
   const titleInput = screen.getByLabelText('编辑任务标题');
+  expect(screen.getByLabelText('编辑任务触发时机')).toHaveValue('晚饭后');
   await userEvent.clear(titleInput);
   await userEvent.type(titleInput, '线性代数复盘');
   await userEvent.click(screen.getByRole('button', { name: '保存修改' }));

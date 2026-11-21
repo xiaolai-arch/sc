@@ -3,6 +3,7 @@ import { friendlyErrorMessage } from '../../shared/errors';
 import { cn } from '../ui/cn';
 import { CheckIcon } from '../ui/icons';
 import { Select } from '../ui/Select';
+import { MAX_TASK_CUE_LENGTH } from '../../shared/workspace';
 import type { ReviewRecord } from '../../shared/ipc';
 import {
   TASK_REPEAT_LABELS,
@@ -258,6 +259,7 @@ type TaskDraft = {
   subject: string;
   duration: string;
   acceptance: string;
+  cue: string;
   repeat: TaskRepeat | '';
 };
 
@@ -267,6 +269,7 @@ function draftFrom(task: WorkspaceTask): TaskDraft {
     subject: task.subject,
     duration: String(task.durationMin),
     acceptance: task.acceptance,
+    cue: task.cue ?? '',
     repeat: task.repeat ?? ''
   };
 }
@@ -298,6 +301,7 @@ export function PlanSection({
     subject: '',
     duration: '30',
     acceptance: '',
+    cue: '',
     repeat: ''
   });
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -334,9 +338,10 @@ export function PlanSection({
         subject: newDraft.subject.trim() || workspace.name,
         durationMin,
         acceptance: newDraft.acceptance.trim(),
+        ...(newDraft.cue.trim() ? { cue: newDraft.cue.trim() } : {}),
         ...(newDraft.repeat ? { repeat: newDraft.repeat } : {})
       });
-      setNewDraft({ title: '', subject: '', duration: '30', acceptance: '', repeat: '' });
+      setNewDraft({ title: '', subject: '', duration: '30', acceptance: '', cue: '', repeat: '' });
       setCreating(false);
     } catch (cause) {
       setCreateError(messageOf(cause));
@@ -366,6 +371,7 @@ export function PlanSection({
         subject: editDraft.subject,
         durationMin,
         acceptance: editDraft.acceptance,
+        cue: editDraft.cue.trim() || null,
         repeat: editDraft.repeat || null
       });
       setEditingId(null);
@@ -464,6 +470,14 @@ export function PlanSection({
           placeholder="验收标准（可选）"
           value={draft.acceptance}
           onChange={(event) => onChange({ ...draft, acceptance: event.target.value })}
+          className={`${inputClass} sm:col-span-2`}
+        />
+        <input
+          aria-label={`${keyPrefix}触发时机`}
+          placeholder="例如：晚饭后、下班回家后"
+          maxLength={MAX_TASK_CUE_LENGTH}
+          value={draft.cue}
+          onChange={(event) => onChange({ ...draft, cue: event.target.value })}
           className={`${inputClass} sm:col-span-2`}
         />
         <Select
@@ -629,6 +643,11 @@ export function PlanSection({
                         {task.repeat ? ` · ${TASK_REPEAT_LABELS[task.repeat]}` : ''}
                         {typeof task.actualMin === 'number' ? ` · 已练 ${task.actualMin} 分钟` : ''}
                       </p>
+                      {task.cue ? (
+                        <span className="mt-1 inline-block max-w-full truncate rounded-full bg-black/[0.05] px-1.5 py-0.5 text-[11px] text-gray-500 dark:bg-white/[0.08] dark:text-[#8e8e93]">
+                          {task.cue}
+                        </span>
+                      ) : null}
                     </div>
                     {task.status === 'done' ? (
                       <CheckIcon className="mt-1 h-3 w-3 text-[#34c759]" />

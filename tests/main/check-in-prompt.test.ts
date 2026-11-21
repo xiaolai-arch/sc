@@ -189,3 +189,32 @@ test('morning, evening and behind templates ignore weekly stats', () => {
     buildCheckInTemplate(context, 'evening', DATE)
   );
 });
+
+test('a cue adds one 触发 segment to the task line', () => {
+  const cued: ButlerContext = {
+    ...context,
+    tasks: [{ ...task, cue: '晚饭后' }]
+  };
+  const prompt = buildCheckInPrompt(cued, 'morning', DATE);
+  expect(prompt).toContain(
+    '- [考研] 极限基础（数学，45 分钟；验收：完成 10 题；触发：晚饭后）'
+  );
+  // The rest of the morning prompt is unchanged.
+  expect(prompt).toBe(MORNING_PROMPT_BEFORE_STATS.replace('完成 10 题）', '完成 10 题；触发：晚饭后）'));
+});
+
+test('the cue never leaks into the morning, evening or behind templates', () => {
+  const cued: ButlerContext = {
+    ...context,
+    tasks: [{ ...task, cue: '晚饭后', due: DATE }]
+  };
+  expect(buildCheckInTemplate(cued, 'morning', DATE)).toBe(
+    '早上好。今天有 1 个任务，先做「极限基础」怎么样？做完告诉我一声。'
+  );
+  expect(buildCheckInTemplate(cued, 'evening', DATE)).toBe(
+    '晚上好。今天还有 1 个任务没完成，最卡的是哪一步？'
+  );
+  expect(buildCheckInTemplate(cued, 'behind', DATE)).toBe(
+    '今天还有 1 个任务没完成，下一项是「极限基础」。要不要一起调整一下今天的安排？'
+  );
+});

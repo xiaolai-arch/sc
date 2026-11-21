@@ -2,7 +2,7 @@ import { isAbsolute } from 'node:path';
 import { isLocalDateTime } from '../shared/date';
 import { isTaskRepeat } from '../shared/recurrence';
 import type { AppSettings } from '../shared/types';
-import { REMINDER_STATES, isTargetDate, type ReminderState } from '../shared/workspace';
+import { MAX_TASK_CUE_LENGTH, REMINDER_STATES, isTargetDate, taskCueLength, type ReminderState } from '../shared/workspace';
 import type {
   BackupResult,
   RestoreResult,
@@ -289,6 +289,29 @@ function requireTaskStatus(value: unknown): (typeof TASK_STATUSES)[number] {
   return value as (typeof TASK_STATUSES)[number];
 }
 
+/**
+ * Validates a task's implementation-intention cue. Create accepts an optional
+ * string (empty means none); update also accepts null to clear it.
+ */
+function requireTaskCue(
+  value: unknown,
+  allowNull: boolean
+): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) {
+    if (allowNull) return null;
+    throw new Error('触发时机无效。');
+  }
+  if (typeof value !== 'string') throw new Error('触发时机无效。');
+  if (/[\r\n]/.test(value)) throw new Error('触发时机不能包含换行。');
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return allowNull ? null : undefined;
+  if (taskCueLength(trimmed) > MAX_TASK_CUE_LENGTH) {
+    throw new Error(`触发时机不能超过 ${MAX_TASK_CUE_LENGTH} 个字符。`);
+  }
+  return trimmed;
+}
+
 function requireCreateWorkspace(value: unknown): CreateWorkspaceInput {
   const input = requireObject(value, '创建工作区');
   requireString(input.name, '工作区名称');
@@ -359,7 +382,8 @@ function requireCreateTask(value: unknown): CreateTaskInput {
   if (input.repeat !== undefined && !isTaskRepeat(input.repeat)) {
     throw new Error('任务重复规则无效。');
   }
-  return input as unknown as CreateTaskInput;
+  const cue = requireTaskCue(input.cue, false);
+  return { ...input, ...(cue !== undefined ? { cue } : {}) } as unknown as CreateTaskInput;
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -375,6 +399,7 @@ function requireUpdateWorkspaceTask(value: unknown): UpdateWorkspaceTaskInput {
     input.durationMin === undefined &&
     input.acceptance === undefined &&
     input.due === undefined &&
+    input.cue === undefined &&
     input.repeat === undefined
   ) {
     throw new Error('没有要更新的任务字段。');
@@ -413,7 +438,8 @@ function requireUpdateWorkspaceTask(value: unknown): UpdateWorkspaceTaskInput {
   ) {
     throw new Error('任务截止日期无效。');
   }
-  return input as unknown as UpdateWorkspaceTaskInput;
+  const cue = requireTaskCue(input.cue, true);
+  return { ...input, ...(cue !== undefined ? { cue } : {}) } as unknown as UpdateWorkspaceTaskInput;
 }
 
 function requireDeleteTask(value: unknown): DeleteTaskInput {

@@ -12,6 +12,8 @@ import { asFiniteNumber, asRecord, asString, asStringArray } from './coerce';
  */
 export type TaskRecord = StudyTask & {
   due?: string;
+  /** Implementation-intention trigger; absent means no if-then plan. */
+  cue?: string;
   startAt?: string;
   repeat?: TaskRepeat;
   /** Set on copies that a completed occurrence spawned. */
@@ -38,6 +40,7 @@ function coerceTask(value: unknown): TaskRecord | null {
   if (!id || !title) return null;
   const status = isTaskStatus(record.status) ? record.status : 'pending';
   const startAt = record.startAt;
+  const cue = asString(record.cue)?.trim();
   return {
     id,
     title,
@@ -48,6 +51,7 @@ function coerceTask(value: unknown): TaskRecord | null {
     status,
     actualMin: asFiniteNumber(record.actualMin),
     due: asString(record.due),
+    ...(cue ? { cue } : {}),
     ...(isTaskRepeat(record.repeat) ? { repeat: record.repeat } : {}),
     ...(asString(record.recurredFrom) ? { recurredFrom: asString(record.recurredFrom) } : {}),
     ...(asString(record.planId) ? { planId: asString(record.planId) } : {}),
@@ -99,6 +103,7 @@ export function toWorkspaceTask(record: TaskRecord, workspaceId: string): Worksp
     status: record.status,
     actualMin: record.actualMin,
     due: record.due,
+    ...(record.cue ? { cue: record.cue } : {}),
     ...(record.repeat ? { repeat: record.repeat } : {}),
     ...(record.recurredFrom ? { recurredFrom: record.recurredFrom } : {}),
     ...(record.planId ? { planId: record.planId } : {}),
