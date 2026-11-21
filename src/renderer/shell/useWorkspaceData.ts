@@ -3,7 +3,7 @@ import type {
   ButlerStreamListener,
   StreamingButlerApi
 } from '../../shared/butler-stream';
-import { formatLocalDate } from '../../shared/date';
+import { formatLocalDate, formatLocalDateTime } from '../../shared/date';
 import { friendlyErrorMessage } from '../../shared/errors';
 import { reviewStreak } from '../../shared/review-stats';
 import type { ReviewRecord, StudyCoachApi } from '../../shared/ipc';
@@ -763,6 +763,22 @@ export function useWorkspaceData(): WorkspaceData {
           if (input.days !== undefined) {
             if (input.days === null || input.days.length === 0) delete next.days;
             else next.days = input.days;
+          }
+          if (input.postponeMinutes !== undefined) {
+            next.state = 'postponed';
+            next.postponedTo = formatLocalDateTime(
+              new Date(Date.now() + input.postponeMinutes * 60_000)
+            );
+            delete next.lastError;
+          } else if (input.state === 'done') {
+            next.state = 'done';
+            delete next.postponedTo;
+          } else if (input.state === 'pending') {
+            next.state = 'pending';
+            delete next.postponedTo;
+            delete next.lastError;
+          } else if (input.state !== undefined) {
+            next.state = input.state;
           }
           return next;
         })

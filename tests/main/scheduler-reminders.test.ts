@@ -1,11 +1,24 @@
 import type { AppSettings } from '../../src/shared/types';
-import type { Reminder, WorkspaceTask } from '../../src/shared/workspace';
+import {
+  applyReminderStatePatch,
+  reminderState,
+  type Reminder,
+  type ReminderStatePatch,
+  type WorkspaceTask
+} from '../../src/shared/workspace';
 import { createDefaultSettings } from '../../src/main/settings/defaults';
 import { Scheduler } from '../../src/main/scheduler/scheduler';
+import {
+  parseRemindersFile,
+  serializeRemindersFile
+} from '../../src/main/workspace/records/reminders';
 
-function settings(): AppSettings {
+function settings(overrides: Partial<AppSettings['notifications']> = {}): AppSettings {
   const base = createDefaultSettings('/tmp/vault');
-  return { ...base, notifications: { ...base.notifications, morning: '15:00' } };
+  return {
+    ...base,
+    notifications: { ...base.notifications, morning: '15:00', ...overrides }
+  };
 }
 
 function at(hour: number, minute: number): Date {
@@ -255,4 +268,292 @@ test('reminders arrive even when no model is configured', async () => {
 
   const result = await scheduler.tick();
   expect(result.delivered.map((entry) => entry.reminderId)).toEqual(['water']);
+});
+
+describe('reminder lifecycle', () => {
+  /** In-memory stand-in for `reminders.md`, keyed by id. */
+  function lifecycle(initial: Reminder[]) {
+    const records = new Map(initial.map((reminder) => [reminder.id, { ...reminder }]));
+    const writes: Array<{ id: string; patch: ReminderStatePatch }> = [];
+    return {
+      records,
+      writes,
+      getReminders: async () => [...records.values()].map((reminder) => ({ ...reminder })),
+      onReminderState: (id: string, patch: ReminderStatePatch) => {
+        writes.push({ id, patch });
+        const current = records.get(id);
+        if (!current) return;
+        if (patch.state !== undefined) current.state = patch.state;
+        for (const field of ['firedAt', 'postponedTo', 'lastError'] as const) {
+          const value = patch[field];
+          if (value === undefined) continue;
+          if (value === null) delete current[field];
+          else current[field] = value;
+        }
+      }
+    };
+  }
+
+  test('a legacy reminder without a state reads as pending', () => {
+    const raw = [
+      '---',
+      'type: plan',
+      'source: user',
+      'items:',
+      '  - id: r1',
+      '    time: "08:00"',
+      '    label: 早间计划',
+      '    enabled: true',
+      '---',
+      '# 提醒',
+      ''
+    ].join('\n');
+    const [reminder] = parseRemindersFile(raw);
+    expect(reminder).toMatchObject({ id: 'r1', label: '早间计划' });
+    // The field stays out of the parsed record; every reader defaults it.
+    expect(reminder).not.toHaveProperty('state');
+    expect(reminderState(reminder!)).toBe('pending');
+    expect(reminder).not.toHaveProperty('postponedTo');
+    expect(reminder).not.toHaveProperty('lastError');
+  });
+
+  test('delivery records fired with a timestamp', async () => {
+    const store = lifecycle([{ id: 'water', time: '12:00', label: '喝水', enabled: true }]);
+    const now = at(12, 0);
+    const scheduler = new Scheduler({
+      now: () => now,
+      getSettings: async () => settings(),
+      getReminders: store.getReminders,
+      onReminderState: store.onReminderState,
+      notify: () => undefined
+    });
+
+    await scheduler.tick();
+
+    const record = store.records.get('water');
+    expect(record?.state).toBe('fired');
+    expect(record?.firedAt).toBe(now.toISOString());
+    expect(store.writes).toEqual([
+      {
+        id: 'water',
+        patch: {
+          state: 'fired',
+          firedAt: now.toISOString(),
+          postponedTo: null,
+          lastError: null
+        }
+      }
+    ]);
+  });
+
+  test('a sink failure records failed with lastError', async () => {
+    const store = lifecycle([{ id: 'water', time: '12:00', label: '喝水', enabled: true }]);
+    const scheduler = new Scheduler({
+      now: () => at(12, 0),
+      getSettings: async () => settings(),
+      getReminders: store.getReminders,
+      onReminderState: store.onReminderState,
+      notify: () => {
+        throw new Error('notification unavailable');
+      }
+    });
+
+    await scheduler.tick();
+
+    const record = store.records.get('water');
+    expect(record?.state).toBe('failed');
+    expect(record?.lastError).toBe('notification unavailable');
+  });
+
+  test('DND leaves the reminder pending instead of fired', async () => {
+    const store = lifecycle([{ id: 'water', time: '23:30', label: '喝水', enabled: true }]);
+    const now = at(23, 31);
+    const scheduler = new Scheduler({
+      now: () => now,
+      getSettings: async () =>
+        settings({
+          // Force a DND window that covers the reminder time.
+          dndStart: '23:00',
+          dndEnd: '07:00'
+        }),
+      getReminders: store.getReminders,
+      onReminderState: store.onReminderState,
+      notify: () => undefined
+    });
+
+    const result = await scheduler.tick();
+    expect(result.delivered).toHaveLength(0);
+    expect(result.suppressed.some((entry) => entry.kind === 'reminder')).toBe(true);
+    expect(result.suppressed.every((entry) => entry.reason === 'dnd')).toBe(true);
+    // A legacy record has no state key at all; absence means pending, and DND
+    // must not write a spurious transition.
+    expect(reminderState(store.records.get('water')!)).toBe('pending');
+    expect(store.writes).toHaveLength(0);
+  });
+
+  test('a postponed reminder persists, waits for the new time and fires once', async () => {
+    // Simulates a restart: the same persisted reminder object is re-read on
+    // every scheduler construction, so the postponement must come from disk.
+    const store = lifecycle([
+      {
+        id: 'water',
+        time: '12:00',
+        label: '喝水',
+        enabled: true,
+        state: 'postponed',
+        postponedTo: '2026-10-31T12:10'
+      }
+    ]);
+    const deliveredKeys = new Map<string, string[]>();
+    const deliveryLog = {
+      load: async (date: string) => deliveredKeys.get(date) ?? [],
+      save: async (date: string, keys: readonly string[]) => {
+        deliveredKeys.set(date, [...keys]);
+      }
+    };
+    let now = at(12, 5);
+    const make = () =>
+      new Scheduler({
+        now: () => now,
+        getSettings: async () => settings(),
+        getReminders: store.getReminders,
+        onReminderState: store.onReminderState,
+        notify: () => undefined,
+        deliveryLog
+      });
+
+    // Before the postponed time, nothing fires and the state is untouched.
+    expect((await make().tick()).delivered).toHaveLength(0);
+    expect(store.records.get('water')?.state).toBe('postponed');
+
+    // A fresh scheduler (restart) at the postponed minute delivers exactly once.
+    now = at(12, 10);
+    const fired = await make().tick();
+    expect(fired.delivered.map((entry) => entry.reminderId)).toEqual(['water']);
+    expect(store.records.get('water')?.state).toBe('fired');
+    expect(store.records.get('water')?.postponedTo).toBeUndefined();
+
+    // Another restart within the same minute must not deliver again.
+    now = at(12, 11);
+    expect((await make().tick()).delivered).toHaveLength(0);
+  });
+
+  test('the postponement survives the reminders.md round-trip', async () => {
+    // This one really writes the file format: every scheduler read parses the
+    // serialized `reminders.md`, and every state write re-serializes it, the
+    // same way the vault service does. Serialized timestamps must stay quoted
+    // strings, or YAML would hand back a Date and the postponement would vanish.
+    let raw = serializeRemindersFile([
+      {
+        id: 'water',
+        time: '12:00',
+        label: '喝水',
+        enabled: true,
+        state: 'postponed',
+        postponedTo: '2026-10-31T12:10'
+      }
+    ]);
+    const deliveredKeys = new Map<string, string[]>();
+    const deliveryLog = {
+      load: async (date: string) => deliveredKeys.get(date) ?? [],
+      save: async (date: string, keys: readonly string[]) => {
+        deliveredKeys.set(date, [...keys]);
+      }
+    };
+    const store = {
+      getReminders: async () => parseRemindersFile(raw),
+      onReminderState: (id: string, patch: ReminderStatePatch) => {
+        const reminders = parseRemindersFile(raw);
+        const index = reminders.findIndex((reminder) => reminder.id === id);
+        if (index < 0) return;
+        reminders[index] = applyReminderStatePatch(reminders[index]!, patch);
+        raw = serializeRemindersFile(reminders);
+      }
+    };
+    let now = at(12, 5);
+    const make = () =>
+      new Scheduler({
+        now: () => now,
+        getSettings: async () => settings(),
+        getReminders: store.getReminders,
+        onReminderState: store.onReminderState,
+        notify: () => undefined,
+        deliveryLog
+      });
+
+    expect(parseRemindersFile(raw)[0]).toMatchObject({
+      state: 'postponed',
+      postponedTo: '2026-10-31T12:10'
+    });
+    // Nothing before 12:10; the persisted target is honoured after a restart.
+    expect((await make().tick()).delivered).toHaveLength(0);
+
+    now = at(12, 10);
+    expect((await make().tick()).delivered.map((entry) => entry.reminderId)).toEqual([
+      'water'
+    ]);
+    const persisted = parseRemindersFile(raw)[0]!;
+    expect(persisted.state).toBe('fired');
+    expect(persisted.firedAt).toBe(at(12, 10).toISOString());
+    expect(persisted).not.toHaveProperty('postponedTo');
+    expect(persisted).not.toHaveProperty('lastError');
+
+    // The daily trigger was consumed too, so a later restart is silent.
+    now = at(13, 0);
+    expect((await make().tick()).delivered).toHaveLength(0);
+  });
+
+  test('a postponed reminder does not also fire at its normal time', async () => {
+    const store = lifecycle([
+      {
+        id: 'water',
+        time: '12:00',
+        label: '喝水',
+        enabled: true,
+        state: 'postponed',
+        postponedTo: '2026-10-31T12:10'
+      }
+    ]);
+    const deliveredKeys = new Map<string, string[]>();
+    const deliveryLog = {
+      load: async (date: string) => deliveredKeys.get(date) ?? [],
+      save: async (date: string, keys: readonly string[]) => {
+        deliveredKeys.set(date, [...keys]);
+      }
+    };
+    let now = at(12, 10);
+    const options = {
+      now: () => now,
+      getSettings: async () => settings(),
+      getReminders: store.getReminders,
+      onReminderState: store.onReminderState,
+      notify: () => undefined,
+      deliveryLog
+    };
+
+    expect((await new Scheduler(options).tick()).delivered).toHaveLength(1);
+    // The normal daily key was consumed, so a later tick at 13:00 is silent.
+    now = at(13, 0);
+    expect((await new Scheduler(options).tick()).delivered).toHaveLength(0);
+  });
+
+  test('a done reminder stops firing until it is re-enabled', async () => {
+    const store = lifecycle([
+      { id: 'water', time: '12:00', label: '喝水', enabled: true, state: 'done' }
+    ]);
+    const notified: string[] = [];
+    const scheduler = new Scheduler({
+      now: () => at(12, 30),
+      getSettings: async () => settings(),
+      getReminders: store.getReminders,
+      onReminderState: store.onReminderState,
+      notify: (notification) => {
+        notified.push(notification.key);
+      }
+    });
+
+    await scheduler.tick();
+    expect(notified).toHaveLength(0);
+    expect(store.writes).toHaveLength(0);
+  });
 });

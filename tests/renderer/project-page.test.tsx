@@ -372,6 +372,56 @@ test('rolls the reminder switch back when saving fails', async () => {
   spy.mockRestore();
 });
 
+test('shows reminder lifecycle chips and postpones, completes and re-enables', async () => {
+  const api = setup();
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
+  await userEvent.click(navButton('提醒'));
+
+  // Three seeded reminders have no stored state, so they all read as pending.
+  expect(screen.getAllByText('待触发')).toHaveLength(3);
+  const row = () => {
+    const toggle = screen.getByRole('switch', { name: '早间计划 提醒开关' });
+    return within(toggle.closest('div') as HTMLElement);
+  };
+
+  // The user-visible rule about when reminders can actually arrive.
+  expect(
+    screen.getByText(
+      '提醒只在 ASAKI 运行时发出。电脑休眠醒来后，错过的那次最多补一次，不会重复播放；应用退出期间不会提醒。'
+    )
+  ).toBeInTheDocument();
+
+  expect(row().getByText('待触发')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '延后 10 分钟：早间计划' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '延后 1 小时：早间计划' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '标为完成：早间计划' })).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: '延后 10 分钟：早间计划' }));
+  await waitFor(() => expect(row().getByText('已延后')).toBeInTheDocument());
+  await waitFor(async () => {
+    const reminder = (await api.getReminders()).find((entry) => entry.id === 'r1');
+    expect(reminder?.state).toBe('postponed');
+    expect(reminder?.postponedTo).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
+  });
+
+  await userEvent.click(screen.getByRole('button', { name: '标为完成：早间计划' }));
+  await waitFor(() => expect(row().getByText('已完成')).toBeInTheDocument());
+  expect(screen.queryByRole('button', { name: '延后 10 分钟：早间计划' })).not.toBeInTheDocument();
+  await waitFor(async () => {
+    const reminder = (await api.getReminders()).find((entry) => entry.id === 'r1');
+    expect(reminder?.state).toBe('done');
+    expect(reminder?.enabled).toBe(true);
+  });
+
+  await userEvent.click(screen.getByRole('button', { name: '重新启用：早间计划' }));
+  await waitFor(() => expect(row().getByText('待触发')).toBeInTheDocument());
+  await waitFor(async () => {
+    const reminder = (await api.getReminders()).find((entry) => entry.id === 'r1');
+    expect(reminder?.state).toBe('pending');
+    expect(reminder?.enabled).toBe(true);
+  });
+});
+
 test('routes a project prompt to the selected project, not the open chat', async () => {
   const api = setup();
   await screen.findByText(homeGreeting('xiaolai', new Date()));

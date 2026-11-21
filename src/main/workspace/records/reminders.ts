@@ -1,5 +1,10 @@
 import type { NoteMeta } from '../../../shared/types';
-import type { Reminder } from '../../../shared/workspace';
+import {
+  REMINDER_STATES,
+  type Reminder,
+  type ReminderState
+} from '../../../shared/workspace';
+import { isLocalDateTime } from '../../../shared/date';
 import { parseNote, serializeNote } from '../../vault/note';
 import { asBoolean, asRecord, asString } from './coerce';
 
@@ -26,6 +31,30 @@ function coerceDays(value: unknown): number[] | undefined {
   return days.length > 0 ? days : undefined;
 }
 
+/**
+ * Legacy `reminders.md` files carry no state field. Leaving it absent lets
+ * `reminderState()` / the page read a legacy reminder as `pending` without
+ * inventing data in the file; a later real transition writes the field.
+ */
+function coerceState(value: unknown): ReminderState | undefined {
+  return typeof value === 'string' && (REMINDER_STATES as readonly string[]).includes(value)
+    ? (value as ReminderState)
+    : undefined;
+}
+
+function coerceTimestamp(value: unknown): string | undefined {
+  const text = asString(value);
+  if (!text) return undefined;
+  // Hand-edited or YAML-coerced values must round-trip as an ISO timestamp.
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? undefined : text;
+}
+
+function coerceLocalDateTime(value: unknown): string | undefined {
+  const text = asString(value);
+  return text && isLocalDateTime(text) ? text : undefined;
+}
+
 export function parseRemindersFile(raw: string): Reminder[] {
   const { meta } = parseNote(raw);
   if (!Array.isArray(meta.items)) return [];
@@ -37,12 +66,20 @@ export function parseRemindersFile(raw: string): Reminder[] {
     const label = asString(record.label);
     if (!id || !label) continue;
     const days = coerceDays(record.days);
+    const state = coerceState(record.state);
+    const firedAt = coerceTimestamp(record.firedAt);
+    const postponedTo = coerceLocalDateTime(record.postponedTo);
+    const lastError = asString(record.lastError);
     reminders.push({
       id,
       time: coerceTime(record.time),
       label,
       enabled: asBoolean(record.enabled, true),
-      ...(days ? { days } : {})
+      ...(days ? { days } : {}),
+      ...(state ? { state } : {}),
+      ...(firedAt ? { firedAt } : {}),
+      ...(postponedTo ? { postponedTo } : {}),
+      ...(lastError ? { lastError } : {})
     });
   }
   return reminders;

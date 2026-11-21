@@ -53,6 +53,13 @@ export function createContextScheduler(options: ContextSchedulerOptions): Schedu
   const schedulerOptions: SchedulerOptions = {
     getSettings: () => options.context.settings.get(),
     getReminders: () => options.context.workspace.getReminders(),
+    // Persist fired/failed/pending so the reminders page shows what happened
+    // and a postponed reminder survives a restart.
+    onReminderState: (id, patch) => {
+      const workspace = options.context.workspace;
+      if (!workspace.setReminderState) return Promise.resolve();
+      return workspace.setReminderState(id, patch).then(() => undefined);
+    },
     // Read only task files; snapshots would also load notes and memory on
     // every 30-second tick. The snapshot path is a fallback for implementations
     // that do not expose the lightweight query.

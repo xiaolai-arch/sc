@@ -2,6 +2,7 @@ import { isAbsolute } from 'node:path';
 import { isLocalDateTime } from '../shared/date';
 import { isTaskRepeat } from '../shared/recurrence';
 import type { AppSettings } from '../shared/types';
+import { REMINDER_STATES, type ReminderState } from '../shared/workspace';
 import type {
   BackupResult,
   RestoreResult,
@@ -459,8 +460,25 @@ function requireCreateReminder(value: unknown): CreateReminderInput {
   };
 }
 
+function requireReminderState(value: unknown): ReminderState {
+  if (typeof value === 'string' && (REMINDER_STATES as readonly string[]).includes(value)) {
+    return value as ReminderState;
+  }
+  throw new Error('提醒状态无效。');
+}
+
+function requirePostponeMinutes(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0 || value > 1440) {
+    throw new Error('延后时长必须是 1–1440 分钟。');
+  }
+  return value;
+}
+
 function requireUpdateReminder(value: unknown): UpdateReminderInput {
   const input = requireObject(value, '更新提醒');
+  if (input.state !== undefined && input.postponeMinutes !== undefined) {
+    throw new Error('延后与状态修改不能同时提交。');
+  }
   return {
     id: requireString(input.id, '提醒 ID'),
     ...(input.time !== undefined ? { time: requireReminderTime(input.time) } : {}),
@@ -468,6 +486,10 @@ function requireUpdateReminder(value: unknown): UpdateReminderInput {
     ...(input.enabled !== undefined ? { enabled: requireReminderEnabled(input.enabled) } : {}),
     ...(input.days !== undefined
       ? { days: input.days === null ? null : requireReminderDays(input.days) }
+      : {}),
+    ...(input.state !== undefined ? { state: requireReminderState(input.state) } : {}),
+    ...(input.postponeMinutes !== undefined
+      ? { postponeMinutes: requirePostponeMinutes(input.postponeMinutes) }
       : {})
   };
 }
