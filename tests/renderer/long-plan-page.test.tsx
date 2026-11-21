@@ -82,6 +82,48 @@ const plan: LongPlan = {
   ]
 };
 
+/** Two phases whose first phase holds two acceptance checks. */
+function gatedPlan(firstChecks: [boolean, boolean], secondCheck: boolean): LongPlan {
+  const firstPhase = plan.phases[0]!;
+  return {
+    ...plan,
+    weeks: 3,
+    phases: [
+      {
+        ...firstPhase,
+        weeks: [
+          {
+            ...firstPhase.weeks[0]!,
+            checks: [{ id: 'w1c1', text: '阶段一验收 1', done: firstChecks[0] }]
+          },
+          {
+            ...firstPhase.weeks[1]!,
+            checks: [{ id: 'w2c1', text: '阶段一验收 2', done: firstChecks[1] }]
+          }
+        ]
+      },
+      {
+        id: 'ph2',
+        title: '阶段二：独立项目',
+        subtitle: '从零做一个 Agent',
+        goal: '独立完成项目',
+        weeks: [
+          {
+            id: 'w3',
+            number: 3,
+            title: '第 3 周：项目',
+            goal: '完成 Agent',
+            startDate: '2026-11-16',
+            endDate: '2026-11-22',
+            days: [day('w3d1', '2026-11-16', '周六')],
+            checks: [{ id: 'w3c1', text: '独立完成一个 Agent', done: secondCheck }]
+          }
+        ]
+      }
+    ]
+  };
+}
+
 function renderPage(options: {
   plans?: LongPlan[];
   onCreatePlan?: (input: CreateLongPlanInput) => Promise<LongPlan>;
@@ -389,6 +431,57 @@ test('shows recalibration progress and keeps the dialog open on failure', async 
     '重排剩余计划需要先配置模型。'
   );
   expect(screen.getByRole('button', { name: '开始重排' })).toBeInTheDocument();
+});
+
+test('a locked phase shows the acceptance gap without padlocking its weeks', async () => {
+  const { onSetItemDone } = renderPage({ plans: [gatedPlan([false, false], false)] });
+
+  const detail = screen.getByRole('region', { name: '计划详情' });
+  expect(
+    within(detail).getByText('阶段推进看验收，不看日期：下一阶段还差 2 项验收')
+  ).toBeInTheDocument();
+  expect(
+    within(detail).getByText('解锁条件：完成「阶段一：建立基础」的验收项，还差 2 项')
+  ).toBeInTheDocument();
+  expect(within(detail).queryByText('已达标')).not.toBeInTheDocument();
+
+  // The gate is information, not a padlock: the locked phase still opens and
+  // its tasks can be checked.
+  await userEvent.click(screen.getByRole('button', { name: '展开第 3 周' }));
+  expect(screen.getByText('周六 的任务')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('checkbox', { name: '完成第 3 周 11/16 的任务' }));
+  expect(onSetItemDone).toHaveBeenCalledWith({
+    planId: 'lp-1',
+    weekId: 'w3',
+    itemId: 'w3d1',
+    kind: 'day',
+    done: true
+  });
+});
+
+test('done phases show a small 已达标 chip and no gate copy', () => {
+  renderPage({ plans: [gatedPlan([true, true], true)] });
+
+  expect(screen.queryByText(/阶段推进看验收/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/解锁条件/)).not.toBeInTheDocument();
+  expect(screen.getAllByText('已达标')).toHaveLength(2);
+});
+
+test('plans without acceptance checks render without any gate copy', () => {
+  const bare = gatedPlan([false, false], false);
+  const withoutChecks: LongPlan = {
+    ...bare,
+    phases: bare.phases.map((phase) => ({
+      ...phase,
+      weeks: phase.weeks.map((week) => ({ ...week, checks: [] }))
+    }))
+  };
+
+  renderPage({ plans: [withoutChecks] });
+
+  expect(screen.queryByText(/阶段推进看验收/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/解锁条件/)).not.toBeInTheDocument();
+  expect(screen.queryByText('已达标')).not.toBeInTheDocument();
 });
 
 test('switches between multiple plans', async () => {

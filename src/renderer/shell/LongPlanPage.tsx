@@ -5,6 +5,7 @@ import type {
   LongPlan,
   LongPlanDay,
   LongPlanPhase,
+  LongPlanPhaseGate,
   LongPlanWeek,
   RecalibrateLongPlanInput,
   UpdateLongPlanInput,
@@ -12,6 +13,7 @@ import type {
 } from '../../shared/plans';
 import {
   currentPlanWeek,
+  phaseGate,
   phaseProgress,
   planBasis,
   planMonthDay,
@@ -96,6 +98,21 @@ function formatRecalibration(plan: LongPlan): { line: string; detail?: string } 
     line: parts.join(' · '),
     ...(detail.length > 0 ? { detail: detail.join(' · ') } : {})
   };
+}
+
+/**
+ * The closest earlier phase that still has an unchecked acceptance item. It is
+ * the phase the learner actually has to finish before this one unlocks, even
+ * when several earlier phases remain open.
+ */
+function blockingPhaseTitle(plan: LongPlan, index: number): string | null {
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const phase = plan.phases[cursor];
+    if (phase && phase.weeks.some((week) => week.checks.some((check) => !check.done))) {
+      return phase.title;
+    }
+  }
+  return null;
 }
 
 function planRangeLabel(plan: LongPlan): string {
@@ -352,6 +369,8 @@ function WeekSection({
 function PhaseSection({
   plan,
   phase,
+  gate,
+  blockingTitle,
   today,
   expandedWeeks,
   onToggleWeek,
@@ -360,6 +379,9 @@ function PhaseSection({
 }: {
   plan: LongPlan;
   phase: LongPlanPhase;
+  gate: LongPlanPhaseGate;
+  /** The earlier phase whose unchecked items still block this one. */
+  blockingTitle: string | null;
   today: string;
   expandedWeeks: Set<string>;
   onToggleWeek: (weekId: string) => void;
@@ -369,7 +391,11 @@ function PhaseSection({
   const progress = phaseProgress(phase);
   return (
     <section className="mt-6">
-      <header className="mb-3 flex flex-wrap items-end justify-between gap-2">
+      <header
+        className={`mb-3 flex flex-wrap items-end justify-between gap-2${
+          gate.state === 'locked' ? ' opacity-70' : ''
+        }`}
+      >
         <div className="min-w-0">
           <h3 className="text-[16px] font-semibold tracking-tight text-[#1d1d1f] dark:text-[#f5f5f7]">
             {phase.title}
@@ -384,10 +410,26 @@ function PhaseSection({
               {phase.goal}
             </p>
           ) : null}
+          {gate.state === 'locked' ? (
+            <p className="mt-1 text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
+              解锁条件：完成「{blockingTitle ?? '上一阶段'}」的验收项，还差 {gate.remaining} 项
+            </p>
+          ) : null}
         </div>
-        <span className="shrink-0 text-[12px] tabular-nums text-gray-500 dark:text-[#a1a1a6]">
-          {progress.done}/{progress.total} · {progress.percent}%
-        </span>
+        {gate.state === 'done' ? (
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="rounded-full bg-[#34c759]/10 px-2 py-0.5 text-[11px] font-medium text-[#1f7a3a] dark:bg-[#30d158]/15 dark:text-[#30d158]">
+              已达标
+            </span>
+            <span className="text-[12px] tabular-nums text-gray-500 dark:text-[#a1a1a6]">
+              {progress.done}/{progress.total} · {progress.percent}%
+            </span>
+          </div>
+        ) : (
+          <span className="shrink-0 text-[12px] tabular-nums text-gray-500 dark:text-[#a1a1a6]">
+            {progress.done}/{progress.total} · {progress.percent}%
+          </span>
+        )}
       </header>
       <div className="space-y-2">
         {phase.weeks.map((week) => (
@@ -462,6 +504,16 @@ export function LongPlanPage({
   const progress = selectedPlan ? planProgress(selectedPlan) : null;
   const basis = selectedPlan ? planBasis(selectedPlan) : 'model';
   const recalibration = selectedPlan ? formatRecalibration(selectedPlan) : null;
+  // Acceptance checks decide when a phase starts, not the calendar. Only the
+  // first locked phase drives the header; phase cards carry their own line.
+  const firstLockedGate = useMemo(() => {
+    if (!selectedPlan) return null;
+    for (let index = 0; index < selectedPlan.phases.length; index += 1) {
+      const gate = phaseGate(selectedPlan, index);
+      if (gate.state === 'locked') return gate;
+    }
+    return null;
+  }, [selectedPlan]);
   // The countdown comes from the project's target date, recomputed from the
   // real local `today` each render — never stored on the plan.
   const countdown = useMemo(() => {
@@ -747,6 +799,11 @@ export function LongPlanPage({
                   {selectedPlan.weeklyHours} 小时
                   {countdown ? <span data-testid="plan-countdown"> · {countdown}</span> : null}
                 </p>
+                {firstLockedGate ? (
+                  <p className="mt-1 text-[12px] text-gray-500 dark:text-[#8e8e93]">
+                    阶段推进看验收，不看日期：下一阶段还差 {firstLockedGate.remaining} 项验收
+                  </p>
+                ) : null}
                 {recalibration ? (
                   <>
                     <p className="mt-1 text-[12px] text-gray-500 dark:text-[#8e8e93]">
@@ -930,11 +987,13 @@ export function LongPlanPage({
               </p>
             ) : null}
 
-            {selectedPlan.phases.map((phase) => (
+            {selectedPlan.phases.map((phase, index) => (
               <PhaseSection
                 key={phase.id}
                 plan={selectedPlan}
                 phase={phase}
+                gate={phaseGate(selectedPlan, index)}
+                blockingTitle={blockingPhaseTitle(selectedPlan, index)}
                 today={today}
                 expandedWeeks={expandedWeeks}
                 onToggleWeek={toggleWeek}
