@@ -1,6 +1,15 @@
-import { createButlerTools, executeButlerTool } from '../../src/main/butler/tools';
+import {
+  createButlerTools,
+  executeButlerTool,
+  ToolInputError
+} from '../../src/main/butler/tools';
 import type { KnowledgeService } from '../../src/shared/knowledge';
 import type { ProfileService } from '../../src/shared/profile';
+import type {
+  CreatePracticeSetInput,
+  PracticeService,
+  PracticeSet
+} from '../../src/shared/practice';
 import type { WorkspaceService } from '../../src/shared/workspace';
 
 function knowledgeStub(overrides: Partial<KnowledgeService> = {}): KnowledgeService {
@@ -91,6 +100,87 @@ const workspaceService = {
 
 const tools = createButlerTools();
 const context = { workspace: workspaceService, workspaceId: 'ws-exam', now: () => new Date() };
+
+/** A workspace service whose snapshot carries a readable workspace name. */
+function workspaceWithName(name: string): WorkspaceService {
+  return {
+    ...workspaceService,
+    getWorkspaceSnapshot: async (workspaceId: string) => ({
+      workspace: {
+        id: workspaceId,
+        name,
+        kind: 'exam',
+        color: '#ef4444',
+        goal: '',
+        description: ''
+      },
+      tasks: [],
+      notes: [],
+      memory: [],
+      reminders: []
+    })
+  } as unknown as WorkspaceService;
+}
+
+function practiceStub(): { service: PracticeService; createSet: ReturnType<typeof vi.fn> } {
+  const createSet = vi.fn(async (input: CreatePracticeSetInput): Promise<PracticeSet> => ({
+    id: 'set-1',
+    workspaceId: input.workspaceId,
+    title: input.title,
+    subject: input.subject ?? '',
+    questions: input.questions.map((question, index) => ({
+      id: `q-${index + 1}`,
+      prompt: question.prompt,
+      options: question.options,
+      answer: question.answer,
+      explanation: question.explanation ?? ''
+    })),
+    createdAt: '2026-11-21T00:00:00.000Z',
+    updatedAt: '2026-11-21T00:00:00.000Z'
+  }));
+  return { createSet, service: { createSet } as unknown as PracticeService };
+}
+
+function quizQuestions(): unknown[] {
+  return [
+    {
+      prompt: '极限 lim(x→0) sin(x)/x 等于多少？',
+      options: ['0', '1', '∞', '不存在'],
+      answer: 1,
+      explanation: '重要极限。'
+    },
+    {
+      prompt: 'x→0 时，下列哪组是等价无穷小？',
+      options: ['x 与 x²', 'x 与 sin(x)', 'x 与 ln(x)', 'x 与 1/x'],
+      answer: 1
+    },
+    {
+      prompt: '夹逼准则适用于哪类数列收敛的判定？',
+      options: ['单调有界数列', '两边夹住的数列', '递推数列', '任意数列'],
+      answer: 1
+    }
+  ];
+}
+
+/** Runs the new tool's execute directly and returns what it threw (null on success). */
+async function createPracticeSetError(questions: unknown): Promise<unknown> {
+  const tool = createButlerTools().find((entry) => entry.name === 'create_practice_set');
+  if (!tool) throw new Error('create_practice_set tool is missing');
+  try {
+    await tool.execute(
+      { title: '极限小测', questions },
+      {
+        workspace: workspaceService,
+        workspaceId: 'ws-exam',
+        practice: practiceStub().service,
+        now: () => new Date()
+      }
+    );
+    return null;
+  } catch (error) {
+    return error;
+  }
+}
 
 test('record_knowledge creates or appends a topic through the service', async () => {
   const record = vi.fn(async (input: { name: string; status?: string; note?: string }) => ({
@@ -602,4 +692,113 @@ test('save_profile keeps a model guess pending unless the user confirmed it', as
       confidence: 'candidate'
     })
   );
+});
+
+test('create_practice_set creates a set through the practice service', async () => {
+  const { createSet, service } = practiceStub();
+  const result = await executeButlerTool(
+    {
+      id: 'p1',
+      name: 'create_practice_set',
+      arguments: { title: '极限小测', subject: '数学', questions: quizQuestions() }
+    },
+    tools,
+    {
+      workspace: workspaceWithName('考研'),
+      workspaceId: 'ws-exam',
+      practice: service,
+      now: () => new Date('2026-11-21T09:00:00.000Z')
+    }
+  );
+
+  expect(result.ok).toBe(true);
+  expect(createSet).toHaveBeenCalledTimes(1);
+  expect(createSet).toHaveBeenCalledWith(
+    expect.objectContaining({ workspaceId: 'ws-exam', title: '极限小测', subject: '数学' })
+  );
+  expect(JSON.parse(result.content)).toMatchObject({
+    ok: true,
+    result: {
+      setId: 'set-1',
+      workspaceId: 'ws-exam',
+      title: '极限小测',
+      questionCount: 3,
+      message: '已出题：极限小测（3 题，考研）· 去学习页作答，错题会自动进错题本'
+    }
+  });
+});
+
+test('create_practice_set rejects invalid question lists with Chinese messages', async () => {
+  const singleOption = { prompt: '只有一个选项？', options: ['是的'], answer: 0 };
+  const duplicated = { prompt: '重复选项？', options: ['甲', '乙', '甲'], answer: 0 };
+  const outOfRange = { prompt: '下标越界？', options: ['甲', '乙'], answer: 5 };
+
+  const tooFew = await createPracticeSetError(quizQuestions().slice(0, 2));
+  expect(tooFew).toBeInstanceOf(ToolInputError);
+  expect((tooFew as ToolInputError).message).toContain('3-10 道题');
+
+  const tooMany = await createPracticeSetError(
+    Array.from({ length: 11 }, (_, index) => ({
+      prompt: `第 ${index + 1} 题`,
+      options: ['甲', '乙'],
+      answer: 0
+    }))
+  );
+  expect(tooMany).toBeInstanceOf(ToolInputError);
+  expect((tooMany as ToolInputError).message).toContain('3-10 道题');
+
+  const oneOption = await createPracticeSetError([singleOption, singleOption, singleOption]);
+  expect(oneOption).toBeInstanceOf(ToolInputError);
+  expect((oneOption as ToolInputError).message).toContain('2-6 个选项');
+
+  const badAnswer = await createPracticeSetError([outOfRange, outOfRange, outOfRange]);
+  expect(badAnswer).toBeInstanceOf(ToolInputError);
+  expect((badAnswer as ToolInputError).message).toContain('整数下标');
+
+  const sameOptions = await createPracticeSetError([duplicated, duplicated, duplicated]);
+  expect(sameOptions).toBeInstanceOf(ToolInputError);
+  expect((sameOptions as ToolInputError).message).toContain('选项不能重复');
+});
+
+test('create_practice_set reports when the practice service is unavailable', async () => {
+  const result = await executeButlerTool(
+    {
+      id: 'p2',
+      name: 'create_practice_set',
+      arguments: { title: '极限小测', questions: quizQuestions() }
+    },
+    tools,
+    {
+      workspace: workspaceWithName('考研'),
+      workspaceId: 'ws-exam',
+      practice: null,
+      now: () => new Date()
+    }
+  );
+
+  expect(result.ok).toBe(false);
+  expect(result.content).toContain('练习服务未连接');
+});
+
+test('create_practice_set is gated by write permissions like other write tools', async () => {
+  const { createSet, service } = practiceStub();
+  const result = await executeButlerTool(
+    {
+      id: 'p3',
+      name: 'create_practice_set',
+      arguments: { title: '极限小测', questions: quizQuestions() }
+    },
+    tools,
+    {
+      workspace: workspaceWithName('考研'),
+      workspaceId: 'ws-exam',
+      practice: service,
+      permissions: { web: true, write: false, shell: false },
+      now: () => new Date()
+    }
+  );
+
+  expect(result.ok).toBe(false);
+  expect(result.content).toContain('仅可查看');
+  expect(createSet).not.toHaveBeenCalled();
 });

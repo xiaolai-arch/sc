@@ -10,6 +10,7 @@ import type { ConversationStore } from '../conversations/conversation-store';
 import type { KnowledgeService } from '../../shared/knowledge';
 import type { MemoryService } from '../../shared/memory';
 import type { ProfileService } from '../../shared/profile';
+import type { PracticeService } from '../../shared/practice';
 import type { SearchService } from '../../shared/search';
 import type { WorkspacePlanner } from '../../shared/planning';
 import type { LongPlanService } from '../../shared/plans';
@@ -31,6 +32,7 @@ export interface CreateButlerServiceOptions {
   longPlanService?: LongPlanService | null;
   knowledgeService?: KnowledgeService | null;
   profileService?: ProfileService | null;
+  practiceService?: PracticeService | null;
   getSearchService?: (() => SearchService | null) | null;
   provider?: ProviderConfig;
   /** Kept in memory only; never logged, stored, or echoed in replies. */
@@ -74,6 +76,9 @@ export function createButlerService(
       : {}),
     ...(options.profileService !== undefined
       ? { profileService: options.profileService }
+      : {}),
+    ...(options.practiceService !== undefined
+      ? { practiceService: options.practiceService }
       : {}),
     ...(options.getSearchService !== undefined
       ? { getSearchService: options.getSearchService }
