@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import { posix, resolve } from 'node:path';
-import { formatLocalDate } from '../../shared/date';
+import { formatLocalDate, formatLocalDateTime } from '../../shared/date';
 import { isTaskRepeat, nextRepeatDate } from '../../shared/recurrence';
 import type {
   CreateNoteInput,
@@ -12,6 +12,7 @@ import type {
   DeleteTaskInput,
   MemoryItem,
   Reminder,
+  ReminderStatePatch,
   SubmitReviewInput,
   UpdateReminderInput,
   UpdateWorkspaceInput,
@@ -24,8 +25,10 @@ import type {
   WorkspaceTask
 } from '../../shared/workspace';
 import {
+  applyReminderStatePatch,
   MAX_DAILY_AVAILABLE_MINUTES,
-  MIN_DAILY_AVAILABLE_MINUTES
+  MIN_DAILY_AVAILABLE_MINUTES,
+  REMINDER_STATES
 } from '../../shared/workspace';
 import { createMutex, listDirectories, listMarkdownFiles, pathExists, readFileOrNull, writeFileAtomic } from './fs-utils';
 import { newId, slugify, uniqueFileName } from './ids';
@@ -728,6 +731,12 @@ export function createWorkspaceService(
     async updateReminder(input: UpdateReminderInput): Promise<Reminder> {
       await ensureVault();
       const id = requireString(input?.id, 'Reminder id');
+      if (input?.state !== undefined && !REMINDER_STATES.includes(input.state)) {
+        throw new Error('Reminder state must be one of pending, fired, done, postponed, failed');
+      }
+      if (input?.postponeMinutes !== undefined && input.state !== undefined) {
+        throw new Error('A reminder cannot be postponed and change state at once');
+      }
       return runExclusively(async () => {
         const reminders = await readReminders();
         const index = reminders.findIndex((reminder) => reminder.id === id);
@@ -735,7 +744,7 @@ export function createWorkspaceService(
         const current = reminders[index]!;
         const days =
           input.days !== undefined ? normalizeReminderDays(input.days) : current.days;
-        const next: Reminder = {
+        let next: Reminder = {
           ...current,
           ...(input.time !== undefined ? { time: normalizeReminderTime(input.time) } : {}),
           ...(input.label !== undefined
@@ -745,6 +754,31 @@ export function createWorkspaceService(
         };
         if (days === undefined) delete next.days;
         else next.days = days;
+
+        if (input.postponeMinutes !== undefined) {
+          const minutes = input.postponeMinutes;
+          if (!Number.isInteger(minutes) || minutes <= 0 || minutes > 24 * 60) {
+            throw new Error('Postpone minutes must be between 1 and 1440');
+          }
+          const target = new Date(Date.now() + minutes * 60_000);
+          next = applyReminderStatePatch(next, {
+            state: 'postponed',
+            postponedTo: formatLocalDateTime(target),
+            lastError: null
+          });
+        } else if (input.state === 'done') {
+          next = applyReminderStatePatch(next, { state: 'done', postponedTo: null });
+        } else if (input.state === 'pending') {
+          // 重新启用: back on the regular schedule with a clean slate.
+          next = applyReminderStatePatch(next, {
+            state: 'pending',
+            postponedTo: null,
+            lastError: null
+          });
+        } else if (input.state !== undefined) {
+          next = applyReminderStatePatch(next, { state: input.state });
+        }
+
         const updated = [...reminders];
         updated[index] = next;
         await writeFileAtomic(remindersFile(vaultRoot), serializeRemindersFile(updated));
@@ -760,6 +794,26 @@ export function createWorkspaceService(
         const remaining = reminders.filter((reminder) => reminder.id !== id);
         if (remaining.length === reminders.length) throw new Error('Reminder not found');
         await writeFileAtomic(remindersFile(vaultRoot), serializeRemindersFile(remaining));
+      });
+    },
+
+    /**
+     * Applies a scheduler lifecycle transition. Not part of the renderer
+     * contract: the UI goes through `updateReminder`, whose lifecycle actions
+     * (done / postpone / re-enable) use the same serialized write path.
+     */
+    async setReminderState(id: string, patch: ReminderStatePatch): Promise<Reminder> {
+      await ensureVault();
+      const reminderId = requireString(id, 'Reminder id');
+      return runExclusively(async () => {
+        const reminders = await readReminders();
+        const index = reminders.findIndex((reminder) => reminder.id === reminderId);
+        if (index < 0) throw new Error('Reminder not found');
+        const next = applyReminderStatePatch(reminders[index]!, patch);
+        const updated = [...reminders];
+        updated[index] = next;
+        await writeFileAtomic(remindersFile(vaultRoot), serializeRemindersFile(updated));
+        return next;
       });
     },
 

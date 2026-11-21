@@ -31,6 +31,7 @@ import type {
 } from '../src/shared/workspace';
 import type { StreamingButlerApi } from '../src/shared/butler-stream';
 import type { ConversationRunSnapshot } from '../src/shared/butler-run';
+import { formatLocalDateTime } from '../src/shared/date';
 import type {
   CreateKnowledgeTopicInput,
   KnowledgeBacklink,
@@ -2108,6 +2109,23 @@ export function createMockApi(
         const days = normalizeMockDays(input.days);
         if (days) reminder.days = days;
         else delete reminder.days;
+      }
+      // Mirrors the vault service's lifecycle transitions so the web prototype
+      // and the renderer tests show the same chips and postpone behaviour.
+      if (input.postponeMinutes !== undefined) {
+        const target = new Date(Date.now() + input.postponeMinutes * 60_000);
+        reminder.state = 'postponed';
+        reminder.postponedTo = formatLocalDateTime(target);
+        delete reminder.lastError;
+      } else if (input.state === 'done') {
+        reminder.state = 'done';
+        delete reminder.postponedTo;
+      } else if (input.state === 'pending') {
+        reminder.state = 'pending';
+        delete reminder.postponedTo;
+        delete reminder.lastError;
+      } else if (input.state !== undefined) {
+        reminder.state = input.state;
       }
       persist();
       return structuredClone(reminder);

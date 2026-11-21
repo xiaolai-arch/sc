@@ -1,6 +1,12 @@
-import { formatLocalDate } from '../../shared/date';
+import { formatLocalDate, splitLocalDateTime } from '../../shared/date';
 import type { AppSettings } from '../../shared/types';
-import type { Reminder, WorkspaceTask } from '../../shared/workspace';
+import {
+  reminderState,
+  type Reminder,
+  type ReminderState,
+  type ReminderStatePatch,
+  type WorkspaceTask
+} from '../../shared/workspace';
 import type { DeliveryLog } from './delivery-log';
 import {
   isTimeReached,
@@ -52,6 +58,12 @@ export interface SchedulerOptions {
   /** Tasks pinned to a start time on today's schedule. */
   getScheduledTasks?: () => Promise<WorkspaceTask[]>;
   notify: (notification: SchedulerNotification) => void | Promise<void>;
+  /**
+   * Persists reminder lifecycle transitions (fired/failed/pending). Optional so
+   * read-only scheduler usages keep working; a failed write is reported and
+   * never blocks delivery.
+   */
+  onReminderState?: (id: string, patch: ReminderStatePatch) => void | Promise<void>;
   /** Persists delivered keys so a restart does not repeat today's reminders. */
   deliveryLog?: DeliveryLog;
   /** Called once before the morning notification is shown. */
@@ -82,12 +94,21 @@ interface Trigger {
   reminderId?: string;
   taskId?: string;
   conversationId?: string;
+  /** True while the reminder is due because the user postponed it. */
+  postponed?: boolean;
+  /** Due immediately regardless of the clock (a stale postponement caught up). */
+  catchUp?: boolean;
+  /** Lifecycle state as read this tick, so pending writes can be skipped. */
+  reminderState?: ReminderState;
 }
 
 const SNOOZE_INTERVAL_MS = 30_000;
 
 function keyFor(date: string, trigger: Trigger): string {
-  return `${date}:${trigger.kind}:${trigger.id}`;
+  // A postponed occurrence gets its own key so the reminder can fire again
+  // after the user moves it; the original daily key is already consumed.
+  const suffix = trigger.postponed ? `@${trigger.time}` : '';
+  return `${date}:${trigger.kind}:${trigger.id}${suffix}`;
 }
 
 function buildTriggers(
@@ -130,10 +151,37 @@ function buildTriggers(
   // so it is skipped precisely in runTick instead.
   const checkInTimes = new Set([settings.notifications.morning, settings.notifications.evening]);
   for (const reminder of reminders) {
+    if (!reminder.enabled) continue;
+    // `done` is a lifecycle state, not the schedule switch: a completed
+    // reminder stays quiet until the user re-enables it.
+    if (reminderState(reminder) === 'done') continue;
+
+    const postponed = reminder.postponedTo
+      ? splitLocalDateTime(reminder.postponedTo)
+      : null;
+    if (postponed) {
+      // A postponed occurrence replaces today's normal one. A target later
+      // than today waits for that day's tick instead of being consumed now.
+      if (date !== '' && postponed.date > date) continue;
+      triggers.push({
+        kind: 'reminder',
+        id: reminder.id,
+        time: postponed.time,
+        postponed: true,
+        // Missed while the app was closed: deliver once, then clear it.
+        ...(date !== '' && postponed.date < date ? { catchUp: true } : {}),
+        title: `提醒：${reminder.label}`,
+        body: reminder.label,
+        reminderId: reminder.id,
+        reminderState: reminderState(reminder)
+      });
+      continue;
+    }
+
     const seedMirror =
       (reminder.id === 'r1' && reminder.label === '早间计划') ||
       (reminder.id === 'r2' && reminder.label === '晚间复盘');
-    if (!reminder.enabled || (seedMirror && checkInTimes.has(reminder.time))) continue;
+    if (seedMirror && checkInTimes.has(reminder.time)) continue;
     triggers.push({
       kind: 'reminder',
       id: reminder.id,
@@ -141,7 +189,8 @@ function buildTriggers(
       ...(reminder.days && reminder.days.length > 0 ? { daysOfWeek: reminder.days } : {}),
       title: `提醒：${reminder.label}`,
       body: reminder.label,
-      reminderId: reminder.id
+      reminderId: reminder.id,
+      reminderState: reminderState(reminder)
     });
   }
 
@@ -184,6 +233,9 @@ export class Scheduler {
   private readonly getReminders: () => Promise<Reminder[]>;
   private readonly getScheduledTasks: () => Promise<WorkspaceTask[]>;
   private readonly notify: (notification: SchedulerNotification) => void | Promise<void>;
+  private readonly onReminderState:
+    | ((id: string, patch: ReminderStatePatch) => void | Promise<void>)
+    | undefined;
   private readonly deliveryLog: DeliveryLog | undefined;
   /** Date whose delivered keys were loaded from disk; avoids reloading each tick. */
   private hydratedDate: string | null = null;
@@ -215,6 +267,7 @@ export class Scheduler {
     this.getReminders = options.getReminders ?? (async () => []);
     this.getScheduledTasks = options.getScheduledTasks ?? (async () => []);
     this.notify = options.notify;
+    this.onReminderState = options.onReminderState;
     this.deliveryLog = options.deliveryLog;
     this.onMorningPlan = options.onMorningPlan;
     this.onEveningReview = options.onEveningReview;
@@ -238,6 +291,46 @@ export class Scheduler {
     } catch {
       // A broken error reporter must not take the scheduler down with it.
     }
+  }
+
+  /**
+   * Persists a lifecycle transition for a reminder trigger. A broken vault
+   * write is reported but never blocks delivery: the notification already
+   * reached the user.
+   */
+  private async writeReminderState(id: string, patch: ReminderStatePatch): Promise<void> {
+    if (this.onReminderState === undefined) return;
+    try {
+      await this.onReminderState(id, patch);
+    } catch (error) {
+      this.reportError(error);
+    }
+  }
+
+  /** Delivery succeeded: record `fired` and drop the postponement. */
+  private async markFired(trigger: Trigger, at: Date): Promise<void> {
+    if (trigger.kind !== 'reminder' || trigger.reminderId === undefined) return;
+    if (trigger.postponed) {
+      // The postponed occurrence replaces that day's normal one: pretend the
+      // regular trigger already fired so it cannot deliver twice.
+      this.delivered.add(`${formatLocalDate(at)}:reminder:${trigger.reminderId}`);
+    }
+    await this.writeReminderState(trigger.reminderId, {
+      state: 'fired',
+      firedAt: at.toISOString(),
+      postponedTo: null,
+      lastError: null
+    });
+  }
+
+  /** The notification sink failed: record `failed` with a readable cause. */
+  private async markFailed(trigger: Trigger, cause: unknown): Promise<void> {
+    if (trigger.kind !== 'reminder' || trigger.reminderId === undefined) return;
+    const message = cause instanceof Error ? cause.message : String(cause);
+    await this.writeReminderState(trigger.reminderId, {
+      state: 'failed',
+      lastError: message.trim() || '通知发送失败'
+    });
   }
 
   /** Drops bookkeeping from earlier days so long-running sessions do not grow forever. */
@@ -294,7 +387,7 @@ export class Scheduler {
       ) {
         continue;
       }
-      if (!isTimeReached(at, trigger.time)) continue;
+      if (!trigger.catchUp && !isTimeReached(at, trigger.time)) continue;
       const key = keyFor(date, trigger);
       if (this.delivered.has(key)) continue;
 
@@ -303,6 +396,18 @@ export class Scheduler {
         // a later tick still sees it as due and delivers it.
         this.pending.delete(key);
         result.suppressed.push({ key, kind: trigger.kind, reason: state });
+        // Keep the lifecycle honest: the reminder is still waiting, not fired.
+        // A postponement keeps its own `postponed` state so the page still
+        // shows the new time. Only write on a real change, so a long DND
+        // window does not rewrite reminders.md every 30 seconds.
+        if (
+          trigger.kind === 'reminder' &&
+          trigger.reminderId !== undefined &&
+          trigger.reminderState !== 'pending' &&
+          trigger.reminderState !== 'postponed'
+        ) {
+          await this.writeReminderState(trigger.reminderId, { state: 'pending' });
+        }
         continue;
       }
 
@@ -317,8 +422,10 @@ export class Scheduler {
           this.pending.delete(key);
           this.attempts.delete(key);
           result.delivered.push(pending.notification);
+          await this.markFired(trigger, at);
         } catch (error) {
           pending.attempts += 1;
+          await this.markFailed(trigger, error);
           if (pending.attempts >= MAX_TRIGGER_ATTEMPTS) {
             // Give up on the day rather than retry forever; surface the cause.
             this.delivered.add(key);
@@ -392,9 +499,11 @@ export class Scheduler {
         this.delivered.add(key);
         this.attempts.delete(key);
         result.delivered.push(notification);
-      } catch {
+        await this.markFired(trigger, at);
+      } catch (error) {
         // Keep the generated notification so later ticks retry delivery only.
         this.pending.set(key, { notification, attempts: 1 });
+        await this.markFailed(trigger, error);
         result.failed.push(key);
       }
     }

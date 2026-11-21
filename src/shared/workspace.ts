@@ -71,6 +71,21 @@ export interface MemoryItem {
   createdAt?: string;
 }
 
+/**
+ * Lifecycle of the latest occurrence of a reminder. This is deliberately
+ * separate from `enabled`: `enabled` is the user's schedule switch, `state`
+ * records what happened the last time the reminder came due.
+ */
+export type ReminderState = 'pending' | 'fired' | 'done' | 'postponed' | 'failed';
+
+export const REMINDER_STATES: readonly ReminderState[] = [
+  'pending',
+  'fired',
+  'done',
+  'postponed',
+  'failed'
+];
+
 export interface Reminder {
   id: string;
   time: string;
@@ -81,6 +96,53 @@ export interface Reminder {
    * Omitted or empty means every day.
    */
   days?: number[];
+  /**
+   * Persisted lifecycle state. Absent (legacy files) reads as `pending`.
+   * `fired` records the last delivery only; the daily/weekly schedule still
+   * decides when it fires again. `done` suppresses firing until re-enabled.
+   */
+  state?: ReminderState;
+  /** ISO timestamp of the last successful delivery. */
+  firedAt?: string;
+  /** Local `YYYY-MM-DDTHH:mm` the reminder was postponed to. */
+  postponedTo?: string;
+  /** Human-readable cause of the last delivery failure. */
+  lastError?: string;
+}
+
+/** Fields a scheduler or the UI may write to advance a reminder's lifecycle. */
+export interface ReminderStatePatch {
+  state?: ReminderState;
+  /** null clears the recorded delivery time. */
+  firedAt?: string | null;
+  /** null clears the postponement. */
+  postponedTo?: string | null;
+  /** null clears the recorded failure. */
+  lastError?: string | null;
+}
+
+/** Reads the lifecycle state, treating a legacy record without one as pending. */
+export function reminderState(reminder: Pick<Reminder, 'state'>): ReminderState {
+  return reminder.state ?? 'pending';
+}
+
+/**
+ * Applies a lifecycle patch. `null` clears an optional field; leaving it
+ * undefined keeps the current value. `enabled` is never touched here.
+ */
+export function applyReminderStatePatch(
+  reminder: Reminder,
+  patch: ReminderStatePatch
+): Reminder {
+  const next: Reminder = { ...reminder };
+  if (patch.state !== undefined) next.state = patch.state;
+  for (const field of ['firedAt', 'postponedTo', 'lastError'] as const) {
+    const value = patch[field];
+    if (value === undefined) continue;
+    if (value === null) delete next[field];
+    else next[field] = value;
+  }
+  return next;
 }
 
 export interface WorkspaceSnapshot {
@@ -197,6 +259,13 @@ export interface UpdateReminderInput {
   enabled?: boolean;
   /** null clears the repeat and returns the reminder to every day. */
   days?: number[] | null;
+  /**
+   * Lifecycle transition requested by the user: 标为完成 (`done`) or
+   * 重新启用 (`pending`). Never written together with `postponeMinutes`.
+   */
+  state?: ReminderState;
+  /** 延后: minutes from now until the reminder is due again. */
+  postponeMinutes?: number;
 }
 
 export interface DeleteReminderInput {
@@ -246,6 +315,11 @@ export interface WorkspaceService {
   createReminder?(input: CreateReminderInput): Promise<Reminder>;
   updateReminder?(input: UpdateReminderInput): Promise<Reminder>;
   deleteReminder?(input: DeleteReminderInput): Promise<void>;
+  /**
+   * Main-process-only lifecycle write used by the scheduler. Deliberately not
+   * exposed on the renderer IPC bridge; the UI uses `updateReminder`.
+   */
+  setReminderState?(id: string, patch: ReminderStatePatch): Promise<Reminder>;
   submitReview(input: SubmitReviewInput): Promise<void>;
 }
 

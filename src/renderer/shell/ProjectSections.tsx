@@ -25,6 +25,7 @@ import type {
   DeleteReminderInput,
   DeleteTaskInput,
   Reminder,
+  ReminderState,
   UpdateReminderInput,
   UpdateWorkspaceNoteInput,
   UpdateWorkspaceTaskInput,
@@ -138,6 +139,39 @@ function repeatLabel(days: number[] | undefined): string {
   if (repeat === 'weekdays') return '工作日';
   if (repeat === 'weekend') return '周末';
   return (days ?? []).map((day) => `周${WEEKDAY_NAMES[day] ?? ''}`).join('、');
+}
+
+/** Chinese label and chip colour for each persisted reminder lifecycle state. */
+const REMINDER_STATE_CHIPS: Record<ReminderState, { label: string; className: string }> = {
+  pending: {
+    label: '待触发',
+    className: 'bg-black/[0.05] text-gray-500 dark:bg-white/[0.08] dark:text-[#a1a1a6]'
+  },
+  fired: {
+    label: '已触发',
+    className: 'bg-[#0071e3]/10 text-[#0071e3] dark:bg-[#0a84ff]/20 dark:text-[#4da3ff]'
+  },
+  done: {
+    label: '已完成',
+    className: 'bg-[#34c759]/10 text-[#1a8a3c] dark:bg-[#34c759]/20 dark:text-[#5ddc7f]'
+  },
+  postponed: {
+    label: '已延后',
+    className: 'bg-[#ff9500]/10 text-[#a35a00] dark:bg-[#ff9500]/20 dark:text-[#ffb340]'
+  },
+  failed: {
+    label: '失败',
+    className: 'bg-[#d70015]/10 text-[#d70015] dark:bg-[#ff7b72]/20 dark:text-[#ff7b72]'
+  }
+};
+
+/** `2026-11-21T14:30` → `11-21 14:30`, enough context without the year. */
+function shortLocalDateTime(value: string): string {
+  return value.length >= 16 ? `${value.slice(5, 10)} ${value.slice(11, 16)}` : value;
+}
+
+function reminderStateOf(reminder: Reminder): ReminderState {
+  return reminder.state ?? 'pending';
 }
 
 function statusDot(status: WorkspaceTask['status']) {
@@ -1454,6 +1488,29 @@ export function ReviewSection({ workspace, reviews, onPrompt }: ReviewSectionPro
   );
 }
 
+function ReminderStateChip({ reminder }: { reminder: Reminder }) {
+  const state = reminderStateOf(reminder);
+  const chip = REMINDER_STATE_CHIPS[state];
+  const detail =
+    state === 'postponed' && reminder.postponedTo
+      ? `（${shortLocalDateTime(reminder.postponedTo)}）`
+      : state === 'failed' && reminder.lastError
+        ? `（${reminder.lastError}）`
+        : '';
+  return (
+    <span
+      data-reminder-state={state}
+      title={detail ? detail.slice(1, -1) : chip.label}
+      className={cn(
+        'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium leading-4',
+        chip.className
+      )}
+    >
+      {chip.label}
+    </span>
+  );
+}
+
 type RemindersSectionProps = {
   reminders: Reminder[];
   onCreateReminder: (input: CreateReminderInput) => Promise<Reminder>;
@@ -1508,6 +1565,22 @@ export function RemindersSection({
     setReminderError(null);
     try {
       await onUpdateReminder({ id: reminder.id, enabled: !reminder.enabled });
+    } catch (cause) {
+      setReminderError(messageOf(cause));
+    } finally {
+      setPendingReminderId(null);
+    }
+  }
+
+  /** Lifecycle action: 延后 by N minutes, 标为完成, or 重新启用. */
+  async function changeReminderLifecycle(
+    reminder: Reminder,
+    patch: Pick<UpdateReminderInput, 'state' | 'postponeMinutes' | 'enabled'>
+  ) {
+    setPendingReminderId(reminder.id);
+    setReminderError(null);
+    try {
+      await onUpdateReminder({ id: reminder.id, ...patch });
     } catch (cause) {
       setReminderError(messageOf(cause));
     } finally {
@@ -1633,6 +1706,12 @@ export function RemindersSection({
       </form>
 
       <p className="mb-2 text-[12px] text-gray-500 dark:text-[#8e8e93]">全部提醒</p>
+      <p
+        data-reminder-rule="true"
+        className="mb-3 rounded-xl bg-[#f5f5f7] px-3 py-2 text-[12px] leading-5 text-gray-500 dark:bg-white/[0.06] dark:text-[#8e8e93]"
+      >
+        提醒只在 ASAKI 运行时发出。电脑休眠醒来后，错过的那次最多补一次，不会重复播放；应用退出期间不会提醒。
+      </p>
       {reminders.length === 0 ? (
         <Empty
           text="还没有提醒。"
@@ -1704,6 +1783,60 @@ export function RemindersSection({
                       {repeatLabel(reminder.days)}
                     </span>
                   </span>
+                  <ReminderStateChip reminder={reminder} />
+                  {reminderStateOf(reminder) === 'done' ? (
+                    <button
+                      type="button"
+                      aria-label={`重新启用：${reminder.label}`}
+                      disabled={pendingReminderId === reminder.id}
+                      // 重新启用 both clears `done` and turns the schedule switch
+                      // back on, so the promise "stops firing until re-enabled"
+                      // holds even if the reminder was also switched off.
+                      onClick={() =>
+                        void changeReminderLifecycle(reminder, {
+                          state: 'pending',
+                          enabled: true
+                        })
+                      }
+                      className={actionClass}
+                    >
+                      重新启用
+                    </button>
+                  ) : reminder.enabled ? (
+                    <>
+                      <button
+                        type="button"
+                        aria-label={`延后 10 分钟：${reminder.label}`}
+                        disabled={pendingReminderId === reminder.id}
+                        onClick={() =>
+                          void changeReminderLifecycle(reminder, { postponeMinutes: 10 })
+                        }
+                        className={actionClass}
+                      >
+                        延后 10 分钟
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`延后 1 小时：${reminder.label}`}
+                        disabled={pendingReminderId === reminder.id}
+                        onClick={() =>
+                          void changeReminderLifecycle(reminder, { postponeMinutes: 60 })
+                        }
+                        className={actionClass}
+                      >
+                        延后 1 小时
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`标为完成：${reminder.label}`}
+                        disabled={pendingReminderId === reminder.id}
+                        onClick={() => void changeReminderLifecycle(reminder, { state: 'done' })}
+                        className={actionClass}
+                      >
+                        标为完成
+                      </button>
+                    </>
+                  ) : null}
                   <button
                     type="button"
                     aria-label={`编辑提醒：${reminder.label}`}
