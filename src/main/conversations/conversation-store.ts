@@ -152,6 +152,7 @@ function normalizeMessage(value: unknown): ConversationMessage | null {
     value['trigger'] === 'morning' ||
     value['trigger'] === 'evening' ||
     value['trigger'] === 'weekly' ||
+    value['trigger'] === 'behind' ||
     value['trigger'] === 'custom'
       ? value['trigger']
       : undefined;

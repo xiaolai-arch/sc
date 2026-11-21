@@ -9,6 +9,11 @@ import {
 } from '../../shared/workspace';
 import type { DeliveryLog } from './delivery-log';
 import {
+  BEHIND_SCHEDULE_TITLE,
+  buildBehindScheduleNotification,
+  isTaskForDate
+} from './behind-schedule';
+import {
   isTimeReached,
   notificationState,
   type NotificationState
@@ -21,6 +26,7 @@ export type SchedulerTriggerKind =
   | 'morning-plan'
   | 'evening-review'
   | 'weekly-review'
+  | 'behind-schedule'
   | 'reminder'
   | 'task';
 
@@ -57,6 +63,11 @@ export interface SchedulerOptions {
   getReminders?: () => Promise<Reminder[]>;
   /** Tasks pinned to a start time on today's schedule. */
   getScheduledTasks?: () => Promise<WorkspaceTask[]>;
+  /**
+   * Every task belonging to a calendar day, done ones included. Used only by
+   * the 落后提醒 fallback when no check-in service provides the message.
+   */
+  getTodayTasks?: (date: string) => Promise<WorkspaceTask[]>;
   notify: (notification: SchedulerNotification) => void | Promise<void>;
   /**
    * Persists reminder lifecycle transitions (fired/failed/pending). Optional so
@@ -75,7 +86,7 @@ export interface SchedulerOptions {
    * skipped (budget/duplicate); the trigger is consumed without a notification.
    */
   onCheckIn?: (
-    kind: 'morning' | 'evening' | 'weekly',
+    kind: 'morning' | 'evening' | 'weekly' | 'behind',
     date: string
   ) => Promise<SchedulerNotification | null> | SchedulerNotification | null;
   onError?: (error: unknown) => void;
@@ -142,6 +153,19 @@ function buildTriggers(
       dayOfWeek: 0,
       title: '周日复盘时间到了',
       body: '回顾本周的完成与卡点，一起安排下周重点。'
+    });
+  }
+
+  // 落后提醒: the body depends on today's tasks, so it is composed in runTick;
+  // the trigger only claims the configured time and is dropped there when the
+  // plan is on track or empty.
+  if (settings.notifications.behindScheduleEnabled) {
+    triggers.push({
+      kind: 'behind-schedule',
+      id: 'behind-schedule',
+      time: settings.notifications.behindSchedule,
+      title: BEHIND_SCHEDULE_TITLE,
+      body: ''
     });
   }
 
@@ -232,6 +256,7 @@ export class Scheduler {
   private readonly getSettings: () => Promise<AppSettings>;
   private readonly getReminders: () => Promise<Reminder[]>;
   private readonly getScheduledTasks: () => Promise<WorkspaceTask[]>;
+  private readonly getTodayTasks: (date: string) => Promise<WorkspaceTask[]>;
   private readonly notify: (notification: SchedulerNotification) => void | Promise<void>;
   private readonly onReminderState:
     | ((id: string, patch: ReminderStatePatch) => void | Promise<void>)
@@ -245,7 +270,7 @@ export class Scheduler {
   private readonly onEveningReview: ((date: string) => void | Promise<void>) | undefined;
   private readonly onCheckIn:
     | ((
-        kind: 'morning' | 'evening' | 'weekly',
+        kind: 'morning' | 'evening' | 'weekly' | 'behind',
         date: string
       ) => Promise<SchedulerNotification | null> | SchedulerNotification | null)
     | undefined;
@@ -266,6 +291,7 @@ export class Scheduler {
     this.getSettings = options.getSettings;
     this.getReminders = options.getReminders ?? (async () => []);
     this.getScheduledTasks = options.getScheduledTasks ?? (async () => []);
+    this.getTodayTasks = options.getTodayTasks ?? (async () => []);
     this.notify = options.notify;
     this.onReminderState = options.onReminderState;
     this.deliveryLog = options.deliveryLog;
@@ -449,7 +475,40 @@ export class Scheduler {
       };
 
       try {
-        if (
+        if (trigger.kind === 'behind-schedule') {
+          if (this.onCheckIn) {
+            const generated = await this.onCheckIn('behind', date);
+            if (generated === null) {
+              // Nothing is behind today (or the check-in service skipped for a
+              // budget/cap/duplicate reason): consume the trigger silently.
+              this.delivered.add(key);
+              continue;
+            }
+            notification = {
+              ...generated,
+              key,
+              kind: trigger.kind,
+              date,
+              scheduledTime: trigger.time
+            };
+          } else {
+            // No check-in service (e.g. a headless context): compose the same
+            // deterministic text straight from today's tasks.
+            const tasks = await this.getTodayTasks(date);
+            const composed = buildBehindScheduleNotification(
+              tasks.filter((task) => isTaskForDate(task, date))
+            );
+            if (composed === null) {
+              this.delivered.add(key);
+              continue;
+            }
+            notification = {
+              ...notification,
+              title: composed.title,
+              body: composed.body
+            };
+          }
+        } else if (
           trigger.kind === 'morning-plan' ||
           trigger.kind === 'evening-review' ||
           trigger.kind === 'weekly-review'

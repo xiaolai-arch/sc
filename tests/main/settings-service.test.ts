@@ -31,6 +31,8 @@ test('returns documented defaults', async () => {
       evening: '21:30',
       weekly: '20:00',
       weeklyEnabled: true,
+      behindSchedule: '20:30',
+      behindScheduleEnabled: true,
       dndStart: '23:00',
       dndEnd: '07:30'
     },
@@ -63,6 +65,8 @@ test('merges nested settings and persists them across store instances', async ()
       evening: '21:30',
       weekly: '20:00',
       weeklyEnabled: true,
+      behindSchedule: '20:30',
+      behindScheduleEnabled: true,
       dndStart: '23:00',
       dndEnd: '07:30'
     });
@@ -153,6 +157,51 @@ test('validates local CLI effort and keeps configs without effort readable', asy
     provider: { kind: 'local-cli', agent: 'claude', command: 'claude' }
   });
   expect(plain.provider).toEqual({ kind: 'local-cli', agent: 'claude', command: 'claude' });
+});
+
+test('validates and persists the behind-schedule reminder settings', async () => {
+  const { service } = memorySettings();
+
+  await expect(
+    service.update({ notifications: { behindSchedule: '8:30' } as never })
+  ).rejects.toThrow('提醒时间格式必须为 HH:MM。');
+  await expect(
+    service.update({ notifications: { behindScheduleEnabled: 'yes' } as never })
+  ).rejects.toThrow(/落后提醒开关/);
+
+  const updated = await service.update({
+    notifications: { behindSchedule: '19:45', behindScheduleEnabled: false } as never
+  });
+  expect(updated.notifications).toMatchObject({
+    behindSchedule: '19:45',
+    behindScheduleEnabled: false
+  });
+  // Round-trips through the state document.
+  expect(await service.get()).toEqual(updated);
+});
+
+test('fills behind-schedule defaults for settings written before the feature', async () => {
+  const defaults = createDefaultSettings('/tmp/old-vault');
+  const {
+    behindSchedule: _time,
+    behindScheduleEnabled: _on,
+    weekly: _weekly,
+    weeklyEnabled: _weeklyEnabled,
+    ...oldNotifications
+  } = defaults.notifications;
+  const state = new JsonStateStore({
+    filePath: null,
+    createDefault: () => ({
+      onboarded: true,
+      settings: { ...defaults, notifications: oldNotifications as never }
+    })
+  });
+  const service = new SettingsService(state);
+
+  expect((await service.get()).notifications).toMatchObject({
+    behindSchedule: '20:30',
+    behindScheduleEnabled: true
+  });
 });
 
 test('accepts non-negative token prices and rejects invalid ones', async () => {

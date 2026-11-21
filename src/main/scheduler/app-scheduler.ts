@@ -1,5 +1,6 @@
 import type { AppContext } from '../context';
 import { createDeliveryLog, type DeliveryLog } from './delivery-log';
+import { isTaskForDate } from './behind-schedule';
 import { Scheduler, type SchedulerNotification, type SchedulerOptions } from './scheduler';
 
 export interface ContextSchedulerOptions {
@@ -78,6 +79,16 @@ export function createContextScheduler(options: ContextSchedulerOptions): Schedu
             task.startAt !== undefined &&
             (task.status === 'pending' || task.status === 'in-progress')
         );
+    },
+    // Only the 落后提醒 fallback needs every task of the day (done included).
+    getTodayTasks: async (date) => {
+      const workspaces = await options.context.api.listWorkspaces();
+      const snapshots = await Promise.all(
+        workspaces.map((workspace) => options.context.api.getWorkspaceSnapshot(workspace.id))
+      );
+      return snapshots.flatMap((snapshot) =>
+        snapshot.tasks.filter((task) => isTaskForDate(task, date))
+      );
     },
     notify: options.notify,
     ...(options.deliveryLog !== undefined || options.deliveryLogPath !== undefined

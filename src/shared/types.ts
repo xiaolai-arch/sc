@@ -58,6 +58,10 @@ export interface NotificationSettings {
   /** Sunday recap time (HH:MM). */
   weekly: string;
   weeklyEnabled: boolean;
+  /** 落后提醒: checks today's plan in the evening (HH:MM). */
+  behindSchedule: string;
+  /** 落后提醒 switch; on by default. */
+  behindScheduleEnabled: boolean;
   /** Local date (YYYY-MM-DD) that pauses proactive check-ins; '' clears it. */
   snoozedUntil?: string;
   dndStart: string;

@@ -434,12 +434,16 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     };
     const butler = createButler(nextSettings.vaultPath, dependencies);
 
+    const practice = createPractice(nextSettings.vaultPath);
     const checkIns = new ProactiveCheckInService({
       conversationStore,
       workspaceService: workspace,
       modelClient,
       getSettings: () => settings.get(),
       getDailyTokensUsed: dailyTokensUsed,
+      // Read-only digest: the morning check-in names due mistakes without
+      // touching grading or scheduling.
+      practiceService: practice,
       now
     });
 
@@ -451,7 +455,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       videoModelName: videoModel,
       workspace,
       butler,
-      practice: createPractice(nextSettings.vaultPath),
+      practice,
       memory,
       profile,
       knowledge,

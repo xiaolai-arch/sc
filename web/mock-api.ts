@@ -197,6 +197,8 @@ const defaultSettings: AppSettings = {
     evening: '21:30',
     weekly: '20:00',
     weeklyEnabled: true,
+    behindSchedule: '20:30',
+    behindScheduleEnabled: true,
     dndStart: '23:00',
     dndEnd: '07:30'
   },
