@@ -62,17 +62,20 @@ import {
   type AgentPermissions
 } from '../src/shared/attachments';
 import type {
+  CreatePracticeQuestionInput,
   CreatePracticeSetInput,
   DeletePracticeSetInput,
   ExportMistakeSheetInput,
   ExportMistakeSheetResult,
   PracticeAttempt,
   PracticeMistake,
+  PracticeQuestion,
   PracticeSet,
   ReviewMistakeInput,
   SetMistakeResolvedInput,
   SubmitAnswerInput,
   SubmitAnswerResult,
+  SubmitShortAnswerInput,
   UpdatePracticeSetInput
 } from '../src/shared/practice';
 import { PRACTICE_INTERVALS } from '../src/shared/practice';
@@ -677,6 +680,30 @@ export function createMockApi(
     return null;
   }
 
+  /** Mirrors the vault service's normalization for a create/update question. */
+  function toPracticeQuestion(question: CreatePracticeQuestionInput): PracticeQuestion {
+    if (question.kind === 'short') {
+      const referenceAnswer = question.referenceAnswer?.trim();
+      if (!referenceAnswer) throw new Error('简答题需要参考答案');
+      return {
+        id: question.id ?? nextId('q'),
+        prompt: question.prompt,
+        kind: 'short',
+        options: [],
+        answer: 0,
+        referenceAnswer,
+        explanation: question.explanation ?? ''
+      };
+    }
+    return {
+      id: question.id ?? nextId('q'),
+      prompt: question.prompt,
+      options: [...(question.options ?? [])],
+      answer: question.answer ?? 0,
+      explanation: question.explanation ?? ''
+    };
+  }
+
   function scheduleMistake(
     existing: PracticeMistake | undefined,
     source: {
@@ -684,8 +711,10 @@ export function createMockApi(
       setId: string;
       questionId: string;
       prompt: string;
+      kind?: 'short';
       options: string[];
       answer: number;
+      referenceAnswer?: string;
       explanation: string;
     },
     correct: boolean,
@@ -702,8 +731,12 @@ export function createMockApi(
         setId: source.setId,
         questionId: source.questionId,
         prompt: source.prompt,
+        ...(source.kind === 'short' ? { kind: 'short' as const } : {}),
         options: [...source.options],
         answer: source.answer,
+        ...(source.referenceAnswer !== undefined
+          ? { referenceAnswer: source.referenceAnswer }
+          : {}),
         explanation: source.explanation,
         wrongCount,
         correctStreak: 0,
@@ -1316,13 +1349,7 @@ export function createMockApi(
         workspaceId: workspace.id,
         title: input.title,
         subject: input.subject ?? '',
-        questions: input.questions.map((question) => ({
-          id: question.id ?? nextId('q'),
-          prompt: question.prompt,
-          options: [...question.options],
-          answer: question.answer,
-          explanation: question.explanation ?? ''
-        })),
+        questions: input.questions.map(toPracticeQuestion),
         createdAt: timestamp,
         updatedAt: timestamp
       };
@@ -1345,13 +1372,7 @@ export function createMockApi(
       if (input.subject !== undefined) set.subject = input.subject;
       if (input.questions !== undefined) {
         if (input.questions.length === 0) throw new Error('练习至少需要一道题');
-        set.questions = input.questions.map((question) => ({
-          id: question.id ?? nextId('q'),
-          prompt: question.prompt,
-          options: [...question.options],
-          answer: question.answer,
-          explanation: question.explanation ?? ''
-        }));
+        set.questions = input.questions.map(toPracticeQuestion);
       }
       set.updatedAt = new Date().toISOString();
       persist();
@@ -1370,6 +1391,7 @@ export function createMockApi(
       const found = findPracticeQuestion(input.questionId);
       if (found === null) throw new Error('题目不存在');
       const { set, question } = found;
+      if (question.kind === 'short') throw new Error('这是简答题，请用简答作答');
       if (!Number.isInteger(input.choice) || input.choice < 0 || input.choice >= question.options.length) {
         throw new Error('选项无效');
       }
@@ -1420,6 +1442,77 @@ export function createMockApi(
         choice: input.choice,
         correct,
         answer: question.answer,
+        explanation: question.explanation,
+        attempt,
+        mistake,
+        ...(mistake?.status === 'active' ? { due: mistake.due } : {})
+      };
+    },
+
+    async submitPracticeShortAnswer(
+      input: SubmitShortAnswerInput
+    ): Promise<SubmitAnswerResult> {
+      const found = findPracticeQuestion(input.questionId);
+      if (found === null) throw new Error('题目不存在');
+      const { set, question } = found;
+      if (question.kind !== 'short') throw new Error('这不是简答题');
+      const response = input.response;
+      if (typeof response !== 'string' || response.trim() === '') {
+        throw new Error('回答内容不能为空');
+      }
+      if (typeof input.selfCorrect !== 'boolean') throw new Error('自评参数无效');
+      const answeredAtDate = new Date();
+      const answeredAt = answeredAtDate.toISOString();
+      const date = formatLocalDate(answeredAtDate);
+      // No local grader: the learner's own verdict drives the schedule.
+      const correct = input.selfCorrect;
+      // `choice` is unused (0) for a free-recall attempt.
+      const attempt: PracticeAttempt = {
+        id: nextId('pa'),
+        workspaceId: set.workspaceId,
+        setId: set.id,
+        questionId: question.id,
+        choice: 0,
+        response,
+        correct,
+        answeredAt
+      };
+      state.practiceAttempts = [...state.practiceAttempts, attempt];
+
+      const mistakes = [...state.practiceMistakes];
+      const index = mistakes.findIndex((entry) => entry.questionId === question.id);
+      const existing = index >= 0 ? mistakes[index] : undefined;
+      const mistake = scheduleMistake(
+        existing,
+        {
+          workspaceId: set.workspaceId,
+          setId: set.id,
+          questionId: question.id,
+          prompt: question.prompt,
+          kind: 'short',
+          options: [],
+          answer: 0,
+          referenceAnswer: question.referenceAnswer,
+          explanation: question.explanation
+        },
+        correct,
+        answeredAt,
+        date
+      );
+      if (mistake !== null) {
+        if (index >= 0) mistakes[index] = mistake;
+        else mistakes.push(mistake);
+      }
+      state.practiceMistakes = mistakes;
+      persist();
+
+      return {
+        questionId: question.id,
+        setId: set.id,
+        workspaceId: set.workspaceId,
+        choice: 0,
+        correct,
+        answer: 0,
         explanation: question.explanation,
         attempt,
         mistake,
@@ -1484,23 +1577,40 @@ export function createMockApi(
       if (index < 0) throw new Error('错题不存在');
       const current = state.practiceMistakes[index];
       if (current.status === 'resolved') throw new Error('这道错题已经掌握');
-      if (
-        !Number.isInteger(input.choice) ||
-        input.choice < 0 ||
-        input.choice >= current.options.length
-      ) {
-        throw new Error('选项无效');
+      const short = current.kind === 'short';
+      let choice = 0;
+      let response: string | undefined;
+      let correct: boolean;
+      if (short) {
+        const typed = input.response;
+        if (typeof typed !== 'string' || typed.trim() === '') {
+          throw new Error('回答内容不能为空');
+        }
+        if (typeof input.selfCorrect !== 'boolean') throw new Error('自评参数无效');
+        response = typed;
+        correct = input.selfCorrect;
+      } else {
+        if (
+          typeof input.choice !== 'number' ||
+          !Number.isInteger(input.choice) ||
+          input.choice < 0 ||
+          input.choice >= current.options.length
+        ) {
+          throw new Error('选项无效');
+        }
+        choice = input.choice;
+        correct = choice === current.answer;
       }
       const answeredAtDate = new Date();
       const answeredAt = answeredAtDate.toISOString();
       const date = formatLocalDate(answeredAtDate);
-      const correct = input.choice === current.answer;
       const attempt: PracticeAttempt = {
         id: nextId('pa'),
         workspaceId: current.workspaceId,
         setId: current.setId,
         questionId: current.questionId,
-        choice: input.choice,
+        choice,
+        ...(response !== undefined ? { response } : {}),
         correct,
         answeredAt
       };
@@ -1513,8 +1623,12 @@ export function createMockApi(
           setId: current.setId,
           questionId: current.questionId,
           prompt: current.prompt,
+          ...(current.kind === 'short' ? { kind: 'short' as const } : {}),
           options: current.options,
           answer: current.answer,
+          ...(current.referenceAnswer !== undefined
+            ? { referenceAnswer: current.referenceAnswer }
+            : {}),
           explanation: current.explanation
         },
         correct,
@@ -1531,7 +1645,7 @@ export function createMockApi(
         questionId: current.questionId,
         setId: current.setId,
         workspaceId: current.workspaceId,
-        choice: input.choice,
+        choice,
         correct,
         answer: current.answer,
         explanation: current.explanation,

@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { PracticeMistake, SubmitAnswerResult } from '../../src/shared/practice';
+import type {
+  PracticeMistake,
+  ReviewMistakeInput,
+  SubmitAnswerResult
+} from '../../src/shared/practice';
 import { MistakeReviewDialog } from '../../src/renderer/shell/MistakeReviewDialog';
 import { MistakeBook } from '../../src/renderer/shell/PracticePanels';
 import { Workspace } from '../../src/renderer/shell/Workspace';
@@ -100,6 +104,76 @@ test('marks a mistake mastered without answering', async () => {
 
   await waitFor(() => expect(onResolve).toHaveBeenCalledWith({ mistakeId: 'pm1', resolved: true }));
   expect(onClose).toHaveBeenCalled();
+});
+
+test('reviews a queued short mistake by revealing the answer then self-assessing', async () => {
+  const shortMistake: PracticeMistake = {
+    ...mistake(3),
+    kind: 'short',
+    prompt: '用自己的话说明第一个重要极限。',
+    options: [],
+    answer: 0,
+    referenceAnswer: 'x→0 时 sin x / x 的极限是 1。'
+  };
+  const onReview = vi.fn(async (input: ReviewMistakeInput) => {
+    const answer = resultFor(shortMistake);
+    return {
+      ...answer,
+      choice: 0,
+      answer: 0,
+      attempt: { ...answer.attempt, choice: 0, response: input.response },
+      mistake: input.selfCorrect
+        ? { ...shortMistake, correctStreak: 1, priority: 0 }
+        : shortMistake
+    };
+  });
+  render(
+    <MistakeReviewDialog
+      open
+      queue={[shortMistake]}
+      onReview={onReview}
+      onResolve={vi.fn()}
+      onClose={vi.fn()}
+    />
+  );
+
+  expect(screen.getByText(shortMistake.prompt)).toBeInTheDocument();
+  expect(screen.getByLabelText('用你自己的话回答')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '检查答案' })).not.toBeInTheDocument();
+
+  await userEvent.type(screen.getByLabelText('用你自己的话回答'), '极限是 1');
+  await userEvent.click(screen.getByRole('button', { name: '提交' }));
+
+  expect(screen.getByText('参考答案：x→0 时 sin x / x 的极限是 1。')).toBeInTheDocument();
+  expect(screen.getByText('你写的是：极限是 1')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '答对了' })).toBeInTheDocument();
+  expect(onReview).not.toHaveBeenCalled();
+
+  await userEvent.click(screen.getByRole('button', { name: '答对了' }));
+  await screen.findByText('回答正确');
+  expect(onReview).toHaveBeenCalledWith({
+    mistakeId: 'pm3',
+    response: '极限是 1',
+    selfCorrect: true
+  });
+});
+
+test('lists a short mistake with its reference answer', () => {
+  render(
+    <MistakeBook
+      mistakes={[
+        {
+          ...mistake(3),
+          kind: 'short',
+          prompt: '用自己的话说明第一个重要极限。',
+          options: [],
+          answer: 0,
+          referenceAnswer: 'x→0 时 sin x / x 的极限是 1。'
+        }
+      ]}
+    />
+  );
+  expect(screen.getByText('参考答案：x→0 时 sin x / x 的极限是 1。')).toBeInTheDocument();
 });
 
 test('lists mistakes with review actions and due markers', async () => {

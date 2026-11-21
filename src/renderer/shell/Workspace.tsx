@@ -159,6 +159,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     refreshKnowledge,
     stream,
     submitPracticeAnswer,
+    submitPracticeShortAnswer,
     reviewPracticeMistake,
     resolvePracticeMistake,
     exportMistakeSheet,
@@ -1834,6 +1835,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
                     });
                   }}
                   onSubmitAnswer={submitPracticeAnswer}
+                  onSubmitShortAnswer={submitPracticeShortAnswer}
                   onExportMistakeSheet={exportMistakeSheet}
                   attempts={practiceAttempts.filter(
                     (attempt) =>

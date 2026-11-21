@@ -3,8 +3,21 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createPracticeService } from '../../src/main/practice';
-import { parseMistakesFile, serializeMistakesFile } from '../../src/main/practice/records';
-import type { PracticeMistake } from '../../src/shared/practice';
+import {
+  coerceQuestion,
+  parseAttemptFile,
+  parseMistakesFile,
+  parsePracticeSetFile,
+  serializeAttemptFile,
+  serializeMistakesFile,
+  serializePracticeSetFile
+} from '../../src/main/practice/records';
+import type {
+  CreatePracticeQuestionInput,
+  PracticeAttempt,
+  PracticeMistake,
+  PracticeSet
+} from '../../src/shared/practice';
 import { serializeNote } from '../../src/main/vault/note';
 
 let root: string;
@@ -283,6 +296,133 @@ test('migrates a legacy record and persists the schedule on its first answer', a
   expect(after).toContain('stability: 3');
   expect(after).toContain('difficulty: 0.55');
   expect(parseMistakesFile(after)[0]).toMatchObject({ stabilityDays: 3, difficulty: 0.55 });
+});
+
+test('choice-only set files round-trip byte-identically without kind fields', () => {
+  const set: PracticeSet = {
+    id: 'ps1',
+    workspaceId: 'kaoyan',
+    title: '极限',
+    subject: '数学',
+    questions: [
+      {
+        id: 'q1',
+        prompt: '极限？',
+        options: ['0', '1'],
+        answer: 1,
+        explanation: '重要极限。'
+      }
+    ],
+    createdAt: '2026-11-01T09:00:00.000Z',
+    updatedAt: '2026-11-01T09:00:00.000Z'
+  };
+  const serialized = serializePracticeSetFile(set);
+  expect(serialized).not.toContain('kind: short');
+  expect(serialized).not.toContain('referenceAnswer');
+  expect(parsePracticeSetFile(serialized, 'kaoyan', 'ps1')).toEqual(set);
+  expect(serializePracticeSetFile(parsePracticeSetFile(serialized, 'kaoyan', 'ps1')!)).toBe(
+    serialized
+  );
+});
+
+test('short questions round-trip through the set-file serializer', () => {
+  const set: PracticeSet = {
+    id: 'ps1',
+    workspaceId: 'kaoyan',
+    title: '简答',
+    subject: '数学',
+    questions: [
+      {
+        id: 'q1',
+        kind: 'short',
+        prompt: '说明重要极限。',
+        options: [],
+        answer: 0,
+        referenceAnswer: 'sin x / x → 1。',
+        explanation: ''
+      }
+    ],
+    createdAt: '2026-11-01T09:00:00.000Z',
+    updatedAt: '2026-11-01T09:00:00.000Z'
+  };
+  const serialized = serializePracticeSetFile(set);
+  expect(serialized).toContain('kind: short');
+  expect(serialized).toContain('referenceAnswer: sin x / x → 1。');
+  expect(serialized).toContain('**参考答案**：sin x / x → 1。');
+  expect(parsePracticeSetFile(serialized, 'kaoyan', 'ps1')).toEqual(set);
+});
+
+test('coerceQuestion requires a non-empty reference answer for short questions', () => {
+  expect(coerceQuestion({ id: 'q1', prompt: '题', kind: 'short' })).toBeNull();
+  expect(
+    coerceQuestion({ id: 'q1', prompt: '题', kind: 'short', referenceAnswer: '  ' })
+  ).toBeNull();
+  expect(
+    coerceQuestion({ id: 'q1', prompt: '题', kind: 'short', referenceAnswer: '答' })
+  ).toMatchObject({ id: 'q1', kind: 'short', options: [], answer: 0, referenceAnswer: '答' });
+  // No `kind` keeps the original choice validation.
+  expect(coerceQuestion({ id: 'q1', prompt: '题', options: ['A'], answer: 0 })).toBeNull();
+});
+
+test('short mistake records round-trip through the mistake book', () => {
+  const short: PracticeMistake = {
+    id: 'pm3',
+    workspaceId: 'kaoyan',
+    setId: 'ps1',
+    questionId: 'q1',
+    prompt: '说明重要极限。',
+    kind: 'short',
+    options: [],
+    answer: 0,
+    referenceAnswer: 'sin x / x → 1。',
+    explanation: '',
+    wrongCount: 1,
+    correctStreak: 0,
+    priority: 1,
+    intervalDays: 1,
+    due: '2026-11-05',
+    status: 'active',
+    createdAt: '2026-11-01T09:00:00.000Z',
+    updatedAt: '2026-11-02T09:00:00.000Z',
+    lastAnsweredAt: '2026-11-02T09:00:00.000Z'
+  };
+  const serialized = serializeMistakesFile('kaoyan', [short], '2026-11-02T09:00:00.000Z');
+  expect(serialized).toContain('kind: short');
+  expect(serialized).toContain('参考答案：sin x / x → 1。');
+  expect(parseMistakesFile(serialized)).toEqual([short]);
+});
+
+test('attempt files round-trip and show a typed response for short answers', () => {
+  const choice: PracticeAttempt = {
+    id: 'pa1',
+    workspaceId: 'kaoyan',
+    setId: 'ps1',
+    questionId: 'q1',
+    choice: 1,
+    correct: true,
+    answeredAt: '2026-11-01T09:05:00.000Z'
+  };
+  const short: PracticeAttempt = {
+    id: 'pa2',
+    workspaceId: 'kaoyan',
+    setId: 'ps1',
+    questionId: 'q2',
+    // Unused for a free-recall attempt, kept so every record has the shape.
+    choice: 0,
+    response: '极限是 1',
+    correct: false,
+    answeredAt: '2026-11-01T09:10:00.000Z'
+  };
+  const serialized = serializeAttemptFile('2026-11-01', [choice, short]);
+  expect(serialized).toContain('选择 1');
+  expect(serialized).toContain('简答「极限是 1」');
+  expect(parseAttemptFile(serialized)).toEqual([choice, short]);
+
+  // A choice-only log keeps its original text and never mentions a response.
+  const choiceOnly = serializeAttemptFile('2026-11-01', [choice]);
+  expect(choiceOnly).not.toContain('response');
+  expect(choiceOnly).not.toContain('简答');
+  expect(parseAttemptFile(choiceOnly)).toEqual([choice]);
 });
 
 test('parses and serializes old mistake records byte-identically', () => {
@@ -670,4 +810,267 @@ test('rejects invalid review-sheet requests', async () => {
   await expect(service.exportMistakeSheet!({ workspaceId: '../escape' })).rejects.toThrow(
     'Invalid workspace id'
   );
+});
+
+// --- Short answer (free recall) -------------------------------------------
+
+const shortQuestion = {
+  kind: 'short' as const,
+  prompt: '用自己的话说明第一个重要极限。',
+  referenceAnswer: 'x→0 时 sin x / x 的极限是 1。',
+  explanation: '夹逼准则可证。'
+};
+
+test('createSet accepts short questions and round-trips them through the vault', async () => {
+  const service = at('2026-11-01');
+  const created = await service.createSet({
+    workspaceId: 'kaoyan',
+    title: '简答小测',
+    questions: [
+      shortQuestion,
+      { prompt: '矩阵可逆的条件？', options: ['|A| = 0', '|A| ≠ 0'], answer: 1 }
+    ]
+  });
+
+  expect(created.questions[0]).toMatchObject({
+    kind: 'short',
+    prompt: shortQuestion.prompt,
+    referenceAnswer: shortQuestion.referenceAnswer,
+    options: [],
+    answer: 0
+  });
+  // Choice questions carry no `kind`, so older readers see the same shape.
+  expect(created.questions[1]?.kind).toBeUndefined();
+
+  const loaded = await at('2026-11-02').getSet(created.id);
+  expect(loaded?.questions[0]).toMatchObject({
+    kind: 'short',
+    referenceAnswer: shortQuestion.referenceAnswer,
+    options: [],
+    answer: 0
+  });
+  expect(loaded?.questions[1]?.kind).toBeUndefined();
+
+  const raw = await fs.readFile(
+    join(root, 'workspaces', 'kaoyan', 'practice', 'sets', `${created.id}.md`),
+    'utf8'
+  );
+  expect(raw).toContain('kind: short');
+  expect(raw).toContain('referenceAnswer:');
+  expect(raw).toContain('**参考答案**：');
+});
+
+test('short questions without a reference answer are rejected', async () => {
+  const service = at('2026-11-01');
+  await expect(
+    service.createSet({
+      workspaceId: 'kaoyan',
+      title: '坏简答',
+      questions: [{ kind: 'short', prompt: '没有参考答案' }]
+    })
+  ).rejects.toThrow('referenceAnswer is required');
+  await expect(
+    service.createSet({
+      workspaceId: 'kaoyan',
+      title: '空简答',
+      questions: [{ kind: 'short', prompt: '空参考答案', referenceAnswer: '   ' }]
+    })
+  ).rejects.toThrow('referenceAnswer is required');
+  await expect(
+    service.createSet({
+      workspaceId: 'kaoyan',
+      title: '怪题型',
+      questions: [
+        { kind: 'essay', prompt: '题', options: ['A', 'B'], answer: 0 } as unknown as CreatePracticeQuestionInput
+      ]
+    })
+  ).rejects.toThrow('kind is invalid');
+});
+
+test('submitShortAnswer records the response and a mistake through the scheduler', async () => {
+  const service = at('2026-11-01');
+  const created = await service.createSet({
+    workspaceId: 'kaoyan',
+    title: '简答小测',
+    questions: [shortQuestion]
+  });
+  const questionId = created.questions[0]!.id;
+
+  const wrong = await service.submitShortAnswer({
+    questionId,
+    response: '  极限不存在  ',
+    selfCorrect: false
+  });
+  expect(wrong).toMatchObject({ questionId, correct: false, choice: 0, answer: 0 });
+  expect(wrong.attempt).toMatchObject({
+    questionId,
+    choice: 0,
+    response: '  极限不存在  ',
+    correct: false
+  });
+  expect(wrong.mistake).toMatchObject({
+    questionId,
+    kind: 'short',
+    referenceAnswer: shortQuestion.referenceAnswer,
+    options: [],
+    wrongCount: 1,
+    intervalDays: 1,
+    due: '2026-11-02',
+    status: 'active'
+  });
+  expect(wrong.due).toBe('2026-11-02');
+
+  // The attempt file keeps the typed answer and the mistake book keeps the
+  // snapshot needed to review it later.
+  const attemptRaw = await fs.readFile(
+    join(root, 'workspaces', 'kaoyan', 'practice', 'attempts', '2026-11-01.md'),
+    'utf8'
+  );
+  expect(attemptRaw).toContain('简答「极限不存在」');
+  const mistakesRaw = await fs.readFile(
+    join(root, 'workspaces', 'kaoyan', 'practice', 'mistakes.md'),
+    'utf8'
+  );
+  expect(parseMistakesFile(mistakesRaw)[0]).toMatchObject({
+    kind: 'short',
+    referenceAnswer: shortQuestion.referenceAnswer
+  });
+
+  // A correct self-assessment on a later day grows the interval.
+  const right = await at('2026-11-02').submitShortAnswer({
+    questionId,
+    response: '极限是 1',
+    selfCorrect: true
+  });
+  expect(right.mistake).toMatchObject({
+    status: 'active',
+    correctStreak: 1,
+    intervalDays: 2,
+    due: '2026-11-04'
+  });
+  expect(right.due).toBe('2026-11-04');
+});
+
+test('a short mistake resolves after a spaced correct self-assessment', async () => {
+  const service = at('2026-11-01');
+  const created = await service.createSet({
+    workspaceId: 'kaoyan',
+    title: '简答小测',
+    questions: [shortQuestion]
+  });
+  const questionId = created.questions[0]!.id;
+  await service.submitShortAnswer({ questionId, response: '不知道', selfCorrect: false });
+
+  const one = await at('2026-11-02').submitShortAnswer({
+    questionId,
+    response: '极限是 1',
+    selfCorrect: true
+  });
+  const two = await at(one.mistake!.due).submitShortAnswer({
+    questionId,
+    response: '极限是 1',
+    selfCorrect: true
+  });
+  const three = await at(two.mistake!.due).submitShortAnswer({
+    questionId,
+    response: '极限是 1',
+    selfCorrect: true
+  });
+
+  expect(three.mistake).toMatchObject({ status: 'resolved' });
+  expect(await at('2026-12-01').getMistakes('kaoyan')).toEqual([]);
+});
+
+test('submitShortAnswer validates its input and refuses choice questions', async () => {
+  const service = at('2026-11-01');
+  const created = await service.createSet({
+    workspaceId: 'kaoyan',
+    title: '混合',
+    questions: [
+      shortQuestion,
+      { prompt: '选择题', options: ['A', 'B'], answer: 0 }
+    ]
+  });
+  const shortId = created.questions[0]!.id;
+  const choiceId = created.questions[1]!.id;
+
+  await expect(
+    service.submitShortAnswer({ questionId: shortId, response: '   ', selfCorrect: true })
+  ).rejects.toThrow('response is required');
+  await expect(
+    service.submitShortAnswer({
+      questionId: shortId,
+      response: '答',
+      selfCorrect: 'yes' as unknown as boolean
+    })
+  ).rejects.toThrow('selfCorrect is required');
+  await expect(
+    service.submitShortAnswer({ questionId: choiceId, response: '答', selfCorrect: true })
+  ).rejects.toThrow('not a short question');
+  await expect(
+    service.submitShortAnswer({ questionId: 'missing', response: '答', selfCorrect: true })
+  ).rejects.toThrow('Question not found');
+});
+
+test('choice questions reject a short answer and keep their own flow', async () => {
+  const service = at('2026-11-01');
+  const choice = await service.submitAnswer({ questionId: 'q1', choice: 1 });
+  expect(choice).toMatchObject({ choice: 1, correct: true, mistake: null });
+  expect(choice.attempt.response).toBeUndefined();
+});
+
+test('short mistakes can be reviewed from their stored snapshot', async () => {
+  const service = at('2026-11-01');
+  const created = await service.createSet({
+    workspaceId: 'kaoyan',
+    title: '简答小测',
+    questions: [shortQuestion]
+  });
+  const first = await service.submitShortAnswer({
+    questionId: created.questions[0]!.id,
+    response: '不知道',
+    selfCorrect: false
+  });
+  const mistakeId = first.mistake!.id;
+
+  // Deleting the set must not break the review: the snapshot has everything.
+  await service.deleteSet?.({ setId: created.id });
+
+  const reviewed = await at('2026-11-02').reviewMistake!({
+    mistakeId,
+    response: '极限是 1',
+    selfCorrect: true
+  });
+  expect(reviewed.correct).toBe(true);
+  expect(reviewed.attempt.response).toBe('极限是 1');
+  expect(reviewed.mistake).toMatchObject({
+    id: mistakeId,
+    kind: 'short',
+    correctStreak: 1,
+    intervalDays: 2
+  });
+
+  await expect(
+    at('2026-11-02').reviewMistake!({ mistakeId, choice: 0 })
+  ).rejects.toThrow('response is required');
+});
+
+test('exports a review sheet that shows 参考答案 for short mistakes', async () => {
+  const service = at('2026-11-01');
+  const created = await service.createSet({
+    workspaceId: 'kaoyan',
+    title: '简答小测',
+    questions: [shortQuestion]
+  });
+  await service.submitShortAnswer({
+    questionId: created.questions[0]!.id,
+    response: '不知道',
+    selfCorrect: false
+  });
+  const result = await service.exportMistakeSheet!({ workspaceId: 'kaoyan' });
+  const raw = await fs.readFile(join(root, result.path), 'utf8');
+  expect(raw).toContain(`参考答案：${shortQuestion.referenceAnswer}`);
+  expect(raw).not.toContain('答案：A');
+  expect(raw).toContain('# 错题复习单 · 2026-11-01');
+  expect(raw).toContain('entries: 1');
 });

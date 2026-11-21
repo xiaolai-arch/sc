@@ -38,6 +38,14 @@ export function coerceQuestion(value: unknown): PracticeQuestion | null {
   const id = asString(record.id);
   const prompt = asString(record.prompt);
   if (!id || !prompt || prompt.trim() === '') return null;
+  const kind = record.kind === 'short' ? 'short' : undefined;
+  const explanation = asString(record.explanation) ?? '';
+  if (kind === 'short') {
+    const referenceAnswer = asString(record.referenceAnswer);
+    if (!referenceAnswer || referenceAnswer.trim() === '') return null;
+    // The shape keeps `options`/`answer` for compatibility; they are unused.
+    return { id, kind, prompt, options: [], answer: 0, referenceAnswer, explanation };
+  }
   const options = asStringArray(record.options);
   if (options.length < 2) return null;
   const answer = asInt(record.answer);
@@ -47,7 +55,7 @@ export function coerceQuestion(value: unknown): PracticeQuestion | null {
     prompt,
     options,
     answer,
-    explanation: asString(record.explanation) ?? ''
+    explanation
   };
 }
 
@@ -78,6 +86,11 @@ function answerLetter(answer: number): string {
   return String.fromCharCode(65 + answer);
 }
 
+/** A typed answer may span lines; the attempt log keeps one line per answer. */
+function singleLine(text: string): string {
+  return text.replace(/\s*\n\s*/g, ' ').trim();
+}
+
 export function serializePracticeSetFile(set: PracticeSet): string {
   const meta: NoteMeta = {
     type: 'qa',
@@ -92,13 +105,27 @@ export function serializePracticeSetFile(set: PracticeSet): string {
     questions: set.questions.map((question) => ({
       id: question.id,
       prompt: question.prompt,
+      // Both fields are written only when present, so a file holding only
+      // choice questions round-trips byte-identically to before this feature.
+      ...(question.kind === 'short' ? { kind: 'short' } : {}),
       options: [...question.options],
       answer: question.answer,
+      ...(question.referenceAnswer !== undefined
+        ? { referenceAnswer: question.referenceAnswer }
+        : {}),
       explanation: question.explanation
     }))
   };
   const context = [set.workspaceId, set.subject, `${set.questions.length} 题`].filter(Boolean).join(' · ');
   const sections = set.questions.map((question, index) => {
+    if (question.kind === 'short') {
+      const explanation = question.explanation ? `\n\n**解析**：${question.explanation}` : '';
+      return [
+        `## ${index + 1}. ${question.prompt}`,
+        '',
+        `**参考答案**：${question.referenceAnswer ?? ''}${explanation}`
+      ].join('\n');
+    }
     const options = question.options
       .map((option, optionIndex) => `- ${String.fromCharCode(65 + optionIndex)}. ${option}`)
       .join('\n');
@@ -131,12 +158,14 @@ export function parseAttemptFile(raw: string): PracticeAttempt[] {
     if (!id || !workspaceId || !setId || !questionId || choice === undefined || !answeredAt) {
       continue;
     }
+    const response = asString(record.response);
     attempts.push({
       id,
       workspaceId,
       setId,
       questionId,
       choice,
+      ...(response !== undefined ? { response } : {}),
       correct: asBoolean(record.correct, false),
       answeredAt
     });
@@ -155,6 +184,10 @@ export function serializeAttemptFile(date: string, attempts: readonly PracticeAt
   const lines = attempts.map((attempt) => {
     const time = attempt.answeredAt.slice(11, 16);
     const verdict = attempt.correct ? '✅' : '❌';
+    if (attempt.response !== undefined) {
+      // Free recall: show what was typed, not an option index.
+      return `- ${time || '--:--'} · ${attempt.questionId} · 简答「${singleLine(attempt.response)}」 · ${verdict}`;
+    }
     return `- ${time || '--:--'} · ${attempt.questionId} · 选择 ${attempt.choice} · ${verdict}`;
   });
   const body = [`# ${date} 练习记录`, '', ...lines, ''].join('\n');
@@ -169,22 +202,26 @@ function coerceMistake(value: unknown): PracticeMistake | null {
   const setId = asString(record.setId);
   const questionId = asString(record.questionId);
   const prompt = asString(record.prompt);
+  const kind = record.kind === 'short' ? 'short' : undefined;
+  const referenceAnswer = asString(record.referenceAnswer);
   const options = asStringArray(record.options);
   const answer = asInt(record.answer);
   const due = asString(record.due);
   const createdAt = asString(record.createdAt);
   const updatedAt = asString(record.updatedAt);
   const lastAnsweredAt = asString(record.lastAnsweredAt);
+  const short = kind === 'short';
   if (
     !id ||
     !workspaceId ||
     !setId ||
     !questionId ||
     !prompt ||
-    options.length < 2 ||
+    (!short && options.length < 2) ||
     answer === undefined ||
     answer < 0 ||
-    answer >= options.length ||
+    (!short && answer >= options.length) ||
+    (short && (referenceAnswer === undefined || referenceAnswer.trim() === '')) ||
     !due ||
     !isIsoDate(due) ||
     !createdAt ||
@@ -205,6 +242,8 @@ function coerceMistake(value: unknown): PracticeMistake | null {
     setId,
     questionId,
     prompt,
+    // Both fields are omitted when absent so legacy records stay unchanged.
+    ...(short ? { kind, referenceAnswer } : {}),
     options,
     answer,
     explanation: asString(record.explanation) ?? '',
@@ -255,9 +294,11 @@ export function serializeMistakesFile(
   };
   const sections = mistakes.map((mistake) => {
     const state = mistake.status === 'resolved' ? '已掌握' : `下次复习 ${mistake.due}`;
+    const answer = mistake.kind === 'short' ? `- 参考答案：${singleLine(mistake.referenceAnswer ?? '')}` : '';
     return [
       `## ${mistake.questionId} · ${mistake.prompt}`,
       '',
+      ...(answer ? [answer] : []),
       `- 错误次数：${mistake.wrongCount}`,
       `- 优先级：${mistake.priority}`,
       `- 间隔：${mistake.intervalDays} 天`,

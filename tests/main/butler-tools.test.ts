@@ -131,8 +131,8 @@ function practiceStub(): { service: PracticeService; createSet: ReturnType<typeo
     questions: input.questions.map((question, index) => ({
       id: `q-${index + 1}`,
       prompt: question.prompt,
-      options: question.options,
-      answer: question.answer,
+      options: question.options ?? [],
+      answer: question.answer ?? 0,
       explanation: question.explanation ?? ''
     })),
     createdAt: '2026-11-21T00:00:00.000Z',
@@ -758,6 +758,64 @@ test('create_practice_set rejects invalid question lists with Chinese messages',
   const sameOptions = await createPracticeSetError([duplicated, duplicated, duplicated]);
   expect(sameOptions).toBeInstanceOf(ToolInputError);
   expect((sameOptions as ToolInputError).message).toContain('选项不能重复');
+});
+
+test('create_practice_set accepts a mixed choice/short list', async () => {
+  const { createSet, service } = practiceStub();
+  const result = await executeButlerTool(
+    {
+      id: 'p4',
+      name: 'create_practice_set',
+      arguments: {
+        title: '混合小测',
+        questions: [
+          quizQuestions()[0],
+          { kind: 'short', prompt: '用自己的话说明夹逼准则。', referenceAnswer: '两边夹住即可' },
+          { prompt: '选择题默认是 choice', options: ['甲', '乙'], answer: 1 }
+        ]
+      }
+    },
+    tools,
+    {
+      workspace: workspaceWithName('考研'),
+      workspaceId: 'ws-exam',
+      practice: service,
+      now: () => new Date('2026-11-21T09:00:00.000Z')
+    }
+  );
+
+  expect(result.ok).toBe(true);
+  expect(createSet).toHaveBeenCalledWith({
+    workspaceId: 'ws-exam',
+    title: '混合小测',
+    questions: [
+      {
+        prompt: '极限 lim(x→0) sin(x)/x 等于多少？',
+        options: ['0', '1', '∞', '不存在'],
+        answer: 1,
+        explanation: '重要极限。'
+      },
+      { kind: 'short', prompt: '用自己的话说明夹逼准则。', referenceAnswer: '两边夹住即可' },
+      { prompt: '选择题默认是 choice', options: ['甲', '乙'], answer: 1 }
+    ]
+  });
+});
+
+test('create_practice_set rejects a short question missing referenceAnswer', async () => {
+  const short = { kind: 'short', prompt: '用自己的话说明夹逼准则。' };
+  const other = quizQuestions()[0];
+  const error = await createPracticeSetError([other, short, other]);
+
+  expect(error).toBeInstanceOf(ToolInputError);
+  expect((error as ToolInputError).message).toContain('参考答案');
+
+  const wrongKind = await createPracticeSetError([
+    other,
+    { kind: 'essay', prompt: '题', options: ['甲', '乙'], answer: 0 },
+    other
+  ]);
+  expect(wrongKind).toBeInstanceOf(ToolInputError);
+  expect((wrongKind as ToolInputError).message).toContain('choice 或 short');
 });
 
 test('create_practice_set reports when the practice service is unavailable', async () => {

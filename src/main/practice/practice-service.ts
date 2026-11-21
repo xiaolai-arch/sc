@@ -15,6 +15,7 @@ import {
   type SetMistakeResolvedInput,
   type SubmitAnswerInput,
   type SubmitAnswerResult,
+  type SubmitShortAnswerInput,
   type UpdatePracticeSetInput
 } from '../../shared/practice';
 import {
@@ -92,6 +93,25 @@ function normalizeQuestions(input: unknown): PracticeQuestion[] {
     }
     const record = value as Record<string, unknown>;
     const prompt = requireString(record.prompt, `Question ${index + 1} prompt`);
+    const id =
+      record.id === undefined
+        ? newId('q')
+        : assertSafeSegment(requireString(record.id, `Question ${index + 1} id`), 'question id');
+    if (used.has(id)) throw new Error(`Duplicate question id: ${id}`);
+    used.add(id);
+    const explanation = typeof record.explanation === 'string' ? record.explanation : '';
+    const kind = record.kind === undefined ? undefined : record.kind;
+    if (kind !== undefined && kind !== 'choice' && kind !== 'short') {
+      throw new Error(`Question ${index + 1} kind is invalid`);
+    }
+    if (kind === 'short') {
+      // Free recall: no options; the reference answer is the model answer.
+      const referenceAnswer = requireString(
+        record.referenceAnswer,
+        `Question ${index + 1} referenceAnswer`
+      );
+      return { id, kind: 'short', prompt, options: [], answer: 0, referenceAnswer, explanation };
+    }
     const options = Array.isArray(record.options)
       ? record.options.filter((option): option is string => typeof option === 'string' && option.trim() !== '')
       : [];
@@ -100,18 +120,12 @@ function normalizeQuestions(input: unknown): PracticeQuestion[] {
     if (typeof answer !== 'number' || !Number.isInteger(answer) || answer < 0 || answer >= options.length) {
       throw new Error(`Question ${index + 1} answer is out of range`);
     }
-    const id =
-      record.id === undefined
-        ? newId('q')
-        : assertSafeSegment(requireString(record.id, `Question ${index + 1} id`), 'question id');
-    if (used.has(id)) throw new Error(`Duplicate question id: ${id}`);
-    used.add(id);
     return {
       id,
       prompt,
       options,
       answer,
-      explanation: typeof record.explanation === 'string' ? record.explanation : ''
+      explanation
     };
   });
 }
@@ -121,8 +135,10 @@ interface MistakeSource {
   setId: string;
   questionId: string;
   prompt: string;
+  kind?: 'short';
   options: string[];
   answer: number;
+  referenceAnswer?: string;
   explanation: string;
 }
 
@@ -152,8 +168,10 @@ function applyMistakeAnswer(
       setId: source.setId,
       questionId: source.questionId,
       prompt: source.prompt,
+      ...(source.kind === 'short' ? { kind: 'short' as const } : {}),
       options: [...source.options],
       answer: source.answer,
+      ...(source.referenceAnswer !== undefined ? { referenceAnswer: source.referenceAnswer } : {}),
       explanation: source.explanation,
       wrongCount,
       correctStreak: 0,
@@ -481,27 +499,127 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
       });
     },
 
+    async submitShortAnswer(input: SubmitShortAnswerInput): Promise<SubmitAnswerResult> {
+      if (typeof input !== 'object' || input === null) throw new Error('Answer is required');
+      const questionId = assertSafeSegment(
+        requireString(input.questionId, 'question id'),
+        'question id'
+      );
+      const response = requireString(input.response, 'response');
+      if (typeof input.selfCorrect !== 'boolean') throw new Error('selfCorrect is required');
+      const correct = input.selfCorrect;
+      await ensureSeeded();
+      const found = await findQuestion(questionId);
+      if (found === null) throw new Error(`Question not found: ${questionId}`);
+      if (found.question.kind !== 'short') throw new Error('Question is not a short question');
+
+      const answeredAtDate = now();
+      const answeredAt = answeredAtDate.toISOString();
+      const today = formatLocalDate(answeredAtDate);
+      const { workspaceId, set, question } = found;
+
+      return runExclusively(async () => {
+        // `choice` stays 0: a free-recall attempt has no option index, and the
+        // field is kept so every attempt record has the same shape.
+        const attempt: PracticeAttempt = {
+          id: newId('pa'),
+          workspaceId,
+          setId: set.id,
+          questionId,
+          choice: 0,
+          response,
+          correct,
+          answeredAt
+        };
+
+        const dayFile = attemptFile(vaultRoot, workspaceId, today);
+        const existingAttemptsRaw = await readFileOrNull(dayFile);
+        const attempts = existingAttemptsRaw === null ? [] : parseAttemptFile(existingAttemptsRaw);
+        await writeFileAtomic(dayFile, serializeAttemptFile(today, [...attempts, attempt]));
+
+        const mistakes = await readMistakes(workspaceId);
+        const index = mistakes.findIndex((entry) => entry.questionId === questionId);
+        const existing = index >= 0 ? mistakes[index] : undefined;
+        const mistake = applyMistakeAnswer(
+          existing,
+          {
+            workspaceId,
+            setId: set.id,
+            questionId,
+            prompt: question.prompt,
+            kind: 'short',
+            options: [],
+            answer: 0,
+            referenceAnswer: question.referenceAnswer,
+            explanation: question.explanation
+          },
+          correct,
+          answeredAt,
+          today
+        );
+
+        if (mistake !== null) {
+          if (index >= 0) mistakes[index] = mistake;
+          else mistakes.push(mistake);
+          await writeFileAtomic(
+            mistakesFile(vaultRoot, workspaceId),
+            serializeMistakesFile(workspaceId, mistakes, answeredAt)
+          );
+        }
+
+        return {
+          questionId,
+          setId: set.id,
+          workspaceId,
+          choice: 0,
+          correct,
+          answer: 0,
+          explanation: question.explanation,
+          attempt,
+          mistake,
+          due: mistake?.status === 'active' ? mistake.due : undefined
+        };
+      });
+    },
+
     async reviewMistake(input: ReviewMistakeInput): Promise<SubmitAnswerResult> {
       if (typeof input !== 'object' || input === null) throw new Error('Review is required');
       const mistakeId = assertSafeSegment(
         requireString(input.mistakeId, 'mistake id'),
         'mistake id'
       );
-      const choice = input.choice;
-      if (typeof choice !== 'number' || !Number.isInteger(choice) || choice < 0) {
-        throw new Error('Invalid answer choice');
+      if (input.choice !== undefined) {
+        const choice = input.choice;
+        if (typeof choice !== 'number' || !Number.isInteger(choice) || choice < 0) {
+          throw new Error('Invalid answer choice');
+        }
       }
       await ensureSeeded();
       const found = await findMistake(mistakeId);
       if (found === null) throw new Error(`Mistake not found: ${mistakeId}`);
       if (found.mistake.status === 'resolved') throw new Error('Mistake is already resolved');
-      if (choice >= found.mistake.options.length) throw new Error('Invalid answer choice');
+      const { workspaceId, mistake: snapshot } = found;
+      const short = snapshot.kind === 'short';
+      let choice = 0;
+      let response: string | undefined;
+      let correct: boolean;
+      if (short) {
+        response = requireString(input.response, 'response');
+        if (typeof input.selfCorrect !== 'boolean') throw new Error('selfCorrect is required');
+        correct = input.selfCorrect;
+      } else {
+        const picked = input.choice;
+        if (typeof picked !== 'number' || !Number.isInteger(picked) || picked < 0) {
+          throw new Error('Invalid answer choice');
+        }
+        if (picked >= snapshot.options.length) throw new Error('Invalid answer choice');
+        choice = picked;
+        correct = picked === snapshot.answer;
+      }
 
       const answeredAtDate = now();
       const answeredAt = answeredAtDate.toISOString();
       const today = formatLocalDate(answeredAtDate);
-      const { workspaceId, mistake: snapshot } = found;
-      const correct = choice === snapshot.answer;
 
       return runExclusively(async () => {
         const attempt: PracticeAttempt = {
@@ -510,6 +628,7 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
           setId: snapshot.setId,
           questionId: snapshot.questionId,
           choice,
+          ...(response !== undefined ? { response } : {}),
           correct,
           answeredAt
         };
@@ -530,8 +649,12 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
             setId: current.setId,
             questionId: current.questionId,
             prompt: current.prompt,
+            ...(current.kind === 'short' ? { kind: 'short' as const } : {}),
             options: current.options,
             answer: current.answer,
+            ...(current.referenceAnswer !== undefined
+              ? { referenceAnswer: current.referenceAnswer }
+              : {}),
             explanation: current.explanation
           },
           correct,

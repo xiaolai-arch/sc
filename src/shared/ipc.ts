@@ -28,6 +28,7 @@ import type {
   SetMistakeResolvedInput,
   SubmitAnswerInput,
   SubmitAnswerResult,
+  SubmitShortAnswerInput,
   UpdatePracticeSetInput
 } from './practice';
 import type { LongPlanApi } from './plans';
@@ -92,6 +93,8 @@ export interface PracticeApi {
   updatePracticeSet?(input: UpdatePracticeSetInput): Promise<PracticeSet>;
   deletePracticeSet?(input: DeletePracticeSetInput): Promise<void>;
   submitPracticeAnswer(input: SubmitAnswerInput): Promise<SubmitAnswerResult>;
+  /** Free-recall answer; `selfCorrect` is the learner's own verdict. */
+  submitPracticeShortAnswer(input: SubmitShortAnswerInput): Promise<SubmitAnswerResult>;
   reviewPracticeMistake?(input: ReviewMistakeInput): Promise<SubmitAnswerResult>;
   setPracticeMistakeResolved?(input: SetMistakeResolvedInput): Promise<PracticeMistake>;
   getPracticeMistakes(workspaceId: string): Promise<PracticeMistake[]>;

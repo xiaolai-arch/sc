@@ -91,4 +91,47 @@ describe('buildMistakeSheet', () => {
     });
     expect(sheet).toContain('## 1. 第一行 第二行');
   });
+
+  it('renders 参考答案 instead of an option letter for a short mistake', () => {
+    const short = mistake({
+      id: 'pm3',
+      questionId: 'q3',
+      kind: 'short',
+      prompt: '用自己的话说明第一个重要极限。',
+      options: [],
+      answer: 0,
+      referenceAnswer: 'x→0 时 sin x / x 的极限是 1。',
+      explanation: '夹逼准则可证。'
+    });
+    const sheet = buildMistakeSheet({
+      workspaceId: 'kaoyan',
+      date: '2026-11-02',
+      mistakes: [short]
+    });
+
+    expect(sheet).toContain('## 1. 用自己的话说明第一个重要极限。');
+    expect(sheet).toContain('参考答案：x→0 时 sin x / x 的极限是 1。');
+    expect(sheet).not.toContain('答案：A');
+    expect(sheet).not.toContain('A. ');
+    // Everything after the answer line is unchanged.
+    expect(sheet).toContain('解析：夹逼准则可证。');
+    expect(sheet).toContain('错 2 次 · 优先级 2 · 下次复习 2026-11-05');
+    expect(sheet).toContain('entries: 1');
+  });
+
+  it('keeps a multi-line reference answer on one line', () => {
+    const sheet = buildMistakeSheet({
+      workspaceId: 'kaoyan',
+      date: '2026-11-02',
+      mistakes: [
+        mistake({
+          kind: 'short',
+          options: [],
+          answer: 0,
+          referenceAnswer: '第一行\n第二行'
+        })
+      ]
+    });
+    expect(sheet).toContain('参考答案：第一行 第二行');
+  });
 });

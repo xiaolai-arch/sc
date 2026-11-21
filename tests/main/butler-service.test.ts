@@ -969,8 +969,8 @@ test('routes create_practice_set tool calls to the injected practice service', a
     questions: input.questions.map((question, index) => ({
       id: `q-${index + 1}`,
       prompt: question.prompt,
-      options: question.options,
-      answer: question.answer,
+      options: question.options ?? [],
+      answer: question.answer ?? 0,
       explanation: question.explanation ?? ''
     })),
     createdAt: NOW.toISOString(),

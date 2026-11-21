@@ -16,12 +16,24 @@
  */
 export const PRACTICE_INTERVALS = [1, 3, 7] as const;
 
+/**
+ * `choice` questions are answered by picking an option; `short` questions are
+ * answered by free recall, which the learning-science evidence favours over
+ * recognition (Bisra 2018). Absent means `choice`, so existing files and
+ * callers keep their meaning without a migration.
+ */
+export type PracticeQuestionKind = 'choice' | 'short';
+
 export interface PracticeQuestion {
   id: string;
   prompt: string;
+  /** Absent means `choice`. */
+  kind?: PracticeQuestionKind;
   options: string[];
-  /** Index into `options`. */
+  /** Index into `options`. Unused (0) for short questions. */
   answer: number;
+  /** Short questions only: the model answer shown after recall. */
+  referenceAnswer?: string;
   explanation: string;
 }
 
@@ -40,8 +52,10 @@ export interface PracticeAttempt {
   workspaceId: string;
   setId: string;
   questionId: string;
-  /** Index into the question's `options`. */
+  /** Index into the question's `options`. Unused (0) for short questions. */
   choice: number;
+  /** Short questions: what the learner typed. Absent for choice attempts. */
+  response?: string;
   correct: boolean;
   answeredAt: string;
 }
@@ -64,8 +78,12 @@ export interface PracticeMistake {
   setId: string;
   questionId: string;
   prompt: string;
+  /** Absent means `choice`; kept on the snapshot so the book can show it. */
+  kind?: PracticeQuestionKind;
   options: string[];
   answer: number;
+  /** Short mistakes only: the model answer, shown in the book and the sheet. */
+  referenceAnswer?: string;
   explanation: string;
   wrongCount: number;
   correctStreak: number;
@@ -93,10 +111,24 @@ export interface SubmitAnswerInput {
   choice: number;
 }
 
+/**
+ * A short question has no grader locally, so the learner assesses their own
+ * recall after seeing the reference answer. `selfCorrect` is that verdict and
+ * drives the same scheduler a choice answer does.
+ */
+export interface SubmitShortAnswerInput {
+  questionId: string;
+  /** What the learner typed; non-empty after trimming. */
+  response: string;
+  /** Self-assessment: true = 答对了, false = 没答对. */
+  selfCorrect: boolean;
+}
+
 export interface SubmitAnswerResult {
   questionId: string;
   setId: string;
   workspaceId: string;
+  /** Unused (0) for short questions; `response` carries what was typed. */
   choice: number;
   correct: boolean;
   answer: number;
@@ -112,8 +144,14 @@ export interface CreatePracticeQuestionInput {
   /** Optional; a path-safe id is generated when omitted. */
   id?: string;
   prompt: string;
-  options: string[];
-  answer: number;
+  /** Absent means `choice`. */
+  kind?: PracticeQuestionKind;
+  /** Choice questions: two or more options. Short questions: empty/omitted. */
+  options?: string[];
+  /** Choice questions: index into `options`. Short questions: omit. */
+  answer?: number;
+  /** Short questions only, required and non-empty for them. */
+  referenceAnswer?: string;
   explanation?: string;
 }
 
@@ -138,8 +176,12 @@ export interface DeletePracticeSetInput {
 
 export interface ReviewMistakeInput {
   mistakeId: string;
-  /** Index into the mistake's stored options. */
-  choice: number;
+  /** Index into the mistake's stored options. Choice mistakes only. */
+  choice?: number;
+  /** Short mistakes only: what the learner typed. */
+  response?: string;
+  /** Short mistakes only: self-assessment (`答对了` = true). */
+  selfCorrect?: boolean;
 }
 
 export interface SetMistakeResolvedInput {
@@ -169,6 +211,11 @@ export interface PracticeService {
   updateSet?(input: UpdatePracticeSetInput): Promise<PracticeSet>;
   deleteSet?(input: DeletePracticeSetInput): Promise<void>;
   submitAnswer(input: SubmitAnswerInput): Promise<SubmitAnswerResult>;
+  /**
+   * Records a free-recall answer. Local-first has no grader, so the learner's
+   * self-assessment is the correctness signal handed to the scheduler.
+   */
+  submitShortAnswer(input: SubmitShortAnswerInput): Promise<SubmitAnswerResult>;
   /**
    * Reviews a mistake using its stored question snapshot, so a review still
    * works after the source practice set was renamed or deleted.

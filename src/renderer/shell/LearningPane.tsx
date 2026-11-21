@@ -13,7 +13,8 @@ import type {
   PracticeMistake,
   PracticeSet,
   SubmitAnswerInput,
-  SubmitAnswerResult
+  SubmitAnswerResult,
+  SubmitShortAnswerInput
 } from '../../shared/practice';
 import { AttemptHistory, MistakeBook } from './PracticePanels';
 import { PracticeSetDialog } from './PracticeSetDialog';
@@ -32,6 +33,8 @@ type LearningPaneProps = {
   onResolveMistake?: (mistake: PracticeMistake) => void;
   attempts?: PracticeAttempt[];
   onSubmitAnswer: (input: SubmitAnswerInput) => Promise<SubmitAnswerResult>;
+  /** Free-recall answers; the learner's self-assessment is the verdict. */
+  onSubmitShortAnswer?: (input: SubmitShortAnswerInput) => Promise<SubmitAnswerResult>;
   onCreateSet?: (input: CreatePracticeSetInput) => Promise<PracticeSet>;
   /** Writes the printable sheet; omitted callers simply do not show the button. */
   onExportMistakeSheet?: (
@@ -53,6 +56,7 @@ export function LearningPane({
   onResolveMistake,
   attempts,
   onSubmitAnswer,
+  onSubmitShortAnswer,
   onCreateSet,
   onExportMistakeSheet,
   onOpenChat,
@@ -62,6 +66,10 @@ export function LearningPane({
   const [selected, setSelected] = useState<number | null>(null);
   const [result, setResult] = useState<SubmitAnswerResult | null>(null);
   const [checking, setChecking] = useState(false);
+  /** Short questions: the textarea contents. */
+  const [response, setResponse] = useState('');
+  /** Short questions: 提交 reveals the reference answer and self-assessment. */
+  const [revealed, setRevealed] = useState(false);
   const [score, setScore] = useState(0);
   const [finished, setFinished] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +80,8 @@ export function LearningPane({
     setSelected(null);
     setResult(null);
     setChecking(false);
+    setResponse('');
+    setRevealed(false);
     setScore(0);
     setFinished(false);
     setError(null);
@@ -162,6 +172,10 @@ export function LearningPane({
   const answered = result !== null;
   const correct = result?.correct === true;
   const last = index === set.questions.length - 1;
+  /** Free recall: the learner has answered, the reference answer is visible. */
+  const isShort = question.kind === 'short';
+  const awaitingSelfAssessment = isShort && revealed && !answered;
+  const responseReady = response.trim() !== '' && !answered && !checking;
 
   async function check() {
     if (selected === null || answered || checking) return;
@@ -169,6 +183,42 @@ export function LearningPane({
     setError(null);
     try {
       const submitted = await onSubmitAnswer({ questionId: question.id, choice: selected });
+      setResult(submitted);
+      if (submitted.correct) setScore((current) => current + 1);
+    } catch (cause) {
+      setError(friendlyErrorMessage(cause, '提交答案失败，请重试。'));
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  /** 提交: nothing is recorded yet — just reveal the model answer. */
+  function reveal() {
+    if (!responseReady) return;
+    setError(null);
+    setRevealed(true);
+  }
+
+  /**
+   * 答对了 / 没答对: recording happens HERE. ASAKI is local-first and has no
+   * grader, so an automatic check is not honest — the learner compares their
+   * own recall with the reference answer and that verdict drives the same
+   * spaced-repetition scheduler a choice answer would.
+   */
+  async function selfAssess(selfCorrect: boolean) {
+    if (!awaitingSelfAssessment || checking) return;
+    if (!onSubmitShortAnswer) {
+      setError('当前存储不支持简答作答。');
+      return;
+    }
+    setChecking(true);
+    setError(null);
+    try {
+      const submitted = await onSubmitShortAnswer({
+        questionId: question.id,
+        response,
+        selfCorrect
+      });
       setResult(submitted);
       if (submitted.correct) setScore((current) => current + 1);
     } catch (cause) {
@@ -186,6 +236,8 @@ export function LearningPane({
     setIndex((current) => current + 1);
     setSelected(null);
     setResult(null);
+    setResponse('');
+    setRevealed(false);
     setError(null);
   }
 
@@ -194,6 +246,8 @@ export function LearningPane({
     setSelected(null);
     setResult(null);
     setChecking(false);
+    setResponse('');
+    setRevealed(false);
     setScore(0);
     setFinished(false);
     setError(null);
@@ -259,41 +313,97 @@ export function LearningPane({
                 {question.prompt}
               </h1>
 
-              <div className="mt-4 space-y-2">
-                {question.options.map((option, optionIndex) => {
-                  const isCorrect = answered && optionIndex === result.answer;
-                  const isWrong = answered && optionIndex === selected && !result?.correct;
-                  return (
-                    <button
-                      key={option}
-                      type="button"
-                      disabled={answered || checking}
-                      onClick={() => setSelected(optionIndex)}
-                      aria-pressed={selected === optionIndex}
-                      aria-label={`${String.fromCharCode(65 + optionIndex)}. ${option}`}
-                      className={cn(
-                        'flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left text-[14px] leading-6 transition-colors duration-200 disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30',
-                        isCorrect
-                          ? 'border-[#34c759]/30 bg-[#34c759]/10 dark:bg-[#34c759]/15 text-black dark:text-[#f5f5f7]'
-                          : isWrong
-                            ? 'border-[#d70015]/20 bg-[#ff3b30]/10 dark:bg-[#ff3b30]/15 text-black dark:text-[#f5f5f7]'
-                            : selected === optionIndex
-                              ? 'border-[#0071e3]/30 bg-[#0071e3]/5 dark:bg-[#0a84ff]/10 text-black dark:text-[#f5f5f7]'
-                              : 'border-gray-200/70 dark:border-white/10 bg-white dark:bg-[#242426] text-gray-500 dark:text-[#a1a1a6] hover:bg-[#f5f5f7] dark:hover:bg-white/[0.06]'
+              {isShort ? (
+                <>
+                  <label
+                    htmlFor="practice-short-response"
+                    className="mt-4 block text-[12px] font-medium text-gray-500 dark:text-[#8e8e93]"
+                  >
+                    用你自己的话回答
+                  </label>
+                  <textarea
+                    id="practice-short-response"
+                    value={response}
+                    rows={4}
+                    disabled={revealed || checking}
+                    onChange={(event) => setResponse(event.target.value)}
+                    className="mt-2 w-full resize-none rounded-xl border border-gray-200/70 bg-white px-4 py-3 text-[14px] leading-6 text-black outline-none transition-colors duration-200 focus:border-[#0071e3]/40 focus:ring-2 focus:ring-[#0071e3]/20 disabled:cursor-default disabled:bg-[#f5f5f7] disabled:text-gray-500 dark:border-white/10 dark:bg-[#242426] dark:text-[#f5f5f7] dark:focus:border-[#0a84ff]/50"
+                  />
+                  {revealed ? (
+                    <div className="mt-4 rounded-xl bg-[#f5f5f7] px-4 py-3 dark:bg-[#1c1c1e]">
+                      <p className="text-[13px] leading-6 text-black dark:text-[#f5f5f7]">
+                        参考答案：{question.referenceAnswer ?? ''}
+                      </p>
+                      {/* The learner's own words are kept as typed. */}
+                      <p className="mt-1 whitespace-pre-wrap text-[13px] leading-6 text-gray-500 dark:text-[#a1a1a6]">
+                        你写的是：{response}
+                      </p>
+                      {question.explanation ? (
+                        <p className="mt-2 text-[13px] leading-6 text-gray-500 dark:text-[#a1a1a6]">
+                          {question.explanation}
+                        </p>
+                      ) : null}
+                      {answered ? (
+                        <>
+                          <p
+                            className={cn(
+                              'mt-2 text-[13px] font-medium',
+                              correct ? 'text-[#1d7f3a]' : 'text-[#d70015] dark:text-[#ff7b72]'
+                            )}
+                          >
+                            {correct ? '回答正确' : '回答错误'}
+                          </p>
+                          {result?.mistake?.status === 'active' ? (
+                            <p className="mt-2 text-[12px] text-gray-500 dark:text-[#8e8e93]" role="status">
+                              已加入错题本，{result.mistake.due} 复习。
+                            </p>
+                          ) : null}
+                        </>
+                      ) : (
+                        <p className="mt-3 text-[12px] text-gray-500 dark:text-[#8e8e93]">
+                          对照参考答案自评，这一步会决定下次复习时间。
+                        </p>
                       )}
-                    >
-                      <span
-                        aria-hidden="true"
-                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-gray-200 dark:border-white/10 text-[11px] font-medium text-gray-500 dark:text-[#8e8e93]"
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <div className="mt-4 space-y-2">
+                  {question.options.map((option, optionIndex) => {
+                    const isCorrect = answered && optionIndex === result.answer;
+                    const isWrong = answered && optionIndex === selected && !result?.correct;
+                    return (
+                      <button
+                        key={option}
+                        type="button"
+                        disabled={answered || checking}
+                        onClick={() => setSelected(optionIndex)}
+                        aria-pressed={selected === optionIndex}
+                        aria-label={`${String.fromCharCode(65 + optionIndex)}. ${option}`}
+                        className={cn(
+                          'flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left text-[14px] leading-6 transition-colors duration-200 disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30',
+                          isCorrect
+                            ? 'border-[#34c759]/30 bg-[#34c759]/10 dark:bg-[#34c759]/15 text-black dark:text-[#f5f5f7]'
+                            : isWrong
+                              ? 'border-[#d70015]/20 bg-[#ff3b30]/10 dark:bg-[#ff3b30]/15 text-black dark:text-[#f5f5f7]'
+                              : selected === optionIndex
+                                ? 'border-[#0071e3]/30 bg-[#0071e3]/5 dark:bg-[#0a84ff]/10 text-black dark:text-[#f5f5f7]'
+                                : 'border-gray-200/70 dark:border-white/10 bg-white dark:bg-[#242426] text-gray-500 dark:text-[#a1a1a6] hover:bg-[#f5f5f7] dark:hover:bg-white/[0.06]'
+                        )}
                       >
-                        {String.fromCharCode(65 + optionIndex)}
-                      </span>
-                      <span>{option}</span>
-                      {isCorrect ? <CheckIcon className="ml-auto h-4 w-4 shrink-0 text-[#34c759]" /> : null}
-                    </button>
-                  );
-                })}
-              </div>
+                        <span
+                          aria-hidden="true"
+                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-gray-200 dark:border-white/10 text-[11px] font-medium text-gray-500 dark:text-[#8e8e93]"
+                        >
+                          {String.fromCharCode(65 + optionIndex)}
+                        </span>
+                        <span>{option}</span>
+                        {isCorrect ? <CheckIcon className="ml-auto h-4 w-4 shrink-0 text-[#34c759]" /> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               {error ? (
                 <p role="alert" className="mt-3 text-[13px] text-[#d70015] dark:text-[#ff7b72]">
@@ -301,7 +411,7 @@ export function LearningPane({
                 </p>
               ) : null}
 
-              {answered ? (
+              {!isShort && answered ? (
                 <div className="mt-4 rounded-xl bg-[#f5f5f7] px-4 py-3 dark:bg-[#1c1c1e]">
                   <p className={cn('text-[13px] font-medium', correct ? 'text-[#1d7f3a]' : 'text-[#d70015] dark:text-[#ff7b72]')}>
                     {correct ? '回答正确' : '回答错误'}
@@ -316,14 +426,46 @@ export function LearningPane({
               ) : null}
 
               <div className="mt-5 flex gap-2">
-                <Button size="sm" disabled={selected === null || answered || checking} onClick={() => void check()}>
-                  {checking ? '正在提交…' : '检查答案'}
-                </Button>
-                {answered ? (
-                  <Button size="sm" variant="secondary" onClick={next}>
-                    {last ? '完成练习' : '下一题'}
-                  </Button>
-                ) : null}
+                {isShort ? (
+                  <>
+                    {!revealed ? (
+                      <Button size="sm" disabled={!responseReady} onClick={reveal}>
+                        提交
+                      </Button>
+                    ) : null}
+                    {awaitingSelfAssessment ? (
+                      <>
+                        <Button size="sm" disabled={checking} onClick={() => void selfAssess(true)}>
+                          答对了
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={checking}
+                          onClick={() => void selfAssess(false)}
+                        >
+                          没答对
+                        </Button>
+                      </>
+                    ) : null}
+                    {answered ? (
+                      <Button size="sm" variant="secondary" onClick={next}>
+                        {last ? '完成练习' : '下一题'}
+                      </Button>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <Button size="sm" disabled={selected === null || answered || checking} onClick={() => void check()}>
+                      {checking ? '正在提交…' : '检查答案'}
+                    </Button>
+                    {answered ? (
+                      <Button size="sm" variant="secondary" onClick={next}>
+                        {last ? '完成练习' : '下一题'}
+                      </Button>
+                    ) : null}
+                  </>
+                )}
               </div>
             </>
           )}

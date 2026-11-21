@@ -750,7 +750,7 @@ export function createButlerTools(): ButlerToolDefinition[] {
     {
       name: 'create_practice_set',
       description:
-        '出 3-10 道选择题组成一份练习集，写入学习页的练习模块。用户说「考考我 / 出几道题 / 测测我 / 帮我复习」时，从用户学过的内容出题；answer 是正确选项的下标（从 0 开始）。',
+        '出 3-10 道题组成一份练习集，写入学习页的练习模块。用户说「考考我 / 出几道题 / 测测我 / 帮我复习」时，从用户学过的内容出题。选择题设 kind 为 choice（或省略 kind），answer 是正确选项的下标（从 0 开始）；短答题请把 kind 设为 short 并给 referenceAnswer（参考答案），让用户用自己的话作答。',
       parameters: {
         type: 'object',
         properties: {
@@ -760,23 +760,32 @@ export function createButlerTools(): ButlerToolDefinition[] {
             type: 'array',
             minItems: 3,
             maxItems: 10,
-            description: '3-10 道选择题',
+            description: '3-10 道题，可以混合选择与短答',
             items: {
               type: 'object',
               properties: {
+                kind: {
+                  type: 'string',
+                  enum: ['choice', 'short'],
+                  description: '题型：choice 选择题（默认）或 short 短答题'
+                },
                 prompt: { type: 'string', description: '题干' },
                 options: {
                   type: 'array',
                   items: { type: 'string' },
-                  description: '2-6 个选项'
+                  description: '选择题的 2-6 个选项；短答题省略'
                 },
                 answer: {
                   type: 'number',
-                  description: '正确选项的下标，从 0 开始的整数'
+                  description: '选择题正确选项的下标，从 0 开始的整数；短答题省略'
+                },
+                referenceAnswer: {
+                  type: 'string',
+                  description: '短答题的参考答案；短答题必填'
                 },
                 explanation: { type: 'string', description: '解析，可选' }
               },
-              required: ['prompt', 'options', 'answer'],
+              required: ['prompt'],
               additionalProperties: false
             }
           },
@@ -1051,6 +1060,34 @@ function requiredPracticeQuestions(
     if (typeof prompt !== 'string' || prompt.trim() === '') {
       throw new ToolInputError(`第 ${index + 1} 题缺少题干 prompt。`);
     }
+    const kindValue = question['kind'];
+    if (kindValue !== undefined && kindValue !== 'choice' && kindValue !== 'short') {
+      throw new ToolInputError(`第 ${index + 1} 题的 kind 只能是 choice 或 short。`);
+    }
+    const explanationValue = question['explanation'];
+    if (explanationValue !== undefined && explanationValue !== null) {
+      if (typeof explanationValue !== 'string') {
+        throw new ToolInputError(`第 ${index + 1} 题的 explanation 必须是字符串。`);
+      }
+    }
+    const explanation =
+      typeof explanationValue === 'string' && explanationValue.trim() !== ''
+        ? explanationValue
+        : undefined;
+
+    if (kindValue === 'short') {
+      const referenceAnswerValue = question['referenceAnswer'];
+      if (typeof referenceAnswerValue !== 'string' || referenceAnswerValue.trim() === '') {
+        throw new ToolInputError(`第 ${index + 1} 题是短答题，必须提供参考答案 referenceAnswer。`);
+      }
+      return {
+        kind: 'short',
+        prompt,
+        referenceAnswer: referenceAnswerValue,
+        ...(explanation ? { explanation } : {})
+      };
+    }
+
     const optionsValue = question['options'];
     if (!Array.isArray(optionsValue) || optionsValue.length < 2 || optionsValue.length > 6) {
       throw new ToolInputError(`第 ${index + 1} 题的 options 必须是 2-6 个选项。`);
@@ -1076,16 +1113,6 @@ function requiredPracticeQuestions(
         `第 ${index + 1} 题的 answer 必须是 0-${options.length - 1} 的整数下标。`
       );
     }
-    const explanationValue = question['explanation'];
-    if (explanationValue !== undefined && explanationValue !== null) {
-      if (typeof explanationValue !== 'string') {
-        throw new ToolInputError(`第 ${index + 1} 题的 explanation 必须是字符串。`);
-      }
-    }
-    const explanation =
-      typeof explanationValue === 'string' && explanationValue.trim() !== ''
-        ? explanationValue
-        : undefined;
     return {
       prompt,
       options,
