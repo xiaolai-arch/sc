@@ -19,6 +19,7 @@ import { Select } from '../ui/Select';
 import { Textarea } from '../ui/Textarea';
 import { PageFrame } from './PageFrame';
 import { ReviewRecords } from './ReviewRecords';
+import { StudyHeatmap } from './StudyHeatmap';
 import { WeeklyOverview } from './WeeklyOverview';
 
 type ReviewPageProps = {
@@ -198,6 +199,7 @@ export function ReviewPage({
         ) : undefined
       }
     >
+      <StudyHeatmap tasks={filteredTasks} today={todayDate} />
       {hasOverviewData ? <WeeklyOverview overview={overview} /> : null}
 
       {reviews.length > 0 ? (
