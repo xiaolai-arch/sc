@@ -8,6 +8,7 @@ import type {
   LongPlan,
   LongPlanKnowledge,
   LongPlanPhase,
+  LongPlanRecalibrationSummary,
   LongPlanService,
   LongPlanWeek,
   RecalibrateLongPlanInput,
@@ -197,6 +198,41 @@ function buildRemainingOutline(weeks: LongPlanWeek[]): string {
     lines.push(`…（后面 ${weeks.length - MAX_OUTLINE_WEEKS} 周略）`);
   }
   return lines.join('\n');
+}
+
+/** Every planned unit a recalibration summary counts: day tasks and weekly checks. */
+function collectItemLabels(weeks: LongPlanWeek[]): string[] {
+  const labels: string[] = [];
+  for (const week of weeks) {
+    for (const day of week.days) {
+      for (const task of day.tasks) labels.push(`task:${task.trim()}`);
+    }
+    for (const check of week.checks) labels.push(`check:${check.text.trim()}`);
+  }
+  return labels;
+}
+
+/** How many of `items` have no free match left in `other` (a multiset difference). */
+function countUnmatched(items: string[], other: string[]): number {
+  const remaining = new Map<string, number>();
+  for (const item of other) remaining.set(item, (remaining.get(item) ?? 0) + 1);
+  let unmatched = 0;
+  for (const item of items) {
+    const count = remaining.get(item) ?? 0;
+    if (count > 0) remaining.set(item, count - 1);
+    else unmatched += 1;
+  }
+  return unmatched;
+}
+
+function countDoneItems(weeks: LongPlanWeek[]): number {
+  return weeks.reduce(
+    (total, week) =>
+      total +
+      week.days.filter((day) => day.done).length +
+      week.checks.filter((check) => check.done).length,
+    0
+  );
 }
 
 /**
@@ -495,6 +531,23 @@ export function createLongPlanService(options: LongPlanServiceOptions): LongPlan
         throw new Error('模型没有返回可用的重排结果，计划未修改。');
       }
 
+      // Record what actually changed, computed from the two plan shapes rather
+      // than from the model, so the page can show real numbers.
+      const regeneratedWeeks = regeneratedPhases.flatMap((phase) => phase.weeks);
+      const nextWeeks = [...preservedPhases.flatMap((phase) => phase.weeks), ...regeneratedWeeks];
+      const oldSection = collectItemLabels(remainingWeeks);
+      const newSection = collectItemLabels(regeneratedWeeks);
+      const recalibration: LongPlanRecalibrationSummary = {
+        fromWeek: fromWeek.number,
+        weeksBefore: weeks.length,
+        weeksAfter: nextWeeks.length,
+        itemsBefore: collectItemLabels(weeks).length,
+        itemsAfter: collectItemLabels(nextWeeks).length,
+        addedItems: countUnmatched(newSection, oldSection),
+        removedItems: countUnmatched(oldSection, newSection),
+        keptDoneItems: countDoneItems(weeks.slice(0, fromIndex))
+      };
+
       const timestamp = now().toISOString();
       const { knowledge: _previousKnowledge, ...rest } = plan;
       const next: LongPlan = {
@@ -508,6 +561,7 @@ export function createLongPlanService(options: LongPlanServiceOptions): LongPlan
           : {}),
         recalibratedAt: timestamp,
         recalibratedFrom: fromWeek.number,
+        recalibration,
         updatedAt: timestamp,
         phases: [...preservedPhases, ...regeneratedPhases]
       };
