@@ -3,6 +3,13 @@
  * into phases → weeks → days, mirroring the printable plan tables people keep
  * on their desktop. Progress is derived from the day rows and acceptance
  * checks, so nothing needs to be stored twice.
+ *
+ * Phase progression is mastery-gated, not calendar-gated (see `phaseGate`):
+ * phase 0 is always reachable, and phase N>0 becomes reachable only once every
+ * acceptance check of every earlier phase is checked. A phase with no checks
+ * cannot block the phases after it, and a plan whose phases have no checks at
+ * all therefore has no locks — the gate adds no requirements the plan did not
+ * already contain.
  */
 
 import type { KnowledgeStatus } from './knowledge';
@@ -162,6 +169,20 @@ export interface LongPlanProgress {
   percent: number;
 }
 
+/** `locked`: an earlier phase still has unchecked acceptance items. */
+export type LongPlanPhaseGateState = 'locked' | 'open' | 'done';
+
+export interface LongPlanPhaseGate {
+  state: LongPlanPhaseGateState;
+  /** Unchecked acceptance checks in the earlier phases still gating this one. */
+  remaining: number;
+  /**
+   * Acceptance checks across all earlier phases — the set `remaining` counts
+   * down from. Phase 0 has no prerequisites, so its total is 0.
+   */
+  total: number;
+}
+
 export interface LongPlanService {
   list(workspaceId?: string): Promise<LongPlan[]>;
   get(planId: string): Promise<LongPlan | null>;
@@ -231,6 +252,39 @@ export function phaseProgress(phase: LongPlanPhase): LongPlanProgress {
     done += progress.done;
   }
   return progressOf(done, total);
+}
+
+function phaseChecks(phase: LongPlanPhase): LongPlanCheck[] {
+  return phase.weeks.flatMap((week) => week.checks);
+}
+
+/**
+ * The mastery gate in front of `plan.phases[index]`. Pure and deterministic:
+ *
+ * - Phase 0 is always reachable; it is `done` once all of its own checks are
+ *   checked, otherwise `open`.
+ * - Phase N>0 is `locked` while any check of any earlier phase is unchecked,
+ *   with `remaining` counting those unchecked checks. Once every earlier check
+ *   is done it is `done` if all of its own checks are checked, else `open`.
+ * - A phase with no checks cannot block later phases. It is never reported as
+ *   `done` (there is nothing to demonstrate), and its own emptiness means later
+ *   phases have fewer prerequisites, not more.
+ *
+ * An out-of-range index reports an empty `open` gate so callers can render
+ * defensively without inventing a lock.
+ */
+export function phaseGate(plan: LongPlan, index: number): LongPlanPhaseGate {
+  const phase = plan.phases[index];
+  if (!phase) return { state: 'open', remaining: 0, total: 0 };
+  const earlierChecks = plan.phases.slice(0, index).flatMap(phaseChecks);
+  const remaining = earlierChecks.filter((check) => !check.done).length;
+  const total = earlierChecks.length;
+  if (remaining > 0) return { state: 'locked', remaining, total };
+  const checks = phaseChecks(phase);
+  if (checks.length > 0 && checks.every((check) => check.done)) {
+    return { state: 'done', remaining: 0, total };
+  }
+  return { state: 'open', remaining: 0, total };
 }
 
 /** Web sources win over pasted references; neither means the model planned alone. */

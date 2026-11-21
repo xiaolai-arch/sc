@@ -1,6 +1,7 @@
 import {
   currentPlanWeek,
   findPlanWeek,
+  phaseGate,
   phaseProgress,
   planBasis,
   planProgress,
@@ -8,6 +9,7 @@ import {
   planWeekday,
   weekProgress,
   type LongPlan,
+  type LongPlanPhase,
   type LongPlanWeek
 } from '../../src/shared/plans';
 
@@ -99,6 +101,97 @@ test('derives the basis from web sources, user references, or the model alone', 
       sources: [{ title: '官方文档', url: 'https://docs.example.com/agents' }]
     })
   ).toBe('web');
+});
+
+function gatePhase(id: string, checksDone: boolean[]): LongPlanPhase {
+  return {
+    id,
+    title: id,
+    subtitle: '',
+    goal: '',
+    weeks: [
+      {
+        id: `${id}-w1`,
+        number: 1,
+        title: '',
+        goal: '',
+        startDate: '2026-11-01',
+        endDate: '2026-11-07',
+        days: [],
+        checks: checksDone.map((done, index) => ({
+          id: `${id}-c${index}`,
+          text: '验收',
+          done
+        }))
+      }
+    ]
+  };
+}
+
+function gatePlan(...phases: LongPlanPhase[]): LongPlan {
+  return { ...plan, phases };
+}
+
+test('phase 0 is always open, even with every check unchecked', () => {
+  const plan = gatePlan(gatePhase('ph-1', [false, false]));
+
+  expect(phaseGate(plan, 0)).toEqual({ state: 'open', remaining: 0, total: 0 });
+});
+
+test('a phase is done once all of its own checks are checked', () => {
+  const plan = gatePlan(gatePhase('ph-1', [true, true]));
+
+  expect(phaseGate(plan, 0)).toEqual({ state: 'done', remaining: 0, total: 0 });
+});
+
+test('a later phase locks while any earlier check is unchecked', () => {
+  const plan = gatePlan(gatePhase('ph-1', [true, false]), gatePhase('ph-2', [true]));
+
+  expect(phaseGate(plan, 1)).toEqual({ state: 'locked', remaining: 1, total: 2 });
+});
+
+test('a later phase is done once earlier and its own checks are all checked', () => {
+  const plan = gatePlan(gatePhase('ph-1', [true, true]), gatePhase('ph-2', [true]));
+
+  expect(phaseGate(plan, 1)).toEqual({ state: 'done', remaining: 0, total: 2 });
+});
+
+test('a later phase opens once every earlier check is done but its own are not', () => {
+  const plan = gatePlan(gatePhase('ph-1', [true, true]), gatePhase('ph-2', [false]));
+
+  expect(phaseGate(plan, 1)).toEqual({ state: 'open', remaining: 0, total: 2 });
+});
+
+test('a phase with no checks never blocks later phases', () => {
+  const plan = gatePlan(gatePhase('ph-1', []), gatePhase('ph-2', [false]));
+
+  expect(phaseGate(plan, 0)).toEqual({ state: 'open', remaining: 0, total: 0 });
+  // Phase 1 has nothing to master, so it is open rather than done — and it
+  // adds no prerequisite for phase 2.
+  expect(phaseGate(plan, 1)).toEqual({ state: 'open', remaining: 0, total: 0 });
+});
+
+test('an empty middle phase contributes no prerequisite to later phases', () => {
+  const plan = gatePlan(gatePhase('ph-1', [true]), gatePhase('ph-2', []), gatePhase('ph-3', [false]));
+
+  expect(phaseGate(plan, 2)).toEqual({ state: 'open', remaining: 0, total: 1 });
+});
+
+test('remaining counts every unchecked check across all earlier phases', () => {
+  const plan = gatePlan(
+    gatePhase('ph-1', [false, false]),
+    gatePhase('ph-2', [false]),
+    gatePhase('ph-3', [false])
+  );
+
+  expect(phaseGate(plan, 2)).toEqual({ state: 'locked', remaining: 3, total: 3 });
+});
+
+test('unknown phase indexes report an empty open gate', () => {
+  const plan = gatePlan(gatePhase('ph-1', [false]));
+
+  expect(phaseGate(plan, -1)).toEqual({ state: 'open', remaining: 0, total: 0 });
+  expect(phaseGate(plan, 9)).toEqual({ state: 'open', remaining: 0, total: 0 });
 });
 
 test('formats weekday and short dates without drifting across time zones', () => {
