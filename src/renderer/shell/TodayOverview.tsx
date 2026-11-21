@@ -411,21 +411,33 @@ export function TodayOverview({
                         </p>
                       ) : null}
                     </div>
-                    {oneThingOffered && oneThing.enabled ? (
+                    <div className="flex shrink-0 flex-col items-end gap-0.5 pt-0.5 whitespace-nowrap text-[11px]">
+                      {oneThingOffered && oneThing.enabled ? (
+                        <button
+                          type="button"
+                          aria-pressed={chosen}
+                          aria-label={`只做这件：${task.title}`}
+                          onClick={() => chooseOneThing(task.id)}
+                          className={`transition-colors ${
+                            chosen
+                              ? 'text-[#0071e3] dark:text-[#4da3ff]'
+                              : 'text-gray-400 hover:text-[#0071e3] dark:text-[#6e6e73] dark:hover:text-[#4da3ff]'
+                          }`}
+                        >
+                          {chosen ? '就做这件' : '只做这件'}
+                        </button>
+                      ) : null}
+                      {/* Stuck on starting, not on knowing what to do: ask for one
+                          smallest action instead of a plan. */}
                       <button
                         type="button"
-                        aria-pressed={chosen}
-                        aria-label={`只做这件：${task.title}`}
-                        onClick={() => chooseOneThing(task.id)}
-                        className={`shrink-0 whitespace-nowrap pt-0.5 text-[11px] transition-colors ${
-                          chosen
-                            ? 'text-[#0071e3] dark:text-[#4da3ff]'
-                            : 'text-gray-400 hover:text-[#0071e3] dark:text-[#6e6e73] dark:hover:text-[#4da3ff]'
-                        }`}
+                        aria-label={`我卡住了：${task.title}`}
+                        onClick={() => onPrompt(`我卡住了：「${task.title}」`)}
+                        className="text-gray-400 transition-colors hover:text-[#0071e3] dark:text-[#6e6e73] dark:hover:text-[#4da3ff]"
                       >
-                        {chosen ? '就做这件' : '只做这件'}
+                        我卡住了
                       </button>
-                    ) : null}
+                    </div>
                   </li>
                   );
                 })}
