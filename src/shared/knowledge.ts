@@ -31,6 +31,11 @@ export interface KnowledgeTopic {
   level?: number;
   /** Absent means the topic applies to every workspace. */
   workspaceId?: string;
+  /**
+   * Local date YYYY-MM-DD: the day the butler should offer a retrieval for
+   * this topic. Absent when no revisit is scheduled.
+   */
+  revisitDue?: string;
   summary: string;
   evidence: KnowledgeEvidence[];
   createdAt: string;
@@ -56,6 +61,8 @@ export interface UpdateKnowledgeTopicInput {
   level?: number | null;
   /** null makes the topic global. */
   workspaceId?: string | null;
+  /** Local date YYYY-MM-DD; null clears the revisit. */
+  revisitDue?: string | null;
   summary?: string;
 }
 

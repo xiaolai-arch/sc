@@ -43,7 +43,7 @@ import { MemoryPage } from './MemoryPage';
 import { ModelPickerDialog } from './ModelPickerDialog';
 import { PracticeSetDialog } from './PracticeSetDialog';
 import { ProfilePage } from './ProfilePage';
-import { TodayOverview } from './TodayOverview';
+import { TodayOverview, dueRevisitTopics } from './TodayOverview';
 import {
   NavigationSidebar,
   type ChatScope,
@@ -376,6 +376,10 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     null;
   const today = formatLocalDate(new Date());
   const dateLabel = formatChineseDate(today);
+  const dueRevisits = useMemo(
+    () => dueRevisitTopics(knowledgeTopics, today),
+    [knowledgeTopics, today]
+  );
 
   const loadModelLabel = useCallback(async () => {
     const api = window.studyCoach;
@@ -1470,6 +1474,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
                   reminders={reminders}
                   longPlans={longPlans}
                   today={today}
+                  revisits={dueRevisits}
                   onOpenWorkspace={(workspaceId) => {
                     selectWorkspace(workspaceId);
                     changeSection('projects');
@@ -1633,6 +1638,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
               reminders={reminders}
               longPlans={longPlans}
               today={today}
+              revisits={dueRevisits}
               onOpenSidebar={openSidebar}
               onOpenWorkspace={(workspaceId) => {
                 selectWorkspace(workspaceId);

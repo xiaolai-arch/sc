@@ -30,6 +30,19 @@ test('teaches the Socratic explanation loop with recitation and knowledge update
   expect(BUTLER_SYSTEM_PROMPT).toContain('record_knowledge');
 });
 
+test('bridges a taught topic to a scheduled revisit without asking', () => {
+  expect(BUTLER_SYSTEM_PROMPT).toContain('schedule_revisit');
+  // Do it, then say so — never ask permission first.
+  expect(BUTLER_SYSTEM_PROMPT).toContain('不要问「要不要我明天考你」');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('直接安排再说');
+  // At most one topic per turn, and only when the learner actually engaged.
+  expect(BUTLER_SYSTEM_PROMPT).toContain('一次只安排一个主题');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('只是读完没有参与的主题不要安排');
+  // Scheduling requires engagement, not passive reading.
+  expect(BUTLER_SYSTEM_PROMPT).toContain('回答了引导问题');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('复述到位');
+});
+
 test('frames long-term goals beyond exams', () => {
   expect(BUTLER_SYSTEM_PROMPT).toContain(
     '（例如考研、学英语、健身、读书、推进一个项目）'

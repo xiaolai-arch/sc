@@ -86,6 +86,9 @@ export function parseKnowledgeTopicFile(
     .map((alias) => alias.trim())
     .filter(Boolean)
     .slice(0, 8);
+  // Tolerant: a hand-edited or bad revisit date is ignored, never drops the topic.
+  const revisitRaw = asString(meta.revisitDue);
+  const revisitDue = isIsoDate(revisitRaw) ? revisitRaw : undefined;
   const evidence = Array.isArray(meta.evidence)
     ? meta.evidence
         .map((entry, index) => coerceEvidence(entry, `${id}e${index + 1}`))
@@ -99,6 +102,7 @@ export function parseKnowledgeTopicFile(
     status,
     ...(level !== undefined ? { level } : {}),
     ...(workspaceId ? { workspaceId } : {}),
+    ...(revisitDue !== undefined ? { revisitDue } : {}),
     summary: asString(meta.summary) ?? '',
     evidence,
     createdAt: asString(meta.created) ?? '',
@@ -117,6 +121,9 @@ export function serializeKnowledgeTopicFile(topic: KnowledgeTopic): string {
     status: topic.status,
     ...(topic.level !== undefined ? { level: topic.level } : {}),
     ...(topic.workspaceId ? { workspaceId: topic.workspaceId } : {}),
+    // Only present topics gain the key, so files without a revisit serialize
+    // byte-identically to before.
+    ...(topic.revisitDue !== undefined ? { revisitDue: topic.revisitDue } : {}),
     summary: topic.summary,
     evidence: topic.evidence.map((entry) => ({
       id: entry.id,

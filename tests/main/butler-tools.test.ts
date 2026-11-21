@@ -3,7 +3,7 @@ import {
   executeButlerTool,
   ToolInputError
 } from '../../src/main/butler/tools';
-import type { KnowledgeService } from '../../src/shared/knowledge';
+import type { KnowledgeService, KnowledgeTopic } from '../../src/shared/knowledge';
 import type { ProfileService } from '../../src/shared/profile';
 import type {
   CreatePracticeSetInput,
@@ -1123,4 +1123,199 @@ test('get_practice_overview requires a workspace id', async () => {
       }
     )
   ).rejects.toThrow('缺少 workspaceId');
+});
+
+function makeTopic(
+  overrides: Partial<KnowledgeTopic> & Pick<KnowledgeTopic, 'id' | 'name'>
+): KnowledgeTopic {
+  return {
+    aliases: [],
+    status: 'learning',
+    summary: '',
+    evidence: [],
+    createdAt: '',
+    updatedAt: '',
+    ...overrides
+  };
+}
+
+/** An update stub that records revisit writes and echoes them back. */
+function updatingKnowledge(topics: KnowledgeTopic[]): {
+  service: KnowledgeService;
+  update: ReturnType<typeof vi.fn>;
+} {
+  const update = vi.fn(async (input: { id: string; revisitDue?: string | null }) => ({
+    ...topics.find((topic) => topic.id === input.id)!,
+    revisitDue: input.revisitDue ?? undefined
+  }));
+  return {
+    update,
+    service: knowledgeStub({
+      list: async () => topics,
+      update: update as unknown as KnowledgeService['update']
+    })
+  };
+}
+
+test('schedule_revisit defaults to tomorrow and confirms in Chinese', async () => {
+  const { service, update } = updatingKnowledge([makeTopic({ id: 'kt-1', name: 'LangChain' })]);
+  const result = await executeButlerTool(
+    { id: 'r1', name: 'schedule_revisit', arguments: { name: 'LangChain' } },
+    tools,
+    {
+      workspace: workspaceService,
+      knowledge: service,
+      now: () => new Date('2026-11-21T10:00:00')
+    }
+  );
+
+  expect(update).toHaveBeenCalledWith({ id: 'kt-1', revisitDue: '2026-11-22' });
+  expect(result.ok).toBe(true);
+  const payload = JSON.parse(result.content) as {
+    result: { message: string; revisitDue: string; name: string };
+  };
+  expect(payload.result.message).toBe('已安排：明天抽 5 分钟自测「LangChain」。');
+  expect(payload.result.revisitDue).toBe('2026-11-22');
+});
+
+test('schedule_revisit resolves an alias and rolls over the month', async () => {
+  const { service, update } = updatingKnowledge([
+    makeTopic({ id: 'kt-1', name: 'LangChain', aliases: ['LC'] })
+  ]);
+  const result = await executeButlerTool(
+    { id: 'r2', name: 'schedule_revisit', arguments: { name: 'LC', days: 10 } },
+    tools,
+    {
+      workspace: workspaceService,
+      knowledge: service,
+      now: () => new Date('2026-11-25T09:00:00')
+    }
+  );
+
+  expect(update).toHaveBeenCalledWith({ id: 'kt-1', revisitDue: '2026-12-05' });
+  const payload = JSON.parse(result.content) as { result: { message: string } };
+  expect(payload.result.message).toContain('10 天后（2026-12-05）');
+  expect(payload.result.message).toContain('LangChain');
+});
+
+test('schedule_revisit clamps days into 1-30', async () => {
+  const { service, update } = updatingKnowledge([makeTopic({ id: 'kt-1', name: 'LangChain' })]);
+  const toolContext = {
+    workspace: workspaceService,
+    knowledge: service,
+    now: () => new Date('2026-11-21T09:00:00')
+  };
+
+  await executeButlerTool(
+    { id: 'r3', name: 'schedule_revisit', arguments: { name: 'LangChain', days: 0 } },
+    tools,
+    toolContext
+  );
+  expect(update).toHaveBeenLastCalledWith({ id: 'kt-1', revisitDue: '2026-11-22' });
+
+  await executeButlerTool(
+    { id: 'r4', name: 'schedule_revisit', arguments: { name: 'LangChain', days: 99 } },
+    tools,
+    toolContext
+  );
+  expect(update).toHaveBeenLastCalledWith({ id: 'kt-1', revisitDue: '2026-12-21' });
+});
+
+test('schedule_revisit rejects an unknown topic with a Chinese error naming it', async () => {
+  const { service } = updatingKnowledge([makeTopic({ id: 'kt-9', name: '番茄工作法' })]);
+  const result = await executeButlerTool(
+    { id: 'r5', name: 'schedule_revisit', arguments: { name: 'LangChain' } },
+    tools,
+    { workspace: workspaceService, knowledge: service, now: () => new Date() }
+  );
+
+  expect(result.ok).toBe(false);
+  const payload = JSON.parse(result.content) as { error: string };
+  expect(payload.error).toContain('LangChain');
+  expect(payload.error).toContain('没有');
+});
+
+test('schedule_revisit refuses without a knowledge service', async () => {
+  const result = await executeButlerTool(
+    { id: 'r6', name: 'schedule_revisit', arguments: { name: 'LangChain' } },
+    tools,
+    { workspace: workspaceService, now: () => new Date() }
+  );
+
+  expect(result.ok).toBe(false);
+  expect(result.content).toContain('知识库未连接');
+});
+
+test('schedule_revisit is gated by write permissions like other write tools', async () => {
+  const { service, update } = updatingKnowledge([makeTopic({ id: 'kt-1', name: 'LangChain' })]);
+  const result = await executeButlerTool(
+    { id: 'r7', name: 'schedule_revisit', arguments: { name: 'LangChain' } },
+    tools,
+    {
+      workspace: workspaceService,
+      knowledge: service,
+      permissions: { web: true, write: false, shell: false },
+      now: () => new Date()
+    }
+  );
+
+  expect(result.ok).toBe(false);
+  expect(result.content).toContain('仅可查看');
+  expect(update).not.toHaveBeenCalled();
+});
+
+test('get_today_plan lists only topics due for a revisit today or earlier', async () => {
+  const knowledge = knowledgeStub({
+    list: async () => [
+      makeTopic({ id: 'kt-due', name: '极限', revisitDue: '2026-11-21' }),
+      makeTopic({ id: 'kt-overdue', name: '积分', revisitDue: '2026-11-19' }),
+      makeTopic({ id: 'kt-future', name: '级数', revisitDue: '2026-11-25' }),
+      makeTopic({ id: 'kt-none', name: '向量' })
+    ]
+  });
+  const workspace = workspaceWithName('考研');
+  const result = await executeButlerTool(
+    { id: 'r8', name: 'get_today_plan', arguments: {} },
+    tools,
+    {
+      workspace,
+      knowledge,
+      now: () => new Date('2026-11-21T09:00:00')
+    }
+  );
+
+  expect(result.ok).toBe(true);
+  const payload = JSON.parse(result.content) as {
+    result: { revisits: Array<{ topicId: string; name: string; revisitDue: string }> };
+  };
+  expect(payload.result.revisits.map((revisit) => revisit.topicId)).toEqual([
+    'kt-overdue',
+    'kt-due'
+  ]);
+  expect(payload.result.revisits[0]).toEqual({
+    topicId: 'kt-overdue',
+    name: '积分',
+    revisitDue: '2026-11-19'
+  });
+});
+
+test('get_today_plan omits revisits entirely without due topics or a knowledge service', async () => {
+  const workspace = workspaceWithName('考研');
+  const noneDue = await executeButlerTool(
+    { id: 'r9', name: 'get_today_plan', arguments: {} },
+    tools,
+    {
+      workspace,
+      knowledge: knowledgeStub({ list: async () => [makeTopic({ id: 'kt-f', name: '级数', revisitDue: '2026-12-01' })] }),
+      now: () => new Date('2026-11-21T09:00:00')
+    }
+  );
+  expect(JSON.parse(noneDue.content).result.revisits).toBeUndefined();
+
+  const noService = await executeButlerTool(
+    { id: 'r10', name: 'get_today_plan', arguments: {} },
+    tools,
+    { workspace, now: () => new Date('2026-11-21T09:00:00') }
+  );
+  expect(JSON.parse(noService.content).result.revisits).toBeUndefined();
 });
