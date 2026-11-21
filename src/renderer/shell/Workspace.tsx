@@ -1799,6 +1799,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
               <div className="min-h-0 flex-1 overflow-y-auto">
                 <LearningPane
                   set={selectedPracticeSet}
+                  sets={filteredPracticeSets}
                   workspace={currentWorkspace}
                   workspaces={workspaces}
                   notes={notes.filter(

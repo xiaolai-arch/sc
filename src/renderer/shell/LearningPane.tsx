@@ -18,11 +18,17 @@ import type {
   SubmitShortAnswerInput
 } from '../../shared/practice';
 import { ConfidencePicker } from './CalibrationCard';
+import { buildMixedPracticeSet, type MixedPracticeSet } from './interleave';
 import { AttemptHistory, MistakeBook } from './PracticePanels';
 import { PracticeSetDialog } from './PracticeSetDialog';
 
 type LearningPaneProps = {
   set: PracticeSet | null;
+  /**
+   * All practice sets in the current workspace. Supplied so the pane can offer
+   * 交错混练 when two of them share one subject; omitted means never offered.
+   */
+  sets?: PracticeSet[];
   workspace: Workspace | null;
   /** All projects, so the practice dialog can show/choose where a set lands. */
   workspaces?: Workspace[];
@@ -48,6 +54,7 @@ type LearningPaneProps = {
 
 export function LearningPane({
   set,
+  sets,
   workspace,
   workspaces,
   notes,
@@ -78,8 +85,10 @@ export function LearningPane({
   const [finished, setFinished] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  /** An in-memory round-robin session; null means the real selected set. */
+  const [mix, setMix] = useState<MixedPracticeSet | null>(null);
 
-  useEffect(() => {
+  function resetAnswerState() {
     setIndex(0);
     setSelected(null);
     setResult(null);
@@ -90,7 +99,23 @@ export function LearningPane({
     setScore(0);
     setFinished(false);
     setError(null);
+  }
+
+  useEffect(() => {
+    resetAnswerState();
+    // Choosing a real set leaves any mixed session behind.
+    setMix(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [set?.id]);
+
+  // Rebuilt cheaply each render; only an eligible same-subject group yields one.
+  const mixable = buildMixedPracticeSet(sets ?? []);
+
+  function startMixed() {
+    if (!mixable) return;
+    resetAnswerState();
+    setMix(mixable);
+  }
 
   const createButton = onCreateSet ? (
     <Button size="sm" variant="secondary" onClick={() => setCreateOpen(true)}>
@@ -173,10 +198,14 @@ export function LearningPane({
     );
   }
 
-  const question = set.questions[index];
+  // A mix replaces the displayed set but never the real one used for lookups.
+  const activeSet: PracticeSet = mix ?? set;
+  const question = activeSet.questions[index];
+  /** Mixed sessions only: the original set's title for this question. */
+  const sourceTitle = mix ? mix.sources[question.id] : undefined;
   const answered = result !== null;
   const correct = result?.correct === true;
-  const last = index === set.questions.length - 1;
+  const last = index === activeSet.questions.length - 1;
   /** Free recall: the learner has answered, the reference answer is visible. */
   const isShort = question.kind === 'short';
   const awaitingSelfAssessment = isShort && revealed && !answered;
@@ -271,7 +300,7 @@ export function LearningPane({
         <div className="flex min-w-0 items-center gap-2">
           <span className="text-[14px] font-medium text-black dark:text-[#f5f5f7]">学习</span>
           <span className="text-[11px] text-gray-400 dark:text-[#8e8e93]">/</span>
-          <span className="truncate text-[12px] text-gray-500 dark:text-[#8e8e93]">{set.title}</span>
+          <span className="truncate text-[12px] text-gray-500 dark:text-[#8e8e93]">{activeSet.title}</span>
         </div>
         <div className="flex items-center gap-2">
           {createButton}
@@ -283,14 +312,24 @@ export function LearningPane({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-6">
         <div className="mx-auto w-full max-w-[720px]">
+          {mixable ? (
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-xl bg-[#f5f5f7] px-4 py-2.5 dark:bg-white/[0.06]">
+              <p className="min-w-0 text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
+                把「{mixable.subject}」的多份练习交错着做，比一次做完一套记得更牢。
+              </p>
+              <Button size="sm" variant="secondary" onClick={startMixed}>
+                交错混练
+              </Button>
+            </div>
+          ) : null}
           {finished ? (
             <div className="rounded-2xl bg-[#f5f5f7] p-8 text-center dark:bg-[#1c1c1e]">
               <p className="text-[16px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">练习完成</p>
               <p className="mt-2 text-[28px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
-                {score} / {set.questions.length}
+                {score} / {activeSet.questions.length}
               </p>
               <p className="mt-1 text-[13px] text-gray-500 dark:text-[#8e8e93]">
-                {score === set.questions.length ? '全对，继续保持。' : '错题已经记下来，晚点复盘再看一遍。'}
+                {score === activeSet.questions.length ? '全对，继续保持。' : '错题已经记下来，晚点复盘再看一遍。'}
               </p>
               {mistakes.length > 0 ? (
                 <p className="mt-1 text-[12px] text-gray-500 dark:text-[#8e8e93]">
@@ -311,19 +350,25 @@ export function LearningPane({
               <div className="flex items-center justify-between gap-3 text-[12px] text-gray-500 dark:text-[#8e8e93]">
                 <span className="inline-flex items-center gap-1.5">
                   <TargetIcon className="h-3.5 w-3.5" />
-                  {set.subject}
+                  {activeSet.subject}
                 </span>
                 <span>
-                  {index + 1} / {set.questions.length}
+                  {index + 1} / {activeSet.questions.length}
                 </span>
               </div>
               <div className="mt-2">
-                <Progress value={index + 1} max={set.questions.length} ariaLabel="练习进度" />
+                <Progress value={index + 1} max={activeSet.questions.length} ariaLabel="练习进度" />
               </div>
 
               <h1 className="mt-6 text-[18px] font-semibold leading-7 tracking-tight text-black dark:text-[#f5f5f7]">
                 {question.prompt}
               </h1>
+
+              {sourceTitle ? (
+                <p className="mt-1 text-[11px] text-gray-400 dark:text-[#8e8e93]">
+                  来自：{sourceTitle}
+                </p>
+              ) : null}
 
               <ConfidencePicker
                 value={confidence}

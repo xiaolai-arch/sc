@@ -15,6 +15,14 @@ test('teaches the butler to quiz users through create_practice_set', () => {
   expect(BUTLER_SYSTEM_PROMPT).toContain('去学习页作答');
 });
 
+test('switches between worked examples and problem-first teaching by mastery', () => {
+  expect(BUTLER_SYSTEM_PROMPT).toContain('get_practice_overview');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('示例先行');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('worked example');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('先练后讲');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('练习数据不可用');
+});
+
 test('teaches the Socratic explanation loop with recitation and knowledge updates', () => {
   expect(BUTLER_SYSTEM_PROMPT).toContain('引导问题');
   expect(BUTLER_SYSTEM_PROMPT).toContain('直接告诉我');
