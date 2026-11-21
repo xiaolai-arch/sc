@@ -908,6 +908,11 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     async listPracticeAttempts(workspaceId) {
       return (await getServices()).practice.listAttempts(workspaceId);
     },
+    async exportMistakeSheet(input) {
+      const practice = (await getServices()).practice;
+      if (!practice.exportMistakeSheet) throw new Error('当前存储不支持导出复习单。');
+      return practice.exportMistakeSheet(input);
+    },
     async listMemory(workspaceId) {
       return (await getServices()).memory.list(workspaceId);
     },

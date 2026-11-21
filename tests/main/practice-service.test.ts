@@ -3,6 +3,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createPracticeService } from '../../src/main/practice';
+import { parseMistakesFile } from '../../src/main/practice/records';
+import { serializeNote } from '../../src/main/vault/note';
 
 let root: string;
 
@@ -392,5 +394,122 @@ test('rejects invalid answers', async () => {
   );
   await expect(service.submitAnswer({ questionId: 'nope', choice: 0 })).rejects.toThrow(
     'Question not found'
+  );
+});
+
+test('exports a printable review sheet for the active mistakes', async () => {
+  const service = at('2026-11-01');
+  await service.submitAnswer({ questionId: 'q1', choice: 0 });
+  await service.submitAnswer({ questionId: 'p2', choice: 0 });
+
+  const result = await service.exportMistakeSheet!({ workspaceId: 'kaoyan' });
+  expect(result).toEqual({
+    path: 'workspaces/kaoyan/practice/review-sheets/2026-11-01.md',
+    count: 2,
+    date: '2026-11-01'
+  });
+
+  const raw = await fs.readFile(
+    join(root, 'workspaces', 'kaoyan', 'practice', 'review-sheets', '2026-11-01.md'),
+    'utf8'
+  );
+  expect(raw).toContain('kind: practice-review-sheet');
+  expect(raw).toContain('# 错题复习单 · 2026-11-01');
+  expect(raw).toContain('A. 0');
+  expect(raw).toContain('B. 1');
+  expect(raw).toContain('答案：B');
+  expect(raw).toContain('错 1 次 · 优先级 1 · 下次复习 2026-11-02');
+  // Sorted by priority, then due date, then question id — same as getMistakes.
+  expect(raw.indexOf('## 1.')).toBeLessThan(raw.indexOf('## 2.'));
+});
+
+test('re-exporting the same day overwrites the sheet instead of duplicating it', async () => {
+  const service = at('2026-11-01');
+  await service.submitAnswer({ questionId: 'q1', choice: 0 });
+  const first = await service.exportMistakeSheet!({ workspaceId: 'kaoyan' });
+  const before = await fs.readFile(join(root, first.path), 'utf8');
+
+  await service.submitAnswer({ questionId: 'p2', choice: 0 });
+  const second = await service.exportMistakeSheet!({ workspaceId: 'kaoyan' });
+  expect(second.path).toBe(first.path);
+  expect(second.count).toBe(2);
+
+  const dir = join(root, 'workspaces', 'kaoyan', 'practice', 'review-sheets');
+  expect(await fs.readdir(dir)).toEqual(['2026-11-01.md']);
+  const after = await fs.readFile(join(root, second.path), 'utf8');
+  expect(after).not.toBe(before);
+  expect(after).toContain('entries: 2');
+});
+
+test('dueOnly keeps just the mistakes due today or earlier', async () => {
+  await at('2026-11-01').submitAnswer({ questionId: 'q1', choice: 0 });
+
+  // 11-02 is q1's first review day; the sheet on 11-03 includes it, on 11-01 not.
+  const early = await at('2026-11-01').exportMistakeSheet!({
+    workspaceId: 'kaoyan',
+    dueOnly: true
+  });
+  expect(early.count).toBe(0);
+  const earlyRaw = await fs.readFile(join(root, early.path), 'utf8');
+  expect(earlyRaw).toContain('entries: 0');
+
+  const later = await at('2026-11-02').exportMistakeSheet!({
+    workspaceId: 'kaoyan',
+    dueOnly: true
+  });
+  expect(later.count).toBe(1);
+  const laterRaw = await fs.readFile(join(root, later.path), 'utf8');
+  expect(laterRaw).toContain('当 x→0 时，sin x / x 的极限是？');
+  expect(laterRaw).toContain('错 1 次 · 优先级 1 · 下次复习 2026-11-02');
+});
+
+test('the sheet is not read back as mistakes and the service keeps working', async () => {
+  const service = at('2026-11-01');
+  await service.submitAnswer({ questionId: 'q1', choice: 0 });
+  await service.exportMistakeSheet!({ workspaceId: 'kaoyan' });
+
+  const raw = await fs.readFile(
+    join(root, 'workspaces', 'kaoyan', 'practice', 'mistakes.md'),
+    'utf8'
+  );
+  expect(parseMistakesFile(raw)).toHaveLength(1);
+
+  // A fresh service instance must ignore the sheet when it reads the vault.
+  const fresh = at('2026-11-01');
+  expect(await fresh.getMistakes('kaoyan')).toHaveLength(1);
+  expect(await fresh.exportMistakeSheet!({ workspaceId: 'kaoyan' })).toMatchObject({ count: 1 });
+});
+
+test('the sheet frontmatter matches the vault note serialization', async () => {
+  await at('2026-11-01').submitAnswer({ questionId: 'q1', choice: 0 });
+  const result = await at('2026-11-01').exportMistakeSheet!({ workspaceId: 'kaoyan' });
+  const raw = await fs.readFile(join(root, result.path), 'utf8');
+
+  const frontmatter = raw.slice(0, raw.indexOf('\n---\n') + 5);
+  const body = raw.slice(frontmatter.length);
+  expect(frontmatter).toBe(
+    serializeNote(
+      {
+        type: 'qa',
+        source: 'user',
+        kind: 'practice-review-sheet',
+        workspaceId: 'kaoyan',
+        generated: '2026-11-01',
+        entries: 1
+      },
+      body
+    ).slice(0, raw.indexOf('\n---\n') + 5)
+  );
+  // The title is the only heading before the per-mistake sections.
+  expect(body.startsWith('# 错题复习单 · 2026-11-01\n\n## 1.')).toBe(true);
+});
+
+test('rejects invalid review-sheet requests', async () => {
+  const service = at('2026-11-01');
+  await expect(service.exportMistakeSheet!({ workspaceId: '' })).rejects.toThrow(
+    'workspace id is required'
+  );
+  await expect(service.exportMistakeSheet!({ workspaceId: '../escape' })).rejects.toThrow(
+    'Invalid workspace id'
   );
 });

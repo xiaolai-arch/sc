@@ -161,6 +161,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     submitPracticeAnswer,
     reviewPracticeMistake,
     resolvePracticeMistake,
+    exportMistakeSheet,
     createTask,
     updateTask,
     deleteTask,
@@ -1833,6 +1834,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
                     });
                   }}
                   onSubmitAnswer={submitPracticeAnswer}
+                  onExportMistakeSheet={exportMistakeSheet}
                   attempts={practiceAttempts.filter(
                     (attempt) =>
                       !projectId || attempt.workspaceId === projectId

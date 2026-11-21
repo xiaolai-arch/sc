@@ -603,3 +603,31 @@ test('mock scans local CLI agents for the settings panel', async () => {
     'anthropic/claude-sonnet-5-5'
   );
 });
+
+test('exports a review-sheet path for the workspace mistakes', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage);
+  const sets = await api.listPracticeSets('kaoyan');
+  const question = (await api.getPracticeSet(sets[0]!.id))!.questions[0]!;
+  // A wrong answer lands in tomorrow's review, so today's due-only sheet is empty.
+  await api.submitPracticeAnswer({ questionId: question.id, choice: 0 });
+
+  const all = await api.exportMistakeSheet!({ workspaceId: 'kaoyan' });
+  expect(all).toMatchObject({
+    count: 1,
+    path: `workspaces/kaoyan/practice/review-sheets/${all.date}.md`
+  });
+  expect(all.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+  const due = await api.exportMistakeSheet!({ workspaceId: 'kaoyan', dueOnly: true });
+  expect(due.count).toBe(0);
+  expect(due.path).toBe(all.path);
+});
+
+test('rejects a review-sheet export for an unknown workspace', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage);
+  await expect(api.exportMistakeSheet!({ workspaceId: 'missing' })).rejects.toThrow(
+    '工作区不存在'
+  );
+});

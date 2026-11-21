@@ -7,6 +7,8 @@ import { cn } from '../ui/cn';
 import type { Workspace, WorkspaceNote } from '../../shared/workspace';
 import type {
   CreatePracticeSetInput,
+  ExportMistakeSheetInput,
+  ExportMistakeSheetResult,
   PracticeAttempt,
   PracticeMistake,
   PracticeSet,
@@ -31,6 +33,10 @@ type LearningPaneProps = {
   attempts?: PracticeAttempt[];
   onSubmitAnswer: (input: SubmitAnswerInput) => Promise<SubmitAnswerResult>;
   onCreateSet?: (input: CreatePracticeSetInput) => Promise<PracticeSet>;
+  /** Writes the printable sheet; omitted callers simply do not show the button. */
+  onExportMistakeSheet?: (
+    input: ExportMistakeSheetInput
+  ) => Promise<ExportMistakeSheetResult>;
   onOpenChat: () => void;
   onOpenNote: (id: string) => void;
 };
@@ -48,6 +54,7 @@ export function LearningPane({
   attempts,
   onSubmitAnswer,
   onCreateSet,
+  onExportMistakeSheet,
   onOpenChat,
   onOpenNote
 }: LearningPaneProps) {
@@ -87,13 +94,22 @@ export function LearningPane({
   ) : null;
 
   const dueIds = new Set((dueMistakes ?? []).map((mistake) => mistake.id));
+  const mistakeBookWorkspaceId =
+    workspace?.id ?? set?.workspaceId ?? mistakes[0]?.workspaceId ?? '';
   const mistakeBook = (
     <MistakeBook
       mistakes={mistakes}
+      workspaceId={mistakeBookWorkspaceId}
       dueIds={dueIds}
       {...(onReviewMistake ? { onReview: onReviewMistake } : {})}
       {...(onReviewAllMistakes ? { onReviewAll: onReviewAllMistakes } : {})}
       {...(onResolveMistake ? { onResolve: onResolveMistake } : {})}
+      {...(onExportMistakeSheet
+        ? {
+            onExport: () =>
+              onExportMistakeSheet({ workspaceId: mistakeBookWorkspaceId, dueOnly: false })
+          }
+        : {})}
     />
   );
 

@@ -19,6 +19,8 @@ import type {
 import type {
   CreatePracticeSetInput,
   DeletePracticeSetInput,
+  ExportMistakeSheetInput,
+  ExportMistakeSheetResult,
   PracticeAttempt,
   PracticeMistake,
   PracticeSet,
@@ -95,6 +97,8 @@ export interface PracticeApi {
   getPracticeMistakes(workspaceId: string): Promise<PracticeMistake[]>;
   getPracticeDue(input: { workspaceId: string; date: string }): Promise<PracticeMistake[]>;
   listPracticeAttempts(workspaceId: string): Promise<PracticeAttempt[]>;
+  /** Writes a printable review sheet for the workspace's active mistakes. */
+  exportMistakeSheet?(input: ExportMistakeSheetInput): Promise<ExportMistakeSheetResult>;
 }
 
 /** Renderer-facing memory contract (vault-backed memory + learner profile). */

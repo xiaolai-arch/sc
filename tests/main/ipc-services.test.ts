@@ -49,6 +49,7 @@ function fakePractice(overrides: Partial<PracticeService> = {}): PracticeService
     getMistakes: vi.fn().mockResolvedValue([]),
     getDue: vi.fn().mockResolvedValue([]),
     listAttempts: vi.fn().mockResolvedValue([]),
+    exportMistakeSheet: vi.fn().mockResolvedValue({ path: '', count: 0, date: '' }),
     ...overrides
   } as PracticeService;
 }
@@ -116,7 +117,12 @@ test('routes planning, practice, memory and search channels to the services', as
     submitAnswer: vi.fn().mockResolvedValue({ questionId: 'q-1', correct: true }),
     getMistakes: vi.fn().mockResolvedValue([{ id: 'pm-1' }]),
     getDue: vi.fn().mockResolvedValue([{ id: 'pm-2' }]),
-    listAttempts: vi.fn().mockResolvedValue([{ id: 'pa-1' }])
+    listAttempts: vi.fn().mockResolvedValue([{ id: 'pa-1' }]),
+    exportMistakeSheet: vi.fn().mockResolvedValue({
+      path: 'workspaces/ws-1/practice/review-sheets/2026-10-31.md',
+      count: 1,
+      date: '2026-10-31'
+    })
   });
   const memory = fakeMemory({
     list: vi.fn().mockResolvedValue([{ id: 'm-1' }]),
@@ -155,6 +161,13 @@ test('routes planning, practice, memory and search channels to the services', as
   ]);
   expect(await handlers.listPracticeAttempts('ws-1')).toEqual([{ id: 'pa-1' }]);
   expect(practice.getDue).toHaveBeenCalledWith('ws-1', '2026-10-31');
+  expect(
+    await handlers.exportMistakeSheet({ workspaceId: 'ws-1', dueOnly: true })
+  ).toMatchObject({ count: 1 });
+  expect(practice.exportMistakeSheet).toHaveBeenCalledWith({
+    workspaceId: 'ws-1',
+    dueOnly: true
+  });
 
   expect(await handlers.listMemory('ws-1')).toEqual([{ id: 'm-1' }]);
   const synthesizeInput = {
@@ -199,6 +212,13 @@ test('rejects malformed planning, practice, memory and search inputs', async () 
   await expect(
     handlers.getPracticeDue({ workspaceId: 'ws-1', date: '' })
   ).rejects.toThrow('日期不能为空。');
+  await expect(handlers.exportMistakeSheet({})).rejects.toThrow('工作区 ID不能为空。');
+  await expect(handlers.exportMistakeSheet({ workspaceId: '   ' })).rejects.toThrow(
+    '工作区 ID不能为空。'
+  );
+  await expect(
+    handlers.exportMistakeSheet({ workspaceId: 'ws-1', dueOnly: 'yes' })
+  ).rejects.toThrow('导出范围参数无效。');
   await expect(
     handlers.synthesizeMemory({ workspaceId: 'ws-1', date: '2026-10-31' })
   ).rejects.toThrow('复盘答案参数无效。');

@@ -130,6 +130,20 @@ export interface SetMistakeResolvedInput {
   resolved: boolean;
 }
 
+/** Writes a printable review sheet for the workspace's active mistakes. */
+export interface ExportMistakeSheetInput {
+  workspaceId: string;
+  /** Keep only mistakes due today (or overdue). Defaults to false. */
+  dueOnly?: boolean;
+}
+
+export interface ExportMistakeSheetResult {
+  /** Vault-relative POSIX path of the written sheet. */
+  path: string;
+  count: number;
+  date: string;
+}
+
 /** Main-process contract: vault-backed or test implementation. */
 export interface PracticeService {
   listSets(workspaceId: string): Promise<PracticeSet[]>;
@@ -149,4 +163,10 @@ export interface PracticeService {
   getDue(workspaceId: string, date: string): Promise<PracticeMistake[]>;
   /** Attempt history, oldest first. Useful for review/analytics. */
   listAttempts(workspaceId: string): Promise<PracticeAttempt[]>;
+  /**
+   * Writes a printable markdown sheet of the active mistakes to
+   * `workspaces/<id>/practice/review-sheets/<YYYY-MM-DD>.md`. Regenerating on
+   * the same day overwrites; the sheet is never read back as mistakes.
+   */
+  exportMistakeSheet?(input: ExportMistakeSheetInput): Promise<ExportMistakeSheetResult>;
 }
