@@ -485,6 +485,24 @@ test('an empty API key clears the stored key when switching endpoints', async ()
   expect(await handlers.getBootstrap()).toMatchObject({ hasApiKey: false });
 });
 
+test('routes strictMastery through settings and rejects a non-boolean', async () => {
+  const { context } = await makeContext();
+  const handlers = createIpcHandlers(context.api);
+
+  const saved = await handlers.updateSettings({ strictMastery: true });
+  expect(saved).toMatchObject({ strictMastery: true });
+  expect(await handlers.getSettings()).toMatchObject({ strictMastery: true });
+
+  const cleared = await handlers.updateSettings({ strictMastery: false });
+  expect(cleared).not.toHaveProperty('strictMastery');
+
+  await expect(handlers.updateSettings({ strictMastery: 'yes' })).rejects.toThrow(
+    '严格掌握设置必须是布尔值。'
+  );
+  // The rejected patch never reached the store.
+  expect(await handlers.getSettings()).not.toHaveProperty('strictMastery');
+});
+
 test('api key is never echoed by settings, bootstrap or workspace payloads', async () => {
   const { context, dir } = await makeContext();
   const handlers = createIpcHandlers(context.api);

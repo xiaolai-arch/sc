@@ -41,6 +41,8 @@ type LearningPaneProps = {
   mistakes: PracticeMistake[];
   /** Active mistakes due today, used to highlight and start a review. */
   dueMistakes?: PracticeMistake[];
+  /** Opt-in stricter mastery; states the rule in the mistake book when on. */
+  strictMastery?: boolean;
   onReviewMistake?: (mistake: PracticeMistake) => void;
   onReviewAllMistakes?: () => void;
   onResolveMistake?: (mistake: PracticeMistake) => void;
@@ -67,6 +69,7 @@ export function LearningPane({
   notes,
   mistakes,
   dueMistakes,
+  strictMastery,
   onReviewMistake,
   onReviewAllMistakes,
   onResolveMistake,
@@ -174,6 +177,7 @@ export function LearningPane({
       mistakes={mistakes}
       workspaceId={mistakeBookWorkspaceId}
       dueIds={dueIds}
+      strict={strictMastery === true}
       {...(onReviewMistake ? { onReview: onReviewMistake } : {})}
       {...(onReviewAllMistakes ? { onReviewAll: onReviewAllMistakes } : {})}
       {...(onResolveMistake ? { onResolve: onResolveMistake } : {})}

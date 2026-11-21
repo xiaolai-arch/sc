@@ -134,4 +134,20 @@ describe('buildMistakeSheet', () => {
     });
     expect(sheet).toContain('参考答案：第一行 第二行');
   });
+
+  it('states the strict clause once under the title only when strict is on', () => {
+    const input = { workspaceId: 'kaoyan', date: '2026-11-02', mistakes: [mistake()] };
+    const loose = buildMistakeSheet(input);
+    expect(loose).not.toContain('更严判定');
+
+    const strict = buildMistakeSheet({ ...input, strict: true });
+    expect(strict).toContain('更严判定生效中：需要简答题复证');
+    // Exactly one occurrence, and it sits between the title and the first entry.
+    expect(strict.split('更严判定生效中').length - 1).toBe(1);
+    expect(strict.indexOf('更严判定生效中')).toBeGreaterThan(strict.indexOf('# 错题复习单'));
+    expect(strict.indexOf('更严判定生效中')).toBeLessThan(strict.indexOf('## 1.'));
+
+    // Explicitly off is byte-identical to the default.
+    expect(buildMistakeSheet({ ...input, strict: false })).toBe(loose);
+  });
 });

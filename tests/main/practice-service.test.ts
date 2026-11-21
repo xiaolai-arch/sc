@@ -1450,3 +1450,160 @@ test('rejects an unknown confidence value', async () => {
     })
   ).rejects.toThrow('Invalid confidence');
 });
+
+/** A service whose opt-in stricter-mastery setting is pinned on. */
+function strictAt(date: string) {
+  return createPracticeService(root, {
+    now: () => new Date(`${date}T09:00:00`),
+    strictMastery: () => true
+  });
+}
+
+test('strict mode withholds mastery for a spaced correct choice answer but still grows the interval', async () => {
+  await at('2026-11-01').submitAnswer({ questionId: 'q1', choice: 0 });
+
+  const one = await at('2026-11-02').submitAnswer({ questionId: 'q1', choice: 1 });
+  expect(one.mistake).toMatchObject({ status: 'active' });
+  const two = await strictAt(one.mistake!.due).submitAnswer({ questionId: 'q1', choice: 1 });
+  const three = await strictAt(two.mistake!.due).submitAnswer({ questionId: 'q1', choice: 1 });
+
+  // A loose workspace would have resolved this by the spaced answer; strict
+  // keeps it active. Every interval still grew and due moved forward.
+  expect(two.mistake!.status).toBe('active');
+  expect(three.mistake!.status).toBe('active');
+  expect(two.mistake!.intervalDays).toBeGreaterThan(one.mistake!.intervalDays);
+  expect(three.mistake!.intervalDays).toBeGreaterThan(two.mistake!.intervalDays);
+  expect((await strictAt('2026-12-01').getMistakes('kaoyan')).map((m) => m.questionId)).toEqual([
+    'q1'
+  ]);
+});
+
+test('strict mode resolves a spaced correct short answer exactly as the default', async () => {
+  const created = await at('2026-11-01').createSet({
+    workspaceId: 'kaoyan',
+    title: '简答小测',
+    questions: [shortQuestion]
+  });
+  const questionId = created.questions[0]!.id;
+  await strictAt('2026-11-01').submitShortAnswer({
+    questionId,
+    response: '不知道',
+    selfCorrect: false
+  });
+
+  const one = await strictAt('2026-11-02').submitShortAnswer({
+    questionId,
+    response: '极限是 1',
+    selfCorrect: true
+  });
+  const two = await strictAt(one.mistake!.due).submitShortAnswer({
+    questionId,
+    response: '极限是 1',
+    selfCorrect: true
+  });
+  const three = await strictAt(two.mistake!.due).submitShortAnswer({
+    questionId,
+    response: '极限是 1',
+    selfCorrect: true
+  });
+
+  expect(three.mistake).toMatchObject({ status: 'resolved' });
+});
+
+test('strict mode never changes a wrong answer', async () => {
+  const isolated = await mkdtemp(join(tmpdir(), 'practice-strict-wrong-'));
+  try {
+    for (const id of ['kaoyan', 'english']) {
+      await fs.mkdir(join(isolated, 'workspaces', id), { recursive: true });
+    }
+    // The same wrong answer in two otherwise-identical vaults: the strict
+    // record must equal the non-strict one field for field.
+    const loose = await at('2026-11-01').submitAnswer({ questionId: 'q1', choice: 0 });
+    const strictWrong = await createPracticeService(isolated, {
+      now: () => new Date('2026-11-01T09:00:00'),
+      strictMastery: () => true
+    }).submitAnswer({ questionId: 'q1', choice: 0 });
+    expect(strictWrong.mistake).toMatchObject({
+      intervalDays: loose.mistake!.intervalDays,
+      due: loose.mistake!.due,
+      difficulty: loose.mistake!.difficulty,
+      stabilityDays: loose.mistake!.stabilityDays,
+      status: 'active',
+      wrongCount: 1
+    });
+  } finally {
+    await rm(isolated, { recursive: true, force: true });
+  }
+});
+
+test('default (strict off) keeps the pre-existing resolve behaviour byte-for-byte', async () => {
+  const isolated = await mkdtemp(join(tmpdir(), 'practice-strict-default-'));
+  try {
+    for (const id of ['kaoyan', 'english']) {
+      await fs.mkdir(join(isolated, 'workspaces', id), { recursive: true });
+    }
+    // Drive the same date-stepped sequence against a vault with no flag and one
+    // whose flag is explicitly off; the mistake-book files must be identical.
+    async function resolveRun(dir: string, strict?: () => boolean) {
+      for (const [date, choice] of [
+        ['2026-11-01', 0],
+        ['2026-11-02', 1],
+        ['2026-11-04', 1],
+        ['2026-11-07', 1]
+      ] as const) {
+        const month = Number(date.slice(5, 7));
+        const day = Number(date.slice(8, 10));
+        await createPracticeService(dir, {
+          now: () => new Date(2026, month - 1, day, 9, 0, 0),
+          ...(strict ? { strictMastery: strict } : {})
+        }).submitAnswer({ questionId: 'q1', choice });
+      }
+      return fs.readFile(join(dir, 'workspaces', 'kaoyan', 'practice', 'mistakes.md'), 'utf8');
+    }
+
+    // Record ids are generated randomly, so normalise them before comparing.
+    const withoutIds = (raw: string) => raw.replace(/pm-[0-9a-f]+/g, 'pm-ID');
+    const implicit = await resolveRun(root);
+    const explicitOff = await resolveRun(isolated, () => false);
+    expect(withoutIds(explicitOff)).toBe(withoutIds(implicit));
+    expect(implicit).toContain('已掌握');
+  } finally {
+    await rm(isolated, { recursive: true, force: true });
+  }
+});
+
+test('the review sheet states the strict clause only when the setting is on', async () => {
+  await at('2026-11-01').submitAnswer({ questionId: 'q1', choice: 0 });
+  const loose = await at('2026-11-01').exportMistakeSheet!({ workspaceId: 'kaoyan' });
+  const looseRaw = await fs.readFile(join(root, loose.path), 'utf8');
+  expect(looseRaw).not.toContain('更严判定');
+
+  await strictAt('2026-11-01').submitAnswer({ questionId: 'p2', choice: 0 });
+  const strict = await strictAt('2026-11-01').exportMistakeSheet!({ workspaceId: 'kaoyan' });
+  const strictRaw = await fs.readFile(join(root, strict.path), 'utf8');
+  expect(strictRaw).toContain('更严判定生效中：需要简答题复证');
+  // The strict note lives under the title, before the first entry.
+  expect(strictRaw.indexOf('更严判定生效中')).toBeLessThan(strictRaw.indexOf('## 1.'));
+});
+
+test('the strict flag is read at answer time, so toggling it applies without a rebuild', async () => {
+  let strict = false;
+  const service = createPracticeService(root, {
+    now: () => new Date('2026-11-01T09:00:00'),
+    strictMastery: () => strict
+  });
+  await service.submitAnswer({ questionId: 'q1', choice: 0 });
+
+  // Answer correctly on a spaced later day while the flag is still off.
+  const now = (date: string) =>
+    createPracticeService(root, {
+      now: () => new Date(`${date}T09:00:00`),
+      strictMastery: () => strict
+    });
+  const one = await now('2026-11-02').submitAnswer({ questionId: 'q1', choice: 1 });
+  // Flip the flag on before the spaced answer; it must take effect immediately.
+  strict = true;
+  const two = await now(one.mistake!.due).submitAnswer({ questionId: 'q1', choice: 1 });
+  expect(two.mistake!.status).toBe('active');
+  expect(two.mistake!.intervalDays).toBeGreaterThan(one.mistake!.intervalDays);
+});

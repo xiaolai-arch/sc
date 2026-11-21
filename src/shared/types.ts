@@ -85,6 +85,13 @@ export interface AppSettings {
   notifications: NotificationSettings;
   budget: BudgetSettings;
   launchAtLogin: boolean;
+  /**
+   * Opt-in stricter mastery: an active mistake is only marked 已掌握 by a
+   * correct *short* (free-recall) answer across a spaced interval; a correct
+   * choice answer still reschedules it but never resolves it. Absent/false is
+   * today's behaviour, and only `true` is ever serialized.
+   */
+  strictMastery?: boolean;
 }
 
 export interface ReviewAnswers { completed: string; stuck: string; tomorrow: string; skipped?: boolean; }
