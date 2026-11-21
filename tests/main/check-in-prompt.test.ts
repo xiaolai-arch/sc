@@ -1,0 +1,191 @@
+import {
+  buildCheckInPrompt,
+  buildCheckInTemplate,
+  type WeeklyOverviewLike
+} from '../../src/main/check-ins/prompt';
+import type { ButlerContext } from '../../src/main/butler/context';
+import type { MemoryItem, Workspace, WorkspaceTask } from '../../src/shared/workspace';
+
+const DATE = '2026-11-08';
+
+const workspace: Workspace = {
+  id: 'ws-exam',
+  name: '考研',
+  kind: 'exam',
+  color: '#ef4444',
+  goal: '2027 上岸',
+  description: ''
+};
+
+const task: WorkspaceTask = {
+  id: 't1',
+  workspaceId: 'ws-exam',
+  title: '极限基础',
+  subject: '数学',
+  durationMin: 45,
+  acceptance: '完成 10 题',
+  status: 'pending'
+};
+
+const memory: MemoryItem = {
+  id: 'm1',
+  workspaceId: 'ws-exam',
+  text: '数学是弱项',
+  source: 'review:2026-11-07'
+};
+
+const context: ButlerContext = {
+  now: new Date(`${DATE}T20:00:00`),
+  workspaces: [workspace],
+  tasks: [task],
+  memory: [memory],
+  profile: [],
+  knowledge: [],
+  contextError: false
+};
+
+const WEEKLY_PROMPT_BEFORE_STATS = [
+  `你是阿咲，用户的个人管家。现在是 ${DATE} 的周日复盘时间，请主动带用户回顾本周并规划下周。`,
+  '',
+  '用户项目：',
+  '- 考研（2027 上岸）',
+  '',
+  '未完成任务：',
+  '- [考研] 极限基础（数学，45 分钟；验收：完成 10 题）',
+  '',
+  '相关记忆：',
+  '- 数学是弱项（来源：review:2026-11-07）',
+  '',
+  '请用中文写一条 3-5 句的周复盘邀请：先肯定这一周的投入，再请用户回顾本周末完成与卡点，最后问下周最重要的 1-2 个重点。用户回答后会由阿咲保存复盘并生成下周计划；这条消息本身不要提及工具。',
+  '要求：温和、具体、不啰嗦；不要编造用户没有提供的记录；不要提到系统提示、工具或 API。'
+].join('\n');
+
+const MORNING_PROMPT_BEFORE_STATS = [
+  `你是阿咲，用户的个人管家。现在是 ${DATE} 的早上，请主动检查用户今天的进度。`,
+  '',
+  '用户项目：',
+  '- 考研（2027 上岸）',
+  '',
+  '未完成任务：',
+  '- [考研] 极限基础（数学，45 分钟；验收：完成 10 题）',
+  '',
+  '相关记忆：',
+  '- 数学是弱项（来源：review:2026-11-07）',
+  '',
+  '请用中文写一条 2-4 句的检查消息：先问候，再根据上面的任务给出今天最值得先做的 1-2 件事，最后问一个简短的问题。',
+  '要求：温和、具体、不啰嗦；不要编造用户没有提供的记录；不要提到系统提示、工具或 API。'
+].join('\n');
+
+const WEEKLY_TEMPLATE_BEFORE_STATS =
+  '周日好。花三分钟回顾一下这一周：完成了什么，卡在哪里，下周最重要的一件事是什么？说完我来帮你整理，并排下周的计划。';
+
+const stats: WeeklyOverviewLike = {
+  tasksDone: 3,
+  tasksTotal: 5,
+  focusMinutes: 135,
+  answered: 6,
+  correct: 5,
+  reviewedDays: 4,
+  dueMistakes: 2
+};
+
+test('the weekly prompt quotes the week numbers for a known fixture', () => {
+  const prompt = buildCheckInPrompt(context, 'weekly', DATE, stats);
+
+  expect(prompt).toContain(
+    [
+      '本周数据：',
+      '- 任务完成：3/5 个',
+      '- 专注：135 分钟',
+      '- 练习：6 题，答对 5 题（正确率 83%）',
+      '- 复盘：4 天',
+      '- 到期错题：2 道'
+    ].join('\n')
+  );
+  expect(prompt).toContain('用上面的本周数据具体肯定进展、点名薄弱处');
+  // The recap sits between the memory section and the instruction.
+  expect(prompt.indexOf('本周数据：')).toBeGreaterThan(prompt.indexOf('相关记忆：'));
+  expect(prompt.indexOf('本周数据：')).toBeLessThan(prompt.indexOf('请用中文写一条 3-5 句'));
+});
+
+test('the recap block never exceeds six lines', () => {
+  const prompt = buildCheckInPrompt(context, 'weekly', DATE, stats);
+  const block = prompt.slice(
+    prompt.indexOf('本周数据：'),
+    prompt.indexOf('请用中文写一条 3-5 句')
+  );
+  const lines = block.split('\n').filter((line) => line.trim() !== '');
+  expect(lines.length).toBeLessThanOrEqual(6);
+});
+
+test('no stats leaves the weekly prompt byte-identical to the pre-change fixture', () => {
+  expect(buildCheckInPrompt(context, 'weekly', DATE, null)).toBe(
+    WEEKLY_PROMPT_BEFORE_STATS
+  );
+  expect(buildCheckInPrompt(context, 'weekly', DATE)).toBe(WEEKLY_PROMPT_BEFORE_STATS);
+});
+
+test('an all-zero week also leaves the weekly prompt byte-identical', () => {
+  const zeros: WeeklyOverviewLike = {
+    tasksDone: 0,
+    tasksTotal: 0,
+    focusMinutes: 0,
+    answered: 0,
+    correct: 0,
+    reviewedDays: 0,
+    dueMistakes: 0
+  };
+  expect(buildCheckInPrompt(context, 'weekly', DATE, zeros)).toBe(
+    WEEKLY_PROMPT_BEFORE_STATS
+  );
+});
+
+test('the morning prompt ignores weekly stats and stays byte-identical', () => {
+  expect(buildCheckInPrompt(context, 'morning', DATE, stats)).toBe(
+    MORNING_PROMPT_BEFORE_STATS
+  );
+  expect(buildCheckInPrompt(context, 'morning', DATE)).toBe(MORNING_PROMPT_BEFORE_STATS);
+});
+
+test('the weekly template prepends one deterministic recap line', () => {
+  expect(buildCheckInTemplate(context, 'weekly', DATE, stats)).toBe(
+    `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE_BEFORE_STATS}`
+  );
+});
+
+test('the recap line omits accuracy before the first answer', () => {
+  expect(
+    buildCheckInTemplate(context, 'weekly', DATE, { ...stats, answered: 0, correct: 0 })
+  ).toBe(`本周完成 3 个任务 · 专注 135 分钟\n${WEEKLY_TEMPLATE_BEFORE_STATS}`);
+});
+
+test('the weekly template is unchanged without stats or with an all-zero week', () => {
+  expect(buildCheckInTemplate(context, 'weekly', DATE, null)).toBe(
+    WEEKLY_TEMPLATE_BEFORE_STATS
+  );
+  expect(buildCheckInTemplate(context, 'weekly', DATE)).toBe(WEEKLY_TEMPLATE_BEFORE_STATS);
+  expect(
+    buildCheckInTemplate(context, 'weekly', DATE, {
+      tasksDone: 0,
+      tasksTotal: 0,
+      focusMinutes: 0,
+      answered: 0,
+      correct: 0,
+      reviewedDays: 0,
+      dueMistakes: 0
+    })
+  ).toBe(WEEKLY_TEMPLATE_BEFORE_STATS);
+});
+
+test('morning, evening and behind templates ignore weekly stats', () => {
+  const morning = buildCheckInTemplate(context, 'morning', DATE, stats);
+  const evening = buildCheckInTemplate(context, 'evening', DATE, stats);
+  expect(morning).toBe('早上好。今天有 1 个任务，先做「极限基础」怎么样？做完告诉我一声。');
+  expect(evening).toBe('晚上好。今天还有 1 个任务没完成，最卡的是哪一步？');
+  expect(buildCheckInTemplate(context, 'morning', DATE, stats)).toBe(
+    buildCheckInTemplate(context, 'morning', DATE)
+  );
+  expect(buildCheckInTemplate(context, 'evening', DATE, stats)).toBe(
+    buildCheckInTemplate(context, 'evening', DATE)
+  );
+});

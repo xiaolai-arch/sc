@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { formatLocalDate } from '../../shared/date';
+import { formatLocalDate, parseLocalDate } from '../../shared/date';
 import type { PracticeService } from '../../shared/practice';
 import type { AppSettings } from '../../shared/types';
 import type { WorkspaceService } from '../../shared/workspace';
@@ -17,7 +17,8 @@ import {
   buildCheckInNotificationBody,
   buildCheckInPrompt,
   buildCheckInTemplate,
-  type CheckInTrigger
+  type CheckInTrigger,
+  type WeeklyOverviewLike
 } from './prompt';
 
 export interface ProactiveCheckInOptions {
@@ -35,6 +36,11 @@ export interface ProactiveCheckInOptions {
    * absent or failing, the message stays exactly as it was without it.
    */
   practiceService?: PracticeService | null;
+  /**
+   * Read-only weekly numbers for the Sunday review. Absent, null or failing
+   * leaves the weekly message byte-identical to the version without stats.
+   */
+  getWeeklyOverview?: (today: Date) => Promise<WeeklyOverviewLike | null>;
   now?: () => Date;
 }
 
@@ -102,6 +108,9 @@ export class ProactiveCheckInService {
   private readonly getSettings: () => Promise<AppSettings>;
   private readonly getDailyTokensUsed: (() => Promise<number>) | undefined;
   private readonly practiceService: PracticeService | null;
+  private readonly getWeeklyOverview:
+    | ((today: Date) => Promise<WeeklyOverviewLike | null>)
+    | undefined;
   private readonly now: () => Date;
 
   constructor(options: ProactiveCheckInOptions) {
@@ -111,6 +120,7 @@ export class ProactiveCheckInService {
     this.getSettings = options.getSettings;
     this.getDailyTokensUsed = options.getDailyTokensUsed;
     this.practiceService = options.practiceService ?? null;
+    this.getWeeklyOverview = options.getWeeklyOverview;
     this.now = options.now ?? (() => new Date());
   }
 
@@ -149,7 +159,10 @@ export class ProactiveCheckInService {
         kind: 'check-in',
         title: checkInTitle(trigger, date)
       }));
-    const text = await this.generate(trigger, date, context);
+    // Weekly numbers are read once and shared by the model prompt and the
+    // deterministic template, so both quote the same figures.
+    const weeklyStats = trigger === 'weekly' ? await this.weeklyStats(date) : null;
+    const text = await this.generate(trigger, date, context, weeklyStats);
     // The due-mistake digest is a deterministic line on the morning message
     // only; it is computed once here so text and the surfaced body agree.
     const digest = trigger === 'morning' ? await this.dueMistakeDigest(context, date) : '';
@@ -232,12 +245,13 @@ export class ProactiveCheckInService {
   private async generate(
     trigger: CheckInTrigger,
     date: string,
-    context: Awaited<ReturnType<typeof gatherContext>>
+    context: Awaited<ReturnType<typeof gatherContext>>,
+    weeklyStats: WeeklyOverviewLike | null = null
   ): Promise<string> {
-    const template = buildCheckInTemplate(context, trigger, date);
+    const template = buildCheckInTemplate(context, trigger, date, weeklyStats);
     if (!this.modelClient) return template;
     try {
-      return await this.composeWithModel(trigger, date, context, template);
+      return await this.composeWithModel(trigger, date, context, template, weeklyStats);
     } catch {
       return template;
     }
@@ -247,17 +261,33 @@ export class ProactiveCheckInService {
     trigger: CheckInTrigger,
     date: string,
     context: Awaited<ReturnType<typeof gatherContext>>,
-    template: string
+    template: string,
+    weeklyStats: WeeklyOverviewLike | null = null
   ): Promise<string> {
     const response = await this.modelClient!.complete({
       messages: [
         {
           role: 'system',
-          content: buildCheckInPrompt(context, trigger, date)
+          content: buildCheckInPrompt(context, trigger, date, weeklyStats)
         }
       ]
     });
     return response.text.trim() || template;
+  }
+
+  /**
+   * The week's numbers for the Sunday review, keyed to the check-in's own date
+   * rather than the wall clock so a late/early tick still reports the right
+   * week. Any provider failure yields null and the check-in proceeds unchanged.
+   */
+  private async weeklyStats(date: string): Promise<WeeklyOverviewLike | null> {
+    const provider = this.getWeeklyOverview;
+    if (!provider) return null;
+    try {
+      return await provider(parseLocalDate(date));
+    } catch {
+      return null;
+    }
   }
 
   /**
