@@ -17,6 +17,7 @@ import type { MemoryService } from '../../shared/memory';
 import { availableMinutesLabel, type WorkspacePlanner } from '../../shared/planning';
 import type { LongPlanService } from '../../shared/plans';
 import type { ProfileService } from '../../shared/profile';
+import type { PracticeService } from '../../shared/practice';
 import type { SearchService } from '../../shared/search';
 import type { ButlerReference, ButlerStreamListener } from '../../shared/butler-stream';
 import { butlerToolLabel } from '../../shared/butler-stream';
@@ -82,6 +83,8 @@ export interface ButlerServiceOptions {
   longPlanService?: LongPlanService | null;
   knowledgeService?: KnowledgeService | null;
   profileService?: ProfileService | null;
+  /** Lets the butler create practice sets (the 学习页练习) through the service. */
+  practiceService?: PracticeService | null;
   /** Lazy getter keeps the search watcher off until a turn actually searches. */
   getSearchService?: (() => SearchService | null) | null;
   now?: () => Date;
@@ -105,6 +108,7 @@ export class ButlerServiceImpl implements ButlerService {
   private readonly longPlanService: LongPlanService | null;
   private readonly knowledgeService: KnowledgeService | null;
   private readonly profileService: ProfileService | null;
+  private readonly practiceService: PracticeService | null;
   private readonly getSearchService: (() => SearchService | null) | null;
   private readonly now: () => Date;
   private readonly maxToolSteps: number;
@@ -127,6 +131,7 @@ export class ButlerServiceImpl implements ButlerService {
     this.longPlanService = options.longPlanService ?? null;
     this.knowledgeService = options.knowledgeService ?? null;
     this.profileService = options.profileService ?? null;
+    this.practiceService = options.practiceService ?? null;
     this.getSearchService = options.getSearchService ?? null;
     this.now = options.now ?? (() => new Date());
     this.maxToolSteps = Math.max(
@@ -738,6 +743,7 @@ export class ButlerServiceImpl implements ButlerService {
       planner: this.planner,
       longPlans: this.longPlanService,
       knowledge: this.knowledgeService,
+      practice: this.practiceService,
       permissions,
       now: this.now,
       ...(signal ? { signal } : {})

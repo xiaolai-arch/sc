@@ -16,6 +16,7 @@ import type {
 import { FakeModelClient } from '../../src/main/agent/model-client';
 import type { Conversation, ConversationMessage } from '../../src/shared/conversations';
 import type { ConversationStore } from '../../src/main/conversations/conversation-store';
+import type { CreatePracticeSetInput, PracticeService, PracticeSet } from '../../src/shared/practice';
 import type { SearchResult, SearchService } from '../../src/shared/search';
 import {
   ButlerServiceImpl,
@@ -331,7 +332,8 @@ describe('ButlerServiceImpl replies', () => {
       'update_task',
       'get_memory',
       'record_knowledge',
-      'save_profile'
+      'save_profile',
+      'create_practice_set'
     ]);
   });
 
@@ -934,4 +936,62 @@ test('passes the workspace directory as cwd to the model client', async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('routes create_practice_set tool calls to the injected practice service', async () => {
+  const client = new FakeModelClient([
+    {
+      text: '',
+      usage: { inputTokens: 6, outputTokens: 3 },
+      toolCalls: [
+        {
+          id: 'c1',
+          name: 'create_practice_set',
+          arguments: {
+            title: '极限小测',
+            subject: '数学',
+            questions: [
+              { prompt: 'lim(x→0) sin(x)/x = ?', options: ['0', '1'], answer: 1 },
+              { prompt: 'x→0 时 x 与 tan(x) 等价吗？', options: ['等价', '不等价'], answer: 0 },
+              { prompt: '夹逼准则需要几边夹住？', options: ['一边', '两边'], answer: 1 }
+            ]
+          }
+        }
+      ]
+    },
+    { text: '已出好 3 道题，去学习页作答。', usage: { inputTokens: 9, outputTokens: 5 } }
+  ]);
+  const createSet = vi.fn(async (input: CreatePracticeSetInput): Promise<PracticeSet> => ({
+    id: 'set-9',
+    workspaceId: input.workspaceId,
+    title: input.title,
+    subject: input.subject ?? '',
+    questions: input.questions.map((question, index) => ({
+      id: `q-${index + 1}`,
+      prompt: question.prompt,
+      options: question.options,
+      answer: question.answer,
+      explanation: question.explanation ?? ''
+    })),
+    createdAt: NOW.toISOString(),
+    updatedAt: NOW.toISOString()
+  }));
+  const service = makeService(client, new MemoryWorkspaceService(), {
+    practiceService: { createSet } as unknown as PracticeService
+  });
+
+  const result = await service.send({ workspaceId: 'ws-exam', message: '考考我极限' });
+
+  expect(result.text).toBe('已出好 3 道题，去学习页作答。');
+  expect(createSet).toHaveBeenCalledWith(
+    expect.objectContaining({ workspaceId: 'ws-exam', title: '极限小测', subject: '数学' })
+  );
+  const toolMessage = lastToolMessage(client, 1);
+  expect(toolMessage?.toolCallId).toBe('c1');
+  const payload = JSON.parse(toolMessage?.content ?? '{}');
+  expect(payload.ok).toBe(true);
+  expect(payload.result.setId).toBe('set-9');
+  expect(payload.result.message).toBe(
+    '已出题：极限小测（3 题，考研）· 去学习页作答，错题会自动进错题本'
+  );
 });

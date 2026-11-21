@@ -8,6 +8,26 @@ test('guides the butler to save and plan after a weekly review', () => {
   expect(BUTLER_SYSTEM_PROMPT).toContain('工具失败时如实说明');
 });
 
+test('teaches the butler to quiz users through create_practice_set', () => {
+  expect(BUTLER_SYSTEM_PROMPT).toContain('考考我');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('create_practice_set');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('不出用户没学过的内容');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('去学习页作答');
+});
+
+test('teaches the Socratic explanation loop with recitation and knowledge updates', () => {
+  expect(BUTLER_SYSTEM_PROMPT).toContain('引导问题');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('直接告诉我');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('复述');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('record_knowledge');
+});
+
+test('frames long-term goals beyond exams', () => {
+  expect(BUTLER_SYSTEM_PROMPT).toContain(
+    '（例如考研、学英语、健身、读书、推进一个项目）'
+  );
+});
+
 test('buildSystemPrompt keeps the weekly guidance alongside context', () => {
   const prompt = buildSystemPrompt({
     now: new Date('2026-11-01T12:00:00.000Z'),

@@ -3,6 +3,10 @@ import type { AgentPermissions } from '../../shared/attachments';
 import type { KnowledgeService, KnowledgeStatus } from '../../shared/knowledge';
 import type { MemoryService } from '../../shared/memory';
 import { isProfileCategory, type ProfileService } from '../../shared/profile';
+import type {
+  CreatePracticeQuestionInput,
+  PracticeService
+} from '../../shared/practice';
 import type { WorkspacePlanner } from '../../shared/planning';
 import type { LongPlanService } from '../../shared/plans';
 import type {
@@ -22,6 +26,8 @@ export interface ButlerToolContext {
   /** Long-plan service; absent in tests without plan persistence. */
   longPlans?: LongPlanService | null;
   knowledge?: KnowledgeService | null;
+  /** Practice sets/attempts/mistakes; absent in tests without a practice vault. */
+  practice?: PracticeService | null;
   /**
    * The turn's permission level. When present, write tools are refused without
    * `write`; tools marked `requiresWeb` also need `web`. Absent means the caller
@@ -740,6 +746,79 @@ export function createButlerTools(): ButlerToolDefinition[] {
           message: '已记到个人档案，等你确认。'
         };
       }
+    },
+    {
+      name: 'create_practice_set',
+      description:
+        '出 3-10 道选择题组成一份练习集，写入学习页的练习模块。用户说「考考我 / 出几道题 / 测测我 / 帮我复习」时，从用户学过的内容出题；answer 是正确选项的下标（从 0 开始）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: '练习标题，例如：极限概念小测' },
+          subject: { type: 'string', description: '科目或主题；省略时使用工作区名称' },
+          questions: {
+            type: 'array',
+            minItems: 3,
+            maxItems: 10,
+            description: '3-10 道选择题',
+            items: {
+              type: 'object',
+              properties: {
+                prompt: { type: 'string', description: '题干' },
+                options: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: '2-6 个选项'
+                },
+                answer: {
+                  type: 'number',
+                  description: '正确选项的下标，从 0 开始的整数'
+                },
+                explanation: { type: 'string', description: '解析，可选' }
+              },
+              required: ['prompt', 'options', 'answer'],
+              additionalProperties: false
+            }
+          },
+          workspaceId: { type: 'string', description: '项目 ID；省略时使用当前项目' }
+        },
+        required: ['title', 'questions'],
+        additionalProperties: false
+      },
+      async execute(input, context) {
+        const workspaceId = optionalString(input, 'workspaceId') ?? context.workspaceId;
+        if (!workspaceId) {
+          throw new ToolInputError('缺少 workspaceId：请先创建或选择项目。');
+        }
+        if (!context.practice) {
+          throw new ToolInputError('练习服务未连接，暂时无法出题。');
+        }
+        const title = requiredString(input, 'title');
+        const subject = optionalString(input, 'subject');
+        const questions = requiredPracticeQuestions(input);
+        throwIfAborted(context.signal);
+        const set = await context.practice.createSet({
+          workspaceId,
+          title,
+          ...(subject ? { subject } : {}),
+          questions
+        });
+        let workspaceName = workspaceId;
+        try {
+          const snapshot = await context.workspace.getWorkspaceSnapshot(workspaceId);
+          workspaceName = snapshot.workspace.name;
+        } catch {
+          // Keep the raw id as the label when the workspace cannot be read.
+        }
+        return {
+          ok: true,
+          setId: set.id,
+          workspaceId,
+          title: set.title,
+          questionCount: set.questions.length,
+          message: `已出题：${set.title}（${set.questions.length} 题，${workspaceName}）· 去学习页作答，错题会自动进错题本`
+        };
+      }
     }
   ];
 }
@@ -947,6 +1026,73 @@ function requiredTaskStatus(input: Record<string, unknown>): WorkspaceTaskStatus
     );
   }
   return value as WorkspaceTaskStatus;
+}
+
+/**
+ * Validates a chat-provided question list into `CreatePracticeQuestionInput`
+ * shapes; every failure is a Chinese ToolInputError the model can correct.
+ */
+function requiredPracticeQuestions(
+  input: Record<string, unknown>
+): CreatePracticeQuestionInput[] {
+  const value = input['questions'];
+  if (!Array.isArray(value)) {
+    throw new ToolInputError('参数 questions 必须是题目数组。');
+  }
+  if (value.length < 3 || value.length > 10) {
+    throw new ToolInputError('questions 必须包含 3-10 道题。');
+  }
+  return value.map((entry, index) => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      throw new ToolInputError(`第 ${index + 1} 题必须是对象。`);
+    }
+    const question = entry as Record<string, unknown>;
+    const prompt = question['prompt'];
+    if (typeof prompt !== 'string' || prompt.trim() === '') {
+      throw new ToolInputError(`第 ${index + 1} 题缺少题干 prompt。`);
+    }
+    const optionsValue = question['options'];
+    if (!Array.isArray(optionsValue) || optionsValue.length < 2 || optionsValue.length > 6) {
+      throw new ToolInputError(`第 ${index + 1} 题的 options 必须是 2-6 个选项。`);
+    }
+    const options: string[] = [];
+    for (const option of optionsValue) {
+      if (typeof option !== 'string' || option.trim() === '') {
+        throw new ToolInputError(`第 ${index + 1} 题的选项不能为空。`);
+      }
+      options.push(option);
+    }
+    if (new Set(options).size !== options.length) {
+      throw new ToolInputError(`第 ${index + 1} 题的选项不能重复。`);
+    }
+    const answer = question['answer'];
+    if (
+      typeof answer !== 'number' ||
+      !Number.isInteger(answer) ||
+      answer < 0 ||
+      answer >= options.length
+    ) {
+      throw new ToolInputError(
+        `第 ${index + 1} 题的 answer 必须是 0-${options.length - 1} 的整数下标。`
+      );
+    }
+    const explanationValue = question['explanation'];
+    if (explanationValue !== undefined && explanationValue !== null) {
+      if (typeof explanationValue !== 'string') {
+        throw new ToolInputError(`第 ${index + 1} 题的 explanation 必须是字符串。`);
+      }
+    }
+    const explanation =
+      typeof explanationValue === 'string' && explanationValue.trim() !== ''
+        ? explanationValue
+        : undefined;
+    return {
+      prompt,
+      options,
+      answer,
+      ...(explanation ? { explanation } : {})
+    };
+  });
 }
 
 function describeError(error: unknown): string {

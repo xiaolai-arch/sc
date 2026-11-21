@@ -85,6 +85,7 @@ export interface ButlerFactoryDependencies {
   getSearchService?: () => SearchService | null;
   planner?: WorkspacePlanner;
   longPlans?: LongPlanService;
+  practice?: PracticeService;
   modelClient?: ModelClient | null;
   modelClientFor?: (model: string) => ModelClient | null;
 }
@@ -282,6 +283,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
         : {}),
       ...(dependencies.planner ? { planner: dependencies.planner } : {}),
       ...(dependencies.longPlans ? { longPlanService: dependencies.longPlans } : {}),
+      ...(dependencies.practice ? { practiceService: dependencies.practice } : {}),
       now,
       ...(dependencies.modelClient !== undefined ? { modelClient: dependencies.modelClient } : {}),
       ...(dependencies.modelClientFor ? { modelClientFor: dependencies.modelClientFor } : {})
@@ -418,6 +420,8 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       modelClient,
       knowledge
     );
+    // Built before the butler so chat tools can create practice sets.
+    const practice = createPractice(nextSettings.vaultPath);
     const dependencies: ButlerFactoryDependencies = {
       workspaceService: workspace,
       provider: nextSettings.provider,
@@ -429,12 +433,12 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       getSearchService,
       planner,
       longPlans,
+      practice,
       modelClient,
       modelClientFor
     };
     const butler = createButler(nextSettings.vaultPath, dependencies);
 
-    const practice = createPractice(nextSettings.vaultPath);
     const checkIns = new ProactiveCheckInService({
       conversationStore,
       workspaceService: workspace,
