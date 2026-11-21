@@ -230,3 +230,67 @@ test('reviews a real mistake from the practice panel and records the answer', as
     expect(screen.queryByRole('dialog', { name: '复习错题' })).not.toBeInTheDocument()
   );
 });
+
+test('passes the picked confidence with a choice review, and none when unmarked', async () => {
+  const onReview = vi.fn(async (input: ReviewMistakeInput) =>
+    resultFor(mistake(input.mistakeId === 'pm1' ? 1 : 2))
+  );
+  render(
+    <MistakeReviewDialog
+      open
+      queue={[mistake(1), mistake(2)]}
+      onReview={onReview}
+      onResolve={vi.fn()}
+      onClose={vi.fn()}
+    />
+  );
+
+  // The picker starts with neither mark pressed.
+  const sure = screen.getByRole('button', { name: '有把握' });
+  expect(sure).toHaveAttribute('aria-pressed', 'false');
+
+  // Unmarked: the request keeps its pre-feature shape.
+  await userEvent.click(screen.getByRole('button', { name: 'B. 正确选项' }));
+  await userEvent.click(screen.getByRole('button', { name: '检查答案' }));
+  await screen.findByText('回答正确');
+  expect(onReview).toHaveBeenLastCalledWith({ mistakeId: 'pm1', choice: 1 });
+
+  // Next question, this time marked 不确定.
+  await userEvent.click(screen.getByRole('button', { name: '下一题' }));
+  await userEvent.click(screen.getByRole('button', { name: '不确定' }));
+  expect(screen.getByRole('button', { name: '不确定' })).toHaveAttribute('aria-pressed', 'true');
+  await userEvent.click(screen.getByRole('button', { name: 'B. 正确选项' }));
+  await userEvent.click(screen.getByRole('button', { name: '检查答案' }));
+  await screen.findByText('回答正确');
+  expect(onReview).toHaveBeenLastCalledWith({ mistakeId: 'pm2', choice: 1, confidence: 'unsure' });
+});
+
+test('passes the picked confidence with a short self-assessment', async () => {
+  const shortMistake: PracticeMistake = {
+    ...mistake(3),
+    kind: 'short',
+    prompt: '用自己的话说明第一个重要极限。',
+    options: [],
+    answer: 0,
+    referenceAnswer: 'x→0 时 sin x / x 的极限是 1。'
+  };
+  const onReview = vi.fn(async () => {
+    const answer = resultFor(shortMistake);
+    return { ...answer, choice: 0, answer: 0, attempt: { ...answer.attempt, choice: 0 } };
+  });
+  render(
+    <MistakeReviewDialog open queue={[shortMistake]} onReview={onReview} onResolve={vi.fn()} onClose={vi.fn()} />
+  );
+
+  await userEvent.click(screen.getByRole('button', { name: '有把握' }));
+  await userEvent.type(screen.getByLabelText('用你自己的话回答'), '极限是 1');
+  await userEvent.click(screen.getByRole('button', { name: '提交' }));
+  await userEvent.click(screen.getByRole('button', { name: '没答对' }));
+
+  expect(onReview).toHaveBeenCalledWith({
+    mistakeId: 'pm3',
+    response: '极限是 1',
+    selfCorrect: false,
+    confidence: 'sure'
+  });
+});

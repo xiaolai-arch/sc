@@ -18,6 +18,7 @@ import { Label } from '../ui/Label';
 import { Select } from '../ui/Select';
 import { Textarea } from '../ui/Textarea';
 import { AccuracyTrend } from './AccuracyTrend';
+import { CalibrationCard } from './CalibrationCard';
 import { PageFrame } from './PageFrame';
 import { ReviewRecords } from './ReviewRecords';
 import { StudyHeatmap } from './StudyHeatmap';
@@ -202,6 +203,7 @@ export function ReviewPage({
     >
       <StudyHeatmap tasks={filteredTasks} today={todayDate} />
       <AccuracyTrend attempts={filteredAttempts} today={todayDate} />
+      <CalibrationCard attempts={filteredAttempts} today={todayDate} />
       {hasOverviewData ? <WeeklyOverview overview={overview} /> : null}
 
       {reviews.length > 0 ? (

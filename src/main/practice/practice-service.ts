@@ -7,6 +7,7 @@ import {
   type ExportMistakeSheetInput,
   type ExportMistakeSheetResult,
   type PracticeAttempt,
+  type PracticeConfidence,
   type PracticeMistake,
   type PracticeQuestion,
   type PracticeService,
@@ -82,6 +83,13 @@ function requireString(value: unknown, label: string): string {
   return value;
 }
 
+/** The optional confidence enum; anything else is a caller bug, not data. */
+function optionalConfidence(value: unknown): PracticeConfidence | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (value !== 'sure' && value !== 'unsure') throw new Error('Invalid confidence');
+  return value;
+}
+
 function normalizeQuestions(input: unknown): PracticeQuestion[] {
   if (!Array.isArray(input) || input.length === 0) {
     throw new Error('Practice set needs at least one question');
@@ -147,19 +155,23 @@ interface MistakeSource {
  * (`schedule.ts`): a wrong answer resets the interval to one day and raises
  * difficulty; a correct answer grows the interval, moves `due` forward and may
  * resolve the mistake once a spaced interval has elapsed. `correctStreak` is
- * bookkeeping only — it no longer resolves a record by itself.
+ * bookkeeping only — it no longer resolves a record by itself. A wrong answer
+ * the learner marked `有把握` raises difficulty by one extra step; `不确定` and
+ * an unmarked answer behave exactly as before, and a correct answer is never
+ * affected by confidence.
  */
 function applyMistakeAnswer(
   existing: PracticeMistake | undefined,
   source: MistakeSource,
   correct: boolean,
+  confidence: PracticeConfidence | undefined,
   answeredAt: string,
   today: string
 ): PracticeMistake | null {
   if (!correct) {
     const schedule = nextSchedule(
       existing === undefined ? { intervalDays: 1, due: today } : existing,
-      { correct: false, today }
+      { correct: false, ...(confidence !== undefined ? { confidence } : {}), today }
     );
     const wrongCount = (existing?.wrongCount ?? 0) + 1;
     return {
@@ -429,6 +441,7 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
       if (typeof choice !== 'number' || !Number.isInteger(choice) || choice < 0) {
         throw new Error('Invalid answer choice');
       }
+      const confidence = optionalConfidence(input.confidence);
       await ensureSeeded();
       const found = await findQuestion(questionId);
       if (found === null) throw new Error(`Question not found: ${questionId}`);
@@ -447,6 +460,7 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
           setId: set.id,
           questionId,
           choice,
+          ...(confidence !== undefined ? { confidence } : {}),
           correct,
           answeredAt
         };
@@ -471,6 +485,7 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
             explanation: question.explanation
           },
           correct,
+          confidence,
           answeredAt,
           today
         );
@@ -508,6 +523,7 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
       const response = requireString(input.response, 'response');
       if (typeof input.selfCorrect !== 'boolean') throw new Error('selfCorrect is required');
       const correct = input.selfCorrect;
+      const confidence = optionalConfidence(input.confidence);
       await ensureSeeded();
       const found = await findQuestion(questionId);
       if (found === null) throw new Error(`Question not found: ${questionId}`);
@@ -528,6 +544,7 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
           questionId,
           choice: 0,
           response,
+          ...(confidence !== undefined ? { confidence } : {}),
           correct,
           answeredAt
         };
@@ -554,6 +571,7 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
             explanation: question.explanation
           },
           correct,
+          confidence,
           answeredAt,
           today
         );
@@ -594,6 +612,7 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
           throw new Error('Invalid answer choice');
         }
       }
+      const confidence = optionalConfidence(input.confidence);
       await ensureSeeded();
       const found = await findMistake(mistakeId);
       if (found === null) throw new Error(`Mistake not found: ${mistakeId}`);
@@ -629,6 +648,7 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
           questionId: snapshot.questionId,
           choice,
           ...(response !== undefined ? { response } : {}),
+          ...(confidence !== undefined ? { confidence } : {}),
           correct,
           answeredAt
         };
@@ -658,6 +678,7 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
             explanation: current.explanation
           },
           correct,
+          confidence,
           answeredAt,
           today
         );

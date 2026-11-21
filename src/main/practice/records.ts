@@ -1,6 +1,7 @@
 import type { NoteMeta } from '../../shared/types';
 import type {
   PracticeAttempt,
+  PracticeConfidence,
   PracticeMistake,
   PracticeMistakeStatus,
   PracticeQuestion,
@@ -29,6 +30,15 @@ function asRangedNumber(value: unknown, min: number, max: number): number | unde
   return typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
     ? value
     : undefined;
+}
+
+/**
+ * Tolerant read of the optional pre-answer confidence. Anything else in the
+ * field is dropped rather than failing the whole attempt, so a hand-edited file
+ * never loses an answer over one stray value.
+ */
+export function asConfidence(value: unknown): PracticeConfidence | undefined {
+  return value === 'sure' || value === 'unsure' ? value : undefined;
 }
 
 /** Validates one question object from frontmatter (or a create request). */
@@ -159,6 +169,7 @@ export function parseAttemptFile(raw: string): PracticeAttempt[] {
       continue;
     }
     const response = asString(record.response);
+    const confidence = asConfidence(record.confidence);
     attempts.push({
       id,
       workspaceId,
@@ -166,6 +177,7 @@ export function parseAttemptFile(raw: string): PracticeAttempt[] {
       questionId,
       choice,
       ...(response !== undefined ? { response } : {}),
+      ...(confidence !== undefined ? { confidence } : {}),
       correct: asBoolean(record.correct, false),
       answeredAt
     });
@@ -184,11 +196,15 @@ export function serializeAttemptFile(date: string, attempts: readonly PracticeAt
   const lines = attempts.map((attempt) => {
     const time = attempt.answeredAt.slice(11, 16);
     const verdict = attempt.correct ? '✅' : '❌';
+    // Confidence is written only when the learner marked one, so logs that
+    // predate the feature keep their exact previous text.
+    const confidence =
+      attempt.confidence === 'sure' ? ' · 有把握' : attempt.confidence === 'unsure' ? ' · 不确定' : '';
     if (attempt.response !== undefined) {
       // Free recall: show what was typed, not an option index.
-      return `- ${time || '--:--'} · ${attempt.questionId} · 简答「${singleLine(attempt.response)}」 · ${verdict}`;
+      return `- ${time || '--:--'} · ${attempt.questionId} · 简答「${singleLine(attempt.response)}」${confidence} · ${verdict}`;
     }
-    return `- ${time || '--:--'} · ${attempt.questionId} · 选择 ${attempt.choice} · ${verdict}`;
+    return `- ${time || '--:--'} · ${attempt.questionId} · 选择 ${attempt.choice}${confidence} · ${verdict}`;
   });
   const body = [`# ${date} 练习记录`, '', ...lines, ''].join('\n');
   return serializeNote(meta, body);

@@ -493,3 +493,133 @@ describe('mistake review sheet', () => {
     expect(screen.getByRole('button', { name: '复制清单' })).toBeInTheDocument();
   });
 });
+
+describe('confidence picker while answering', () => {
+  function choiceResult(correct: boolean): SubmitAnswerResult {
+    return {
+      questionId: 'q1',
+      setId: 'ps1',
+      workspaceId: 'kaoyan',
+      choice: 1,
+      correct,
+      answer: 1,
+      explanation: '第一个重要极限。',
+      attempt: {
+        id: 'pa1',
+        workspaceId: 'kaoyan',
+        setId: 'ps1',
+        questionId: 'q1',
+        choice: 1,
+        correct,
+        answeredAt: '2026-11-01T09:00:00.000Z'
+      },
+      mistake: correct ? null : { ...mistake(1), questionId: 'q1', due: '2026-11-02' },
+      due: correct ? undefined : '2026-11-02'
+    };
+  }
+
+  it('sends no confidence when none is picked', async () => {
+    const user = userEvent.setup();
+    const onSubmitAnswer = vi.fn(async () => choiceResult(true));
+    renderPane({ set: practiceSet, onSubmitAnswer });
+
+    const sure = screen.getByRole('button', { name: '有把握' });
+    expect(sure).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: '不确定' })).toHaveAttribute('aria-pressed', 'false');
+
+    await user.click(screen.getByRole('button', { name: 'B. 1' }));
+    await user.click(screen.getByRole('button', { name: '检查答案' }));
+
+    await waitFor(() => expect(onSubmitAnswer).toHaveBeenCalledTimes(1));
+    expect(onSubmitAnswer).toHaveBeenCalledWith({ questionId: 'q1', choice: 1 });
+  });
+
+  it('keeps the marks mutually exclusive and sends the picked one', async () => {
+    const user = userEvent.setup();
+    const onSubmitAnswer = vi.fn(async () => choiceResult(true));
+    renderPane({ set: practiceSet, onSubmitAnswer });
+
+    await user.click(screen.getByRole('button', { name: '有把握' }));
+    expect(screen.getByRole('button', { name: '有把握' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '不确定' })).toHaveAttribute('aria-pressed', 'false');
+
+    // Picking the other swaps the selection instead of adding to it.
+    await user.click(screen.getByRole('button', { name: '不确定' }));
+    expect(screen.getByRole('button', { name: '有把握' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: '不确定' })).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(screen.getByRole('button', { name: 'B. 1' }));
+    await user.click(screen.getByRole('button', { name: '检查答案' }));
+
+    await waitFor(() => expect(onSubmitAnswer).toHaveBeenCalledTimes(1));
+    expect(onSubmitAnswer).toHaveBeenCalledWith({
+      questionId: 'q1',
+      choice: 1,
+      confidence: 'unsure'
+    });
+  });
+
+  it('sends the picked confidence with a short self-assessment', async () => {
+    const user = userEvent.setup();
+    const shortSet: PracticeSet = {
+      id: 'ps-short',
+      workspaceId: 'kaoyan',
+      title: '简答练习',
+      subject: '数学',
+      questions: [
+        {
+          id: 'sq1',
+          kind: 'short',
+          prompt: '用自己的话说明第一个重要极限。',
+          options: [],
+          answer: 0,
+          referenceAnswer: 'x→0 时 sin x / x 的极限是 1。',
+          explanation: ''
+        }
+      ]
+    };
+    const onSubmitShortAnswer = vi.fn(async () => ({
+      ...choiceResult(false),
+      questionId: 'sq1',
+      setId: 'ps-short',
+      choice: 0,
+      answer: 0
+    }));
+    renderPane({ set: shortSet, onSubmitShortAnswer });
+
+    await user.click(screen.getByRole('button', { name: '有把握' }));
+    await user.type(screen.getByLabelText('用你自己的话回答'), '极限是 0');
+    await user.click(screen.getByRole('button', { name: '提交' }));
+    await user.click(screen.getByRole('button', { name: '没答对' }));
+
+    await waitFor(() =>
+      expect(onSubmitShortAnswer).toHaveBeenCalledWith({
+        questionId: 'sq1',
+        response: '极限是 0',
+        selfCorrect: false,
+        confidence: 'sure'
+      })
+    );
+  });
+
+  it('clears the mark when the learner moves to the next question', async () => {
+    const user = userEvent.setup();
+    const twoQuestionSet: PracticeSet = {
+      ...practiceSet,
+      questions: [
+        practiceSet.questions[0],
+        { ...practiceSet.questions[0], id: 'q2', prompt: '第二题？' }
+      ]
+    };
+    const onSubmitAnswer = vi.fn(async () => choiceResult(true));
+    renderPane({ set: twoQuestionSet, onSubmitAnswer });
+
+    await user.click(screen.getByRole('button', { name: '有把握' }));
+    await user.click(screen.getByRole('button', { name: 'B. 1' }));
+    await user.click(screen.getByRole('button', { name: '检查答案' }));
+    await waitFor(() => expect(onSubmitAnswer).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole('button', { name: '下一题' }));
+    expect(screen.getByRole('button', { name: '有把握' })).toHaveAttribute('aria-pressed', 'false');
+  });
+});

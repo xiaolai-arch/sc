@@ -479,3 +479,80 @@ test('routes local CLI discovery without parameters', async () => {
   await expect(handlers.scanLocalClis()).resolves.toMatchObject({ entries: [] });
   expect(scanLocalClis).toHaveBeenCalledWith();
 });
+
+test('carries the optional confidence enum over IPC and rejects anything else', async () => {
+  const submitAnswer = vi.fn().mockResolvedValue({ questionId: 'q-1', correct: true });
+  const submitShortAnswer = vi.fn().mockResolvedValue({ questionId: 'q-1', correct: false });
+  const reviewMistake = vi.fn().mockResolvedValue({ questionId: 'q-1', correct: true });
+  const practice = {
+    listSets: vi.fn(),
+    getSet: vi.fn(),
+    createSet: vi.fn(),
+    submitAnswer,
+    submitShortAnswer,
+    reviewMistake,
+    getMistakes: vi.fn(),
+    getDue: vi.fn(),
+    listAttempts: vi.fn()
+  } as unknown as PracticeService;
+  const { context } = await makeContext(fakeWorkspace(), fakeButler(), practice);
+  const handlers = createIpcHandlers(context.api);
+
+  await handlers.submitPracticeAnswer({ questionId: 'q-1', choice: 0, confidence: 'sure' });
+  expect(submitAnswer).toHaveBeenLastCalledWith({
+    questionId: 'q-1',
+    choice: 0,
+    confidence: 'sure'
+  });
+  // An unmarked answer keeps the original input shape exactly.
+  await handlers.submitPracticeAnswer({ questionId: 'q-1', choice: 0 });
+  expect(submitAnswer).toHaveBeenLastCalledWith({ questionId: 'q-1', choice: 0 });
+
+  await handlers.submitPracticeShortAnswer({
+    questionId: 'q-1',
+    response: '极限是 1',
+    selfCorrect: true,
+    confidence: 'unsure'
+  });
+  expect(submitShortAnswer).toHaveBeenLastCalledWith({
+    questionId: 'q-1',
+    response: '极限是 1',
+    selfCorrect: true,
+    confidence: 'unsure'
+  });
+
+  await handlers.reviewPracticeMistake({ mistakeId: 'pm-1', choice: 1, confidence: 'sure' });
+  expect(reviewMistake).toHaveBeenLastCalledWith({
+    mistakeId: 'pm-1',
+    choice: 1,
+    confidence: 'sure'
+  });
+  await handlers.reviewPracticeMistake({
+    mistakeId: 'pm-1',
+    response: '极限是 1',
+    selfCorrect: false,
+    confidence: 'unsure'
+  });
+  expect(reviewMistake).toHaveBeenLastCalledWith({
+    mistakeId: 'pm-1',
+    response: '极限是 1',
+    selfCorrect: false,
+    confidence: 'unsure'
+  });
+
+  // An unknown enum value never crosses the boundary.
+  await expect(
+    handlers.submitPracticeAnswer({ questionId: 'q-1', choice: 0, confidence: 'certain' })
+  ).rejects.toThrow('把握度参数无效。');
+  await expect(
+    handlers.submitPracticeShortAnswer({
+      questionId: 'q-1',
+      response: '答',
+      selfCorrect: true,
+      confidence: 'maybe'
+    })
+  ).rejects.toThrow('把握度参数无效。');
+  await expect(
+    handlers.reviewPracticeMistake({ mistakeId: 'pm-1', choice: 1, confidence: 'yes' })
+  ).rejects.toThrow('把握度参数无效。');
+});

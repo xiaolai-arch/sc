@@ -44,6 +44,7 @@ import type {
   CreatePracticeSetInput,
   DeletePracticeSetInput,
   ExportMistakeSheetInput,
+  PracticeConfidence,
   ReviewMistakeInput,
   SetMistakeResolvedInput,
   SubmitAnswerInput,
@@ -726,12 +727,28 @@ function requirePracticeDue(value: unknown): { workspaceId: string; date: string
   return input as unknown as { workspaceId: string; date: string };
 }
 
+/**
+ * The optional confidence enum crossing IPC. Absent is fine (the learner did
+ * not pick one); anything other than `sure`/`unsure` is rejected so a typo
+ * cannot silently reach the scheduler.
+ */
+function optionalConfidence(value: unknown): PracticeConfidence | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (value !== 'sure' && value !== 'unsure') throw new Error('把握度参数无效。');
+  return value;
+}
+
 function requireSubmitAnswer(value: unknown): SubmitAnswerInput {
   const input = requireObject(value, '提交答案');
   requireString(input.questionId, '题目 ID');
   const choice = optionalNonNegativeInteger(input.choice, '选项');
   if (choice === undefined) throw new Error('选项参数无效。');
-  return { questionId: input.questionId as string, choice };
+  const confidence = optionalConfidence(input.confidence);
+  return {
+    questionId: input.questionId as string,
+    choice,
+    ...(confidence !== undefined ? { confidence } : {})
+  };
 }
 
 function requireSubmitShortAnswer(value: unknown): SubmitShortAnswerInput {
@@ -739,7 +756,13 @@ function requireSubmitShortAnswer(value: unknown): SubmitShortAnswerInput {
   const questionId = requireString(input.questionId, '题目 ID');
   const response = requireString(input.response, '回答内容');
   if (typeof input.selfCorrect !== 'boolean') throw new Error('自评参数无效。');
-  return { questionId, response, selfCorrect: input.selfCorrect };
+  const confidence = optionalConfidence(input.confidence);
+  return {
+    questionId,
+    response,
+    selfCorrect: input.selfCorrect,
+    ...(confidence !== undefined ? { confidence } : {})
+  };
 }
 
 function requireCreatePracticeSet(value: unknown): CreatePracticeSetInput {
@@ -784,18 +807,24 @@ function requireDeletePracticeSet(value: unknown): DeletePracticeSetInput {
 function requireReviewMistake(value: unknown): ReviewMistakeInput {
   const input = requireObject(value, '复习错题');
   const mistakeId = requireString(input.mistakeId, '错题 ID');
+  const confidence = optionalConfidence(input.confidence);
   // A choice review sends `choice`; a short review sends its typed answer and
   // self-assessment. The service decides which shape the stored mistake needs.
   if (input.response !== undefined || input.selfCorrect !== undefined) {
     const response = requireString(input.response, '回答内容');
     if (typeof input.selfCorrect !== 'boolean') throw new Error('自评参数无效。');
-    return { mistakeId, response, selfCorrect: input.selfCorrect };
+    return {
+      mistakeId,
+      response,
+      selfCorrect: input.selfCorrect,
+      ...(confidence !== undefined ? { confidence } : {})
+    };
   }
   const choice = input.choice;
   if (typeof choice !== 'number' || !Number.isInteger(choice) || choice < 0) {
     throw new Error('选项无效。');
   }
-  return { mistakeId, choice };
+  return { mistakeId, choice, ...(confidence !== undefined ? { confidence } : {}) };
 }
 
 function requireSetMistakeResolved(value: unknown): SetMistakeResolvedInput {
