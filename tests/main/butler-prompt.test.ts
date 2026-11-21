@@ -23,6 +23,24 @@ test('switches between worked examples and problem-first teaching by mastery', (
   expect(BUTLER_SYSTEM_PROMPT).toContain('练习数据不可用');
 });
 
+test('diagnoses a new topic before choosing the teaching mode', () => {
+  // At most two concrete diagnostic questions, never a survey.
+  expect(BUTLER_SYSTEM_PROMPT).toContain('问 1-2 个有具体答案的问题');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('你学到哪一步了？');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('诊断最多连续 2 个');
+  expect(BUTLER_SYSTEM_PROMPT).toContain(
+    '不要发问卷（如「你的学习目标、基础、时间安排分别是什么？」）'
+  );
+  // The answer drives 示例先行 / 先练后讲 and the choice is named back.
+  expect(BUTLER_SYSTEM_PROMPT).toContain('新主题的诊断回答决定选哪种');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('点明选择');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('你刚说卡在 X，那我先示范一道再看你做');
+  // Unclear answer -> state an assumption and continue, no interrogation.
+  expect(BUTLER_SYSTEM_PROMPT).toContain('说明一个假设');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('那我按零基础讲');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('不要追问');
+});
+
 test('teaches the Socratic explanation loop with recitation and knowledge updates', () => {
   expect(BUTLER_SYSTEM_PROMPT).toContain('引导问题');
   expect(BUTLER_SYSTEM_PROMPT).toContain('直接告诉我');
