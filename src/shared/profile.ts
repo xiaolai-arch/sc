@@ -12,6 +12,31 @@ export type ProfileSource = 'user' | 'model';
 export type ProfileConfidence = 'confirmed' | 'candidate';
 export type ProfileStatus = 'active' | 'expired';
 
+/** A value this entry used to hold, kept when an edit replaces it. */
+export interface ProfileHistoryEntry {
+  /** The replaced text as it was before the edit. */
+  text: string;
+  /** The origin the entry carried while this was the current value. */
+  origin: string;
+  source: ProfileSource;
+  /** ISO time at which this value was replaced by a newer one. */
+  replacedAt: string;
+}
+
+/**
+ * How many replaced values an entry keeps. The array is newest first; older
+ * records fall off the end so `profile.md` cannot grow without bound.
+ */
+export const PROFILE_HISTORY_LIMIT = 5;
+
+/** Prepends `record` to `history`, keeping at most `PROFILE_HISTORY_LIMIT`. */
+export function pushProfileHistory(
+  history: readonly ProfileHistoryEntry[] | undefined,
+  record: ProfileHistoryEntry
+): ProfileHistoryEntry[] {
+  return [record, ...(history ?? [])].slice(0, PROFILE_HISTORY_LIMIT);
+}
+
 export interface ProfileEntry {
   id: string;
   category: ProfileCategory;
@@ -25,6 +50,11 @@ export interface ProfileEntry {
   origin: string;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Replaced values, newest first. Absent until the entry is edited for the
+   * first time; prompts never see it — the current text stays the one truth.
+   */
+  history?: ProfileHistoryEntry[];
 }
 
 export interface CreateProfileEntryInput {
