@@ -5,7 +5,8 @@ import type {
   PracticeMistake,
   PracticeMistakeStatus,
   PracticeQuestion,
-  PracticeSet
+  PracticeSet,
+  PracticeSetSource
 } from '../../shared/practice';
 import { parseNote, serializeNote } from '../vault/note';
 import { asBoolean, asFiniteNumber, asRecord, asString, asStringArray } from '../workspace/records/coerce';
@@ -69,6 +70,22 @@ export function coerceQuestion(value: unknown): PracticeQuestion | null {
   };
 }
 
+/**
+ * Tolerant read of the optional set provenance. Anything other than `model` is
+ * treated as hand-made: legacy files carry `source: user` and hand-edited
+ * values must not fail the whole set.
+ */
+export function asPracticeSetSource(value: unknown): PracticeSetSource | undefined {
+  return value === 'model' ? 'model' : undefined;
+}
+
+/** A usable ISO timestamp, or undefined — stray values are dropped on read. */
+function asIsoTimestamp(value: unknown): string | undefined {
+  const text = asString(value);
+  if (text === undefined || text.trim() === '') return undefined;
+  return Number.isNaN(new Date(text).getTime()) ? undefined : text;
+}
+
 export function parsePracticeSetFile(
   raw: string,
   workspaceId: string,
@@ -81,12 +98,18 @@ export function parsePracticeSetFile(
     .map(coerceQuestion)
     .filter((question): question is PracticeQuestion => question !== null);
   if (questions.length === 0) return null;
+  const source = asPracticeSetSource(meta.source);
+  const reviewedAt = asIsoTimestamp(meta.reviewedAt);
   return {
     id,
     workspaceId,
     title: asString(meta.title) ?? id,
     subject: asString(meta.subject) ?? '',
     questions,
+    // Both provenance fields are omitted when they carry no meaning, so files
+    // written before this feature parse to exactly the records they hold.
+    ...(source !== undefined ? { source } : {}),
+    ...(reviewedAt !== undefined ? { reviewedAt } : {}),
     createdAt: asString(meta.created),
     updatedAt: asString(meta.updated)
   };
@@ -104,12 +127,18 @@ function singleLine(text: string): string {
 export function serializePracticeSetFile(set: PracticeSet): string {
   const meta: NoteMeta = {
     type: 'qa',
-    source: 'user',
+    // Hand-made sets keep the historical `source: user` line so every set file
+    // written before provenance existed round-trips byte-identically; a model
+    // set is marked so the learner sees 待核对 until they review it.
+    source: set.source === 'model' ? 'model' : 'user',
     kind: 'practice-set',
     id: set.id,
     workspaceId: set.workspaceId,
     title: set.title,
     subject: set.subject,
+    // Absent until the learner confirms; omitted entirely while unset so an
+    // unreviewed set has no extra line.
+    ...(set.reviewedAt !== undefined ? { reviewedAt: set.reviewedAt } : {}),
     created: set.createdAt,
     updated: set.updatedAt,
     questions: set.questions.map((question) => ({

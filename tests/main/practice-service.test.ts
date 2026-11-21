@@ -325,6 +325,167 @@ test('choice-only set files round-trip byte-identically without kind fields', ()
   );
 });
 
+test('model sets serialize source and reviewedAt; hand-made sets never do', () => {
+  const base: PracticeSet = {
+    id: 'ps1',
+    workspaceId: 'kaoyan',
+    title: '极限',
+    subject: '数学',
+    questions: [
+      { id: 'q1', prompt: '极限？', options: ['0', '1'], answer: 1, explanation: '' }
+    ],
+    createdAt: '2026-11-01T09:00:00.000Z',
+    updatedAt: '2026-11-01T09:00:00.000Z'
+  };
+
+  // Hand-made/default: no provenance keys at all, byte-identical round-trip.
+  const handmade = serializePracticeSetFile(base);
+  expect(handmade).toContain('source: user');
+  expect(handmade).not.toContain('source: model');
+  expect(handmade).not.toContain('reviewedAt');
+  expect(parsePracticeSetFile(handmade, 'kaoyan', 'ps1')).toEqual(base);
+  expect(serializePracticeSetFile(parsePracticeSetFile(handmade, 'kaoyan', 'ps1')!)).toBe(
+    handmade
+  );
+
+  // An unreviewed model set carries `source: model` but no `reviewedAt`.
+  const model = serializePracticeSetFile({ ...base, source: 'model' });
+  expect(model).toContain('source: model');
+  expect(model).not.toContain('reviewedAt');
+  expect(parsePracticeSetFile(model, 'kaoyan', 'ps1')).toEqual({ ...base, source: 'model' });
+
+  // A reviewed model set records the timestamp and round-trips exactly.
+  const reviewed = serializePracticeSetFile({
+    ...base,
+    source: 'model',
+    reviewedAt: '2026-11-21T10:00:00.000Z'
+  });
+  expect(reviewed).toContain("reviewedAt: '2026-11-21T10:00:00.000Z'");
+  expect(parsePracticeSetFile(reviewed, 'kaoyan', 'ps1')).toEqual({
+    ...base,
+    source: 'model',
+    reviewedAt: '2026-11-21T10:00:00.000Z'
+  });
+});
+
+test('legacy set files without provenance round-trip byte-identically', () => {
+  // The exact text a pre-provenance serializer wrote: `source: user`, no
+  // reviewedAt. Reading and rewriting it must not add a line.
+  const legacy = serializeNote(
+    {
+      type: 'qa',
+      source: 'user',
+      kind: 'practice-set',
+      id: 'ps-legacy',
+      workspaceId: 'kaoyan',
+      title: '老练习',
+      subject: '数学',
+      created: '2026-10-01T09:00:00.000Z',
+      updated: '2026-10-01T09:00:00.000Z',
+      questions: [{ id: 'q1', prompt: '旧题？', options: ['0', '1'], answer: 1, explanation: '' }]
+    },
+    '# 老练习\n\nkaoyan · 数学 · 1 题\n\n## 1. 旧题？\n\n- A. 0\n- B. 1\n\n**答案**：B\n'
+  );
+
+  const parsed = parsePracticeSetFile(legacy, 'kaoyan', 'ps-legacy')!;
+  expect(parsed.source).toBeUndefined();
+  expect(parsed.reviewedAt).toBeUndefined();
+  expect(serializePracticeSetFile(parsed)).toBe(legacy);
+});
+
+test('tolerant parse drops a bogus source instead of failing the set', () => {
+  const raw = serializeNote(
+    {
+      type: 'qa',
+      source: 'robot' as unknown as 'user',
+      kind: 'practice-set',
+      id: 'ps1',
+      workspaceId: 'kaoyan',
+      title: '怪来源',
+      subject: '数学',
+      reviewedAt: 'not-a-date',
+      questions: [{ id: 'q1', prompt: '题？', options: ['0', '1'], answer: 1, explanation: '' }]
+    },
+    '# 怪来源\n'
+  );
+  const parsed = parsePracticeSetFile(raw, 'kaoyan', 'ps1')!;
+  expect(parsed.source).toBeUndefined();
+  expect(parsed.reviewedAt).toBeUndefined();
+  expect(parsed.questions).toHaveLength(1);
+});
+
+test('createSet writes a model source and updateSet records reviewedAt', async () => {
+  const service = at('2026-11-01');
+  const created = await service.createSet({
+    workspaceId: 'kaoyan',
+    title: '阿咲出题',
+    source: 'model',
+    questions: [{ prompt: '矩阵可逆的条件？', options: ['|A| = 0', '|A| ≠ 0'], answer: 1 }]
+  });
+  expect(created.source).toBe('model');
+  expect(created.reviewedAt).toBeUndefined();
+
+  const file = join(root, 'workspaces', 'kaoyan', 'practice', 'sets', `${created.id}.md`);
+  expect(await fs.readFile(file, 'utf8')).toContain('source: model');
+
+  const reviewed = await service.updateSet!({
+    setId: created.id,
+    reviewedAt: '2026-11-21T10:00:00.000Z'
+  });
+  expect(reviewed.reviewedAt).toBe('2026-11-21T10:00:00.000Z');
+  expect(reviewed.title).toBe(created.title);
+  expect(reviewed.questions).toEqual(created.questions);
+  expect(await fs.readFile(file, 'utf8')).toContain(
+    "reviewedAt: '2026-11-21T10:00:00.000Z'"
+  );
+  // A fresh read sees the confirmation.
+  expect((await at('2026-11-22').getSet(created.id))?.reviewedAt).toBe(
+    '2026-11-21T10:00:00.000Z'
+  );
+});
+
+test('createSet with source user and a hand-made set write no model marker', async () => {
+  const service = at('2026-11-01');
+  const created = await service.createSet({
+    workspaceId: 'kaoyan',
+    title: '自己出题',
+    source: 'user',
+    questions: [{ prompt: '1 + 1？', options: ['1', '2'], answer: 1 }]
+  });
+  expect(created.source).toBeUndefined();
+  const raw = await fs.readFile(
+    join(root, 'workspaces', 'kaoyan', 'practice', 'sets', `${created.id}.md`),
+    'utf8'
+  );
+  expect(raw).toContain('source: user');
+  expect(raw).not.toContain('source: model');
+});
+
+test('createSet and updateSet reject bogus provenance values', async () => {
+  const service = at('2026-11-01');
+  await expect(
+    service.createSet({
+      workspaceId: 'kaoyan',
+      title: '怪来源',
+      source: 'robot' as unknown as 'model',
+      questions: [{ prompt: '题？', options: ['0', '1'], answer: 1 }]
+    })
+  ).rejects.toThrow('Invalid practice set source');
+
+  const created = await service.createSet({
+    workspaceId: 'kaoyan',
+    title: '正常',
+    questions: [{ prompt: '题？', options: ['0', '1'], answer: 1 }]
+  });
+  await expect(
+    service.updateSet!({ setId: created.id, reviewedAt: 'not-a-date' })
+  ).rejects.toThrow('Invalid practice set reviewedAt');
+  // An update with only an empty field list still fails as before.
+  await expect(service.updateSet!({ setId: created.id })).rejects.toThrow(
+    'No practice set fields to update'
+  );
+});
+
 test('short questions round-trip through the set-file serializer', () => {
   const set: PracticeSet = {
     id: 'ps1',

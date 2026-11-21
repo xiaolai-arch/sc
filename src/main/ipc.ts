@@ -791,6 +791,25 @@ function requireSubmitShortAnswer(value: unknown): SubmitShortAnswerInput {
   };
 }
 
+/**
+ * Provenance crossing IPC. Absent (and `user`) means a hand-made set; only
+ * `model` is meaningful, and a stray value is rejected so a typo cannot make a
+ * set silently claim to be hand-made.
+ */
+function optionalPracticeSource(value: unknown): 'user' | 'model' | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (value !== 'user' && value !== 'model') throw new Error('练习来源无效。');
+  return value;
+}
+
+/** The 我看过了 timestamp; the renderer sends an ISO date string. */
+function requireReviewTimestamp(value: unknown): string {
+  if (typeof value !== 'string' || value.trim() === '' || Number.isNaN(new Date(value).getTime())) {
+    throw new Error('复习确认时间无效。');
+  }
+  return value;
+}
+
 function requireCreatePracticeSet(value: unknown): CreatePracticeSetInput {
   const input = requireObject(value, '创建练习');
   requireString(input.workspaceId, '工作区 ID');
@@ -798,14 +817,19 @@ function requireCreatePracticeSet(value: unknown): CreatePracticeSetInput {
   if (!Array.isArray(input.questions) || input.questions.length === 0) {
     throw new Error('练习题目不能为空。');
   }
-  return input as unknown as CreatePracticeSetInput;
+  const source = optionalPracticeSource(input.source);
+  return {
+    ...(input as unknown as CreatePracticeSetInput),
+    ...(source !== undefined ? { source } : {})
+  };
 }
 
 function requireUpdatePracticeSet(value: unknown): UpdatePracticeSetInput {
   const input = requireObject(value, '更新练习');
   const setId = requireString(input.setId, '练习 ID');
   const hasQuestions = input.questions !== undefined;
-  if (input.title === undefined && input.subject === undefined && !hasQuestions) {
+  const hasReviewedAt = input.reviewedAt !== undefined;
+  if (input.title === undefined && input.subject === undefined && !hasQuestions && !hasReviewedAt) {
     throw new Error('练习更新参数无效。');
   }
   if (input.title !== undefined) requireString(input.title, '练习标题');
@@ -815,10 +839,12 @@ function requireUpdatePracticeSet(value: unknown): UpdatePracticeSetInput {
   if (hasQuestions && (!Array.isArray(input.questions) || input.questions.length === 0)) {
     throw new Error('练习题目不能为空。');
   }
+  const reviewedAt = hasReviewedAt ? requireReviewTimestamp(input.reviewedAt) : undefined;
   return {
     setId,
     ...(input.title !== undefined ? { title: input.title as string } : {}),
     ...(input.subject !== undefined ? { subject: input.subject as string } : {}),
+    ...(reviewedAt !== undefined ? { reviewedAt } : {}),
     ...(hasQuestions
       ? { questions: input.questions as CreatePracticeQuestionInput[] }
       : {})

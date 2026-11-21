@@ -138,6 +138,41 @@ test('opens practice from the projects page', async () => {
   expect(screen.getByRole('button', { name: '关闭练习' })).toBeInTheDocument();
 });
 
+test('marks a model set 待核对 and clears it after 我看过了', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage, { streamPace: 0.05 });
+  window.studyCoach = api;
+  window.studyCoachPrototype = { reset: vi.fn() };
+  const model = await api.createPracticeSet({
+    workspaceId: 'kaoyan',
+    title: '阿咲出的小测',
+    subject: '数学',
+    source: 'model',
+    questions: [{ prompt: '矩阵可逆的条件？', options: ['|A| = 0', '|A| ≠ 0'], answer: 1 }]
+  });
+
+  render(<Workspace hasApiKey={false} onRefresh={vi.fn()} />);
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
+  await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
+  await userEvent.click(screen.getByRole('button', { name: '练习' }));
+
+  expect((await screen.findAllByText('阿咲出的小测')).length).toBeGreaterThan(0);
+  expect((await screen.findAllByText('待核对')).length).toBeGreaterThan(0);
+
+  await userEvent.click(
+    (await screen.findAllByRole('button', { name: '确认已看过：阿咲出的小测' }))[0]!
+  );
+
+  await waitFor(async () => {
+    const reloaded = await api.getPracticeSet(model.id);
+    expect(reloaded?.reviewedAt).toBeTruthy();
+  });
+  await waitFor(() =>
+    expect(screen.queryByRole('button', { name: '确认已看过：阿咲出的小测' })).not.toBeInTheDocument()
+  );
+  expect(screen.queryByText('待核对')).not.toBeInTheDocument();
+});
+
 
 test('edits and deletes a practice set from the practice sidebar', async () => {
   const api = setup();

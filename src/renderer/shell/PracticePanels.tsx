@@ -3,6 +3,8 @@ import { formatLocalDate } from '../../shared/date';
 import { friendlyErrorMessage } from '../../shared/errors';
 import { buildMistakeSheet } from '../../shared/practice-sheet';
 import type {
+  CreatePracticeQuestionInput,
+  CreatePracticeSetInput,
   ExportMistakeSheetResult,
   PracticeAttempt,
   PracticeMistake,
@@ -18,6 +20,8 @@ type MistakeBookProps = {
   onReview?: (mistake: PracticeMistake) => void;
   onReviewAll?: () => void;
   onResolve?: (mistake: PracticeMistake) => void;
+  /** Turns one mistake into a single-question practice set in this project. */
+  onMakeSet?: (mistake: PracticeMistake) => void;
   /** Writes the printable sheet to the vault; its path is shown afterwards. */
   onExport?: () => Promise<ExportMistakeSheetResult>;
 };
@@ -27,6 +31,7 @@ type MistakeRowProps = {
   due: boolean;
   onReview?: (mistake: PracticeMistake) => void;
   onResolve?: (mistake: PracticeMistake) => void;
+  onMakeSet?: (mistake: PracticeMistake) => void;
 };
 
 const rowActionClass =
@@ -34,6 +39,94 @@ const rowActionClass =
 
 const quietActionClass =
   'rounded-full px-1 text-[12px] font-medium text-[#0071e3] transition-colors duration-200 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:text-[#4da3ff]';
+
+/** Whether a set still needs the learner's 我看过了 confirmation. */
+export function needsPracticeReview(set: PracticeSet): boolean {
+  return set.source === 'model' && set.reviewedAt === undefined;
+}
+
+type PracticeReviewChipProps = {
+  set: PracticeSet;
+  /** Records `reviewedAt` through the update path; omitted means chip only. */
+  onReviewed?: () => Promise<void> | void;
+};
+
+/**
+ * A quiet provenance mark for AI-generated sets. It disappears once the learner
+ * confirms they read the questions (`reviewedAt`), and a hand-made set shows
+ * nothing at all — no badge ceremony.
+ */
+export function PracticeReviewChip({ set, onReviewed }: PracticeReviewChipProps) {
+  const [saving, setSaving] = useState(false);
+  if (!needsPracticeReview(set)) return null;
+
+  async function review() {
+    if (onReviewed === undefined || saving) return;
+    setSaving(true);
+    try {
+      await onReviewed();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1.5">
+      <span className="rounded-full bg-[#ff9f0a]/15 px-2 py-0.5 text-[11px] font-medium text-[#8a5a00] dark:text-[#ffb340]">
+        待核对
+      </span>
+      {onReviewed ? (
+        <button
+          type="button"
+          aria-label={`确认已看过：${set.title}`}
+          disabled={saving}
+          onClick={() => void review()}
+          className={quietActionClass}
+        >
+          {saving ? '记录中…' : '我看过了'}
+        </button>
+      ) : null}
+    </span>
+  );
+}
+
+function singleLineTitle(prompt: string): string {
+  const line = prompt.replace(/\s*\n\s*/g, ' ').trim();
+  return line.length > 24 ? `${line.slice(0, 24)}…` : line;
+}
+
+/**
+ * Builds the one-question set for a mistake-book row. Choice mistakes keep
+ * their options and answer; short mistakes stay free recall with the stored
+ * reference answer. `source` is deliberately unset: the questions came from the
+ * learner's own answer history, not from a model.
+ */
+export function singleQuestionSetInput(
+  mistake: PracticeMistake,
+  workspaceId: string,
+  subject: string
+): CreatePracticeSetInput {
+  const question: CreatePracticeQuestionInput =
+    mistake.kind === 'short'
+      ? {
+          kind: 'short',
+          prompt: mistake.prompt,
+          referenceAnswer: mistake.referenceAnswer ?? '',
+          explanation: mistake.explanation
+        }
+      : {
+          prompt: mistake.prompt,
+          options: [...mistake.options],
+          answer: mistake.answer,
+          explanation: mistake.explanation
+        };
+  return {
+    workspaceId,
+    title: `单题 · ${singleLineTitle(mistake.prompt)}`,
+    subject,
+    questions: [question]
+  };
+}
 
 /** Renders the sheet for the mistakes currently on screen so copy matches export. */
 function sheetFor(mistakes: readonly PracticeMistake[], workspaceId: string): string {
@@ -44,7 +137,7 @@ function sheetFor(mistakes: readonly PracticeMistake[], workspaceId: string): st
   });
 }
 
-function MistakeRow({ mistake, due, onReview, onResolve }: MistakeRowProps) {
+function MistakeRow({ mistake, due, onReview, onResolve, onMakeSet }: MistakeRowProps) {
   return (
     <li className="flex items-start gap-2">
       <div className="min-w-0 flex-1">
@@ -62,6 +155,16 @@ function MistakeRow({ mistake, due, onReview, onResolve }: MistakeRowProps) {
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-1">
+        {onMakeSet ? (
+          <button
+            type="button"
+            aria-label={`转为练习：${mistake.prompt}`}
+            onClick={() => onMakeSet(mistake)}
+            className={rowActionClass}
+          >
+            转为练习
+          </button>
+        ) : null}
         {onReview ? (
           <button
             type="button"
@@ -95,6 +198,7 @@ export function MistakeBook({
   onReview,
   onReviewAll,
   onResolve,
+  onMakeSet,
   onExport
 }: MistakeBookProps) {
   const [expanded, setExpanded] = useState(false);
@@ -210,6 +314,7 @@ export function MistakeBook({
             due={dueIds?.has(mistake.id) === true}
             {...(onReview ? { onReview } : {})}
             {...(onResolve ? { onResolve } : {})}
+            {...(onMakeSet ? { onMakeSet } : {})}
           />
         ))}
       </ul>

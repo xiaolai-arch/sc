@@ -323,6 +323,25 @@ test('serves seeded practice sets and records answers, mistakes and attempts', a
     questions: [{ prompt: 'p', options: ['a', 'b'], answer: 1 }]
   });
   expect((await api.listPracticeSets('english')).some((entry) => entry.id === created.id)).toBe(true);
+
+  // A model-generated set carries provenance; 我看过了 records reviewedAt.
+  const model = await api.createPracticeSet({
+    workspaceId: 'english',
+    title: '阿咲出题',
+    source: 'model',
+    questions: [{ prompt: 'p2', options: ['a', 'b'], answer: 1 }]
+  });
+  expect(model.source).toBe('model');
+  expect(model.reviewedAt).toBeUndefined();
+  const reviewed = await api.updatePracticeSet!({
+    setId: model.id,
+    reviewedAt: '2026-11-21T10:00:00.000Z'
+  });
+  expect(reviewed.reviewedAt).toBe('2026-11-21T10:00:00.000Z');
+  expect(reviewed.source).toBe('model');
+  await expect(
+    api.updatePracticeSet!({ setId: model.id, reviewedAt: 'nope' })
+  ).rejects.toThrow('复习确认时间无效。');
 });
 
 test('serves short questions and records free-recall attempts and mistakes', async () => {

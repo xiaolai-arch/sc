@@ -963,6 +963,9 @@ export function createButlerTools(): ButlerToolDefinition[] {
           workspaceId,
           title,
           ...(subject ? { subject } : {}),
+          // Model-written questions are marked so the learning page shows
+          // 待核对 until the learner confirms they read them.
+          source: 'model',
           questions
         });
         let workspaceName = workspaceId;

@@ -1349,6 +1349,9 @@ export function createMockApi(
     async createPracticeSet(input: CreatePracticeSetInput): Promise<PracticeSet> {
       const workspace = requireWorkspace(input.workspaceId);
       if (input.questions.length === 0) throw new Error('练习至少需要一道题');
+      if (input.source !== undefined && input.source !== 'user' && input.source !== 'model') {
+        throw new Error('练习来源无效。');
+      }
       const timestamp = new Date().toISOString();
       const set: PracticeSet = {
         id: nextId('ps'),
@@ -1356,6 +1359,7 @@ export function createMockApi(
         title: input.title,
         subject: input.subject ?? '',
         questions: input.questions.map(toPracticeQuestion),
+        ...(input.source === 'model' ? { source: 'model' as const } : {}),
         createdAt: timestamp,
         updatedAt: timestamp
       };
@@ -1370,9 +1374,20 @@ export function createMockApi(
       if (
         input.title === undefined &&
         input.subject === undefined &&
-        input.questions === undefined
+        input.questions === undefined &&
+        input.reviewedAt === undefined
       ) {
         throw new Error('没有要修改的内容');
+      }
+      if (input.reviewedAt !== undefined) {
+        if (
+          typeof input.reviewedAt !== 'string' ||
+          input.reviewedAt.trim() === '' ||
+          Number.isNaN(new Date(input.reviewedAt).getTime())
+        ) {
+          throw new Error('复习确认时间无效。');
+        }
+        set.reviewedAt = input.reviewedAt;
       }
       if (input.title !== undefined) set.title = input.title;
       if (input.subject !== undefined) set.subject = input.subject;

@@ -776,7 +776,13 @@ test('create_practice_set creates a set through the practice service', async () 
   expect(result.ok).toBe(true);
   expect(createSet).toHaveBeenCalledTimes(1);
   expect(createSet).toHaveBeenCalledWith(
-    expect.objectContaining({ workspaceId: 'ws-exam', title: '极限小测', subject: '数学' })
+    expect.objectContaining({
+      workspaceId: 'ws-exam',
+      title: '极限小测',
+      subject: '数学',
+      // Model-written questions stay 待核对 until the learner reviews them.
+      source: 'model'
+    })
   );
   expect(JSON.parse(result.content)).toMatchObject({
     ok: true,
@@ -850,6 +856,7 @@ test('create_practice_set accepts a mixed choice/short list', async () => {
   expect(createSet).toHaveBeenCalledWith({
     workspaceId: 'ws-exam',
     title: '混合小测',
+    source: 'model',
     questions: [
       {
         prompt: '极限 lim(x→0) sin(x)/x 等于多少？',
