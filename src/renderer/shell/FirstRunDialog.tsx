@@ -80,6 +80,7 @@ export function FirstRunDialog({ open, onComplete, onSkip }: FirstRunDialogProps
     >
       <p className="text-[14px] leading-6 text-[#1d1d1f] dark:text-[#f5f5f7]">
         先建一个项目，之后可以让阿咲在对话里拆目标、排今天的事、记录复盘。
+        不管是备考、学一门语言，还是读完一本书、坚持健身、推进一个项目，都可以从这里开始。
         数据保存在本地 markdown vault，不需要账号。
       </p>
       <p className="mt-2 text-[13px] leading-6 text-gray-500 dark:text-[#a1a1a6]">
@@ -92,7 +93,7 @@ export function FirstRunDialog({ open, onComplete, onSkip }: FirstRunDialogProps
           id="first-run-name"
           value={name}
           onChange={(event) => setName(event.target.value)}
-          placeholder="例如：考研、英语、我的项目"
+          placeholder="例如：考研、学英语、读完一本书、坚持健身、推进一个项目"
           disabled={busy}
         />
       </div>
