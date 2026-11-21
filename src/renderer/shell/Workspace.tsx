@@ -43,7 +43,7 @@ import { MemoryPage } from './MemoryPage';
 import { ModelPickerDialog } from './ModelPickerDialog';
 import { PracticeSetDialog } from './PracticeSetDialog';
 import { ProfilePage } from './ProfilePage';
-import { TodayOverview, dueRevisitTopics } from './TodayOverview';
+import { TodayOverview, dueRevisitTopics, todayQuizOffer } from './TodayOverview';
 import {
   NavigationSidebar,
   type ChatScope,
@@ -101,6 +101,33 @@ function chatMessageId(prefix: string) {
 /** Drops the payload before it is persisted with the user's message. */
 function messageAttachmentsOf(attachments: ChatAttachment[]): MessageAttachment[] {
   return attachments.map(({ name, mediaType, size, kind }) => ({ name, mediaType, size, kind }));
+}
+
+/**
+ * Quiz-offer cooldown. The offer must show at most once per local day, and the
+ * fact "shown" is a renderer-side fact, so it lives in the shell's existing
+ * lightweight-prefs localStorage (the same store that already keeps the theme
+ * and the sidebar width) rather than in AppSettings: extending AppSettings
+ * would change the shared settings/IPC contract. In Electron this persists in
+ * the app's profile under userData across restarts; on the web build it is the
+ * browser profile. Storage failures degrade to "offer again next launch".
+ */
+const QUIZ_OFFER_DATE_KEY = 'asaki:today-quiz-offer-date';
+
+function readQuizOfferDate(): string | null {
+  try {
+    return window.localStorage.getItem(QUIZ_OFFER_DATE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function recordQuizOfferDate(today: string): void {
+  try {
+    window.localStorage.setItem(QUIZ_OFFER_DATE_KEY, today);
+  } catch {
+    // Storage unavailable; the worst case is the offer appearing again.
+  }
 }
 
 function WorkspaceStatus({
@@ -380,6 +407,16 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     () => dueRevisitTopics(knowledgeTopics, today),
     [knowledgeTopics, today]
   );
+  // The practice data itself speaking: one proactive quiz offer per day, from
+  // the active mistake book and the 8-week accuracy window. The cooldown date
+  // is written the moment an offer renders, so the next mount stays silent.
+  const todayQuiz = useMemo(
+    () => todayQuizOffer(practiceAttempts, practiceMistakes, today, readQuizOfferDate()),
+    [practiceAttempts, practiceMistakes, today]
+  );
+  useEffect(() => {
+    if (todayQuiz) recordQuizOfferDate(today);
+  }, [todayQuiz, today]);
 
   const loadModelLabel = useCallback(async () => {
     const api = window.studyCoach;
@@ -1475,6 +1512,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
                   longPlans={longPlans}
                   today={today}
                   revisits={dueRevisits}
+                  quizOffer={todayQuiz}
                   onOpenWorkspace={(workspaceId) => {
                     selectWorkspace(workspaceId);
                     changeSection('projects');
@@ -1639,6 +1677,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
               longPlans={longPlans}
               today={today}
               revisits={dueRevisits}
+              quizOffer={todayQuiz}
               onOpenSidebar={openSidebar}
               onOpenWorkspace={(workspaceId) => {
                 selectWorkspace(workspaceId);
