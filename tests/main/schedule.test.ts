@@ -2,6 +2,7 @@ import {
   MAX_DIFFICULTY,
   MAX_INTERVAL_DAYS,
   MIN_DIFFICULTY,
+  SURE_WRONG_EXTRA_STEP,
   migrateSchedule,
   nextSchedule,
   scheduleLabel
@@ -92,6 +93,37 @@ describe('nextSchedule', () => {
       { correct: false, today: '2026-11-01' }
     );
     expect(next.difficulty).toBe(MAX_DIFFICULTY);
+
+    // The sure-wrong extra step cannot push above the same ceiling either.
+    const sure = nextSchedule(
+      { intervalDays: 1, due: '2026-11-01', difficulty: 0.88 },
+      { correct: false, confidence: 'sure', today: '2026-11-01' }
+    );
+    expect(sure.difficulty).toBe(MAX_DIFFICULTY);
+  });
+
+  it('adds an extra difficulty step only to a sure wrong answer', () => {
+    const base = { intervalDays: 7, due: '2026-11-20', stabilityDays: 7, difficulty: 0.4 };
+    const plain = nextSchedule(base, { correct: false, today: '2026-11-20' });
+    const unsure = nextSchedule(base, { correct: false, confidence: 'unsure', today: '2026-11-20' });
+    const sure = nextSchedule(base, { correct: false, confidence: 'sure', today: '2026-11-20' });
+
+    // Plain and 不确定 keep today's behaviour exactly.
+    expect(plain).toEqual(unsure);
+    expect(plain.difficulty).toBeCloseTo(0.5, 5);
+    // 有把握 yet wrong is the illusion of competence: one extra step.
+    expect(sure.difficulty).toBeCloseTo(0.55, 5);
+    expect(sure.difficulty - plain.difficulty).toBeCloseTo(SURE_WRONG_EXTRA_STEP, 5);
+    // Nothing else about a wrong answer changes.
+    expect(sure).toMatchObject({ stabilityDays: 1, intervalDays: 1, due: '2026-11-21', status: 'active' });
+  });
+
+  it('never lets confidence change a correct answer', () => {
+    const base = { intervalDays: 3, due: '2026-11-03', stabilityDays: 3, difficulty: 0.5 };
+    const plain = nextSchedule(base, { correct: true, today: '2026-11-03' });
+    for (const confidence of ['sure', 'unsure'] as const) {
+      expect(nextSchedule(base, { correct: true, confidence, today: '2026-11-03' })).toEqual(plain);
+    }
   });
 
   it('grows the interval monotonically on success and moves due forward', () => {
@@ -119,6 +151,16 @@ describe('nextSchedule', () => {
       3
     );
     expect(intervals.reduce((sum, value) => sum + value, 0)).toBeGreaterThan(7);
+  });
+
+  it('floors a sure wrong answer’s extra step at the same floor only via clamping', () => {
+    // The step is additive, so the floor still applies to the record, not the step.
+    const next = nextSchedule(
+      { intervalDays: 1, due: '2026-11-01', difficulty: 0.1 },
+      { correct: false, confidence: 'sure', today: '2026-11-01' }
+    );
+    expect(next.difficulty).toBeCloseTo(0.25, 5);
+    expect(next.difficulty).toBeGreaterThanOrEqual(MIN_DIFFICULTY);
   });
 
   it('lowers difficulty on success and floors it', () => {

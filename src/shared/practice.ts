@@ -56,11 +56,22 @@ export interface PracticeAttempt {
   choice: number;
   /** Short questions: what the learner typed. Absent for choice attempts. */
   response?: string;
+  /** Pre-answer confidence; absent when the learner did not pick one. */
+  confidence?: PracticeConfidence;
   correct: boolean;
   answeredAt: string;
 }
 
 export type PracticeMistakeStatus = 'active' | 'resolved';
+
+/**
+ * The learner's own confidence *before* seeing the verdict: `有把握` or
+ * `不确定`. Optional everywhere so an answer without a choice stays valid and
+ * older records keep their meaning. It exists because illusions of competence
+ * are the norm (Kornell & Bjork 2009): a confidently wrong answer is the one
+ * worth drilling, and the scheduler treats it as a harder item.
+ */
+export type PracticeConfidence = 'sure' | 'unsure';
 
 /**
  * A wrong answer enters the mistake book. `priority` rises with each wrong
@@ -109,6 +120,8 @@ export interface PracticeMistake {
 export interface SubmitAnswerInput {
   questionId: string;
   choice: number;
+  /** Optional self-assessment recorded with the attempt. */
+  confidence?: PracticeConfidence;
 }
 
 /**
@@ -122,6 +135,8 @@ export interface SubmitShortAnswerInput {
   response: string;
   /** Self-assessment: true = 答对了, false = 没答对. */
   selfCorrect: boolean;
+  /** Optional pre-answer confidence, recorded with the attempt. */
+  confidence?: PracticeConfidence;
 }
 
 export interface SubmitAnswerResult {
@@ -182,6 +197,8 @@ export interface ReviewMistakeInput {
   response?: string;
   /** Short mistakes only: self-assessment (`答对了` = true). */
   selfCorrect?: boolean;
+  /** Optional pre-answer confidence, recorded with the attempt. */
+  confidence?: PracticeConfidence;
 }
 
 export interface SetMistakeResolvedInput {

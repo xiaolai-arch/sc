@@ -10,12 +10,14 @@ import type {
   ExportMistakeSheetInput,
   ExportMistakeSheetResult,
   PracticeAttempt,
+  PracticeConfidence,
   PracticeMistake,
   PracticeSet,
   SubmitAnswerInput,
   SubmitAnswerResult,
   SubmitShortAnswerInput
 } from '../../shared/practice';
+import { ConfidencePicker } from './CalibrationCard';
 import { AttemptHistory, MistakeBook } from './PracticePanels';
 import { PracticeSetDialog } from './PracticeSetDialog';
 
@@ -70,6 +72,8 @@ export function LearningPane({
   const [response, setResponse] = useState('');
   /** Short questions: 提交 reveals the reference answer and self-assessment. */
   const [revealed, setRevealed] = useState(false);
+  /** Pre-answer confidence; undefined until the learner marks one. */
+  const [confidence, setConfidence] = useState<PracticeConfidence | undefined>(undefined);
   const [score, setScore] = useState(0);
   const [finished, setFinished] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +86,7 @@ export function LearningPane({
     setChecking(false);
     setResponse('');
     setRevealed(false);
+    setConfidence(undefined);
     setScore(0);
     setFinished(false);
     setError(null);
@@ -182,7 +187,11 @@ export function LearningPane({
     setChecking(true);
     setError(null);
     try {
-      const submitted = await onSubmitAnswer({ questionId: question.id, choice: selected });
+      const submitted = await onSubmitAnswer({
+        questionId: question.id,
+        choice: selected,
+        ...(confidence !== undefined ? { confidence } : {})
+      });
       setResult(submitted);
       if (submitted.correct) setScore((current) => current + 1);
     } catch (cause) {
@@ -217,7 +226,8 @@ export function LearningPane({
       const submitted = await onSubmitShortAnswer({
         questionId: question.id,
         response,
-        selfCorrect
+        selfCorrect,
+        ...(confidence !== undefined ? { confidence } : {})
       });
       setResult(submitted);
       if (submitted.correct) setScore((current) => current + 1);
@@ -238,6 +248,7 @@ export function LearningPane({
     setResult(null);
     setResponse('');
     setRevealed(false);
+    setConfidence(undefined);
     setError(null);
   }
 
@@ -248,6 +259,7 @@ export function LearningPane({
     setChecking(false);
     setResponse('');
     setRevealed(false);
+    setConfidence(undefined);
     setScore(0);
     setFinished(false);
     setError(null);
@@ -312,6 +324,12 @@ export function LearningPane({
               <h1 className="mt-6 text-[18px] font-semibold leading-7 tracking-tight text-black dark:text-[#f5f5f7]">
                 {question.prompt}
               </h1>
+
+              <ConfidencePicker
+                value={confidence}
+                disabled={answered || checking}
+                onChange={setConfidence}
+              />
 
               {isShort ? (
                 <>

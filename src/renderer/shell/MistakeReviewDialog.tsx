@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { friendlyErrorMessage } from '../../shared/errors';
 import type {
+  PracticeConfidence,
   PracticeMistake,
   ReviewMistakeInput,
   SetMistakeResolvedInput,
@@ -9,6 +10,7 @@ import type {
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
 import { cn } from '../ui/cn';
+import { ConfidencePicker } from './CalibrationCard';
 
 type MistakeReviewDialogProps = {
   open: boolean;
@@ -39,6 +41,8 @@ export function MistakeReviewDialog({
   /** Short mistakes: the typed recall, and whether the answer is revealed. */
   const [response, setResponse] = useState('');
   const [revealed, setRevealed] = useState(false);
+  /** Pre-answer confidence; undefined until the learner marks one. */
+  const [confidence, setConfidence] = useState<PracticeConfidence | undefined>(undefined);
 
   useEffect(() => {
     if (!open) return;
@@ -50,6 +54,7 @@ export function MistakeReviewDialog({
     setError(null);
     setResponse('');
     setRevealed(false);
+    setConfidence(undefined);
   }, [open]);
 
   const mistake = queue[index] ?? null;
@@ -65,7 +70,11 @@ export function MistakeReviewDialog({
     setChecking(true);
     setError(null);
     try {
-      const submitted = await onReview({ mistakeId: mistake!.id, choice: selected });
+      const submitted = await onReview({
+        mistakeId: mistake!.id,
+        choice: selected,
+        ...(confidence !== undefined ? { confidence } : {})
+      });
       setResult(submitted);
     } catch (cause) {
       setError(friendlyErrorMessage(cause, '提交答案失败，请重试。'));
@@ -94,7 +103,8 @@ export function MistakeReviewDialog({
       const submitted = await onReview({
         mistakeId: mistake!.id,
         response,
-        selfCorrect
+        selfCorrect,
+        ...(confidence !== undefined ? { confidence } : {})
       });
       setResult(submitted);
     } catch (cause) {
@@ -114,6 +124,7 @@ export function MistakeReviewDialog({
     setResult(null);
     setResponse('');
     setRevealed(false);
+    setConfidence(undefined);
     setError(null);
   }
 
@@ -143,6 +154,12 @@ export function MistakeReviewDialog({
       <h3 className="mt-3 text-[16px] font-semibold leading-7 text-[#1d1d1f] dark:text-[#f5f5f7]">
         {mistake.prompt}
       </h3>
+
+      <ConfidencePicker
+        value={confidence}
+        disabled={answered || checking || resolving}
+        onChange={setConfidence}
+      />
 
       {isShort ? (
         <>

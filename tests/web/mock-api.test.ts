@@ -673,3 +673,16 @@ test('rejects a review-sheet export for an unknown workspace', async () => {
     '工作区不存在'
   );
 });
+
+test('the browser mock keeps confidence on an attempt when one is picked', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage);
+  const set = await api.getPracticeSet('ps1');
+  const question = set!.questions[0]!;
+
+  await api.submitPracticeAnswer({ questionId: question.id, choice: 0, confidence: 'sure' });
+  await api.submitPracticeAnswer({ questionId: question.id, choice: 1 });
+
+  const attempts = await api.listPracticeAttempts('kaoyan');
+  expect(attempts.map((attempt) => attempt.confidence)).toEqual(['sure', undefined]);
+});

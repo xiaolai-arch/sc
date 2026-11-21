@@ -1074,3 +1074,218 @@ test('exports a review sheet that shows 参考答案 for short mistakes', async 
   expect(raw).toContain('# 错题复习单 · 2026-11-01');
   expect(raw).toContain('entries: 1');
 });
+
+// --- Confidence calibration -----------------------------------------------
+
+test('records confidence on an attempt and serializes it only when present', async () => {
+  const service = at('2026-11-01');
+  await service.submitAnswer({ questionId: 'q1', choice: 0, confidence: 'sure' });
+  await service.submitAnswer({ questionId: 'p2', choice: 0, confidence: 'unsure' });
+  await service.submitAnswer({ questionId: 'q2', choice: 2 });
+
+  const attempts = await service.listAttempts('kaoyan');
+  // Same clock for all three, so look them up by question id rather than time.
+  const byQuestion = new Map(attempts.map((attempt) => [attempt.questionId, attempt.confidence]));
+  expect(byQuestion).toEqual(
+    new Map<string, string | undefined>([
+      ['q1', 'sure'],
+      ['p2', 'unsure'],
+      ['q2', undefined]
+    ])
+  );
+
+  const raw = await fs.readFile(
+    join(root, 'workspaces', 'kaoyan', 'practice', 'attempts', '2026-11-01.md'),
+    'utf8'
+  );
+  expect(raw).toContain('confidence: sure');
+  expect(raw).toContain('confidence: unsure');
+  expect(raw).toContain('· 有把握 · ❌');
+  expect(raw).toContain('· 不确定 · ❌');
+  // The unmarked attempt keeps the pre-feature shape.
+  expect(raw).toContain('选择 2 · ✅');
+  expect(raw).not.toContain('选择 2 · 有把握');
+  // All three share one clock, so only the content is comparable, not order.
+  const parsed = parseAttemptFile(raw);
+  expect(parsed).toHaveLength(3);
+  expect(
+    new Map(parsed.map((attempt) => [attempt.questionId, attempt.confidence]))
+  ).toEqual(new Map(attempts.map((attempt) => [attempt.questionId, attempt.confidence])));
+});
+
+test('confident attempts round-trip byte-identically', () => {
+  const marked: PracticeAttempt[] = [
+    {
+      id: 'pa1',
+      workspaceId: 'kaoyan',
+      setId: 'ps1',
+      questionId: 'q1',
+      choice: 1,
+      confidence: 'sure',
+      correct: true,
+      answeredAt: '2026-11-01T09:05:00.000Z'
+    },
+    {
+      id: 'pa2',
+      workspaceId: 'kaoyan',
+      setId: 'ps1',
+      questionId: 'q2',
+      choice: 0,
+      response: '极限是 1',
+      confidence: 'unsure',
+      correct: false,
+      answeredAt: '2026-11-01T09:10:00.000Z'
+    }
+  ];
+  const serialized = serializeAttemptFile('2026-11-01', marked);
+  expect(serialized).toContain('选择 1 · 有把握 · ✅');
+  expect(serialized).toContain('简答「极限是 1」 · 不确定 · ❌');
+  expect(parseAttemptFile(serialized)).toEqual(marked);
+  expect(serializeAttemptFile('2026-11-01', parseAttemptFile(serialized))).toBe(serialized);
+});
+
+test('a stray confidence value in a hand-edited log is dropped, not fatal', () => {
+  const raw = serializeNote(
+    {
+      type: 'log',
+      source: 'user',
+      kind: 'practice-attempts',
+      date: '2026-11-01',
+      entries: [
+        {
+          id: 'pa1',
+          workspaceId: 'kaoyan',
+          setId: 'ps1',
+          questionId: 'q1',
+          choice: 1,
+          confidence: 'maybe',
+          correct: true,
+          answeredAt: '2026-11-01T09:05:00.000Z'
+        }
+      ]
+    },
+    '# 2026-11-01 练习记录\n'
+  );
+  const parsed = parseAttemptFile(raw);
+  expect(parsed).toHaveLength(1);
+  expect(parsed[0]?.confidence).toBeUndefined();
+  expect(parsed[0]?.correct).toBe(true);
+});
+
+test('attempt files without confidence round-trip byte-identically', () => {
+  const legacy: PracticeAttempt = {
+    id: 'pa1',
+    workspaceId: 'kaoyan',
+    setId: 'ps1',
+    questionId: 'q1',
+    choice: 1,
+    correct: true,
+    answeredAt: '2026-11-01T09:05:00.000Z'
+  };
+  const serialized = serializeAttemptFile('2026-11-01', [legacy]);
+  expect(serialized).not.toContain('confidence');
+  expect(serialized).not.toContain('有把握');
+  expect(serialized).not.toContain('不确定');
+  expect(parseAttemptFile(serialized)).toEqual([legacy]);
+  expect(serializeAttemptFile('2026-11-01', parseAttemptFile(serialized))).toBe(serialized);
+});
+
+test('a sure wrong answer raises difficulty by the extra step, unsure does not', async () => {
+  // Mistakes are keyed by question id, so each question is its own fresh record
+  // and all three start from the same migrated difficulty.
+  async function firstDifficulty(
+    questionId: string,
+    confidence?: 'sure' | 'unsure'
+  ): Promise<number | undefined> {
+    const result = await at('2026-11-01').submitAnswer({
+      questionId,
+      choice: 0,
+      ...(confidence !== undefined ? { confidence } : {})
+    });
+    expect(result.correct).toBe(false);
+    return result.mistake?.difficulty;
+  }
+
+  const plain = await firstDifficulty('q1');
+  const unsure = await firstDifficulty('q2', 'unsure');
+  const sure = await firstDifficulty('q3', 'sure');
+
+  // A first mistake starts at 0.3 (priority 0 migration) + 0.1 = 0.4.
+  expect(plain).toBeCloseTo(0.4, 5);
+  expect(unsure).toBeCloseTo(0.4, 5);
+  expect(sure).toBeCloseTo(0.45, 5);
+});
+
+test('confidence never changes a correct answer, and is recorded on the attempt', async () => {
+  const service = at('2026-11-01');
+  await service.submitAnswer({ questionId: 'q1', choice: 0 });
+  const correct = await at('2026-11-02').submitAnswer({
+    questionId: 'q1',
+    choice: 1,
+    confidence: 'sure'
+  });
+
+  expect(correct.correct).toBe(true);
+  expect(correct.mistake?.difficulty).toBeCloseTo(0.35, 5);
+  expect(correct.attempt.confidence).toBe('sure');
+});
+
+test('the short-answer path records confidence and feeds it to the scheduler', async () => {
+  const service = at('2026-11-01');
+  const created = await service.createSet({
+    workspaceId: 'kaoyan',
+    title: '简答小测',
+    questions: [shortQuestion]
+  });
+  const questionId = created.questions[0]!.id;
+
+  const wrong = await service.submitShortAnswer({
+    questionId,
+    response: '不知道',
+    selfCorrect: false,
+    confidence: 'sure'
+  });
+  expect(wrong.attempt.confidence).toBe('sure');
+  expect(wrong.mistake?.difficulty).toBeCloseTo(0.45, 5);
+
+  const reviewed = await at('2026-11-02').reviewMistake!({
+    mistakeId: wrong.mistake!.id,
+    response: '极限是 1',
+    selfCorrect: true,
+    confidence: 'unsure'
+  });
+  expect(reviewed.attempt.confidence).toBe('unsure');
+});
+
+test('reviewMistake passes confidence through to scheduling and the attempt', async () => {
+  const service = at('2026-11-01');
+  const first = await service.submitAnswer({ questionId: 'q1', choice: 0 });
+  expect(first.mistake?.difficulty).toBeCloseTo(0.4, 5);
+
+  const reviewed = await at('2026-11-02').reviewMistake!({
+    mistakeId: first.mistake!.id,
+    choice: 0,
+    confidence: 'sure'
+  });
+  expect(reviewed.attempt.confidence).toBe('sure');
+  expect(reviewed.mistake?.difficulty).toBeCloseTo(0.55, 5);
+});
+
+test('rejects an unknown confidence value', async () => {
+  const service = at('2026-11-01');
+  await expect(
+    service.submitAnswer({
+      questionId: 'q1',
+      choice: 1,
+      confidence: 'certain' as unknown as 'sure'
+    })
+  ).rejects.toThrow('Invalid confidence');
+  await expect(
+    service.submitShortAnswer({
+      questionId: 'q1',
+      response: '答',
+      selfCorrect: true,
+      confidence: 'maybe' as unknown as 'sure'
+    })
+  ).rejects.toThrow('Invalid confidence');
+});

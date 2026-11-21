@@ -19,7 +19,7 @@
  */
 
 import { parseLocalDate, formatLocalDate } from '../../shared/date';
-import type { PracticeMistakeStatus } from '../../shared/practice';
+import type { PracticeConfidence, PracticeMistakeStatus } from '../../shared/practice';
 
 export const MIN_DIFFICULTY = 0.1;
 export const MAX_DIFFICULTY = 0.9;
@@ -28,6 +28,13 @@ export const MAX_INTERVAL_DAYS = 365;
 /** A wrong answer always comes back the next day. */
 const WRONG_INTERVAL_DAYS = 1;
 const WRONG_DIFFICULTY_STEP = 0.1;
+/**
+ * A wrong answer the learner marked `有把握` is an illusion of competence
+ * (Kornell & Bjork 2009), so it raises difficulty by one extra step on top of
+ * the normal wrong step. `不确定` and an unmarked answer keep today's
+ * behaviour, and a correct answer is never affected by confidence.
+ */
+export const SURE_WRONG_EXTRA_STEP = 0.05;
 const CORRECT_DIFFICULTY_STEP = 0.05;
 /**
  * Growth factor is `GROWTH_BASE - difficulty`, i.e. 1.1–1.9 per success, and
@@ -54,6 +61,11 @@ export interface ScheduleState extends ScheduleSource {
 
 export interface NextScheduleInput {
   correct: boolean;
+  /**
+   * The learner's pre-answer confidence. Only `sure` changes anything: a
+   * confidently wrong answer adds {@link SURE_WRONG_EXTRA_STEP} difficulty.
+   */
+  confidence?: PracticeConfidence;
   /** Local calendar date (`YYYY-MM-DD`) of the answer. */
   today: string;
 }
@@ -124,23 +136,27 @@ export function migrateSchedule(mistake: ScheduleSource): {
 /**
  * One answer → the record's next review state.
  *
- * - Wrong: stability resets to one day, difficulty rises, due tomorrow.
+ * - Wrong: stability resets to one day, difficulty rises, due tomorrow. If the
+ *   answer was marked `有把握`, difficulty rises by an extra
+ *   {@link SURE_WRONG_EXTRA_STEP}; `不确定` (or no mark) matches the plain step.
  * - Correct: difficulty falls; the interval grows monotonically from the
  *   current stability (`round(stability * (2 - difficulty))`, at least
  *   `intervalDays + 1`, capped at 365 days), and due moves forward by it.
+ *   Confidence never changes a correct answer.
  * - Resolved only when the answer is correct, the interval that just elapsed
  *   was at least 3 days, and today is a later day than the last answer.
  *   Two correct answers in one sitting therefore never mark a mistake mastered.
  */
 export function nextSchedule(
   current: ScheduleState,
-  { correct, today }: NextScheduleInput
+  { correct, confidence, today }: NextScheduleInput
 ): ScheduleResult {
   const base = migrateSchedule(current);
   if (!correct) {
+    const step = confidence === 'sure' ? WRONG_DIFFICULTY_STEP + SURE_WRONG_EXTRA_STEP : WRONG_DIFFICULTY_STEP;
     return {
       stabilityDays: 1,
-      difficulty: clampDifficulty(base.difficulty + WRONG_DIFFICULTY_STEP),
+      difficulty: clampDifficulty(base.difficulty + step),
       intervalDays: WRONG_INTERVAL_DAYS,
       due: addDays(today, WRONG_INTERVAL_DAYS),
       status: 'active'

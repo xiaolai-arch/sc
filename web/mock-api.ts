@@ -68,6 +68,7 @@ import type {
   ExportMistakeSheetInput,
   ExportMistakeSheetResult,
   PracticeAttempt,
+  PracticeConfidence,
   PracticeMistake,
   PracticeQuestion,
   PracticeSet,
@@ -670,6 +671,11 @@ export function createMockApi(
       summary,
       generatedAt: new Date().toISOString()
     };
+  }
+
+  /** Tolerant read of the optional picker value; absent stays absent. */
+  function confidenceOf(value: unknown): PracticeConfidence | undefined {
+    return value === 'sure' || value === 'unsure' ? value : undefined;
   }
 
   function findPracticeQuestion(questionId: string) {
@@ -1399,12 +1405,16 @@ export function createMockApi(
       const answeredAt = answeredAtDate.toISOString();
       const date = formatLocalDate(answeredAtDate);
       const correct = input.choice === question.answer;
+      // The browser mock records confidence so the calibration card has data
+      // to show; its fixed-interval schedule stays as it was.
+      const confidence = confidenceOf(input.confidence);
       const attempt: PracticeAttempt = {
         id: nextId('pa'),
         workspaceId: set.workspaceId,
         setId: set.id,
         questionId: question.id,
         choice: input.choice,
+        ...(confidence !== undefined ? { confidence } : {}),
         correct,
         answeredAt
       };
@@ -1466,6 +1476,7 @@ export function createMockApi(
       const date = formatLocalDate(answeredAtDate);
       // No local grader: the learner's own verdict drives the schedule.
       const correct = input.selfCorrect;
+      const confidence = confidenceOf(input.confidence);
       // `choice` is unused (0) for a free-recall attempt.
       const attempt: PracticeAttempt = {
         id: nextId('pa'),
@@ -1474,6 +1485,7 @@ export function createMockApi(
         questionId: question.id,
         choice: 0,
         response,
+        ...(confidence !== undefined ? { confidence } : {}),
         correct,
         answeredAt
       };
@@ -1604,6 +1616,7 @@ export function createMockApi(
       const answeredAtDate = new Date();
       const answeredAt = answeredAtDate.toISOString();
       const date = formatLocalDate(answeredAtDate);
+      const confidence = confidenceOf(input.confidence);
       const attempt: PracticeAttempt = {
         id: nextId('pa'),
         workspaceId: current.workspaceId,
@@ -1611,6 +1624,7 @@ export function createMockApi(
         questionId: current.questionId,
         choice,
         ...(response !== undefined ? { response } : {}),
+        ...(confidence !== undefined ? { confidence } : {}),
         correct,
         answeredAt
       };
