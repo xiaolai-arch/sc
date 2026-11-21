@@ -95,6 +95,77 @@ test('a passed deadline still asks for rounds instead of a negative countdown', 
   expect(prompt.user).not.toContain('还有 -2 天');
 });
 
+test('a study workspace stages 入门 → 进阶 → 巩固 and never asks for exam rounds', () => {
+  const prompt = promptFor({ ...WORKSPACE, kind: 'study', targetDate: '2027-12-19' });
+
+  expect(prompt.user).toContain('目标日期：2027-12-19（距离 2026-11-21 还有 393 天）');
+  expect(prompt.user).toContain('阶段：入门 → 进阶 → 巩固');
+  expect(prompt.user).toContain('按剩余的 393 天为每一阶段分配时间');
+  expect(prompt.user).toContain('不要用考试轮次的说法');
+  // The staging is learning phases, never review rounds.
+  expect(prompt.user).not.toContain('复习轮次');
+  expect(prompt.user).not.toContain('基础 → 强化 → 冲刺');
+});
+
+test('a project workspace gets a milestone instruction instead of exam rounds', () => {
+  const prompt = promptFor({ ...WORKSPACE, kind: 'project', targetDate: '2027-12-19' });
+
+  expect(prompt.user).toContain('里程碑');
+  expect(prompt.user).toContain('可验收');
+  expect(prompt.user).toContain('按剩余的 393 天排先后');
+  expect(prompt.user).not.toContain('复习轮次');
+  expect(prompt.user).not.toContain('基础 → 强化 → 冲刺');
+});
+
+test('a life workspace stages milestones like a project', () => {
+  const prompt = promptFor({ ...WORKSPACE, kind: 'life', targetDate: '2027-12-19' });
+
+  expect(prompt.user).toContain('里程碑');
+  expect(prompt.user).not.toContain('复习轮次');
+  expect(prompt.user).not.toContain('基础 → 强化 → 冲刺');
+});
+
+test('an exam workspace keeps the exact review-rounds line', () => {
+  const prompt = promptFor({ ...WORKSPACE, kind: 'exam', targetDate: '2027-12-19' });
+
+  expect(prompt.user).toContain(
+    '请把计划组织成复习轮次（轮次：基础 → 强化 → 冲刺），并按剩余的 393 天为每一轮分配时间。'
+  );
+});
+
+test('a missing kind falls back to the exam wording', () => {
+  const withoutKind = { ...WORKSPACE, targetDate: '2027-12-19' } as Workspace;
+  delete (withoutKind as { kind?: string }).kind;
+  const prompt = promptFor(withoutKind);
+
+  expect(prompt.user).toContain(
+    '请把计划组织成复习轮次（轮次：基础 → 强化 → 冲刺），并按剩余的 393 天为每一轮分配时间。'
+  );
+});
+
+test('a passed deadline compresses non-exam kinds without exam wording', () => {
+  const study = promptFor({ ...WORKSPACE, kind: 'study', targetDate: '2026-11-19' });
+  expect(study.user).toContain('目标日期：2026-11-19（已过去 2 天）');
+  expect(study.user).toContain('收尾未完成的部分');
+  expect(study.user).not.toContain('复习轮次');
+  expect(study.user).not.toContain('冲刺');
+  expect(study.user).not.toContain('考试');
+
+  const project = promptFor({ ...WORKSPACE, kind: 'project', targetDate: '2026-11-19' });
+  expect(project.user).toContain('优先里程碑');
+  expect(project.user).not.toContain('复习轮次');
+
+  const life = promptFor({ ...WORKSPACE, kind: 'life', targetDate: '2026-11-19' });
+  expect(life.user).toContain('优先里程碑');
+  expect(life.user).not.toContain('考试');
+
+  // The exam branch keeps its original compression wording verbatim.
+  const exam = promptFor({ ...WORKSPACE, kind: 'exam', targetDate: '2026-11-19' });
+  expect(exam.user).toContain(
+    '请按复习轮次重新压缩安排（轮次：基础 → 强化 → 冲刺），优先补齐薄弱环节。'
+  );
+});
+
 class FakeWorkspaceService implements WorkspaceService {
   constructor(private readonly snapshot: WorkspaceSnapshot) {}
 

@@ -24,7 +24,7 @@ export interface Workspace {
   /** Default minutes the user can study per day; planning starts from it. */
   availableMinutes?: number;
   /**
-   * The deadline the project counts down to (目标日期 / 考试日期), as a local
+   * The deadline the project counts down to (目标日期 / 截止日期), as a local
    * `YYYY-MM-DD` date. Absent means no target date has been set.
    */
   targetDate?: string;

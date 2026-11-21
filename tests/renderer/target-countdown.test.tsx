@@ -117,6 +117,14 @@ test('the soonest upcoming deadline wins, and a passed one is named when alone',
   ).toBe('kaoyan');
 });
 
+test('the Today countdown copy is goal-neutral, never exam wording', () => {
+  renderToday([exam]);
+  const todayLine = screen.getByRole('status', { name: '目标倒计时' });
+  // The line says 目标, never 考试/冲刺, so any kind of goal reads correctly.
+  expect(todayLine.textContent).toContain('距离目标');
+  expect(todayLine.textContent).not.toMatch(/考试|冲刺|复习/);
+});
+
 const plan: LongPlan = {
   id: 'lp-1',
   workspaceId: 'kaoyan',

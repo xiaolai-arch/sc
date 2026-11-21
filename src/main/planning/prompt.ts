@@ -1,5 +1,10 @@
 import { daysUntilTarget } from '../../shared/workspace';
-import type { MemoryItem, Workspace, WorkspaceNote } from '../../shared/workspace';
+import type {
+  MemoryItem,
+  Workspace,
+  WorkspaceKind,
+  WorkspaceNote
+} from '../../shared/workspace';
 
 const MAX_PROMPT_NOTES = 8;
 const MAX_PROMPT_MEMORY = 8;
@@ -49,7 +54,11 @@ export function buildWorkspacePlanPrompt(input: WorkspacePlanPromptInput): Works
   }
   // A target date turns planning into countdown-driven planning. Absent or
   // unreadable, nothing is added, so the prompt stays byte-identical.
-  const countdown = targetCountdownLines(input.workspace.targetDate, input.date);
+  const countdown = targetCountdownLines(
+    input.workspace.targetDate,
+    input.date,
+    input.workspace.kind
+  );
   if (countdown !== null) lines.push(...countdown);
 
   const notes = input.notes.slice(0, MAX_PROMPT_NOTES);
@@ -87,13 +96,16 @@ function clip(value: string, maxLength: number): string {
 
 /**
  * The countdown section of the planning prompt: the deadline, how many whole
- * days remain on the plan's own date, and the instruction to stage the plan as
- * review rounds. Returns null when there is no usable target date, so the
- * prompt is unchanged for projects without one.
+ * days remain on the plan's own date, and how to stage the work towards it.
+ * The staging instruction follows the workspace kind, so an exam gets review
+ * rounds while a course, a project or a life goal gets its own shape.
+ * Returns null when there is no usable target date, so the prompt is unchanged
+ * for projects without one.
  */
 export function targetCountdownLines(
   targetDate: string | undefined,
-  date: string
+  date: string,
+  kind?: WorkspaceKind
 ): string[] | null {
   if (!targetDate) return null;
   const days = daysUntilTarget(targetDate, date);
@@ -101,13 +113,39 @@ export function targetCountdownLines(
   if (days < 0) {
     return [
       `目标日期：${targetDate}（已过去 ${-days} 天）`,
-      `请按复习轮次重新压缩安排（轮次：基础 → 强化 → 冲刺），优先补齐薄弱环节。`
+      passedTargetInstruction(kind)
     ];
   }
   return [
     `目标日期：${targetDate}（距离 ${date} 还有 ${days} 天）`,
-    `请把计划组织成复习轮次（轮次：基础 → 强化 → 冲刺），并按剩余的 ${days} 天为每一轮分配时间。`
+    stagingInstruction(kind, days)
   ];
+}
+
+/** Missing or unrecognised kinds plan like an exam, the original wording. */
+function normaliseKind(kind: WorkspaceKind | undefined): WorkspaceKind {
+  return kind === 'study' || kind === 'project' || kind === 'life' ? kind : 'exam';
+}
+
+/** How to spread the remaining days when the deadline is still ahead. */
+function stagingInstruction(kind: WorkspaceKind | undefined, days: number): string {
+  switch (normaliseKind(kind)) {
+    case 'study':
+      return `请把计划组织成学习阶段（阶段：入门 → 进阶 → 巩固），并按剩余的 ${days} 天为每一阶段分配时间；不要用考试轮次的说法。`;
+    case 'project':
+    case 'life':
+      return `请把计划组织成里程碑式：先列出可验收的里程碑（每步做完能看到什么成果），按剩余的 ${days} 天排先后，而不是按考试轮次。`;
+    default:
+      return `请把计划组织成复习轮次（轮次：基础 → 强化 → 冲刺），并按剩余的 ${days} 天为每一轮分配时间。`;
+  }
+}
+
+/** How to compress the plan once the deadline has already passed. */
+function passedTargetInstruction(kind: WorkspaceKind | undefined): string {
+  if (normaliseKind(kind) === 'exam') {
+    return '请按复习轮次重新压缩安排（轮次：基础 → 强化 → 冲刺），优先补齐薄弱环节。';
+  }
+  return '请重新压缩剩余安排：收尾未完成的部分，优先里程碑。';
 }
 
 function availableSourceLabel(source: 'input' | 'workspace' | 'default' | undefined): string {
