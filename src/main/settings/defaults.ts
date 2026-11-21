@@ -2,13 +2,16 @@ import type { AppSettings, ProviderConfig } from '../../shared/types';
 
 export const DEFAULT_VAULT_DIRECTORY = 'StudyCoachVault';
 
+/** First-run 称呼; the home greeting and the e2e specs both read it. */
+export const DEFAULT_DISPLAY_NAME = 'xiaolai';
+
 export function defaultProvider(): ProviderConfig {
   return { kind: 'local-cli', agent: 'codex', command: 'codex' };
 }
 
 export function createDefaultSettings(vaultPath: string): AppSettings {
   return {
-    displayName: 'xiaolai',
+    displayName: DEFAULT_DISPLAY_NAME,
     vaultPath,
     provider: defaultProvider(),
     notifications: {

@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { DEFAULT_DISPLAY_NAME } from '../src/main/settings/defaults';
 import {
   createIsolatedEnvironment,
   launchStudyCoach,
@@ -53,7 +54,9 @@ const HEATMAP_CELLS = 84;
 const TREND_BARS = 8;
 /** The project target date is seeded this many days ahead of the launch day. */
 const TARGET_OFFSET_DAYS = 30;
-const GREETING = /^(早上好|中午好|下午好|晚上好|夜深了)，xiaolai。$/;
+const GREETING = new RegExp(
+  `^(早上好|中午好|下午好|晚上好|夜深了)，${DEFAULT_DISPLAY_NAME}。$`
+);
 
 /** Local calendar date `YYYY-MM-DD`, offset by whole days from today. */
 function localDate(offsetDays: number): string {

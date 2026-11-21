@@ -1,5 +1,9 @@
 import { expect, test } from '@playwright/test';
+import { DEFAULT_DISPLAY_NAME } from '../src/main/settings/defaults';
 import { launchStudyCoach, type LaunchedStudyCoach } from './support/launch';
+
+/** Trailing 称呼 of the home greeting, from the same default the app ships. */
+const GREETING_SUFFIX = new RegExp(`，${DEFAULT_DISPLAY_NAME}。$`);
 
 /**
  * Walks every navigation destination and creates one record of each kind
@@ -29,7 +33,7 @@ test.describe('ASAKI feature smoke', () => {
         expect(workspaceId).toBeTruthy();
         await page.reload();
         await page.waitForLoadState('domcontentloaded');
-        await expect(page.getByText(/，xiaolai。$/)).toBeVisible();
+        await expect(page.getByText(GREETING_SUFFIX)).toBeVisible();
       });
 
       await test.step('every navigation destination renders', async () => {
