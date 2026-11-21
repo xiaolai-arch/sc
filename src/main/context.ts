@@ -946,6 +946,9 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     async submitPracticeAnswer(input) {
       return (await getServices()).practice.submitAnswer(input);
     },
+    async submitPracticeShortAnswer(input) {
+      return (await getServices()).practice.submitShortAnswer(input);
+    },
     async getPracticeMistakes(workspaceId) {
       return (await getServices()).practice.getMistakes(workspaceId);
     },

@@ -4,8 +4,9 @@
  * The mistake book (`workspaces/<id>/practice/mistakes.md`) is a storage
  * format: options and answers live in the YAML frontmatter so the app can read
  * them back. This builder renders the same records as a human-facing sheet —
- * one heading per mistake, the options spelled out, the answer, the
- * explanation and the review state — that can be printed or copied.
+ * one heading per mistake, the options spelled out (choice) or the reference
+ * answer (short), the answer, the explanation and the review state — that can
+ * be printed or copied.
  *
  * The output is deterministic (same input, byte-identical text) and stays
  * Obsidian-readable: it uses the same `type: qa` frontmatter with its own
@@ -48,17 +49,22 @@ function singleLine(text: string): string {
 }
 
 function mistakeSection(mistake: PracticeMistake, index: number): string {
+  const state = mistake.status === 'resolved' ? '已掌握' : `下次复习 ${mistake.due}`;
+  // A short question has no options to letter; its model answer is prose.
+  const answerLine =
+    mistake.kind === 'short'
+      ? `参考答案：${singleLine(mistake.referenceAnswer ?? '')}`
+      : `答案：${optionLetter(mistake.answer)}`;
   // Empty options are skipped, but letters keep their original position so the
   // answer letter still matches the option the learner actually picked.
   const options = mistake.options.flatMap((option, optionIndex) =>
     option.trim() === '' ? [] : [`${optionLetter(optionIndex)}. ${singleLine(option)}`]
   );
-  const state = mistake.status === 'resolved' ? '已掌握' : `下次复习 ${mistake.due}`;
   return [
     `## ${index + 1}. ${singleLine(mistake.prompt)}`,
     '',
     ...(options.length > 0 ? [...options, ''] : []),
-    `答案：${optionLetter(mistake.answer)}`,
+    answerLine,
     `解析：${singleLine(mistake.explanation)}`,
     '',
     `错 ${mistake.wrongCount} 次 · 优先级 ${mistake.priority} · ${state}`

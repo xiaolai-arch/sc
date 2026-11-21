@@ -6,7 +6,8 @@ import type {
   ExportMistakeSheetResult,
   PracticeAttempt,
   PracticeMistake,
-  PracticeSet
+  PracticeSet,
+  SubmitAnswerResult
 } from '../../src/shared/practice';
 import type { Workspace } from '../../src/shared/workspace';
 import { LearningPane } from '../../src/renderer/shell/LearningPane';
@@ -251,6 +252,16 @@ describe('LearningPane practice UI', () => {
         choice: 0,
         correct: false,
         answeredAt: '2026-11-02T09:15:00.000Z'
+      },
+      {
+        id: 'pa3',
+        workspaceId: 'kaoyan',
+        setId: 'ps1',
+        questionId: 'q1',
+        choice: 0,
+        response: '极限是 1',
+        correct: true,
+        answeredAt: '2026-11-03T09:15:00.000Z'
       }
     ];
 
@@ -259,14 +270,128 @@ describe('LearningPane practice UI', () => {
     expect(screen.getByText('答题历史')).toBeInTheDocument();
     expect(screen.getByText('2026-11-01 08:30')).toBeInTheDocument();
     expect(screen.getByText('2026-11-02 09:15')).toBeInTheDocument();
-    expect(screen.getByText('回答正确')).toBeInTheDocument();
+    expect(screen.getByText('2026-11-03 09:15')).toBeInTheDocument();
+    expect(screen.getAllByText('回答正确')).toHaveLength(2);
     expect(screen.getByText('回答错误')).toBeInTheDocument();
-    expect(screen.getAllByText(practiceSet.questions[0].prompt)).toHaveLength(3);
+    // A free-recall attempt shows what was typed.
+    expect(screen.getByText('你写的是：极限是 1')).toBeInTheDocument();
+    expect(screen.getAllByText(practiceSet.questions[0].prompt)).toHaveLength(4);
 
     view.unmount();
 
     renderPane({ attempts: [] });
     expect(screen.queryByText('答题历史')).not.toBeInTheDocument();
+  });
+});
+
+describe('short-answer (free recall) practice UI', () => {
+  const shortSet: PracticeSet = {
+    id: 'ps-short',
+    workspaceId: 'kaoyan',
+    title: '简答练习',
+    subject: '数学',
+    questions: [
+      {
+        id: 'sq1',
+        kind: 'short',
+        prompt: '用自己的话说明第一个重要极限。',
+        options: [],
+        answer: 0,
+        referenceAnswer: 'x→0 时 sin x / x 的极限是 1。',
+        explanation: '夹逼准则可证。'
+      }
+    ]
+  };
+
+  function shortResult(correct: boolean): SubmitAnswerResult {
+    return {
+      questionId: 'sq1',
+      setId: 'ps-short',
+      workspaceId: 'kaoyan',
+      choice: 0,
+      correct,
+      answer: 0,
+      explanation: '夹逼准则可证。',
+      attempt: {
+        id: 'pa-short',
+        workspaceId: 'kaoyan',
+        setId: 'ps-short',
+        questionId: 'sq1',
+        choice: 0,
+        response: '极限是 1',
+        correct,
+        answeredAt: '2026-11-01T09:00:00.000Z'
+      },
+      mistake: correct
+        ? null
+        : {
+            ...mistake(1),
+            questionId: 'sq1',
+            kind: 'short',
+            referenceAnswer: 'x→0 时 sin x / x 的极限是 1。',
+            due: '2026-11-02'
+          },
+      due: correct ? undefined : '2026-11-02'
+    };
+  }
+
+  it('reveals the reference answer on 提交 without recording anything', async () => {
+    const user = userEvent.setup();
+    const onSubmitShortAnswer = vi.fn(async () => shortResult(true));
+
+    renderPane({ set: shortSet, onSubmitShortAnswer });
+
+    expect(screen.getByLabelText('用你自己的话回答')).toBeInTheDocument();
+    // Nothing is submitted until the learner self-assesses.
+    expect(screen.getByRole('button', { name: '提交' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '答对了' })).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('用你自己的话回答'), '极限是 1');
+    await user.click(screen.getByRole('button', { name: '提交' }));
+
+    expect(screen.getByText('参考答案：x→0 时 sin x / x 的极限是 1。')).toBeInTheDocument();
+    expect(screen.getByText('你写的是：极限是 1')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '答对了' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '没答对' })).toBeInTheDocument();
+    expect(onSubmitShortAnswer).not.toHaveBeenCalled();
+  });
+
+  it('records the attempt only when a self-assessment button is pressed', async () => {
+    const user = userEvent.setup();
+    const onSubmitShortAnswer = vi.fn(async () => shortResult(true));
+
+    renderPane({ set: shortSet, onSubmitShortAnswer });
+    await user.type(screen.getByLabelText('用你自己的话回答'), '极限是 1');
+    await user.click(screen.getByRole('button', { name: '提交' }));
+    await user.click(screen.getByRole('button', { name: '答对了' }));
+
+    await waitFor(() => expect(onSubmitShortAnswer).toHaveBeenCalledTimes(1));
+    expect(onSubmitShortAnswer).toHaveBeenCalledWith({
+      questionId: 'sq1',
+      response: '极限是 1',
+      selfCorrect: true
+    });
+    expect(await screen.findByText('回答正确')).toBeInTheDocument();
+  });
+
+  it('marks a mis-recall through 没答对 and shows the scheduled review', async () => {
+    const user = userEvent.setup();
+    const onSubmitShortAnswer = vi.fn(async () => shortResult(false));
+
+    renderPane({ set: shortSet, onSubmitShortAnswer });
+    await user.type(screen.getByLabelText('用你自己的话回答'), '极限是 0');
+    await user.click(screen.getByRole('button', { name: '提交' }));
+    await user.click(screen.getByRole('button', { name: '没答对' }));
+
+    await waitFor(() =>
+      expect(onSubmitShortAnswer).toHaveBeenCalledWith({
+        questionId: 'sq1',
+        response: '极限是 0',
+        selfCorrect: false
+      })
+    );
+    expect(await screen.findByText('回答错误')).toBeInTheDocument();
+    expect(screen.getByText('已加入错题本，2026-11-02 复习。')).toBeInTheDocument();
   });
 });
 

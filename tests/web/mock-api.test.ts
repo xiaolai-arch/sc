@@ -325,6 +325,48 @@ test('serves seeded practice sets and records answers, mistakes and attempts', a
   expect((await api.listPracticeSets('english')).some((entry) => entry.id === created.id)).toBe(true);
 });
 
+test('serves short questions and records free-recall attempts and mistakes', async () => {
+  localStorage.clear();
+  const api = createMockApi(localStorage);
+  const created = await api.createPracticeSet({
+    workspaceId: 'kaoyan',
+    title: '简答小测',
+    questions: [
+      { kind: 'short', prompt: '说明第一个重要极限。', referenceAnswer: 'sin x / x → 1' },
+      { prompt: '选择题', options: ['A', 'B'], answer: 1 }
+    ]
+  });
+  const [shortQuestion, choiceQuestion] = created.questions;
+  expect(shortQuestion).toMatchObject({ kind: 'short', referenceAnswer: 'sin x / x → 1', options: [] });
+  expect(choiceQuestion?.kind).toBeUndefined();
+
+  await expect(
+    api.submitPracticeAnswer({ questionId: shortQuestion!.id, choice: 0 })
+  ).rejects.toThrow('简答题');
+
+  const wrong = await api.submitPracticeShortAnswer({
+    questionId: shortQuestion!.id,
+    response: '极限是 0',
+    selfCorrect: false
+  });
+  expect(wrong.correct).toBe(false);
+  expect(wrong.attempt).toMatchObject({ choice: 0, response: '极限是 0' });
+  expect(wrong.mistake).toMatchObject({
+    kind: 'short',
+    referenceAnswer: 'sin x / x → 1',
+    status: 'active'
+  });
+  expect((await api.getPracticeMistakes('kaoyan'))[0]?.kind).toBe('short');
+
+  await expect(
+    api.submitPracticeShortAnswer({
+      questionId: shortQuestion!.id,
+      response: '   ',
+      selfCorrect: true
+    })
+  ).rejects.toThrow('回答内容不能为空');
+});
+
 test('synthesizes memory from reviews and builds a learner profile', async () => {
   localStorage.clear();
   const api = createMockApi(localStorage);

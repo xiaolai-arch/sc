@@ -194,6 +194,84 @@ test('exports the mistake review sheet through the practice service', async () =
   expect(exportMistakeSheet).toHaveBeenCalledTimes(2);
 });
 
+test('submits a short answer with a typed response and a self-assessment', async () => {
+  const submitShortAnswer = vi.fn().mockResolvedValue({
+    questionId: 'q-1',
+    correct: false,
+    attempt: { id: 'pa-1', response: '极限是 0' }
+  });
+  const practice = {
+    listSets: vi.fn(),
+    getSet: vi.fn(),
+    createSet: vi.fn(),
+    submitAnswer: vi.fn(),
+    submitShortAnswer,
+    getMistakes: vi.fn(),
+    getDue: vi.fn(),
+    listAttempts: vi.fn()
+  } as unknown as PracticeService;
+  const { context } = await makeContext(fakeWorkspace(), fakeButler(), practice);
+  const handlers = createIpcHandlers(context.api);
+
+  const result = await handlers.submitPracticeShortAnswer({
+    questionId: 'q-1',
+    response: '极限是 0',
+    selfCorrect: false
+  });
+  expect(result).toMatchObject({ questionId: 'q-1', correct: false });
+  expect(submitShortAnswer).toHaveBeenCalledWith({
+    questionId: 'q-1',
+    response: '极限是 0',
+    selfCorrect: false
+  });
+
+  // Stricter than the service: blanks, a non-boolean verdict and a missing id
+  // never cross the IPC boundary.
+  await expect(
+    handlers.submitPracticeShortAnswer({ questionId: 'q-1', response: '  ', selfCorrect: true })
+  ).rejects.toThrow('回答内容不能为空。');
+  await expect(
+    handlers.submitPracticeShortAnswer({ questionId: 'q-1', response: '答', selfCorrect: 1 })
+  ).rejects.toThrow('自评参数无效。');
+  await expect(
+    handlers.submitPracticeShortAnswer({ response: '答', selfCorrect: true })
+  ).rejects.toThrow('题目 ID不能为空。');
+  expect(submitShortAnswer).toHaveBeenCalledTimes(1);
+});
+
+test('reviews a short mistake over IPC with its typed answer', async () => {
+  const reviewMistake = vi.fn().mockResolvedValue({ questionId: 'q-1', correct: true });
+  const practice = {
+    listSets: vi.fn(),
+    getSet: vi.fn(),
+    createSet: vi.fn(),
+    submitAnswer: vi.fn(),
+    submitShortAnswer: vi.fn(),
+    reviewMistake,
+    getMistakes: vi.fn(),
+    getDue: vi.fn(),
+    listAttempts: vi.fn()
+  } as unknown as PracticeService;
+  const { context } = await makeContext(fakeWorkspace(), fakeButler(), practice);
+  const handlers = createIpcHandlers(context.api);
+
+  await handlers.reviewPracticeMistake({
+    mistakeId: 'pm-1',
+    response: '极限是 1',
+    selfCorrect: true
+  });
+  expect(reviewMistake).toHaveBeenCalledWith({
+    mistakeId: 'pm-1',
+    response: '极限是 1',
+    selfCorrect: true
+  });
+
+  // The choice shape still validates the same way.
+  await expect(
+    handlers.reviewPracticeMistake({ mistakeId: 'pm-1', choice: 1.5 })
+  ).rejects.toThrow('选项无效。');
+});
+
 test('rejects malformed handler parameters before they reach services', async () => {
   const { context, workspace } = await makeContext();
   const handlers = createIpcHandlers(context.api);

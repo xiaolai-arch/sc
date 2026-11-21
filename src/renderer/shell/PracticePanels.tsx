@@ -51,6 +51,11 @@ function MistakeRow({ mistake, due, onReview, onResolve }: MistakeRowProps) {
         <p className="text-[13px] leading-6 text-gray-500 dark:text-[#a1a1a6]">
           {mistake.prompt}
         </p>
+        {mistake.kind === 'short' && mistake.referenceAnswer ? (
+          <p className="text-[12px] leading-6 text-gray-400 dark:text-[#8e8e93]">
+            参考答案：{mistake.referenceAnswer}
+          </p>
+        ) : null}
         <p className="text-[11px] text-gray-400 dark:text-[#8e8e93]">
           {due ? '今天复习 · ' : ''}
           {mistake.due} 复习 · 错 {mistake.wrongCount} 次 · 优先级 {mistake.priority}
@@ -285,6 +290,11 @@ export function AttemptHistory({ attempts, set, mistakes }: AttemptHistoryProps)
                 {prompt ? (
                   <p className="mt-1 text-[13px] leading-6 text-gray-500 dark:text-[#a1a1a6]">
                     {prompt}
+                  </p>
+                ) : null}
+                {attempt.response !== undefined ? (
+                  <p className="mt-1 whitespace-pre-wrap text-[12px] leading-6 text-gray-400 dark:text-[#8e8e93]">
+                    你写的是：{attempt.response}
                   </p>
                 ) : null}
               </li>

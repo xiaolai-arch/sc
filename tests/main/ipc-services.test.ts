@@ -46,6 +46,7 @@ function fakePractice(overrides: Partial<PracticeService> = {}): PracticeService
     getSet: vi.fn().mockResolvedValue(null),
     createSet: vi.fn(),
     submitAnswer: vi.fn(),
+    submitShortAnswer: vi.fn(),
     getMistakes: vi.fn().mockResolvedValue([]),
     getDue: vi.fn().mockResolvedValue([]),
     listAttempts: vi.fn().mockResolvedValue([]),
@@ -115,6 +116,7 @@ test('routes planning, practice, memory and search channels to the services', as
     getSet: vi.fn().mockResolvedValue({ id: 'ps-1' }),
     createSet: vi.fn().mockResolvedValue({ id: 'ps-2' }),
     submitAnswer: vi.fn().mockResolvedValue({ questionId: 'q-1', correct: true }),
+    submitShortAnswer: vi.fn().mockResolvedValue({ questionId: 'q-1', correct: true }),
     getMistakes: vi.fn().mockResolvedValue([{ id: 'pm-1' }]),
     getDue: vi.fn().mockResolvedValue([{ id: 'pm-2' }]),
     listAttempts: vi.fn().mockResolvedValue([{ id: 'pa-1' }]),
@@ -154,6 +156,18 @@ test('routes planning, practice, memory and search channels to the services', as
   ).toEqual({ id: 'ps-2' });
   expect(await handlers.submitPracticeAnswer({ questionId: 'q-1', choice: 0 })).toMatchObject({
     correct: true
+  });
+  expect(
+    await handlers.submitPracticeShortAnswer({
+      questionId: 'q-1',
+      response: '极限是 1',
+      selfCorrect: false
+    })
+  ).toEqual({ questionId: 'q-1', correct: true });
+  expect(practice.submitShortAnswer).toHaveBeenLastCalledWith({
+    questionId: 'q-1',
+    response: '极限是 1',
+    selfCorrect: false
   });
   expect(await handlers.getPracticeMistakes('ws-1')).toEqual([{ id: 'pm-1' }]);
   expect(await handlers.getPracticeDue({ workspaceId: 'ws-1', date: '2026-10-31' })).toEqual([
@@ -209,6 +223,15 @@ test('rejects malformed planning, practice, memory and search inputs', async () 
   await expect(handlers.submitPracticeAnswer({ questionId: '', choice: 0 })).rejects.toThrow(
     '题目 ID不能为空。'
   );
+  await expect(
+    handlers.submitPracticeShortAnswer({ questionId: 'q-1', response: '   ', selfCorrect: true })
+  ).rejects.toThrow('回答内容不能为空。');
+  await expect(
+    handlers.submitPracticeShortAnswer({ questionId: 'q-1', response: '答', selfCorrect: 'yes' })
+  ).rejects.toThrow('自评参数无效。');
+  await expect(
+    handlers.submitPracticeShortAnswer({ questionId: '', response: '答', selfCorrect: true })
+  ).rejects.toThrow('题目 ID不能为空。');
   await expect(
     handlers.getPracticeDue({ workspaceId: 'ws-1', date: '' })
   ).rejects.toThrow('日期不能为空。');

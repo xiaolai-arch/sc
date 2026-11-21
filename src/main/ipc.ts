@@ -47,6 +47,7 @@ import type {
   ReviewMistakeInput,
   SetMistakeResolvedInput,
   SubmitAnswerInput,
+  SubmitShortAnswerInput,
   UpdatePracticeSetInput
 } from '../shared/practice';
 import type {
@@ -173,7 +174,9 @@ export const IPC_CHANNELS = {
   updateProfileEntry: 'study-coach:profile:update',
   deleteProfileEntry: 'study-coach:profile:delete',
   // Appended after the profile batch for the same stability reason.
-  setConversationPermissions: 'study-coach:conversations:set-permissions'
+  setConversationPermissions: 'study-coach:conversations:set-permissions',
+  // Free recall: appended last so every existing channel keeps its position.
+  submitPracticeShortAnswer: 'study-coach:practice:submit-short-answer'
 } as const;
 
 /** Streaming uses a separate request/event pair so the request map stays stable. */
@@ -731,6 +734,14 @@ function requireSubmitAnswer(value: unknown): SubmitAnswerInput {
   return { questionId: input.questionId as string, choice };
 }
 
+function requireSubmitShortAnswer(value: unknown): SubmitShortAnswerInput {
+  const input = requireObject(value, '提交简答');
+  const questionId = requireString(input.questionId, '题目 ID');
+  const response = requireString(input.response, '回答内容');
+  if (typeof input.selfCorrect !== 'boolean') throw new Error('自评参数无效。');
+  return { questionId, response, selfCorrect: input.selfCorrect };
+}
+
 function requireCreatePracticeSet(value: unknown): CreatePracticeSetInput {
   const input = requireObject(value, '创建练习');
   requireString(input.workspaceId, '工作区 ID');
@@ -772,11 +783,19 @@ function requireDeletePracticeSet(value: unknown): DeletePracticeSetInput {
 
 function requireReviewMistake(value: unknown): ReviewMistakeInput {
   const input = requireObject(value, '复习错题');
+  const mistakeId = requireString(input.mistakeId, '错题 ID');
+  // A choice review sends `choice`; a short review sends its typed answer and
+  // self-assessment. The service decides which shape the stored mistake needs.
+  if (input.response !== undefined || input.selfCorrect !== undefined) {
+    const response = requireString(input.response, '回答内容');
+    if (typeof input.selfCorrect !== 'boolean') throw new Error('自评参数无效。');
+    return { mistakeId, response, selfCorrect: input.selfCorrect };
+  }
   const choice = input.choice;
   if (typeof choice !== 'number' || !Number.isInteger(choice) || choice < 0) {
     throw new Error('选项无效。');
   }
-  return { mistakeId: requireString(input.mistakeId, '错题 ID'), choice };
+  return { mistakeId, choice };
 }
 
 function requireSetMistakeResolved(value: unknown): SetMistakeResolvedInput {
@@ -1336,6 +1355,8 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
     getPracticeSet: async (input) => api.getPracticeSet(requireString(input, '练习 ID')),
     createPracticeSet: async (input) => api.createPracticeSet(requireCreatePracticeSet(input)),
     submitPracticeAnswer: async (input) => api.submitPracticeAnswer(requireSubmitAnswer(input)),
+    submitPracticeShortAnswer: async (input) =>
+      api.submitPracticeShortAnswer(requireSubmitShortAnswer(input)),
     getPracticeMistakes: async (input) => api.getPracticeMistakes(requireString(input, '工作区 ID')),
     getPracticeDue: async (input) => api.getPracticeDue(requirePracticeDue(input)),
     listPracticeAttempts: async (input) =>
@@ -1854,6 +1875,8 @@ export function createStudyCoachBridge(
     reviewPracticeMistake: (input) => call(IPC_CHANNELS.reviewPracticeMistake, input),
     setPracticeMistakeResolved: (input) => call(IPC_CHANNELS.setPracticeMistakeResolved, input),
     exportMistakeSheet: (input) => call(IPC_CHANNELS.exportMistakeSheet, input),
+    submitPracticeShortAnswer: (input) =>
+      call(IPC_CHANNELS.submitPracticeShortAnswer, input),
     async stream(input, onEvent) {
       const requestId = createRequestId();
       const unsubscribe = subscribe?.(BUTLER_STREAM_CHANNELS.event, (payload) => {
