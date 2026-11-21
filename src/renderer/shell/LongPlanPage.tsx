@@ -20,6 +20,7 @@ import {
 } from '../../shared/plans';
 import type { KnowledgeStatus } from '../../shared/knowledge';
 import type { Workspace } from '../../shared/workspace';
+import { targetCountdownLabel } from '../../shared/workspace';
 import { Dialog } from '../ui/Dialog';
 import { ChevronDownIcon, ChevronRightIcon, PlusIcon } from '../ui/icons';
 import { Select } from '../ui/Select';
@@ -461,6 +462,13 @@ export function LongPlanPage({
   const progress = selectedPlan ? planProgress(selectedPlan) : null;
   const basis = selectedPlan ? planBasis(selectedPlan) : 'model';
   const recalibration = selectedPlan ? formatRecalibration(selectedPlan) : null;
+  // The countdown comes from the project's target date, recomputed from the
+  // real local `today` each render — never stored on the plan.
+  const countdown = useMemo(() => {
+    if (!selectedPlan) return undefined;
+    const workspace = workspaces.find((entry) => entry.id === selectedPlan.workspaceId);
+    return targetCountdownLabel(workspace?.targetDate, today);
+  }, [selectedPlan?.workspaceId, workspaces, today]);
 
   useEffect(() => {
     if (!focusPlanId) return;
@@ -737,6 +745,7 @@ export function LongPlanPage({
                 <p className="mt-1 text-[12px] text-gray-500 dark:text-[#8e8e93]">
                   {workspaceName(selectedPlan.workspaceId)} · {planRangeLabel(selectedPlan)} · 每周约{' '}
                   {selectedPlan.weeklyHours} 小时
+                  {countdown ? <span data-testid="plan-countdown"> · {countdown}</span> : null}
                 </p>
                 {recalibration ? (
                   <>

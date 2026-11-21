@@ -1,3 +1,4 @@
+import { daysUntilTarget } from '../../shared/workspace';
 import type { MemoryItem, Workspace, WorkspaceNote } from '../../shared/workspace';
 
 const MAX_PROMPT_NOTES = 8;
@@ -46,6 +47,10 @@ export function buildWorkspacePlanPrompt(input: WorkspacePlanPromptInput): Works
   if (input.workspace.description.trim()) {
     lines.push(`工作区说明：${input.workspace.description.trim()}`);
   }
+  // A target date turns planning into countdown-driven planning. Absent or
+  // unreadable, nothing is added, so the prompt stays byte-identical.
+  const countdown = targetCountdownLines(input.workspace.targetDate, input.date);
+  if (countdown !== null) lines.push(...countdown);
 
   const notes = input.notes.slice(0, MAX_PROMPT_NOTES);
   if (notes.length > 0) {
@@ -78,6 +83,31 @@ export function buildWorkspacePlanPrompt(input: WorkspacePlanPromptInput): Works
 
 function clip(value: string, maxLength: number): string {
   return value.length > maxLength ? `${value.slice(0, maxLength)}…` : value;
+}
+
+/**
+ * The countdown section of the planning prompt: the deadline, how many whole
+ * days remain on the plan's own date, and the instruction to stage the plan as
+ * review rounds. Returns null when there is no usable target date, so the
+ * prompt is unchanged for projects without one.
+ */
+export function targetCountdownLines(
+  targetDate: string | undefined,
+  date: string
+): string[] | null {
+  if (!targetDate) return null;
+  const days = daysUntilTarget(targetDate, date);
+  if (days === null) return null;
+  if (days < 0) {
+    return [
+      `目标日期：${targetDate}（已过去 ${-days} 天）`,
+      `请按复习轮次重新压缩安排（轮次：基础 → 强化 → 冲刺），优先补齐薄弱环节。`
+    ];
+  }
+  return [
+    `目标日期：${targetDate}（距离 ${date} 还有 ${days} 天）`,
+    `请把计划组织成复习轮次（轮次：基础 → 强化 → 冲刺），并按剩余的 ${days} 天为每一轮分配时间。`
+  ];
 }
 
 function availableSourceLabel(source: 'input' | 'workspace' | 'default' | undefined): string {

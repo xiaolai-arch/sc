@@ -91,6 +91,7 @@ export function ProjectsPage({
   const [deletingWorkspace, setDeletingWorkspace] = useState(false);
   const [confirmDeleteWorkspace, setConfirmDeleteWorkspace] = useState(false);
   const [minutesDraft, setMinutesDraft] = useState('');
+  const [targetDateDraft, setTargetDateDraft] = useState('');
 
   const workspaceId = workspace?.id ?? null;
   const editingWorkspace = editingFor !== null && editingFor === workspaceId;
@@ -98,6 +99,10 @@ export function ProjectsPage({
   useEffect(() => {
     setMinutesDraft(workspace?.availableMinutes ? String(workspace.availableMinutes) : '');
   }, [workspace?.id, workspace?.availableMinutes]);
+
+  useEffect(() => {
+    setTargetDateDraft(workspace?.targetDate ?? '');
+  }, [workspace?.id, workspace?.targetDate]);
 
   useEffect(() => {
     if (editingFor === null || editingFor === workspaceId) return;
@@ -176,6 +181,22 @@ export function ProjectsPage({
     try {
       await onUpdateWorkspace({ workspaceId: workspace.id, availableMinutes: Math.round(parsed) });
     } catch (cause) {
+      setWorkspaceError(friendlyErrorMessage(cause, '保存失败，请重试。'));
+    }
+  }
+
+  // An empty input clears the target date; a chosen date is saved as-is.
+  async function saveTargetDate(value: string) {
+    if (!workspace) return;
+    setTargetDateDraft(value);
+    setWorkspaceError(null);
+    try {
+      await onUpdateWorkspace({
+        workspaceId: workspace.id,
+        targetDate: value === '' ? null : value
+      });
+    } catch (cause) {
+      setTargetDateDraft(workspace.targetDate ?? '');
       setWorkspaceError(friendlyErrorMessage(cause, '保存失败，请重试。'));
     }
   }
@@ -373,6 +394,35 @@ export function ProjectsPage({
                   >
                     保存
                   </button>
+                </div>
+              </div>
+            ) : null}
+            {workspace && !editingWorkspace ? (
+              <div className="mt-4 flex items-center justify-between gap-2 border-t border-gray-100 pt-3 dark:border-white/[0.08]">
+                <label
+                  htmlFor="workspace-target-date"
+                  className="text-[12px] text-gray-500 dark:text-[#a1a1a6]"
+                >
+                  目标日期
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    id="workspace-target-date"
+                    aria-label="目标日期"
+                    type="date"
+                    value={targetDateDraft}
+                    onChange={(event) => void saveTargetDate(event.target.value)}
+                    className="h-8 rounded-lg border border-black/10 bg-white px-2 text-[12px] tabular-nums text-[#1d1d1f] outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:border-white/10 dark:bg-[#242426] dark:text-[#f5f5f7]"
+                  />
+                  {targetDateDraft ? (
+                    <button
+                      type="button"
+                      onClick={() => void saveTargetDate('')}
+                      className="rounded-full px-2 py-1 text-[12px] font-medium text-gray-500 hover:bg-black/[0.04] dark:text-[#a1a1a6] dark:hover:bg-white/[0.06]"
+                    >
+                      清除
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ) : null}
