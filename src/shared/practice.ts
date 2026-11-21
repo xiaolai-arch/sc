@@ -8,7 +8,12 @@
  * YAML frontmatter so they stay readable and editable in Obsidian.
  */
 
-/** Spaced-repetition intervals (days) for consecutive wrong answers. */
+/**
+ * Legacy fixed intervals (days). The main-process scheduler no longer uses
+ * these — it grows the interval on success and resets on failure
+ * (`src/main/practice/schedule.ts`). Kept for the browser mock API until it
+ * moves to the same schedule.
+ */
 export const PRACTICE_INTERVALS = [1, 3, 7] as const;
 
 export interface PracticeQuestion {
@@ -45,10 +50,13 @@ export type PracticeMistakeStatus = 'active' | 'resolved';
 
 /**
  * A wrong answer enters the mistake book. `priority` rises with each wrong
- * answer (0–3) and falls when the same question is answered correctly again;
- * two consecutive correct answers mark the mistake as resolved. Resolved
- * records stay in the vault for history but are excluded from `getMistakes`
- * and `getDue`.
+ * answer (0–3) and falls when the same question is answered correctly again.
+ * Scheduling follows the evidence on spaced practice: a correct answer grows
+ * the interval and moves `due` forward, a wrong answer resets it to one day,
+ * and a mistake is only resolved by a correct answer after an interval of at
+ * least three days has elapsed on a later day (never by two same-day answers).
+ * Resolved records stay in the vault for history but are excluded from
+ * `getMistakes` and `getDue`.
  */
 export interface PracticeMistake {
   id: string;
@@ -63,6 +71,15 @@ export interface PracticeMistake {
   correctStreak: number;
   priority: number;
   intervalDays: number;
+  /**
+   * Current memory stability in days — what `intervalDays` grows from on a
+   * successful review. Optional: records written before evidence-based
+   * scheduling carry no value and are migrated on the fly
+   * (`src/main/practice/schedule.ts`).
+   */
+  stabilityDays?: number;
+  /** Memory difficulty, 0 (easy) – 1 (hard). Optional, as above. */
+  difficulty?: number;
   /** Local calendar date (`YYYY-MM-DD`) the mistake should be reviewed. */
   due: string;
   status: PracticeMistakeStatus;

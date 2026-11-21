@@ -1,8 +1,7 @@
 import { promises as fs } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { formatLocalDate, parseLocalDate } from '../../shared/date';
+import { formatLocalDate } from '../../shared/date';
 import {
-  PRACTICE_INTERVALS,
   type CreatePracticeSetInput,
   type DeletePracticeSetInput,
   type ExportMistakeSheetInput,
@@ -37,6 +36,7 @@ import {
   serializeMistakesFile,
   serializePracticeSetFile
 } from './records';
+import { nextSchedule } from './schedule';
 import { buildSeedSets } from './seed';
 
 export interface PracticeServiceOptions {
@@ -79,12 +79,6 @@ function reviewSheetFile(root: string, workspaceId: string, date: string): strin
 function requireString(value: unknown, label: string): string {
   if (typeof value !== 'string' || value.trim() === '') throw new Error(`${label} is required`);
   return value;
-}
-
-function addDays(date: string, days: number): string {
-  const next = parseLocalDate(date);
-  next.setDate(next.getDate() + days);
-  return formatLocalDate(next);
 }
 
 function normalizeQuestions(input: unknown): PracticeQuestion[] {
@@ -133,9 +127,11 @@ interface MistakeSource {
 }
 
 /**
- * Applies one answer to the spaced-repetition record. A wrong answer creates or
- * advances a mistake; a correct answer lowers priority and resolves the
- * mistake after two consecutive correct answers.
+ * Applies one answer to the spaced-repetition record via the pure scheduler
+ * (`schedule.ts`): a wrong answer resets the interval to one day and raises
+ * difficulty; a correct answer grows the interval, moves `due` forward and may
+ * resolve the mistake once a spaced interval has elapsed. `correctStreak` is
+ * bookkeeping only — it no longer resolves a record by itself.
  */
 function applyMistakeAnswer(
   existing: PracticeMistake | undefined,
@@ -145,9 +141,11 @@ function applyMistakeAnswer(
   today: string
 ): PracticeMistake | null {
   if (!correct) {
+    const schedule = nextSchedule(
+      existing === undefined ? { intervalDays: 1, due: today } : existing,
+      { correct: false, today }
+    );
     const wrongCount = (existing?.wrongCount ?? 0) + 1;
-    const intervalDays =
-      PRACTICE_INTERVALS[Math.min(wrongCount - 1, PRACTICE_INTERVALS.length - 1)];
     return {
       id: existing?.id ?? newId('pm'),
       workspaceId: source.workspaceId,
@@ -160,21 +158,27 @@ function applyMistakeAnswer(
       wrongCount,
       correctStreak: 0,
       priority: Math.min(3, (existing?.priority ?? 0) + 1),
-      intervalDays,
-      due: addDays(today, intervalDays),
-      status: 'active',
+      intervalDays: schedule.intervalDays,
+      stabilityDays: schedule.stabilityDays,
+      difficulty: schedule.difficulty,
+      due: schedule.due,
+      status: schedule.status,
       createdAt: existing?.createdAt ?? answeredAt,
       updatedAt: answeredAt,
       lastAnsweredAt: answeredAt
     };
   }
   if (existing === undefined) return null;
-  const correctStreak = existing.correctStreak + 1;
+  const schedule = nextSchedule(existing, { correct: true, today });
   return {
     ...existing,
     priority: Math.max(0, existing.priority - 1),
-    correctStreak,
-    status: correctStreak >= 2 ? 'resolved' : 'active',
+    correctStreak: existing.correctStreak + 1,
+    intervalDays: schedule.intervalDays,
+    stabilityDays: schedule.stabilityDays,
+    difficulty: schedule.difficulty,
+    due: schedule.due,
+    status: schedule.status,
     updatedAt: answeredAt,
     lastAnsweredAt: answeredAt
   };
