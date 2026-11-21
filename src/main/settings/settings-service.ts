@@ -1,8 +1,9 @@
-import type {
-  AppSettings,
-  LocalCliEffort,
-  NotificationSettings,
-  ProviderConfig
+import {
+  MAX_ACCOUNTABILITY_NAME,
+  type AppSettings,
+  type LocalCliEffort,
+  type NotificationSettings,
+  type ProviderConfig
 } from '../../shared/types';
 import type { SettingsPatch } from '../../shared/ipc';
 import type { AppState, JsonStateStore } from '../state-store';
@@ -50,17 +51,52 @@ function normalizeSettings(settings: AppSettings): AppSettings {
       : createDefaultSettings('').displayName;
   // `strictMastery` is opt-in, so it is only carried (and later serialized)
   // when literally true. Absent, false or a junk value all mean the default.
-  const { strictMastery, ...rest } = settings;
+  const { strictMastery, accountabilityName, ...rest } = settings;
+  // The accountability name is local-only and off by default: only a valid,
+  // non-empty name is carried, so a settings file written before this feature
+  // (or after a clear) round-trips byte-identically.
+  const carriedName = normalizeAccountabilityName(accountabilityName);
   return {
     ...rest,
     displayName,
     ...(strictMastery === true ? { strictMastery: true } : {}),
+    ...(carriedName ? { accountabilityName: carriedName } : {}),
     notifications: normalizeNotifications(settings.notifications)
   };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+const NEWLINE_PATTERN = /[\r\n]/;
+
+/**
+ * Tolerant read of a stored accountability name: trimmed, single-line and at
+ * most `MAX_ACCOUNTABILITY_NAME` chars. Anything else reads as absent, so one
+ * hand edit in `state.json` cannot put a multi-line name into a reminder.
+ */
+function normalizeAccountabilityName(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const name = value.trim();
+  if (name === '' || NEWLINE_PATTERN.test(name)) return undefined;
+  if ([...name].length > MAX_ACCOUNTABILITY_NAME) return undefined;
+  return name;
+}
+
+/**
+ * Validates an accountability-name patch. An empty value turns the feature
+ * off; a non-empty one must be single-line and within the character limit.
+ */
+function validateAccountabilityName(value: unknown): string | undefined {
+  if (typeof value !== 'string') throw new Error('问责对象必须是文本。');
+  const name = value.trim();
+  if (name === '') return undefined;
+  if (NEWLINE_PATTERN.test(name)) throw new Error('问责对象不能包含换行。');
+  if ([...name].length > MAX_ACCOUNTABILITY_NAME) {
+    throw new Error(`问责对象不能超过 ${MAX_ACCOUNTABILITY_NAME} 字。`);
+  }
+  return name;
 }
 
 function nonEmptyString(value: unknown, label: string): string {
@@ -209,7 +245,17 @@ function mergeSettings(current: AppSettings, patch: unknown): AppSettings {
     patch.strictMastery === undefined
       ? current.strictMastery
       : validateStrictMastery(patch.strictMastery);
-  return strictMastery === true ? { ...next, strictMastery: true } : next;
+  const withStrictMastery =
+    strictMastery === true ? { ...next, strictMastery: true } : next;
+  // The accountability name is stored only when non-empty, so an empty patch
+  // clears it (and the key) rather than writing a blank string.
+  const accountabilityName =
+    patch.accountabilityName === undefined
+      ? current.accountabilityName
+      : validateAccountabilityName(patch.accountabilityName);
+  return accountabilityName === undefined
+    ? withStrictMastery
+    : { ...withStrictMastery, accountabilityName };
 }
 
 function validateBoolean(value: unknown): boolean {

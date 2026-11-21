@@ -1112,8 +1112,7 @@ test('a failing honest provider leaves the weekly message unchanged', async () =
   }
 });
 
-test('the morning check-in never reads the honest provider', async () => {
-  const { dir, value } = await store();
+test('the morning check-in never reads the honest provider', async () => {  const { dir, value } = await store();
   try {
     let called = false;
     const service = new ProactiveCheckInService({
@@ -1139,8 +1138,38 @@ test('the morning check-in never reads the honest provider', async () => {
   }
 });
 
-// --- the promise revisit (morning only) ------------------------------------
+test('the weekly message carries the accountability clause once, and the prompt does not', async () => {
+  const { dir, value } = await store();
+  try {
+    const clause = '你说过要做「写完第三章」，你告诉过 小林 的时间是 2026-11-20';
+    const client = new FakeModelClient(['这一周你完成了 3 个任务，稳中有进。']);
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: client,
+      getWeeklyOverview: async () => weeklyStats,
+      getWeeklyHonest: async () => ({ ...HONEST, accountability: clause }),
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
 
+    await service.check('weekly', '2026-11-01');
+
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    const text = conversation?.messages[0]?.text ?? '';
+    expect(text).toBe(
+      `这一周你完成了 3 个任务，稳中有进。\n${HONEST_LINES}\n${clause}`
+    );
+    // Exactly once, and never inside the model's prompt.
+    expect(text.split(clause)).toHaveLength(2);
+    expect(client.calls[0]?.messages[0]?.content ?? '').not.toContain(clause);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// --- the promise revisit (morning only) ------------------------------------
 function dueCommitment(text: string, due: string) {
   return async () => ({ text, due });
 }

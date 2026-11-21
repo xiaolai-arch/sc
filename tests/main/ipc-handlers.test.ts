@@ -503,8 +503,31 @@ test('routes strictMastery through settings and rejects a non-boolean', async ()
   expect(await handlers.getSettings()).not.toHaveProperty('strictMastery');
 });
 
-test('api key is never echoed by settings, bootstrap or workspace payloads', async () => {
-  const { context, dir } = await makeContext();
+test('routes the accountability name through settings, validates it and clears it', async () => {
+  const { context } = await makeContext();
+  const handlers = createIpcHandlers(context.api);
+
+  const saved = (await handlers.updateSettings({
+    accountabilityName: '  小林 '
+  })) as { accountabilityName?: string };
+  expect(saved.accountabilityName).toBe('小林');
+  expect(await handlers.getSettings()).toMatchObject({ accountabilityName: '小林' });
+
+  await expect(
+    handlers.updateSettings({ accountabilityName: '一二三四五六七八九十一二三四五六七八九十一' })
+  ).rejects.toThrow('问责对象不能超过 20 字。');
+  await expect(handlers.updateSettings({ accountabilityName: 42 })).rejects.toThrow(
+    '问责对象必须是文本。'
+  );
+
+  const cleared = (await handlers.updateSettings({ accountabilityName: '' })) as Record<
+    string,
+    unknown
+  >;
+  expect(cleared).not.toHaveProperty('accountabilityName');
+});
+
+test('api key is never echoed by settings, bootstrap or workspace payloads', async () => {  const { context, dir } = await makeContext();
   const handlers = createIpcHandlers(context.api);
   const key = 'sk-live-never-echo-this-987654321';
 

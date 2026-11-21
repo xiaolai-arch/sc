@@ -31,6 +31,9 @@ export interface StudyTask {
 export type LocalCliAgent = 'codex' | 'claude' | 'zcode' | 'opencode';
 export type LocalCliEffort = 'low' | 'medium' | 'high';
 
+/** Longest local accountability name, in characters (trimmed, single line). */
+export const MAX_ACCOUNTABILITY_NAME = 20;
+
 export type ProviderConfig =
   | { kind: 'anthropic'; model: string }
   | { kind: 'openai-compatible'; baseURL: string; model: string }
@@ -92,6 +95,14 @@ export interface AppSettings {
    * today's behaviour, and only `true` is ever serialized.
    */
   strictMastery?: boolean;
+  /**
+   * A real person the user names for themselves (friend, colleague, family),
+   * stored only on this machine. The app never contacts them; reminders may
+   * state one fact such as `你告诉过 A 的时间是 2026-11-20`. Trimmed, at most
+   * 20 characters, no newlines. Empty/absent means off and is never
+   * serialized, so legacy settings files round-trip byte-identically.
+   */
+  accountabilityName?: string;
 }
 
 export interface ReviewAnswers { completed: string; stuck: string; tomorrow: string; skipped?: boolean; }

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProviderConfig } from '../../src/shared/types';
@@ -410,4 +410,78 @@ test('a butler-recorded promise comes back once on the next morning check-in', a
   expect(raw).toContain('背 20 个单词');
   expect(raw).toContain("due: '2026-11-01'");
   expect(raw).toContain('status: open');
+});
+
+test('the accountability name reaches only the weekly clause, never a record', async () => {
+  const dir = await tempDir();
+  const model = new FakeModelClient([
+    // 1) the promise is recorded in the chat turn
+    {
+      text: '',
+      usage: { inputTokens: 0, outputTokens: 0 },
+      toolCalls: [
+        {
+          id: 'c1',
+          name: 'record_commitment',
+          arguments: { text: '写完第三章', due: '2026-10-31' }
+        }
+      ]
+    },
+    { text: '记下了。', usage: { inputTokens: 0, outputTokens: 0 } },
+    // 2) the promise is resolved as done, still in the past week
+    {
+      text: '',
+      usage: { inputTokens: 0, outputTokens: 0 },
+      toolCalls: [
+        { id: 'c2', name: 'resolve_commitment', arguments: { text: '写完第三章', outcome: 'done' } }
+      ]
+    },
+    { text: '做到了，很好。', usage: { inputTokens: 0, outputTokens: 0 } },
+    // 3) the Sunday review reply
+    '这一周稳中有进。'
+  ]);
+  const context = await createAppContext({
+    userDataPath: join(dir, 'user-data'),
+    defaultVaultPath: join(dir, 'vault'),
+    secretStore: new InMemorySecretStore(),
+    modelClient: model,
+    now: fixedNow
+  });
+  await context.api.updateSettings({ accountabilityName: '小林' });
+
+  await context.butler.send({ message: '我明天写完第三章' });
+  await context.butler.send({ message: '写完了' });
+
+  const notification = await context.checkIns.check('weekly', '2026-11-01');
+  expect(notification).not.toBeNull();
+  const conversation = await context.conversationStore.get(notification!.conversationId!);
+  const text = conversation?.messages[0]?.text ?? '';
+  const clause = '你说过要做「写完第三章」，你告诉过 小林 的时间是 2026-10-31';
+  expect(text.split(clause)).toHaveLength(2);
+  expect(text.endsWith(clause)).toBe(true);
+  // The model never sees the sentence, so it cannot reword it.
+  expect(model.calls.every((call) => !call.messages.some((message) => message.content.includes(clause)))).toBe(true);
+
+  // The user-delivered weekly review is the only surface allowed to state the
+  // name. Every record the app persists must not carry it: the vault (the
+  // commitments file included), the chat turns, and any review/data file.
+  for (const file of await readdir(join(dir, 'vault')).catch(() => [] as string[])) {
+    if (!file.endsWith('.md')) continue;
+    const raw = await readFile(join(dir, 'vault', file), 'utf8');
+    expect(raw).not.toContain('小林');
+  }
+  expect(await readFile(join(dir, 'vault', 'commitments.md'), 'utf8')).not.toContain('小林');
+  // Only the weekly check-in conversation holds the clause; the two chat turns
+  // that recorded and resolved the promise never mention the name.
+  const chatTexts: string[] = [];
+  for (const summary of await context.conversationStore.list()) {
+    const conversationRecord = await context.conversationStore.get(summary.id);
+    for (const message of conversationRecord?.messages ?? []) {
+      if (message.trigger === undefined) chatTexts.push(message.text);
+    }
+  }
+  expect(chatTexts.join('\n')).not.toContain('小林');
+  expect(await readFile(join(dir, 'user-data', 'state.json'), 'utf8')).toContain(
+    '"accountabilityName": "小林"'
+  );
 });

@@ -1391,6 +1391,11 @@ function requireSettingsPatch(value: unknown): SettingsPatch {
   if (input.strictMastery !== undefined && typeof input.strictMastery !== 'boolean') {
     throw new Error('严格掌握设置必须是布尔值。');
   }
+  // The service owns trimming, the length bound and the line check; the
+  // channel only rejects the wrong shape early.
+  if (input.accountabilityName !== undefined && typeof input.accountabilityName !== 'string') {
+    throw new Error('问责对象必须是文本。');
+  }
   return input as SettingsPatch;
 }
 
