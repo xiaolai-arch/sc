@@ -12,8 +12,9 @@ type RemindersPageProps = {
   onCreateReminder: (input: CreateReminderInput) => Promise<Reminder>;
   onUpdateReminder: (input: UpdateReminderInput) => Promise<Reminder>;
   onDeleteReminder?: (input: DeleteReminderInput) => Promise<void>;
-  snoozedToday: boolean;
-  onSnoozeCheckIns: () => void;
+  snoozedUntil: string;
+  onSnoozeCheckIns: (days: number) => void;
+  onResumeCheckIns: () => void;
   onOpenSidebar: () => void;
   onPrompt: (prompt: string) => void;
 };
@@ -23,8 +24,9 @@ export function RemindersPage({
   onCreateReminder,
   onUpdateReminder,
   onDeleteReminder,
-  snoozedToday,
+  snoozedUntil,
   onSnoozeCheckIns,
+  onResumeCheckIns,
   onOpenSidebar,
   onPrompt
 }: RemindersPageProps) {
@@ -36,8 +38,9 @@ export function RemindersPage({
           onCreateReminder={onCreateReminder}
           onUpdateReminder={onUpdateReminder}
           onDeleteReminder={onDeleteReminder}
-          snoozedToday={snoozedToday}
+          snoozedUntil={snoozedUntil}
           onSnoozeCheckIns={onSnoozeCheckIns}
+          onResumeCheckIns={onResumeCheckIns}
           onPrompt={onPrompt}
         />
       </div>

@@ -443,8 +443,9 @@ test('offers one reminder CTA in the empty state and none when reminders exist',
   const props = {
     onCreateReminder,
     onUpdateReminder,
-    snoozedToday: false,
+    snoozedUntil: '',
     onSnoozeCheckIns: vi.fn(),
+    onResumeCheckIns: vi.fn(),
     onPrompt: vi.fn()
   };
   const { rerender } = render(<RemindersSection reminders={[]} {...props} />);
