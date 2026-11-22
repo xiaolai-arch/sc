@@ -252,6 +252,133 @@ test('a stored busy day that rolls out of its week is repaired or dropped', () =
   ]);
 });
 
+test('a repaired fake week and the real week collapse into one record', async () => {
+  // sc-review follow-up: after the read-repair, a vault that holds BOTH the
+  // fake `2026-02-30` week (the old parser read it as Monday 2026-03-02) and
+  // a real 03-02 record must parse to ONE week, not two. The real record
+  // survives (earliest createdAt) with its id and createdAt; busy days are
+  // the union; the survivor's missing note falls back to the other record's.
+  await withVault(async (root) => {
+    const raw = [
+      '---',
+      'type: log',
+      'source: user',
+      'kind: week-availability',
+      'items:',
+      '  - id: wa-fake',
+      "    weekStart: '2026-02-30'",
+      "    busyDates: ['2026-02-30']",
+      "    note: '开学前赶due的一周'",
+      "    createdAt: '2026-02-24T20:30:00.000Z'",
+      '  - id: wa-real',
+      "    weekStart: '2026-03-02'",
+      "    busyDates: ['2026-03-03']",
+      "    createdAt: '2026-02-20T20:30:00.000Z'",
+      '---',
+      '# 下周安排',
+      '',
+      ''
+    ].join('\n');
+    await writeFile(weekAvailabilityFile(root), raw, 'utf8');
+
+    const service = createAvailabilityService({ root, now: () => NOW });
+    expect(await service.list()).toEqual([
+      {
+        id: 'wa-real',
+        weekStart: '2026-03-02',
+        busyDates: ['2026-03-02', '2026-03-03'],
+        note: '开学前赶due的一周',
+        createdAt: '2026-02-20T20:30:00.000Z'
+      }
+    ]);
+    // A pure read does not rewrite the file.
+    expect(await readFile(weekAvailabilityFile(root), 'utf8')).toBe(raw);
+
+    // The first write persists exactly one record for that week.
+    await service.set({ weekStart: '2026-03-09', busyDates: ['2026-03-10'] });
+    const reread = parseWeekAvailabilityFile(
+      await readFile(weekAvailabilityFile(root), 'utf8')
+    );
+    expect(reread.map((entry) => entry.weekStart)).toEqual([
+      '2026-03-02',
+      '2026-03-09'
+    ]);
+    expect(reread[0]).toMatchObject({
+      id: 'wa-real',
+      createdAt: '2026-02-20T20:30:00.000Z',
+      busyDates: ['2026-03-02', '2026-03-03'],
+      note: '开学前赶due的一周'
+    });
+  });
+});
+
+test('the merge never touches a file whose weeks are distinct', () => {
+  // Weeks deliberately out of ascending order: a clean file must keep its
+  // exact records and order, so a parse→serialize round trip stays identical.
+  const clean: WeekAvailability[] = [
+    {
+      id: 'wa-later',
+      weekStart: '2026-12-07',
+      busyDates: ['2026-12-09'],
+      createdAt: '2026-11-22T20:30:00.000Z'
+    },
+    {
+      id: 'wa-earlier',
+      weekStart: '2026-11-23',
+      busyDates: ['2026-11-24'],
+      note: '期末周，全天都在赶due',
+      createdAt: '2026-11-15T20:30:00.000Z'
+    }
+  ];
+  const raw = serializeWeekAvailabilityFile(clean);
+  expect(parseWeekAvailabilityFile(raw)).toEqual(clean);
+  expect(serializeWeekAvailabilityFile(parseWeekAvailabilityFile(raw))).toBe(raw);
+});
+
+test('same-week duplicates collapse identically regardless of their order in the file', () => {
+  // Same createdAt: the tie falls to the smaller id (wa-a), so both orders of
+  // the same two entries parse to one identical merged record — and the
+  // survivor's own note wins over the other record's.
+  const file = (entries: string[]) =>
+    [
+      '---',
+      'type: log',
+      'source: user',
+      'kind: week-availability',
+      'items:',
+      ...entries,
+      '---',
+      '# 下周安排',
+      '',
+      ''
+    ].join('\n');
+  const a = [
+    '  - id: wa-a',
+    "    weekStart: '2026-11-23'",
+    "    busyDates: ['2026-11-24']",
+    "    note: '甲的备注'",
+    "    createdAt: '2026-11-22T20:30:00.000Z'"
+  ];
+  const b = [
+    '  - id: wa-b',
+    "    weekStart: '2026-11-23'",
+    "    busyDates: ['2026-11-26']",
+    "    note: '乙的备注'",
+    "    createdAt: '2026-11-22T20:30:00.000Z'"
+  ];
+  const merged = [
+    {
+      id: 'wa-a',
+      weekStart: '2026-11-23',
+      busyDates: ['2026-11-24', '2026-11-26'],
+      note: '甲的备注',
+      createdAt: '2026-11-22T20:30:00.000Z'
+    }
+  ];
+  expect(parseWeekAvailabilityFile(file([...a, ...b]))).toEqual(merged);
+  expect(parseWeekAvailabilityFile(file([...b, ...a]))).toEqual(merged);
+});
+
 test('set stores sorted deduplicated dates with an optional trimmed note', async () => {
   await withVault(async (root) => {
     const service = createAvailabilityService({ root, now: () => NOW });

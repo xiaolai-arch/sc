@@ -139,9 +139,55 @@ function coerceWeekAvailability(value: unknown): WeekAvailability | null {
 export function parseWeekAvailabilityFile(raw: string): WeekAvailability[] {
   const { meta } = parseNote(raw);
   if (!Array.isArray(meta.items)) return [];
-  return meta.items
-    .map(coerceWeekAvailability)
-    .filter((entry): entry is WeekAvailability => entry !== null);
+  return mergeDuplicateWeeks(
+    meta.items
+      .map(coerceWeekAvailability)
+      .filter((entry): entry is WeekAvailability => entry !== null)
+  );
+}
+
+/**
+ * Collapses records that name the same week into one, deterministically.
+ *
+ * A repaired fake `weekStart` (the old parser read `2026-02-30` as Monday
+ * `2026-03-02`) can collide with a real record for that same week, and this
+ * module must never hand out the same week twice. The survivor is the record
+ * with the earliest `createdAt`, ties falling to the smaller `id` — both
+ * compared in code-unit order, so neither the host locale nor the file's
+ * entry order can decide. Its id and createdAt live on; busy days are the
+ * deduplicated, ascending union; the note is the survivor's own, or — when it
+ * has none — the earliest non-empty note among the others in that same
+ * deterministic order. Weeks that appear once pass through untouched, so a
+ * clean file keeps its exact records and order and serializes byte-identically.
+ */
+function mergeDuplicateWeeks(records: WeekAvailability[]): WeekAvailability[] {
+  const byWeek = new Map<string, WeekAvailability[]>();
+  for (const record of records) {
+    const bucket = byWeek.get(record.weekStart);
+    if (bucket === undefined) byWeek.set(record.weekStart, [record]);
+    else bucket.push(record);
+  }
+  return [...byWeek.values()].map((group) => {
+    if (group.length === 1) return group[0]!;
+    const ordered = [...group].sort(compareStoredRecords);
+    const survivor = ordered[0]!;
+    const note =
+      survivor.note ?? ordered.find((entry) => entry.note !== undefined)?.note;
+    return {
+      id: survivor.id,
+      weekStart: survivor.weekStart,
+      busyDates: [...new Set(ordered.flatMap((entry) => entry.busyDates))].sort(),
+      createdAt: survivor.createdAt,
+      ...(note !== undefined ? { note } : {})
+    };
+  });
+}
+
+/** Code-unit order on (createdAt, id): total, locale-free, file-order-free. */
+function compareStoredRecords(a: WeekAvailability, b: WeekAvailability): number {
+  if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? -1 : 1;
+  if (a.id !== b.id) return a.id < b.id ? -1 : 1;
+  return 0;
 }
 
 /**
