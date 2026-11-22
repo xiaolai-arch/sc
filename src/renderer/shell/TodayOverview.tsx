@@ -6,7 +6,7 @@ import type { PracticeAttempt, PracticeMistake } from '../../shared/practice';
 import { planProgress } from '../../shared/plans';
 import type { LongPlan } from '../../shared/plans';
 import type { Reminder, Workspace, WorkspaceTask } from '../../shared/workspace';
-import { daysUntilTarget, reminderState, targetCountdownLabel } from '../../shared/workspace';
+import { daysUntilTarget, effectiveReminderState, reminderState, targetCountdownLabel } from '../../shared/workspace';
 import { accuracyTrend } from './accuracy-trend';
 import { ChevronRightIcon, CheckIcon, SendIcon } from '../ui/icons';
 import { PageFrame } from './PageFrame';
@@ -169,7 +169,7 @@ function reminderTime(reminder: Reminder): string {
     : reminder.time;
 }
 
-function upcomingReminders(reminders: Reminder[]): Reminder[] {
+function upcomingReminders(reminders: Reminder[], today: string): Reminder[] {
   const now = new Date();
   const minutes = now.getHours() * 60 + now.getMinutes();
   const toMinutes = (time: string): number => {
@@ -177,8 +177,11 @@ function upcomingReminders(reminders: Reminder[]): Reminder[] {
     return (hour ?? 0) * 60 + (minute ?? 0);
   };
   return reminders
-    // `done` means the user finished it, so it is no longer upcoming.
-    .filter((reminder) => reminder.enabled && reminderState(reminder) !== 'done')
+    // `done` means the user finished it, so it is no longer upcoming — but only
+    // for the day it was finished. `today` is threaded in from the caller (the
+    // shell's single clock), never recomputed here, so crossing midnight
+    // restores the reminder on the next render.
+    .filter((reminder) => reminder.enabled && effectiveReminderState(reminder, today) !== 'done')
     .sort((a, b) => {
       const aTime = reminderTime(a);
       const bTime = reminderTime(b);
@@ -220,7 +223,7 @@ export function TodayOverview({
         : null,
     [priorities, tasks, workspaces, today]
   );
-  const upcoming = useMemo(() => upcomingReminders(reminders), [reminders]);
+  const upcoming = useMemo(() => upcomingReminders(reminders, today), [reminders, today]);
   // recomputed from `today` on every render, never cached at plan time.
   // The countdown belongs to the Today page, not the compact chat-home card.
   const countdown = useMemo(() => {

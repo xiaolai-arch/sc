@@ -5,6 +5,8 @@ import type { AppSettings } from '../shared/types';
 import { MAX_TASK_CUE_LENGTH, REMINDER_STATES, isTargetDate, taskCueLength, type ReminderState } from '../shared/workspace';
 import type {
   BackupResult,
+  ListCommitmentsInput,
+  ResolveCommitmentEntryInput,
   RestoreResult,
   SettingsPatch,
   StudyCoachApi
@@ -179,7 +181,13 @@ export const IPC_CHANNELS = {
   // Free recall: appended last so every existing channel keeps its position.
   submitPracticeShortAnswer: 'study-coach:practice:submit-short-answer',
   // Read-only promises; appended last so every existing channel keeps its position.
-  listPendingCommitments: 'study-coach:commitments:pending'
+  listPendingCommitments: 'study-coach:commitments:pending',
+  // iter30: act on promises, and read/clear week availability. Appended last
+  // for the same stability reason; no second channel constant set.
+  listCommitments: 'study-coach:commitments:list',
+  resolveCommitmentEntry: 'study-coach:commitments:resolve',
+  listWeekAvailability: 'study-coach:week-availability:list',
+  clearWeekAvailability: 'study-coach:week-availability:clear'
 } as const;
 
 /** Streaming uses a separate request/event pair so the request map stays stable. */
@@ -802,6 +810,50 @@ function requirePendingCommitments(value: unknown): { byDate: string } {
   const byDate = requireString(input.byDate, '日期');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(byDate)) throw new Error('日期格式必须为 YYYY-MM-DD。');
   return { byDate };
+}
+
+/** Optional `{ includeResolved }`; a non-boolean flag is rejected, not coerced. */
+function requireListCommitments(value: unknown): ListCommitmentsInput {
+  if (value === undefined || value === null) return {};
+  const input = requireObject(value, '读取承诺');
+  if (input.includeResolved !== undefined && typeof input.includeResolved !== 'boolean') {
+    throw new Error('includeResolved 必须是布尔值。');
+  }
+  return input.includeResolved === undefined
+    ? {}
+    : { includeResolved: input.includeResolved };
+}
+
+const COMMITMENT_ACTIONS = ['reschedule', 'drop', 'done'] as const;
+
+/** 改期 needs a real date no earlier than today; the other actions take none. */
+function requireResolveCommitmentEntry(value: unknown): ResolveCommitmentEntryInput {
+  const input = requireObject(value, '处理承诺');
+  const id = requireString(input.id, '承诺 ID');
+  if (
+    typeof input.action !== 'string' ||
+    !(COMMITMENT_ACTIONS as readonly string[]).includes(input.action)
+  ) {
+    throw new Error('承诺操作无效。');
+  }
+  if (input.action === 'reschedule') {
+    const due = requireString(input.due, '新日期');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) {
+      throw new Error('新日期格式必须为 YYYY-MM-DD。');
+    }
+    return { id, action: 'reschedule', due };
+  }
+  return { id, action: input.action as 'drop' | 'done' };
+}
+
+/** The Monday starting the week to clear; a bad shape is rejected early. */
+function requireClearWeekAvailability(value: unknown): { weekStart: string } {
+  const input = requireObject(value, '清除一周安排');
+  const weekStart = requireString(input.weekStart, '周起始日');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) {
+    throw new Error('周起始日格式必须为 YYYY-MM-DD。');
+  }
+  return { weekStart };
 }
 
 /**
@@ -1470,6 +1522,12 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
       api.submitPracticeShortAnswer(requireSubmitShortAnswer(input)),
     listPendingCommitments: async (input) =>
       api.listPendingCommitments(requirePendingCommitments(input)),
+    listCommitments: async (input) => api.listCommitments(requireListCommitments(input)),
+    resolveCommitmentEntry: async (input) =>
+      api.resolveCommitmentEntry(requireResolveCommitmentEntry(input)),
+    listWeekAvailability: async () => api.listWeekAvailability(),
+    clearWeekAvailability: async (input) =>
+      api.clearWeekAvailability(requireClearWeekAvailability(input)),
     getPracticeMistakes: async (input) => api.getPracticeMistakes(requireString(input, '项目 ID')),
     getPracticeDue: async (input) => api.getPracticeDue(requirePracticeDue(input)),
     listPracticeAttempts: async (input) =>
@@ -1991,6 +2049,11 @@ export function createStudyCoachBridge(
     submitPracticeShortAnswer: (input) =>
       call(IPC_CHANNELS.submitPracticeShortAnswer, input),
     listPendingCommitments: (input) => call(IPC_CHANNELS.listPendingCommitments, input),
+    listCommitments: (input) => call(IPC_CHANNELS.listCommitments, input),
+    resolveCommitmentEntry: (input) =>
+      call(IPC_CHANNELS.resolveCommitmentEntry, input),
+    listWeekAvailability: () => call(IPC_CHANNELS.listWeekAvailability),
+    clearWeekAvailability: (input) => call(IPC_CHANNELS.clearWeekAvailability, input),
     async stream(input, onEvent) {
       const requestId = createRequestId();
       const unsubscribe = subscribe?.(BUTLER_STREAM_CHANNELS.event, (payload) => {

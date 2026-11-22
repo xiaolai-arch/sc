@@ -106,6 +106,26 @@ test('auto-schedules open tasks around pinned blocks', () => {
   ]);
 });
 
+test('a 23:30 fixed start stays at 23:30 and blocks auto-scheduling', () => {
+  // Acceptance 14: the late fixed block is not moved off its own time, and no
+  // auto-scheduled task is allowed to occupy its slot.
+  const now = new Date(2026, 10, 1, 7, 0);
+  const late = { ...task('late', '错题本', 'pending', 45), startAt: '2026-11-01T23:30' };
+  const loose = task('loose', '背单词', 'pending', 30);
+
+  const { entries, unscheduled } = buildDailySchedule([late, loose], [workspace], 8, now);
+
+  const lateEntry = entries.find((entry) => entry.title === '错题本')!;
+  expect([lateEntry.time, lateEntry.pinned]).toEqual(['23:30', true]);
+  // The loose task takes the earliest free slot, never the pinned block's.
+  const looseEntry = entries.find((entry) => entry.title === '背单词');
+  expect(looseEntry?.time).toBe('08:00');
+  expect(entries.some((entry) => entry.time === '23:30' && entry.title !== '错题本')).toBe(false);
+  expect(unscheduled).toBe(0);
+  // Every auto-scheduled block finishes before the pinned 23:30 slot starts.
+  expect(entries.map((entry) => entry.time)).toEqual(['08:00', '23:30']);
+});
+
 test('leaves tasks pinned to another day out of today', () => {
   const now = new Date(2026, 10, 1, 7, 0);
   const tomorrow = { ...task('tomorrow', '明天的真题', 'pending', 60), startAt: '2026-11-02T09:00' };

@@ -836,11 +836,18 @@ export function createWorkspaceService(
             lastError: null
           });
         } else if (input.state === 'done') {
-          next = applyReminderStatePatch(next, { state: 'done', postponedTo: null });
+          // Record the day the user finished it: `done` only suppresses the
+          // reminder for today, and the next day reads back as pending.
+          next = applyReminderStatePatch(next, {
+            state: 'done',
+            doneAt: formatLocalDate(new Date()),
+            postponedTo: null
+          });
         } else if (input.state === 'pending') {
           // 重新启用: back on the regular schedule with a clean slate.
           next = applyReminderStatePatch(next, {
             state: 'pending',
+            doneAt: null,
             postponedTo: null,
             lastError: null
           });

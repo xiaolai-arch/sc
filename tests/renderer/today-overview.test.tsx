@@ -273,6 +273,90 @@ test('shows a postponed reminder at its new time and hides completed ones today'
   expect(afterDone.queryByText('喝水')).not.toBeInTheDocument();
 });
 
+test('a reminder done today leaves 接下来 and returns on the next day', () => {
+  // Judgement is effectiveReminderState(reminder, today) with the caller's
+  // today, so the same stored record flips at midnight without any write.
+  const doneToday = { id: 'r1', time: '12:00', label: '喝水', enabled: true, state: 'done' as const, doneAt: '2026-11-21' };
+  const renderCard = (today: string) =>
+    render(
+      <TodayOverview
+        tasks={[]}
+        workspaces={[BASELINE_WORKSPACE]}
+        reminders={[doneToday]}
+        longPlans={[]}
+        today={today}
+        onOpenSidebar={vi.fn()}
+        onOpenWorkspace={vi.fn()}
+        onOpenSchedule={vi.fn()}
+        onOpenPlan={vi.fn()}
+        onOpenReminders={vi.fn()}
+        onToggleTask={vi.fn()}
+        onPrompt={vi.fn()}
+      />
+    );
+
+  const todayView = renderCard('2026-11-21');
+  const sectionToday = within(todayView.container.querySelector('section[aria-label="最近提醒"]') as HTMLElement);
+  expect(sectionToday.queryByText('喝水')).not.toBeInTheDocument();
+  expect(sectionToday.getByText('还没有开启的提醒。')).toBeInTheDocument();
+  todayView.unmount();
+
+  // Crossing midnight the same record is upcoming again.
+  const nextDayView = renderCard('2026-11-22');
+  const sectionNext = within(nextDayView.container.querySelector('section[aria-label="最近提醒"]') as HTMLElement);
+  expect(sectionNext.getByText('喝水')).toBeInTheDocument();
+  nextDayView.unmount();
+});
+
+test('a task with a 截止日期 shows the suffix and one without does not', () => {
+  const due: WorkspaceTask = {
+    id: 't-due',
+    workspaceId: 'ws-exam',
+    title: '实验报告',
+    subject: '数学',
+    durationMin: 45,
+    acceptance: '',
+    status: 'pending',
+    due: '2026-12-01'
+  };
+  const { container } = render(
+    <TodayOverview
+      tasks={[due]}
+      workspaces={[BASELINE_WORKSPACE]}
+      reminders={[]}
+      longPlans={[]}
+      today="2026-11-21"
+      onOpenSidebar={vi.fn()}
+      onOpenWorkspace={vi.fn()}
+      onOpenSchedule={vi.fn()}
+      onOpenPlan={vi.fn()}
+      onOpenReminders={vi.fn()}
+      onToggleTask={vi.fn()}
+      onPrompt={vi.fn()}
+    />
+  );
+
+  expect(container.textContent).toContain('截止 12-01');
+
+  const { container: bare } = render(
+    <TodayOverview
+      tasks={[{ ...due, id: 't-bare', due: undefined }]}
+      workspaces={[BASELINE_WORKSPACE]}
+      reminders={[]}
+      longPlans={[]}
+      today="2026-11-21"
+      onOpenSidebar={vi.fn()}
+      onOpenWorkspace={vi.fn()}
+      onOpenSchedule={vi.fn()}
+      onOpenPlan={vi.fn()}
+      onOpenReminders={vi.fn()}
+      onToggleTask={vi.fn()}
+      onPrompt={vi.fn()}
+    />
+  );
+  expect(bare.textContent).not.toContain('截止');
+});
+
 test('settings expose the four groups', async () => {
   setup();
   await screen.findByRole('region', { name: '接下来' });

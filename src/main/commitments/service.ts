@@ -67,6 +67,12 @@ export interface ResolveCommitmentInput {
  */
 export interface CommitmentService {
   list(): Promise<Commitment[]>;
+  /**
+   * Display projection for the reminders page: open promises by due date, then
+   * `createdAt`, with closed entries appended (most recently resolved first)
+   * only when `includeResolved` is set. Never invents fields.
+   */
+  listSummaries(input?: { includeResolved?: boolean }): Promise<CommitmentSummaryRecord[]>;
   create(input: CreateCommitmentInput): Promise<Commitment>;
   resolve(input: ResolveCommitmentInput): Promise<Commitment>;
   /** Open promises due on or before `byDate`, most overdue first. */
@@ -142,6 +148,25 @@ export function createCommitmentService(
       return readAll();
     },
 
+    async listSummaries(input): Promise<CommitmentSummaryRecord[]> {
+      const commitments = await readAll();
+      const open = commitments
+        .filter((entry) => entry.status === 'open')
+        .sort(
+          (a, b) => a.due.localeCompare(b.due) || a.createdAt.localeCompare(b.createdAt)
+        );
+      const summaries = open.map(summarizeCommitment);
+      if (input?.includeResolved !== true) return summaries;
+      const resolved = commitments
+        .filter((entry) => entry.status !== 'open')
+        .sort(
+          (a, b) =>
+            (b.resolvedAt ?? '').localeCompare(a.resolvedAt ?? '') ||
+            a.due.localeCompare(b.due)
+        );
+      return [...summaries, ...resolved.map(summarizeCommitment)];
+    },
+
     async create(input: CreateCommitmentInput): Promise<Commitment> {
       const text = requireText(input?.text);
       const workspaceId = normalizeWorkspace(input?.workspaceId);
@@ -176,6 +201,15 @@ export function createCommitmentService(
         throw new Error('请提供 outcome（done / dropped）或 newDue。');
       }
       const wanted = newDue ? newDue : undefined;
+      // The one authoritative lower bound for a reschedule. Every entry point
+      // goes through `resolve` — the reminders page, the IPC channel, the
+      // butler's resolve_commitment tool, and any script repairing the vault —
+      // so a promise can never be moved into the past behind the UI's back.
+      // `now` is the caller's clock (context.ts passes its single `now`), so
+      // this does not introduce a second source of "today".
+      if (wanted !== undefined && wanted < addLocalDays(now(), 0)) {
+        throw new Error('改期日期不能早于今天。');
+      }
       return runExclusively(async () => {
         const commitments = await readAll();
         const match = matchCommitment(commitments, id && id !== '' ? id : undefined, text);

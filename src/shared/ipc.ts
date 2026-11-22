@@ -185,13 +185,54 @@ export interface SettingsPatch {
 }
 
 /**
- * Read-only promises feed the notification center. Writing a promise stays in
- * chat (`record_commitment` / `resolve_commitment`), so the renderer gets no
- * create/resolve channel here.
+ * The user acting on a promise from the reminders page. All three map onto the
+ * existing `resolve` semantics: 改期 keeps it open with a new due date, 放下 and
+ * 完成 close it.
+ */
+export type CommitmentAction = 'reschedule' | 'drop' | 'done';
+
+export interface ListCommitmentsInput {
+  /** When true, closed (done/dropped) entries are appended to the same list. */
+  includeResolved?: boolean;
+}
+
+export interface ResolveCommitmentEntryInput {
+  id: string;
+  action: CommitmentAction;
+  /** Required for `reschedule`; local date YYYY-MM-DD. */
+  due?: string;
+}
+
+/**
+ * Read-mostly promises feed the reminders page and the notification center.
+ * Creating a promise stays in chat (`record_commitment`); the renderer can only
+ * reschedule / drop / complete one.
  */
 export interface PromiseApi {
   /** Open promises due on or before `byDate` (local `YYYY-MM-DD`), oldest first. */
   listPendingCommitments(input: { byDate: string }): Promise<CommitmentSummary[]>;
+  /** Open promises by due date; `includeResolved` appends done/dropped entries. */
+  listCommitments(input?: ListCommitmentsInput): Promise<CommitmentSummary[]>;
+  /** 改期 / 放下 / 完成 a promise through the existing resolve semantics. */
+  resolveCommitmentEntry(input: ResolveCommitmentEntryInput): Promise<CommitmentSummary>;
+}
+
+/** The days of one week the user said are especially full. */
+export interface WeekAvailabilitySummary {
+  /** The Monday starting the week, YYYY-MM-DD. */
+  weekStart: string;
+  /** Dates inside that week the user named, ascending. */
+  busyDates: string[];
+  /** Optional context in the user's own words. */
+  note?: string;
+}
+
+/** Read-mostly week availability; the Sunday review writes it through chat. */
+export interface WeekAvailabilityApi {
+  /** Records from this week on, newest week first. */
+  listWeekAvailability(): Promise<WeekAvailabilitySummary[]>;
+  /** Removes one week's record; a missing week is a no-op. */
+  clearWeekAvailability(input: { weekStart: string }): Promise<void>;
 }
 
 /** Local-only usage accounting; nothing leaves this machine. */
@@ -236,6 +277,7 @@ export interface StudyCoachApi
     PlannerApi,
     LongPlanApi,
     PromiseApi,
+    WeekAvailabilityApi,
     ConversationApi,
     UsageApi,
     VideoNotesApi {

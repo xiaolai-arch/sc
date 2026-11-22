@@ -189,6 +189,12 @@ export interface Reminder {
   firedAt?: string;
   /** Local `YYYY-MM-DDTHH:mm` the reminder was postponed to. */
   postponedTo?: string;
+  /**
+   * Local `YYYY-MM-DD` the reminder was marked 完成. `done` only holds for that
+   * one day: `effectiveReminderState` reads it as `pending` from the next day.
+   * Absent on legacy records, whose `done` stays permanent (no migration).
+   */
+  doneAt?: string;
   /** Human-readable cause of the last delivery failure. */
   lastError?: string;
 }
@@ -200,6 +206,8 @@ export interface ReminderStatePatch {
   firedAt?: string | null;
   /** null clears the postponement. */
   postponedTo?: string | null;
+  /** null clears the day the reminder was marked 完成. */
+  doneAt?: string | null;
   /** null clears the recorded failure. */
   lastError?: string | null;
 }
@@ -207,6 +215,25 @@ export interface ReminderStatePatch {
 /** Reads the lifecycle state, treating a legacy record without one as pending. */
 export function reminderState(reminder: Pick<Reminder, 'state'>): ReminderState {
   return reminder.state ?? 'pending';
+}
+
+/**
+ * The state that governs whether a reminder still warrants attention *today*.
+ * A `done` reminder only stays done on the day it was marked; from the next
+ * day it is pending again, so a daily reminder resumes without the user having
+ * to click 重新启用. A legacy `done` without `doneAt` keeps its old, permanent
+ * behaviour. This is the single place the next-day rule lives — the scheduler
+ * and every renderer surface call it instead of comparing dates themselves.
+ */
+export function effectiveReminderState(
+  reminder: Pick<Reminder, 'state' | 'doneAt'>,
+  today: string
+): ReminderState {
+  const state = reminderState(reminder);
+  if (state !== 'done') return state;
+  // No recorded day (legacy) or an unreadable today: keep `done`.
+  if (!isTargetDate(reminder.doneAt) || !ISO_DATE.test(today)) return 'done';
+  return reminder.doneAt < today ? 'pending' : 'done';
 }
 
 /**
@@ -219,7 +246,7 @@ export function applyReminderStatePatch(
 ): Reminder {
   const next: Reminder = { ...reminder };
   if (patch.state !== undefined) next.state = patch.state;
-  for (const field of ['firedAt', 'postponedTo', 'lastError'] as const) {
+  for (const field of ['firedAt', 'postponedTo', 'doneAt', 'lastError'] as const) {
     const value = patch[field];
     if (value === undefined) continue;
     if (value === null) delete next[field];

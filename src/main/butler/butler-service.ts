@@ -163,7 +163,8 @@ export class ButlerServiceImpl implements ButlerService {
       effectiveInput,
       this.now(),
       this.knowledgeService,
-      this.profileService
+      this.profileService,
+      this.commitmentService
     );
     const cwd = this.cwdFor(context);
     const references = await this.loadReferences(context, message);
@@ -286,7 +287,8 @@ export class ButlerServiceImpl implements ButlerService {
       effectiveInput,
       this.now(),
       this.knowledgeService,
-      this.profileService
+      this.profileService,
+      this.commitmentService
     );
     const cwd = this.cwdFor(context);
     const references = await this.loadReferences(context, message);

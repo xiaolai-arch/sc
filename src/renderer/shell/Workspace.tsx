@@ -223,6 +223,8 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     memoryProfile,
     reminders,
     pendingCommitments,
+    commitments,
+    weekAvailability,
     longPlans,
     knowledgeTopics,
     loading,
@@ -247,6 +249,8 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     createReminder,
     updateReminder,
     deleteReminder,
+    resolveCommitmentEntry,
+    clearWeekAvailability,
     createMemory,
     createPracticeSet,
     updatePracticeSet,
@@ -1097,8 +1101,14 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
       setActionError('应用桥接不可用，请刷新页面重试。');
       return;
     }
+    // Record the mute's last day so the first check after the resume can say
+    // one factual sentence about it. `resumedFrom` is cleared again by the
+    // check that consumes it; an empty value never serializes.
+    const prior = snoozedUntil ?? '';
+    const resumePatch =
+      prior !== '' ? { snoozedUntil: '', resumedFrom: prior } : { snoozedUntil: '' };
     try {
-      const settings = await api.updateSettings({ notifications: { snoozedUntil: '' } });
+      const settings = await api.updateSettings({ notifications: resumePatch });
       setSnoozedUntil(settings.notifications.snoozedUntil ?? '');
     } catch (cause) {
       setActionError(messageOf(cause));
@@ -1694,6 +1704,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
               defaultWorkspaceId={projectId}
               focusPlanId={planFocusId}
               today={today}
+              weekAvailability={weekAvailability}
               onOpenSidebar={openSidebar}
               onCreatePlan={createLongPlan}
               onUpdatePlan={updateLongPlan}
@@ -1701,6 +1712,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
               onSetItemDone={setLongPlanItemDone}
               onDeletePlan={deleteLongPlan}
               onAddDayToSchedule={addPlanDayToSchedule}
+              onClearWeekAvailability={clearWeekAvailability}
             />
           ) : null}
 
@@ -1833,9 +1845,13 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
           {section === 'reminders' ? (
             <RemindersPage
               reminders={reminders}
+              commitments={commitments}
+              workspaces={workspaces}
+              today={today}
               onCreateReminder={createReminder}
               onUpdateReminder={updateReminder}
               onDeleteReminder={deleteReminder}
+              onResolveCommitment={resolveCommitmentEntry}
               snoozedUntil={snoozedUntil ?? ''}
               onSnoozeCheckIns={(days) => void snoozeCheckIns(days)}
               onResumeCheckIns={() => void resumeCheckIns()}

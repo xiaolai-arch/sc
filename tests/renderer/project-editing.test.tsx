@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { homeGreeting } from '../../src/shared/greeting';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Workspace } from '../../src/renderer/shell/Workspace';
 import { createMockApi } from '../../web/mock-api';
@@ -197,4 +197,67 @@ test('creates a repeating reminder, edits it and deletes it', async () => {
   await waitFor(() => expect(screen.queryByText('晨跑')).not.toBeInTheDocument());
   reminders = await api.getReminders();
   expect(reminders.some((item) => item.label === '晨跑')).toBe(false);
+});
+
+test('fills, echoes and clears 截止日期 and 固定开始时间 on a task', async () => {
+  const api = setup();
+  await openProjectTasks();
+
+  await userEvent.click(screen.getByRole('button', { name: '新增任务' }));
+  await userEvent.type(screen.getByLabelText('新任务标题'), '写完实验报告');
+  // The two explanations sit directly under the inputs, in the user's words.
+  expect(screen.getByText('截止日期只是「什么时候之前要做完」。')).toBeInTheDocument();
+  expect(
+    screen.getByText('固定开始时间会占住时间表，不会被自动排程挪走。')
+  ).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText('新任务截止日期'), {
+    target: { value: '2026-12-01' }
+  });
+  fireEvent.change(screen.getByLabelText('新任务固定开始时间'), {
+    target: { value: '2026-11-23T23:30' }
+  });
+  await userEvent.click(screen.getByRole('button', { name: '保存任务' }));
+
+  expect(await screen.findByText('写完实验报告')).toBeInTheDocument();
+  let snapshot = await api.getWorkspaceSnapshot('kaoyan');
+  const created = snapshot.tasks.find((task) => task.title === '写完实验报告');
+  expect(created).toMatchObject({ due: '2026-12-01', startAt: '2026-11-23T23:30' });
+
+  // The edit form echoes both stored values back.
+  await userEvent.click(screen.getByRole('button', { name: '编辑任务：写完实验报告' }));
+  expect(screen.getByLabelText('编辑任务截止日期')).toHaveValue('2026-12-01');
+  expect(screen.getByLabelText('编辑任务固定开始时间')).toHaveValue('2026-11-23T23:30');
+
+  // Clearing the inputs removes the values for real, not to empty strings.
+  fireEvent.change(screen.getByLabelText('编辑任务截止日期'), { target: { value: '' } });
+  fireEvent.change(screen.getByLabelText('编辑任务固定开始时间'), { target: { value: '' } });
+  await userEvent.click(screen.getByRole('button', { name: '保存修改' }));
+
+  await waitFor(async () => {
+    const reread = await api.getWorkspaceSnapshot('kaoyan');
+    const cleared = reread.tasks.find((task) => task.id === created!.id);
+    expect(cleared?.due ?? null).toBeNull();
+    expect(cleared?.startAt ?? null).toBeNull();
+  });
+});
+
+test('a datetime-local input cannot even hold a non-timestamp value', async () => {
+  // jsdom sanitizes like the real browser: the field never carries a string
+  // that is not a concrete date and time, so the form cannot send junk and a
+  // bad value degrades to an empty (cleared) field rather than a broken task.
+  const api = setup();
+  await openProjectTasks();
+
+  await userEvent.click(screen.getByRole('button', { name: '新增任务' }));
+  await userEvent.type(screen.getByLabelText('新任务标题'), '昨天晚上要做的事');
+  const input = screen.getByLabelText('新任务固定开始时间') as HTMLInputElement;
+  fireEvent.change(input, { target: { value: '昨天晚上' } });
+  expect(input.value).toBe('');
+  await userEvent.click(screen.getByRole('button', { name: '保存任务' }));
+
+  expect(await screen.findByText('昨天晚上要做的事')).toBeInTheDocument();
+  const snapshot = await api.getWorkspaceSnapshot('kaoyan');
+  const created = snapshot.tasks.find((task) => task.title === '昨天晚上要做的事');
+  expect(created?.startAt ?? null).toBeNull();
 });

@@ -18,6 +18,7 @@ import {
   buildCheckInPrompt,
   buildCheckInTemplate,
   commitmentCheckInLine,
+  resumeCheckInLine,
   weekAvailabilityQuestion,
   weeklyHonestLines,
   type CheckInTrigger,
@@ -58,6 +59,16 @@ export interface ProactiveCheckInOptions {
    * Absent, null or failing leaves the morning message byte-identical.
    */
   getDueCommitment?: (today: Date) => Promise<CommitmentLike | null>;
+  /**
+   * The last muted day of a mute that just ended, when this is the first check
+   * allowed to run after it. Absent or null keeps every message byte-identical.
+   */
+  getResume?: () => Promise<string | null>;
+  /**
+   * Consumes the pending resume once its one sentence has been generated, so
+   * the sentence is appended exactly once across all later checks.
+   */
+  consumeResume?: () => Promise<void>;
   now?: () => Date;
 }
 
@@ -134,6 +145,8 @@ export class ProactiveCheckInService {
   private readonly getDueCommitment:
     | ((today: Date) => Promise<CommitmentLike | null>)
     | undefined;
+  private readonly getResume: (() => Promise<string | null>) | undefined;
+  private readonly consumeResume: (() => Promise<void>) | undefined;
   private readonly now: () => Date;
 
   constructor(options: ProactiveCheckInOptions) {
@@ -146,6 +159,8 @@ export class ProactiveCheckInService {
     this.getWeeklyOverview = options.getWeeklyOverview;
     this.getWeeklyHonest = options.getWeeklyHonest;
     this.getDueCommitment = options.getDueCommitment;
+    this.getResume = options.getResume;
+    this.consumeResume = options.consumeResume;
     this.now = options.now ?? (() => new Date());
   }
 
@@ -178,6 +193,12 @@ export class ProactiveCheckInService {
     // undone. Checked before a conversation is created, so an on-track day
     // leaves no trace at all.
     if (trigger === 'behind' && !isBehindSchedule(context, date)) return null;
+    // Peek before composing: only a check that will actually run may speak the
+    // resume sentence. A peek failure skips the sentence but leaves the flag,
+    // so the next allowed check can still say it.
+    const resumeDay = this.getResume
+      ? await this.getResume().catch(() => null)
+      : null;
     // Only create the conversation once the check is certain to happen, so a
     // skipped check does not leave an empty "今天的检查" behind.
     const conversation =
@@ -201,7 +222,8 @@ export class ProactiveCheckInService {
       context,
       weeklyStats,
       weeklyHonest,
-      commitment
+      commitment,
+      resumeDay
     );
     // The due-mistake digest is a deterministic line on the morning message
     // only; it is computed once here so text and the surfaced body agree.
@@ -215,6 +237,12 @@ export class ProactiveCheckInService {
       source: 'check-in',
       trigger
     });
+    // The message landed: spend the pending resume so no later check repeats
+    // the sentence. A failed consume keeps the flag and would repeat it once —
+    // the honest failure mode for a write that could not be recorded.
+    if (resumeDay && this.consumeResume) {
+      await this.consumeResume().catch(() => undefined);
+    }
 
     const behind = trigger === 'behind';
     const body = buildCheckInNotificationBody(context, trigger, date);
@@ -283,6 +311,31 @@ export class ProactiveCheckInService {
   }
 
   private async generate(
+    trigger: CheckInTrigger,
+    date: string,
+    context: Awaited<ReturnType<typeof gatherContext>>,
+    weeklyStats: WeeklyOverviewLike | null = null,
+    weeklyHonest: WeeklyHonest | null = null,
+    commitment: CommitmentLike | null = null,
+    resumeDay: string | null = null
+  ): Promise<string> {
+    const composed = await this.composeBase(
+      trigger,
+      date,
+      context,
+      weeklyStats,
+      weeklyHonest,
+      commitment
+    );
+    // The mute-resume sentence is deterministic and never handed to the model,
+    // so it appears exactly once by construction: appended here, to whichever
+    // path produced the text, and only while the pending flag exists.
+    const resume = resumeCheckInLine(resumeDay, date);
+    return resume ? `${composed}\n${resume}` : composed;
+  }
+
+  /** The message text without the resume tail; the pre-iter30 shape. */
+  private async composeBase(
     trigger: CheckInTrigger,
     date: string,
     context: Awaited<ReturnType<typeof gatherContext>>,

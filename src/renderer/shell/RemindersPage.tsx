@@ -1,17 +1,25 @@
+import type { CommitmentSummary } from '../../shared/notifications';
+import type { ResolveCommitmentEntryInput } from '../../shared/ipc';
 import type {
   CreateReminderInput,
   DeleteReminderInput,
   Reminder,
-  UpdateReminderInput
+  UpdateReminderInput,
+  Workspace
 } from '../../shared/workspace';
+import { CommitmentsSection, RemindersSection } from './ProjectSections';
 import { PageFrame } from './PageFrame';
-import { RemindersSection } from './ProjectSections';
 
 type RemindersPageProps = {
   reminders: Reminder[];
+  /** Every promise, closed entries included; the section does the filtering. */
+  commitments: CommitmentSummary[];
+  workspaces: Workspace[];
+  today: string;
   onCreateReminder: (input: CreateReminderInput) => Promise<Reminder>;
   onUpdateReminder: (input: UpdateReminderInput) => Promise<Reminder>;
   onDeleteReminder?: (input: DeleteReminderInput) => Promise<void>;
+  onResolveCommitment: (input: ResolveCommitmentEntryInput) => Promise<CommitmentSummary>;
   snoozedUntil: string;
   onSnoozeCheckIns: (days: number) => void;
   onResumeCheckIns: () => void;
@@ -21,9 +29,13 @@ type RemindersPageProps = {
 
 export function RemindersPage({
   reminders,
+  commitments,
+  workspaces,
+  today,
   onCreateReminder,
   onUpdateReminder,
   onDeleteReminder,
+  onResolveCommitment,
   snoozedUntil,
   onSnoozeCheckIns,
   onResumeCheckIns,
@@ -35,12 +47,21 @@ export function RemindersPage({
       <div className="max-w-[720px]">
         <RemindersSection
           reminders={reminders}
+          today={today}
           onCreateReminder={onCreateReminder}
           onUpdateReminder={onUpdateReminder}
           onDeleteReminder={onDeleteReminder}
           snoozedUntil={snoozedUntil}
           onSnoozeCheckIns={onSnoozeCheckIns}
           onResumeCheckIns={onResumeCheckIns}
+          onPrompt={onPrompt}
+        />
+        {/* 承诺 lives on the reminders page, after the reminders themselves. */}
+        <CommitmentsSection
+          commitments={commitments}
+          workspaces={workspaces}
+          today={today}
+          onResolve={onResolveCommitment}
           onPrompt={onPrompt}
         />
       </div>

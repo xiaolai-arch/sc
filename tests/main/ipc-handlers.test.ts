@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ButlerService, WorkspaceService } from '../../src/shared/workspace';
@@ -284,6 +284,156 @@ test('reads pending promises for the day and rejects a bad date early', async ()
   );
   await expect(handlers.listPendingCommitments(null)).rejects.toThrow('读取承诺参数无效。');
   expect(listPendingCommitments).toHaveBeenCalledTimes(1);
+});
+
+test('acts on commitments and week availability over IPC', async () => {
+  const listCommitments = vi.fn().mockResolvedValue([]);
+  const resolveCommitmentEntry = vi
+    .fn()
+    .mockResolvedValue({ id: 'cm-1', text: '整理错题', due: '2026-11-25', status: 'open', createdAt: '2026-11-21T08:00:00.000Z' });
+  const listWeekAvailability = vi.fn().mockResolvedValue([]);
+  const clearWeekAvailability = vi.fn().mockResolvedValue(undefined);
+  const { context } = await makeContext();
+  const handlers = createIpcHandlers({
+    ...context.api,
+    listCommitments,
+    resolveCommitmentEntry,
+    listWeekAvailability,
+    clearWeekAvailability
+  });
+
+  await handlers.listCommitments({ includeResolved: true });
+  expect(listCommitments).toHaveBeenCalledWith({ includeResolved: true });
+  // No argument at all means the default open-only projection.
+  await handlers.listCommitments();
+  expect(listCommitments).toHaveBeenLastCalledWith({});
+
+  await handlers.resolveCommitmentEntry({ id: 'cm-1', action: 'reschedule', due: '2026-11-25' });
+  expect(resolveCommitmentEntry).toHaveBeenCalledWith({
+    id: 'cm-1',
+    action: 'reschedule',
+    due: '2026-11-25'
+  });
+  await handlers.resolveCommitmentEntry({ id: 'cm-2', action: 'drop' });
+  expect(resolveCommitmentEntry).toHaveBeenLastCalledWith({ id: 'cm-2', action: 'drop' });
+
+  await handlers.listWeekAvailability();
+  expect(listWeekAvailability).toHaveBeenCalledTimes(1);
+  await handlers.clearWeekAvailability({ weekStart: '2026-11-23' });
+  expect(clearWeekAvailability).toHaveBeenCalledWith({ weekStart: '2026-11-23' });
+
+  // Bad shapes are rejected in Chinese before any service call.
+  await expect(
+    handlers.listCommitments({ includeResolved: 'yes' } as never)
+  ).rejects.toThrow('includeResolved 必须是布尔值。');
+  await expect(
+    handlers.resolveCommitmentEntry({ id: 'cm-1', action: 'maybe' } as never)
+  ).rejects.toThrow('承诺操作无效。');
+  await expect(
+    handlers.resolveCommitmentEntry({ id: 'cm-1', action: 'reschedule', due: '周五' })
+  ).rejects.toThrow('新日期格式必须为 YYYY-MM-DD。');
+  await expect(
+    handlers.resolveCommitmentEntry({ id: '', action: 'done' })
+  ).rejects.toThrow('承诺 ID不能为空。');
+  // IPC validates the shape only; "must be a Monday" stays in the service.
+  await expect(
+    handlers.clearWeekAvailability({ weekStart: '2026-11-2' })
+  ).rejects.toThrow('周起始日格式必须为 YYYY-MM-DD。');
+  await expect(handlers.clearWeekAvailability(null)).rejects.toThrow(
+    '清除一周安排参数无效。'
+  );
+  expect(resolveCommitmentEntry).toHaveBeenCalledTimes(2);
+});
+
+test('a past reschedule is refused through the real IPC channel, not just the UI', async () => {
+  // Bypasses the renderer entirely: a caller that never touches the reminders
+  // page still goes through the handler -> service path, so the lower bound
+  // cannot be skipped. The context clock is 2026-10-31.
+  const { context, dir } = await makeContext();
+  const vault = join(dir, 'vault');
+  await mkdir(vault, { recursive: true });
+  await writeFile(
+    join(vault, 'commitments.md'),
+    [
+      '---',
+      'type: log',
+      'source: user',
+      'kind: commitments',
+      'items:',
+      '  - id: cm-past',
+      '    text: 整理错题',
+      "    due: '2026-10-30'",
+      '    status: open',
+      "    createdAt: '2026-10-30T08:00:00.000Z'",
+      '---',
+      '# 承诺',
+      '',
+      ''
+    ].join('\n'),
+    'utf8'
+  );
+  const handlers = createIpcHandlers(context.api);
+
+  await expect(
+    handlers.resolveCommitmentEntry({ id: 'cm-past', action: 'reschedule', due: '2026-10-30' })
+  ).rejects.toThrow('改期日期不能早于今天。');
+  await expect(
+    handlers.resolveCommitmentEntry({ id: 'cm-past', action: 'reschedule', due: '2026-01-05' })
+  ).rejects.toThrow('改期日期不能早于今天。');
+  // The file was not rewritten by a rejected call.
+  expect(
+    await readFile(join(vault, 'commitments.md'), 'utf8')
+  ).toContain("due: '2026-10-30'");
+
+  // Today is allowed, and the same channel then updates the entry.
+  const moved = await handlers.resolveCommitmentEntry({
+    id: 'cm-past',
+    action: 'reschedule',
+    due: '2026-10-31'
+  });
+  expect(moved).toMatchObject({ id: 'cm-past', due: '2026-10-31', status: 'open' });
+});
+
+test('rejects an invalid task time or due date in Chinese before the service', async () => {
+  const createTask = vi.fn();
+  const updateWorkspaceTask = vi.fn();
+  const { context } = await makeContext();
+  const handlers = createIpcHandlers({
+    ...context.api,
+    createTask,
+    updateWorkspaceTask
+  });
+
+  // A bad 固定开始时间 never reaches the vault (acceptance 15).
+  await expect(
+    handlers.createTask({
+      workspaceId: 'ws-1',
+      title: '极限',
+      subject: '数学',
+      durationMin: 30,
+      acceptance: '',
+      startAt: '昨天晚上'
+    })
+  ).rejects.toThrow('任务开始时间无效。');
+  await expect(
+    handlers.updateWorkspaceTask({ taskId: 't1', startAt: '2026-11-23 23:30' })
+  ).rejects.toThrow('任务开始时间无效。');
+  // Clearing with null is the supported way and passes through untouched.
+  await expect(
+    handlers.updateWorkspaceTask({ taskId: 't1', startAt: null })
+  ).resolves.toBeUndefined();
+  expect(updateWorkspaceTask).toHaveBeenCalledWith({ taskId: 't1', startAt: null });
+
+  // The same guard covers 截止日期: only a whole local date passes.
+  await expect(
+    handlers.updateWorkspaceTask({ taskId: 't1', due: '12-01' })
+  ).rejects.toThrow('任务截止日期无效。');
+  await expect(
+    handlers.updateWorkspaceTask({ taskId: 't1', due: null })
+  ).resolves.toBeUndefined();
+
+  expect(createTask).not.toHaveBeenCalled();
+  expect(updateWorkspaceTask).toHaveBeenCalledTimes(2);
 });
 
 test('reviews a short mistake over IPC with its typed answer', async () => {

@@ -25,6 +25,11 @@ function at(hour: number, minute: number): Date {
   return new Date(2026, 9, 31, hour, minute, 0);
 }
 
+/** The day after `at`: 2026-11-01, local time. */
+function nextDayAt(hour: number, minute: number): Date {
+  return new Date(2026, 10, 1, hour, minute, 0);
+}
+
 describe('Scheduler reminders', () => {
   test('fires each enabled reminder once and skips disabled ones', async () => {
     let now = at(11, 59);
@@ -284,7 +289,7 @@ describe('reminder lifecycle', () => {
         const current = records.get(id);
         if (!current) return;
         if (patch.state !== undefined) current.state = patch.state;
-        for (const field of ['firedAt', 'postponedTo', 'lastError'] as const) {
+        for (const field of ['firedAt', 'postponedTo', 'doneAt', 'lastError'] as const) {
           const value = patch[field];
           if (value === undefined) continue;
           if (value === null) delete current[field];
@@ -340,6 +345,7 @@ describe('reminder lifecycle', () => {
           state: 'fired',
           firedAt: now.toISOString(),
           postponedTo: null,
+          doneAt: null,
           lastError: null
         }
       }
@@ -389,6 +395,42 @@ describe('reminder lifecycle', () => {
     // must not write a spurious transition.
     expect(reminderState(store.records.get('water')!)).toBe('pending');
     expect(store.writes).toHaveLength(0);
+  });
+
+  test('DND never rewrites a reminder finished yesterday back to pending', async () => {
+    // The reminder was completed yesterday and is due again today, so
+    // effectiveReminderState reads it as pending. At 23:31 it falls inside
+    // DND. Reading the raw `state` here used to see `done` and write
+    // `{state:'pending'}` — leaving `pending` + `doneAt`, a combination the
+    // spec forbids and a badge that flips on its own at night.
+    const store = lifecycle([
+      {
+        id: 'water',
+        time: '12:00',
+        label: '喝水',
+        enabled: true,
+        state: 'done',
+        doneAt: '2026-10-30'
+      }
+    ]);
+    const scheduler = new Scheduler({
+      now: () => at(23, 31),
+      getSettings: async () =>
+        settings({ dndStart: '23:00', dndEnd: '07:00' }),
+      getReminders: store.getReminders,
+      onReminderState: store.onReminderState,
+      notify: () => undefined
+    });
+
+    const result = await scheduler.tick();
+    const suppressed = result.suppressed.filter((entry) => entry.kind === 'reminder');
+    expect(suppressed).toHaveLength(1);
+    expect(suppressed[0]).toMatchObject({ reason: 'dnd' });
+    // No lifecycle write at all: the record must stay exactly as the user left it.
+    expect(store.writes).toEqual([]);
+    const record = store.records.get('water')!;
+    expect(record.state).toBe('done');
+    expect(record.doneAt).toBe('2026-10-30');
   });
 
   test('a postponed reminder persists, waits for the new time and fires once', async () => {
@@ -537,23 +579,155 @@ describe('reminder lifecycle', () => {
     expect((await new Scheduler(options).tick()).delivered).toHaveLength(0);
   });
 
-  test('a done reminder stops firing until it is re-enabled', async () => {
+  test('a done reminder is quiet on its completion day and resumes the next day', async () => {
+    // 「完成」是当天的事，不是关掉：doneAt 记着完成的那一天，当天保持安静，
+    // 第二天 effectiveReminderState 读回 pending，无需手动「重新启用」。
     const store = lifecycle([
-      { id: 'water', time: '12:00', label: '喝水', enabled: true, state: 'done' }
+      {
+        id: 'water',
+        time: '12:00',
+        label: '喝水',
+        enabled: true,
+        state: 'done',
+        doneAt: '2026-10-31'
+      }
     ]);
     const notified: string[] = [];
-    const scheduler = new Scheduler({
-      now: () => at(12, 30),
-      getSettings: async () => settings(),
-      getReminders: store.getReminders,
-      onReminderState: store.onReminderState,
-      notify: (notification) => {
-        notified.push(notification.key);
+    const deliveredKeys = new Map<string, string[]>();
+    const deliveryLog = {
+      load: async (date: string) => deliveredKeys.get(date) ?? [],
+      save: async (date: string, keys: readonly string[]) => {
+        deliveredKeys.set(date, [...keys]);
       }
-    });
+    };
+    let now = at(12, 30);
+    const make = () =>
+      new Scheduler({
+        now: () => now,
+        getSettings: async () => settings(),
+        getReminders: store.getReminders,
+        onReminderState: store.onReminderState,
+        notify: (notification) => {
+          notified.push(notification.key);
+        },
+        deliveryLog
+      });
 
-    await scheduler.tick();
+    // The completion day itself: no trigger is even built, so nothing is
+    // delivered and no lifecycle write happens.
+    expect((await make().tick()).delivered).toHaveLength(0);
     expect(notified).toHaveLength(0);
     expect(store.writes).toHaveLength(0);
+
+    // The next day the same reminder fires again, and a successful delivery
+    // records `fired` while clearing `doneAt` (the completion day is over).
+    now = nextDayAt(12, 0);
+    expect((await make().tick()).delivered.map((entry) => entry.reminderId)).toEqual([
+      'water'
+    ]);
+    const record = store.records.get('water')!;
+    expect(record.state).toBe('fired');
+    expect(record).not.toHaveProperty('doneAt');
+    expect(store.writes.at(-1)?.patch).toMatchObject({ state: 'fired', doneAt: null });
+  });
+
+  test('a done daily reminder resumes on the next day its weekday matches', async () => {
+    // 2026-10-31 is a Saturday. days:[6] means Saturday-only, so finishing it
+    // on Saturday keeps Saturday quiet, the Sunday in between stays a non-day,
+    // and the next Saturday fires without any manual re-enable.
+    const store = lifecycle([
+      {
+        id: 'gym',
+        time: '12:00',
+        label: '跑步',
+        enabled: true,
+        days: [6],
+        state: 'done',
+        doneAt: '2026-10-31'
+      }
+    ]);
+    const deliveredKeys = new Map<string, string[]>();
+    const deliveryLog = {
+      load: async (date: string) => deliveredKeys.get(date) ?? [],
+      save: async (date: string, keys: readonly string[]) => {
+        deliveredKeys.set(date, [...keys]);
+      }
+    };
+    let now = at(12, 0);
+    const make = () =>
+      new Scheduler({
+        now: () => now,
+        getSettings: async () => settings(),
+        getReminders: store.getReminders,
+        onReminderState: store.onReminderState,
+        notify: () => undefined,
+        deliveryLog
+      });
+
+    // Completion day (Saturday): quiet even at and after its time.
+    expect((await make().tick()).delivered).toHaveLength(0);
+
+    // Sunday: the reset already applies, but Saturday-only never fires today.
+    now = nextDayAt(12, 0);
+    expect((await make().tick()).delivered).toHaveLength(0);
+
+    // Next Saturday: the reminder is back, exactly one week later.
+    now = new Date(2026, 10, 7, 12, 0, 0);
+    expect((await make().tick()).delivered.map((entry) => entry.reminderId)).toEqual(['gym']);
+  });
+
+  test('a legacy done reminder without doneAt stays quiet forever', async () => {
+    // Acceptance 19: old files recorded only `state: done` with no completion
+    // day. They must never come back as pending — silence is the contract.
+    const store = lifecycle([
+      { id: 'legacy', time: '12:00', label: '旧提醒', enabled: true, state: 'done' }
+    ]);
+    let now = at(12, 30);
+    const make = () =>
+      new Scheduler({
+        now: () => now,
+        getSettings: async () => settings(),
+        getReminders: store.getReminders,
+        onReminderState: store.onReminderState,
+        notify: () => undefined,
+        deliveryLog: {
+          load: async () => [],
+          save: async () => undefined
+        }
+      });
+
+    expect((await make().tick()).delivered).toHaveLength(0);
+    now = nextDayAt(12, 30);
+    expect((await make().tick()).delivered).toHaveLength(0);
+    now = new Date(2026, 10, 7, 12, 30, 0);
+    expect((await make().tick()).delivered).toHaveLength(0);
+    expect(store.writes).toHaveLength(0);
+  });
+
+  test('doneAt parses strictly and an old file without it round-trips byte-identically', () => {
+    // Covered in tests/main/reminders-records.test.ts; kept as a scheduler-level
+    // guard that a hand-edited bad `doneAt` never brings a reminder back.
+    const raw = [
+      '---',
+      'type: plan',
+      'source: user',
+      'items:',
+      '  - id: water',
+      '    time: "12:00"',
+      '    label: 喝水',
+      '    enabled: true',
+      '    state: done',
+      "    doneAt: '2026-13-40'",
+      '---',
+      '# 提醒',
+      ''
+    ].join('\n');
+    expect(parseRemindersFile(raw)[0]).toEqual({
+      id: 'water',
+      time: '12:00',
+      label: '喝水',
+      enabled: true,
+      state: 'done'
+    });
   });
 });

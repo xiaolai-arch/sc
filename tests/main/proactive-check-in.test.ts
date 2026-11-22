@@ -543,6 +543,227 @@ test('skips check-ins when notifications are disabled', async () => {
   }
 });
 
+// --- the mute-resume sentence -------------------------------------------------
+
+/**
+ * The same peek/consume pair `createAppContext` wires up: peek reports the
+ * pending resume day (a manual `resumedFrom` first, then an expired
+ * `snoozedUntil`), consume spends it in the settings object.
+ */
+function resumePair(notifications: AppSettings['notifications'], today: () => string) {
+  let consumed = 0;
+  return {
+    consumed: () => consumed,
+    getResume: async (): Promise<string | null> => {
+      const day = today();
+      if (notifications.resumedFrom && notifications.resumedFrom <= day) {
+        return notifications.resumedFrom;
+      }
+      if (notifications.snoozedUntil && notifications.snoozedUntil < day) {
+        return notifications.snoozedUntil;
+      }
+      return null;
+    },
+    consumeResume: async (): Promise<void> => {
+      consumed += 1;
+      if (notifications.resumedFrom) delete notifications.resumedFrom;
+      else if (notifications.snoozedUntil) notifications.snoozedUntil = '';
+    }
+  };
+}
+
+test('the first check after a mute ends says the sentence exactly once, template path', async () => {
+  const { dir, value } = await store();
+  try {
+    const notifications = { ...settings().notifications, snoozedUntil: '2026-11-03' };
+    let today = '2026-11-04';
+    const pair = resumePair(notifications, () => today);
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () => settings({ notifications }),
+      ...pair,
+      now: () => NOW
+    });
+
+    // A still-muted day stays silent and never spends the resume.
+    expect(await service.check('morning', '2026-11-03')).toBeNull();
+    expect(pair.consumed()).toBe(0);
+
+    // The first allowed day: the template message ends with the one sentence.
+    const morning = await service.check('morning', '2026-11-04');
+    expect(morning).not.toBeNull();
+    const summaries = await value.list();
+    expect(summaries).toHaveLength(1);
+    const conversation = await value.get(summaries[0]!.id);
+    const text = conversation!.messages[0]!.text;
+    expect(text.endsWith('你之前暂停到 11月3日，今天是恢复的第一天。')).toBe(true);
+    expect(text.split('今天是恢复的第一天')).toHaveLength(2);
+    // The flag was spent only after the message landed.
+    expect(pair.consumed()).toBe(1);
+    expect(notifications.snoozedUntil).toBe('');
+
+    // Morning and evening share one conversation per day (same title), so the
+    // evening message is the second one in it.
+    today = '2026-11-04';
+    const evening = await service.check('evening', '2026-11-04');
+    expect(evening).not.toBeNull();
+    const eveningText = (await value.get(summaries[0]!.id))!.messages.find(
+      (message) => message.trigger === 'evening'
+    )!.text;
+    expect(eveningText).not.toContain('恢复的第一天');
+    expect(pair.consumed()).toBe(1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a manual resume spends resumedFrom and keeps it off later messages', async () => {
+  const { dir, value } = await store();
+  try {
+    const notifications = {
+      ...settings().notifications,
+      resumedFrom: '2026-11-05'
+    };
+    let today = '2026-11-06';
+    const pair = resumePair(notifications, () => today);
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () => settings({ notifications }),
+      ...pair,
+      now: () => NOW
+    });
+
+    const morning = await service.check('morning', '2026-11-06');
+    expect(morning).not.toBeNull();
+    const text = (await value.get((await value.list())[0]!.id))!.messages[0]!.text;
+    // The sentence names the day the user picked, not the resume day.
+    expect(text.endsWith('你之前暂停到 11月5日，今天是恢复的第一天。')).toBe(true);
+    expect(notifications.resumedFrom).toBeUndefined();
+    // The stored mute was never touched by a manual resume.
+    expect(notifications.snoozedUntil).toBeUndefined();
+    expect(pair.consumed()).toBe(1);
+
+    // Later checks the same week carry no resume sentence.
+    today = '2026-11-07';
+    const next = await service.check('morning', '2026-11-07');
+    expect(next).not.toBeNull();
+    expect(
+      (await value.get((await value.list()).find((entry) => entry.title.includes('11-07'))!.id))!
+        .messages[0]!.text
+    ).not.toContain('恢复的第一天');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the model path also carries the sentence once, and never in the prompt', async () => {
+  const { dir, value } = await store();
+  try {
+    const notifications = { ...settings().notifications, snoozedUntil: '2026-11-05' };
+    const pair = resumePair(notifications, () => '2026-11-06');
+    const client = new FakeModelClient(['模型写的晨检，先做极限基础。']);
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: client,
+      getSettings: async () => settings({ notifications }),
+      ...pair,
+      now: () => NOW
+    });
+
+    const notification = await service.check('morning', '2026-11-06');
+    expect(notification).not.toBeNull();
+    const text = (await value.get((await value.list())[0]!.id))!.messages[0]!.text;
+    expect(text).toBe('模型写的晨检，先做极限基础。\n你之前暂停到 11月5日，今天是恢复的第一天。');
+    // The prompt the model saw says nothing about the pause: the sentence is
+    // code-owned, so no reword or duplicate is possible.
+    expect(client.calls[0]!.messages[0]!.content).not.toContain('恢复的第一天');
+    expect(pair.consumed()).toBe(1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('without a pending resume every check-in keeps its previous bytes', async () => {
+  const hookedStore = await store();
+  const plainStore = await store();
+  try {
+    const pair = resumePair(settings().notifications, () => '2026-10-31');
+    const fixture = behindService([
+      behindTask('t0', 'done'),
+      behindTask('t1', 'pending'),
+      behindTask('t2', 'pending')
+    ]);
+    const withHook = new ProactiveCheckInService({
+      conversationStore: hookedStore.value,
+      workspaceService: fixture,
+      modelClient: null,
+      getSettings: async () => settings(),
+      ...pair,
+      now: () => NOW
+    });
+    const withoutHook = new ProactiveCheckInService({
+      conversationStore: plainStore.value,
+      workspaceService: behindService([
+        behindTask('t0', 'done'),
+        behindTask('t1', 'pending'),
+        behindTask('t2', 'pending')
+      ]),
+      modelClient: null,
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    for (const trigger of ['morning', 'evening', 'weekly', 'behind'] as const) {
+      const hooked = await withHook.check(trigger, '2026-10-31');
+      const plain = await withoutHook.check(trigger, '2026-10-31');
+      expect(hooked).not.toBeNull();
+      expect(plain).not.toBeNull();
+      // The four template texts are byte-identical with and without the
+      // resume plumbing when nothing is pending.
+      const hookedConversation = await hookedStore.value.get(hooked!.conversationId!);
+      const plainConversation = await plainStore.value.get(plain!.conversationId!);
+      expect(hookedConversation!.messages[0]!.text).toBe(
+        plainConversation!.messages[0]!.text
+      );
+    }
+    expect(pair.consumed()).toBe(0);
+  } finally {
+    await rm(hookedStore.dir, { recursive: true, force: true });
+    await rm(plainStore.dir, { recursive: true, force: true });
+  }
+});
+
+test('a check that is skipped for budget never speaks or spends the resume', async () => {
+  const { dir, value } = await store();
+  try {
+    const notifications = { ...settings().notifications, snoozedUntil: '2026-11-05' };
+    const pair = resumePair(notifications, () => '2026-11-06');
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () => settings({ notifications }),
+      getDailyTokensUsed: async () => settings().budget.dailyTokens,
+      ...pair,
+      now: () => NOW
+    });
+
+    // The daily token budget is used up: the check is skipped, so the resume
+    // stays pending for the first check that is actually allowed to run.
+    expect(await service.check('morning', '2026-11-06')).toBeNull();
+    expect(await value.list()).toEqual([]);
+    expect(pair.consumed()).toBe(0);
+    expect(notifications.snoozedUntil).toBe('2026-11-05');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 function mistake(workspaceId: string, due: string): PracticeMistake {
   return {
     id: `m-${workspaceId}-${due}`,

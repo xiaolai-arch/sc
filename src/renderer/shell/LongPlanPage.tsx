@@ -21,6 +21,7 @@ import {
   weekProgress
 } from '../../shared/plans';
 import type { KnowledgeStatus } from '../../shared/knowledge';
+import type { WeekAvailabilitySummary } from '../../shared/ipc';
 import type { Workspace } from '../../shared/workspace';
 import { targetCountdownLabel } from '../../shared/workspace';
 import { Dialog } from '../ui/Dialog';
@@ -35,6 +36,17 @@ const KNOWLEDGE_STATUS_LABELS: Record<KnowledgeStatus, string> = {
   paused: '暂停'
 };
 
+const WEEKDAY_WORDS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] as const;
+
+/** `周二、周四` for stored busy dates; falls back to the raw date when odd. */
+function busyDatesLabel(busyDates: readonly string[]): string {
+  const words = busyDates.map((date) => {
+    const weekday = new Date(`${date}T00:00:00Z`).getUTCDay(); // 0 = Sunday
+    return WEEKDAY_WORDS[(weekday + 6) % 7] ?? date;
+  });
+  return words.join('、') || '（未指明哪几天）';
+}
+
 type LongPlanPageProps = {
   plans: LongPlan[];
   workspaces: Workspace[];
@@ -42,6 +54,8 @@ type LongPlanPageProps = {
   /** Opens this plan when the page mounts (global-search deep link). */
   focusPlanId?: string | null;
   today: string;
+  /** Weeks from this week on that the user said are especially full. */
+  weekAvailability?: WeekAvailabilitySummary[];
   onOpenSidebar: () => void;
   onCreatePlan: (input: CreateLongPlanInput) => Promise<LongPlan>;
   onUpdatePlan?: (input: UpdateLongPlanInput) => Promise<LongPlan>;
@@ -49,6 +63,8 @@ type LongPlanPageProps = {
   onSetItemDone: (input: UpdateLongPlanItemInput) => Promise<LongPlan>;
   onDeletePlan?: (planId: string) => Promise<void>;
   onAddDayToSchedule?: (plan: LongPlan, day: LongPlanDay) => Promise<void>;
+  /** Removes one week's availability record. */
+  onClearWeekAvailability?: (weekStart: string) => Promise<void>;
 };
 
 type PlanForm = {
@@ -72,6 +88,15 @@ function errorText(cause: unknown): string {
 
 function dateRangeLabel(week: LongPlanWeek): string {
   return `${planMonthDay(week.startDate)} — ${planMonthDay(week.endDate)}`;
+}
+
+/** A local calendar date N days after `value`, still `YYYY-MM-DD`. */
+function shiftLocalDate(value: string, days: number): string {
+  const [year, month, day] = value.split('-').map(Number);
+  const shifted = new Date(year, (month ?? 1) - 1, (day ?? 1) + days);
+  const nextMonth = String(shifted.getMonth() + 1).padStart(2, '0');
+  const nextDay = String(shifted.getDate()).padStart(2, '0');
+  return `${shifted.getFullYear()}-${nextMonth}-${nextDay}`;
 }
 
 /**
@@ -455,13 +480,15 @@ export function LongPlanPage({
   defaultWorkspaceId,
   focusPlanId,
   today,
+  weekAvailability = [],
   onOpenSidebar,
   onCreatePlan,
   onUpdatePlan,
   onRecalibrate,
   onSetItemDone,
   onDeletePlan,
-  onAddDayToSchedule
+  onAddDayToSchedule,
+  onClearWeekAvailability
 }: LongPlanPageProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [expandedWeeks, setExpandedWeeks] = useState<Set<string>>(new Set());
@@ -497,6 +524,21 @@ export function LongPlanPage({
     () => plans.find((plan) => plan.id === selectedId) ?? plans[0] ?? null,
     [plans, selectedId]
   );
+  // The one stored week that contains today; future weeks stay for the review,
+  // past weeks are not shown at all (the service already filters them out).
+  const currentWeekAvailability = useMemo(
+    () =>
+      weekAvailability.find(
+        (record) => record.weekStart <= today && today <= shiftLocalDate(record.weekStart, 6)
+      ) ?? null,
+    [weekAvailability, today]
+  );
+  const [clearingWeek, setClearingWeek] = useState(false);
+  const [weekCleared, setWeekCleared] = useState(false);
+  useEffect(() => {
+    // A record for this week replaces the "cleared" notice.
+    if (currentWeekAvailability) setWeekCleared(false);
+  }, [currentWeekAvailability?.weekStart]);
   const workspaceName = useMemo(() => {
     const map = new Map(workspaces.map((workspace) => [workspace.id, workspace.name]));
     return (id: string) => map.get(id) ?? '项目';
@@ -718,6 +760,21 @@ export function LongPlanPage({
     }
   }
 
+  async function clearCurrentWeek() {
+    if (!currentWeekAvailability || !onClearWeekAvailability || clearingWeek) return;
+    setClearingWeek(true);
+    setPlanError(null);
+    try {
+      await onClearWeekAvailability(currentWeekAvailability.weekStart);
+      // One factual confirmation; the record itself disappears with it.
+      setWeekCleared(true);
+    } catch (cause) {
+      setPlanError(errorText(cause));
+    } finally {
+      setClearingWeek(false);
+    }
+  }
+
   return (
     <PageFrame
       title="长期计划"
@@ -732,6 +789,34 @@ export function LongPlanPage({
         ) : null
       }
     >
+      {currentWeekAvailability && onClearWeekAvailability ? (
+        <div
+          data-week-availability="true"
+          className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-[#f5f5f7] px-4 py-3 dark:bg-white/[0.06]"
+        >
+          <p className="text-[13px] leading-6 text-[#1d1d1f] dark:text-[#f5f5f7]">
+            你说过这周特别满：{busyDatesLabel(currentWeekAvailability.busyDates)}
+            （来自周复盘）
+          </p>
+          <button
+            type="button"
+            aria-label={`清除一周安排：${currentWeekAvailability.weekStart}`}
+            disabled={clearingWeek}
+            onClick={() => void clearCurrentWeek()}
+            className="rounded-full bg-black/[0.05] px-3 py-1.5 text-[13px] font-medium text-[#1d1d1f] transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:bg-white/10 dark:text-[#f5f5f7]"
+          >
+            清除
+          </button>
+        </div>
+      ) : null}
+      {weekCleared ? (
+        <p
+          role="status"
+          className="mb-4 text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]"
+        >
+          已清除。之后排计划会恢复按项目设置的可用时间。
+        </p>
+      ) : null}
       {plans.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-gray-300/80 px-6 py-16 text-center dark:border-white/10">
           <p className="text-[16px] font-semibold tracking-tight text-[#1d1d1f] dark:text-[#f5f5f7]">

@@ -8,7 +8,7 @@ import { createButlerService } from '../../src/main/butler/create-butler-service
 import { InMemorySecretStore } from '../../src/main/settings/secret-store';
 import { createWorkspaceService } from '../../src/main/workspace/create-workspace-service';
 import { createContextScheduler } from '../../src/main/scheduler/app-scheduler';
-import { serializeWeekAvailabilityFile } from '../../src/main/availability/records';
+import { parseWeekAvailabilityFile, serializeWeekAvailabilityFile } from '../../src/main/availability/records';
 import { BUSY_DAY_MINUTES } from '../../src/main/planning';
 
 const dirs: string[] = [];
@@ -194,6 +194,23 @@ describe('context integration with real vault and butler factories', () => {
     expect(model.calls[2]?.messages.at(-1)?.content ?? '').not.toContain(
       '这天用户说特别满'
     );
+
+    // Clearing the week removes the busy-day rule at the same read path the
+    // planner uses: the same Tuesday plans with the default budget again, and
+    // the vault file holds no record for that week any more.
+    await context.api.clearWeekAvailability({ weekStart: '2026-11-02' });
+    const afterClear = await context.api.planWorkspace({
+      workspaceId: workspace!.id,
+      date: '2026-11-03'
+    });
+    expect(afterClear.availableMinutes).toBe(120);
+    expect(afterClear.availableMinutesSource).toBe('default');
+    expect(model.calls[3]?.messages.at(-1)?.content ?? '').not.toContain('这天用户说特别满');
+    const vaultRoot = (await context.api.getSettings()).vaultPath;
+    const remaining = parseWeekAvailabilityFile(
+      await readFile(join(vaultRoot, 'week-availability.md'), 'utf8')
+    );
+    expect(remaining).toEqual([]);
   });
 
   test('rebuilds workspace and butler services when vault, key or provider changes', async () => {

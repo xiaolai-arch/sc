@@ -55,6 +55,20 @@ function coerceLocalDateTime(value: unknown): string | undefined {
   return text && isLocalDateTime(text) ? text : undefined;
 }
 
+/**
+ * `doneAt` is a local calendar day, not a timestamp. A hand-edited bad value
+ * drops the field rather than failing the whole reminder, so an old file with
+ * no `doneAt` still round-trips byte-identically (the key is only written when
+ * a real completion day exists).
+ */
+function coerceDoneAt(value: unknown): string | undefined {
+  const text = asString(value)?.trim();
+  if (!text || !/^\d{4}-\d{2}-\d{2}$/.test(text)) return undefined;
+  const parsed = new Date(`${text}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  return text;
+}
+
 export function parseRemindersFile(raw: string): Reminder[] {
   const { meta } = parseNote(raw);
   if (!Array.isArray(meta.items)) return [];
@@ -69,6 +83,7 @@ export function parseRemindersFile(raw: string): Reminder[] {
     const state = coerceState(record.state);
     const firedAt = coerceTimestamp(record.firedAt);
     const postponedTo = coerceLocalDateTime(record.postponedTo);
+    const doneAt = coerceDoneAt(record.doneAt);
     const lastError = asString(record.lastError);
     reminders.push({
       id,
@@ -79,6 +94,7 @@ export function parseRemindersFile(raw: string): Reminder[] {
       ...(state ? { state } : {}),
       ...(firedAt ? { firedAt } : {}),
       ...(postponedTo ? { postponedTo } : {}),
+      ...(doneAt ? { doneAt } : {}),
       ...(lastError ? { lastError } : {})
     });
   }
