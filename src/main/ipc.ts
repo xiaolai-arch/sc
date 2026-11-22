@@ -382,6 +382,9 @@ function requireCreateTask(value: unknown): CreateTaskInput {
   if (input.repeat !== undefined && !isTaskRepeat(input.repeat)) {
     throw new Error('任务重复规则无效。');
   }
+  if (input.goalId !== undefined && (typeof input.goalId !== 'string' || input.goalId.trim() === '')) {
+    throw new Error('任务目标无效。');
+  }
   const cue = requireTaskCue(input.cue, false);
   return { ...input, ...(cue !== undefined ? { cue } : {}) } as unknown as CreateTaskInput;
 }

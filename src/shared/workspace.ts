@@ -35,6 +35,13 @@ export interface Workspace {
   name: string;
   kind: WorkspaceKind;
   color: string;
+  /**
+   * Stable identity of the project's goal (目标), minted once when the project
+   * first names a goal. The goal *text* stays `goal`; this is only the handle a
+   * task points at, so renaming or rewording the goal never orphans the tasks
+   * that serve it. Absent on legacy files and on projects without a goal.
+   */
+  goalId?: string;
   goal: string;
   description: string;
   checkIn?: WorkspaceCheckIn;
@@ -116,6 +123,12 @@ export interface WorkspaceTask {
   planId?: string;
   planWeekId?: string;
   planItemId?: string;
+  /**
+   * The goal this task serves (`Workspace.goalId`). Filled automatically for a
+   * task derived from a long-plan item, whose plan belongs to the same project.
+   * Absent means the task serves no recorded goal — never invented on read.
+   */
+  goalId?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -267,6 +280,11 @@ export interface CreateTaskInput {
   planId?: string;
   planWeekId?: string;
   planItemId?: string;
+  /**
+   * Goal the task serves. Omitted by the caller when the task comes from a
+   * plan: the service resolves the plan's project and fills its `goalId`.
+   */
+  goalId?: string;
 }
 
 export interface UpdateWorkspaceTaskInput {

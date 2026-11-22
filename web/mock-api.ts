@@ -540,6 +540,25 @@ export function createMockApi(
     return workspace;
   }
 
+  /**
+   * Mirrors the main-process rule: an explicit goal id wins, and a task derived
+   * from a long-plan item serves its project's goal. A project that predates
+   * goal handles has one minted the first time a plan task needs it.
+   */
+  function goalIdFor(input: CreateTaskInput): string | undefined {
+    const explicit = input.goalId?.trim();
+    if (explicit) return explicit;
+    if (!input.planId || !input.planItemId) return undefined;
+    const plan = state.plans.find((entry) => entry.id === input.planId);
+    if (!plan) return undefined;
+    const workspace = state.workspaces.find((entry) => entry.id === plan.workspaceId);
+    if (!workspace) return undefined;
+    if (workspace.goalId === undefined && workspace.goal.trim() !== '') {
+      workspace.goalId = nextId('goal');
+    }
+    return workspace.goalId;
+  }
+
   /** The workspace's open tasks, soonest deadline first — the mock schedule reply. */
   function pendingTaskLine(workspaceId?: string) {
     const scoped =
@@ -576,6 +595,7 @@ export function createMockApi(
       name: input.name,
       kind: input.kind,
       color: input.color ?? '#8e8e93',
+      ...(input.goal.trim() ? { goalId: nextId('goal') } : {}),
       goal: input.goal,
       description: input.description,
       createdAt: new Date().toISOString(),
@@ -919,6 +939,7 @@ export function createMockApi(
           name: input.name,
           kind: input.kind,
           color: '#0071e3',
+          ...(input.goal.trim() ? { goalId: nextId('goal') } : {}),
           goal: input.goal,
           description: input.description,
           createdAt: new Date().toISOString(),
@@ -2062,6 +2083,10 @@ export function createMockApi(
       if (!workspace) throw new Error('项目不存在');
       if (input.name !== undefined) workspace.name = input.name;
       if (input.goal !== undefined) workspace.goal = input.goal;
+      // Mint the stable handle once, when a project first gains goal text.
+      if (workspace.goalId === undefined && workspace.goal.trim() !== '') {
+        workspace.goalId = nextId('goal');
+      }
       if (input.description !== undefined) workspace.description = input.description;
       if (input.checkIn !== undefined) workspace.checkIn = input.checkIn;
       if (input.availableMinutes !== undefined) {
@@ -2119,6 +2144,7 @@ export function createMockApi(
         );
         if (duplicate) return structuredClone(duplicate);
       }
+      const goalId = goalIdFor(input);
       const task: WorkspaceTask = {
         id: nextId('task'),
         workspaceId: input.workspaceId,
@@ -2134,6 +2160,7 @@ export function createMockApi(
         ...(input.planId ? { planId: input.planId } : {}),
         ...(input.planWeekId ? { planWeekId: input.planWeekId } : {}),
         ...(input.planItemId ? { planItemId: input.planItemId } : {}),
+        ...(goalId ? { goalId } : {}),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };

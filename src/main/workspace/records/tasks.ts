@@ -22,6 +22,11 @@ export type TaskRecord = StudyTask & {
   planId?: string;
   planWeekId?: string;
   planItemId?: string;
+  /**
+   * Stable goal this task serves. Written only when the task is derived from a
+   * plan (the plan's project supplies it), never guessed on read.
+   */
+  goalId?: string;
   created?: string;
   updated?: string;
 };
@@ -57,6 +62,7 @@ function coerceTask(value: unknown): TaskRecord | null {
     ...(asString(record.planId) ? { planId: asString(record.planId) } : {}),
     ...(asString(record.planWeekId) ? { planWeekId: asString(record.planWeekId) } : {}),
     ...(asString(record.planItemId) ? { planItemId: asString(record.planItemId) } : {}),
+    ...(asString(record.goalId) ? { goalId: asString(record.goalId) } : {}),
     ...(isLocalDateTime(startAt) ? { startAt } : {}),
     created: asString(record.created),
     updated: asString(record.updated)
@@ -109,6 +115,7 @@ export function toWorkspaceTask(record: TaskRecord, workspaceId: string): Worksp
     ...(record.planId ? { planId: record.planId } : {}),
     ...(record.planWeekId ? { planWeekId: record.planWeekId } : {}),
     ...(record.planItemId ? { planItemId: record.planItemId } : {}),
+    ...(record.goalId ? { goalId: record.goalId } : {}),
     ...(record.startAt ? { startAt: record.startAt } : {}),
     createdAt: record.created,
     updatedAt: record.updated

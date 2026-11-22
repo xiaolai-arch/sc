@@ -303,12 +303,16 @@ export function createWorkspaceService(
       const name = requireString(input?.name, 'Workspace name');
       const kind = input?.kind;
       if (!isWorkspaceKind(kind)) throw new Error('Invalid workspace kind');
+      const goal = optionalString(input.goal) ?? '';
       const workspace: Workspace = {
         id: '',
         name,
         kind,
         color: optionalString(input?.color) ?? DEFAULT_COLORS[kind],
-        goal: optionalString(input.goal) ?? '',
+        // A project that names a goal gets its stable handle at the same write,
+        // so no read ever has to invent one.
+        ...(goal.trim() ? { goalId: newId('g') } : {}),
+        goal,
         description: optionalString(input.description) ?? '',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
@@ -376,6 +380,7 @@ export function createWorkspaceService(
       }
       return runExclusively(async () => {
         const current = await readWorkspaceOrThrow(workspaceId);
+        const nextGoal = goal !== undefined ? goal : current.goal;
         const next: Workspace = {
           ...current,
           ...(name !== undefined ? { name } : {}),
@@ -385,6 +390,11 @@ export function createWorkspaceService(
           ...(availableMinutes !== undefined ? { availableMinutes } : {}),
           updatedAt: new Date().toISOString()
         };
+        // The goal handle is minted once and survives edits of the goal text;
+        // a previously empty goal now gaining text gets its first handle.
+        if (next.goalId === undefined && nextGoal.trim() !== '') {
+          next.goalId = newId('g');
+        }
         if (targetDate === null) delete next.targetDate;
         else if (targetDate !== undefined) next.targetDate = targetDate;
         await writeFileAtomic(
@@ -441,6 +451,7 @@ export function createWorkspaceService(
       const planId = optionalString(input?.planId);
       const planWeekId = planId ? optionalString(input?.planWeekId) : undefined;
       const planItemId = planId ? optionalString(input?.planItemId) : undefined;
+      const goalId = optionalString(input?.goalId)?.trim() || undefined;
       const record: TaskRecord = {
         id: newId('t'),
         title,
@@ -459,12 +470,32 @@ export function createWorkspaceService(
         ...(planId ? { planId } : {}),
         ...(planWeekId ? { planWeekId } : {}),
         ...(planItemId ? { planItemId } : {}),
+        ...(goalId ? { goalId } : {}),
         created: new Date().toISOString(),
         updated: new Date().toISOString()
       };
       const date = startAt?.slice(0, 10) ?? due ?? formatLocalDate(new Date());
       let saved = record;
       await runExclusively(async () => {
+        // A task derived from a long-plan item serves its project's goal. The
+        // handle is resolved (and, for an older project file, minted once) here
+        // so concurrent adds cannot mint two different goals.
+        if (goalId === undefined && planId !== undefined && planItemId !== undefined) {
+          const workspace = await readWorkspaceOrThrow(workspaceId);
+          let projectGoalId = workspace.goalId;
+          if (projectGoalId === undefined && workspace.goal.trim() !== '') {
+            projectGoalId = newId('g');
+            await writeFileAtomic(
+              workspaceFile(vaultRoot, workspaceId),
+              serializeWorkspaceFile({
+                ...workspace,
+                goalId: projectGoalId,
+                updatedAt: new Date().toISOString()
+              })
+            );
+          }
+          if (projectGoalId !== undefined) record.goalId = projectGoalId;
+        }
         const existingRaw = await readFileOrNull(taskFile(vaultRoot, workspaceId, date));
         const records = existingRaw === null ? [] : parseTaskFile(existingRaw);
         if (existingRaw !== null && records.length === 0) {
@@ -609,6 +640,8 @@ export function createWorkspaceService(
             delete next.planId;
             delete next.planWeekId;
             delete next.planItemId;
+            // The goal link is not a plan-day link: a repeating chore still
+            // serves the same goal, so it is carried over rather than dropped.
             await writeFileAtomic(nextPath, serializeTaskFile(nextDue, [...nextRecords, next]));
           }
         }
