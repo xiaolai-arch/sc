@@ -23,6 +23,7 @@ import {
   weeklyHonestLines,
   type CheckInTrigger,
   type CommitmentLike,
+  type ResumeFacts,
   type WeeklyHonestLike,
   type WeeklyOverviewLike
 } from './prompt';
@@ -60,10 +61,10 @@ export interface ProactiveCheckInOptions {
    */
   getDueCommitment?: (today: Date) => Promise<CommitmentLike | null>;
   /**
-   * The last muted day of a mute that just ended, when this is the first check
-   * allowed to run after it. Absent or null keeps every message byte-identical.
+   * The pending mute resume, when this is the first check allowed to run after
+   * it. Absent or null keeps every message byte-identical.
    */
-  getResume?: () => Promise<string | null>;
+  getResume?: () => Promise<ResumeFacts | null>;
   /**
    * Consumes the pending resume once its one sentence has been generated, so
    * the sentence is appended exactly once across all later checks.
@@ -145,7 +146,7 @@ export class ProactiveCheckInService {
   private readonly getDueCommitment:
     | ((today: Date) => Promise<CommitmentLike | null>)
     | undefined;
-  private readonly getResume: (() => Promise<string | null>) | undefined;
+  private readonly getResume: (() => Promise<ResumeFacts | null>) | undefined;
   private readonly consumeResume: (() => Promise<void>) | undefined;
   private readonly now: () => Date;
 
@@ -196,7 +197,7 @@ export class ProactiveCheckInService {
     // Peek before composing: only a check that will actually run may speak the
     // resume sentence. A peek failure skips the sentence but leaves the flag,
     // so the next allowed check can still say it.
-    const resumeDay = this.getResume
+    const resume = this.getResume
       ? await this.getResume().catch(() => null)
       : null;
     // Only create the conversation once the check is certain to happen, so a
@@ -223,7 +224,7 @@ export class ProactiveCheckInService {
       weeklyStats,
       weeklyHonest,
       commitment,
-      resumeDay
+      resume
     );
     // The due-mistake digest is a deterministic line on the morning message
     // only; it is computed once here so text and the surfaced body agree.
@@ -240,7 +241,7 @@ export class ProactiveCheckInService {
     // The message landed: spend the pending resume so no later check repeats
     // the sentence. A failed consume keeps the flag and would repeat it once —
     // the honest failure mode for a write that could not be recorded.
-    if (resumeDay && this.consumeResume) {
+    if (resume && this.consumeResume) {
       await this.consumeResume().catch(() => undefined);
     }
 
@@ -317,7 +318,7 @@ export class ProactiveCheckInService {
     weeklyStats: WeeklyOverviewLike | null = null,
     weeklyHonest: WeeklyHonest | null = null,
     commitment: CommitmentLike | null = null,
-    resumeDay: string | null = null
+    resume: ResumeFacts | null = null
   ): Promise<string> {
     const composed = await this.composeBase(
       trigger,
@@ -330,8 +331,8 @@ export class ProactiveCheckInService {
     // The mute-resume sentence is deterministic and never handed to the model,
     // so it appears exactly once by construction: appended here, to whichever
     // path produced the text, and only while the pending flag exists.
-    const resume = resumeCheckInLine(resumeDay, date);
-    return resume ? `${composed}\n${resume}` : composed;
+    const resumeLine = resumeCheckInLine(resume, date);
+    return resumeLine ? `${composed}\n${resumeLine}` : composed;
   }
 
   /** The message text without the resume tail; the pre-iter30 shape. */

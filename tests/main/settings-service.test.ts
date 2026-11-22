@@ -275,6 +275,70 @@ test('tracks the pending mute resume and clears it like the snooze', async () =>
   }
 });
 
+test('the early-resume mute end lives and dies with resumedFrom', async () => {
+  const dir = await tempDir();
+  try {
+    const filePath = join(dir, 'state.json');
+    const store = new JsonStateStore({
+      filePath,
+      createDefault: () => createDefaultAppState('/tmp/early-resume-vault')
+    });
+    const service = new SettingsService(store);
+
+    // Written together on an early manual resume.
+    const set = await service.update({
+      notifications: {
+        resumedFrom: '2026-11-02',
+        resumedFromMuteEnd: '2026-11-09'
+      } as never
+    });
+    expect(set.notifications.resumedFrom).toBe('2026-11-02');
+    expect(set.notifications.resumedFromMuteEnd).toBe('2026-11-09');
+    expect(await readFile(filePath, 'utf8')).toContain('"resumedFromMuteEnd": "2026-11-09"');
+
+    // Clearing `resumedFrom` alone also drops the mute end, so the carrier can
+    // never outlive its resume and become a future fake sentence.
+    const cleared = await service.update({
+      notifications: { resumedFrom: '' } as never
+    });
+    expect(cleared.notifications.resumedFrom).toBeUndefined();
+    expect(cleared.notifications.resumedFromMuteEnd).toBeUndefined();
+    expect(await readFile(filePath, 'utf8')).not.toContain('resumedFrom');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('an early-resume mute end without a pending resume is dropped on read', async () => {
+  const defaults = createDefaultSettings('/tmp/orphan-mute-end');
+  const state = new JsonStateStore({
+    filePath: null,
+    createDefault: () => ({
+      onboarded: true,
+      settings: {
+        ...defaults,
+        notifications: {
+          ...defaults.notifications,
+          resumedFromMuteEnd: '2026-11-09'
+        } as never
+      }
+    })
+  });
+  const service = new SettingsService(state);
+  expect((await service.get()).notifications.resumedFromMuteEnd).toBeUndefined();
+});
+
+test('rejects a malformed mute end without mutating stored values', async () => {
+  const { service } = memorySettings();
+  await expect(
+    service.update({ notifications: { resumedFromMuteEnd: '2026-11-9' } as never })
+  ).rejects.toThrow('恢复前静音日期格式必须为 YYYY-MM-DD。');
+  await expect(
+    service.update({ notifications: { resumedFromMuteEnd: 7 } as never })
+  ).rejects.toThrow('恢复前静音日期格式无效。');
+  expect((await service.get()).notifications.resumedFromMuteEnd).toBeUndefined();
+});
+
 test('rejects a malformed resumedFrom without mutating stored values', async () => {
   const { service } = memorySettings();
   await expect(

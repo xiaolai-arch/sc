@@ -160,9 +160,24 @@ export const WEEK_AVAILABILITY_QUESTION =
   '下周哪几天会特别满？回我一句就行，那几天我只给你排一件小事。';
 
 /**
- * The one sentence that names the end of a mute: `你之前暂停到 11月20日，
- * 今天是恢复的第一天。` Null (and therefore absent) unless `day` is a real
- * local date on or before `date`.
+ * The pending-resume facts for the first allowed check after a mute.
+ *
+ * `day` is the local day the resume took effect: the day the user clicked
+ * 恢复提醒, or the last day of a mute that ended on its own. `muteEnd` is
+ * present only when the user resumed *before* the mute would have ended, and
+ * names the original end so the sentence can be truthful about it.
+ */
+export interface ResumeFacts {
+  day: string;
+  muteEnd?: string;
+}
+
+/**
+ * The one sentence that names a resume: `你之前暂停到 11月20日，今天是恢复的
+ * 第一天。` for a natural expiry, or `你提前恢复了提醒，原定暂停到 11月27日。`
+ * when the user resumed early. Null (and therefore absent) unless the facts are
+ * real local dates; the string form keeps its old guard so a `day` still in the
+ * future says nothing.
  *
  * This sentence is deliberately *not* handed to the model: it is appended
  * after whatever text (template or model) came out, so it appears exactly once
@@ -170,10 +185,20 @@ export const WEEK_AVAILABILITY_QUESTION =
  * substring test on model output can produce a false duplicate or a miss.
  */
 export function resumeCheckInLine(
-  day: string | null | undefined,
+  facts: string | ResumeFacts | null | undefined,
   date: string
 ): string {
-  if (!day || !isLocalIsoDate(day) || !isLocalIsoDate(date)) return '';
+  if (!facts) return '';
+  const day = typeof facts === 'string' ? facts : facts.day;
+  const muteEnd = typeof facts === 'string' ? undefined : facts.muteEnd;
+  if (!isLocalIsoDate(day) || !isLocalIsoDate(date)) return '';
+  // An early manual resume names the original end; the mute is still "原定"
+  // because the user ended it before that day arrived. The date is not
+  // compared to `date`, so the sentence never claims the mute already ended.
+  if (muteEnd !== undefined) {
+    if (!isLocalIsoDate(muteEnd)) return '';
+    return `你提前恢复了提醒，原定暂停到 ${formatMonthDay(muteEnd)}。`;
+  }
   if (day > date) return '';
   return `你之前暂停到 ${formatMonthDay(day)}，今天是恢复的第一天。`;
 }

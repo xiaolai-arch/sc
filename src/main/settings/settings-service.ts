@@ -24,12 +24,20 @@ function normalizeNotifications(value: NotificationSettings | undefined): Notifi
   const current = value ?? DEFAULT_NOTIFICATIONS;
   // `resumedFrom` exists only while a mute resume is pending. An empty or
   // malformed value is dropped rather than carried, so a settings file written
-  // before this feature round-trips byte-identically.
+  // before this feature round-trips byte-identically. `resumedFromMuteEnd`
+  // shares that lifetime: it is meaningful only beside a pending resume, so a
+  // stray copy is dropped too rather than becoming a future fake sentence.
   const resumedFrom =
     typeof current.resumedFrom === 'string' && DATE_PATTERN.test(current.resumedFrom)
       ? current.resumedFrom
       : undefined;
-  const { resumedFrom: _ignoredResumedFrom, ...rest } = current;
+  const resumedFromMuteEnd =
+    typeof current.resumedFromMuteEnd === 'string' &&
+    DATE_PATTERN.test(current.resumedFromMuteEnd)
+      ? current.resumedFromMuteEnd
+      : undefined;
+  const { resumedFrom: _ignoredResumedFrom, resumedFromMuteEnd: _ignoredMuteEnd, ...rest } =
+    current;
   return {
     ...DEFAULT_NOTIFICATIONS,
     ...rest,
@@ -49,7 +57,8 @@ function normalizeNotifications(value: NotificationSettings | undefined): Notifi
       typeof current.behindScheduleEnabled === 'boolean'
         ? current.behindScheduleEnabled
         : DEFAULT_NOTIFICATIONS.behindScheduleEnabled,
-    ...(resumedFrom ? { resumedFrom } : {})
+    ...(resumedFrom ? { resumedFrom } : {}),
+    ...(resumedFrom && resumedFromMuteEnd ? { resumedFromMuteEnd } : {})
   };
 }
 
@@ -213,6 +222,16 @@ function validateNotifications(value: unknown): Partial<NotificationSettings> {
     }
     result.resumedFrom = trimmed;
   }
+  if (value.resumedFromMuteEnd !== undefined) {
+    if (typeof value.resumedFromMuteEnd !== 'string') {
+      throw new Error('恢复前静音日期格式无效。');
+    }
+    const trimmed = value.resumedFromMuteEnd.trim();
+    if (trimmed !== '' && !DATE_PATTERN.test(trimmed)) {
+      throw new Error('恢复前静音日期格式必须为 YYYY-MM-DD。');
+    }
+    result.resumedFromMuteEnd = trimmed;
+  }
   return result;
 }
 
@@ -243,11 +262,15 @@ function mergeSettings(current: AppSettings, patch: unknown): AppSettings {
   if (!isRecord(patch)) throw new Error('设置参数无效。');
   // `resumedFrom` is stored only while a mute resume is pending: an empty
   // patch value clears it (and the key) rather than writing a blank string.
+  // `resumedFromMuteEnd` rides with it and is cleared the same way, so the two
+  // never drift apart into a stale sentence source.
   const notifications = {
     ...current.notifications,
     ...(patch.notifications === undefined ? {} : validateNotifications(patch.notifications))
   };
   if (notifications.resumedFrom === '') delete notifications.resumedFrom;
+  if (notifications.resumedFromMuteEnd === '') delete notifications.resumedFromMuteEnd;
+  if (notifications.resumedFrom === undefined) delete notifications.resumedFromMuteEnd;
   const next: AppSettings = {
     displayName:
       patch.displayName === undefined

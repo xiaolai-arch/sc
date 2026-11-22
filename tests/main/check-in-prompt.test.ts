@@ -531,6 +531,27 @@ test('resumeCheckInLine produces exactly one factual first-day sentence', () => 
   expect(resumeCheckInLine(null, DATE)).toBe('');
   expect(resumeCheckInLine(undefined, DATE)).toBe('');
   expect(resumeCheckInLine('', DATE)).toBe('');
+  // The structured form for a natural expiry is byte-identical to the string.
+  expect(resumeCheckInLine({ day: '2026-11-07' }, DATE)).toBe(
+    '你之前暂停到 11月7日，今天是恢复的第一天。'
+  );
+});
+
+test('resumeCheckInLine names the original end for an early manual resume', () => {
+  // The user resumed today; the mute would have run to a later day. The
+  // sentence must say the pause was cut short, naming the day it would have
+  // ended, and must not claim the mute already ended.
+  expect(resumeCheckInLine({ day: DATE, muteEnd: '2026-11-13' }, DATE)).toBe(
+    '你提前恢复了提醒，原定暂停到 11月13日。'
+  );
+  // It is not positive-gated by the check date: the mute end is still ahead.
+  expect(resumeCheckInLine({ day: '2026-11-08', muteEnd: '2026-11-13' }, DATE)).toBe(
+    '你提前恢复了提醒，原定暂停到 11月13日。'
+  );
+  // A malformed muteEnd says nothing rather than a half sentence.
+  expect(resumeCheckInLine({ day: DATE, muteEnd: '下周' }, DATE)).toBe('');
+  // A non-date day still says nothing.
+  expect(resumeCheckInLine({ day: '上周', muteEnd: '2026-11-13' }, DATE)).toBe('');
 });
 
 test('the resume sentence is never handed to the model', () => {
