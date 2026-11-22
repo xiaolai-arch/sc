@@ -389,6 +389,15 @@ function requireCreateTask(value: unknown): CreateTaskInput {
   if (input.startAt !== undefined && !isLocalDateTime(input.startAt)) {
     throw new Error('任务开始时间无效。');
   }
+  // A fake date the Date parser would roll over must never reach the service.
+  // Same guard and wording as the update path just below.
+  if (
+    input.due !== undefined &&
+    input.due !== null &&
+    !isTargetDate(input.due)
+  ) {
+    throw new Error('任务截止日期无效。');
+  }
   if (input.repeat !== undefined && !isTaskRepeat(input.repeat)) {
     throw new Error('任务重复规则无效。');
   }

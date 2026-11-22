@@ -174,6 +174,15 @@ test('rejects invalid start times and empty updates', async () => {
     await expect(
       service.createTask(taskInput(workspace.id, '2026-11-01 14:00'))
     ).rejects.toThrow(/start time/i);
+    // A fake day inside a well-formed wall clock is refused too: the date part
+    // of assertLocalDateTime goes through the strict assertIsoDate.
+    await expect(
+      service.createTask(taskInput(workspace.id, '2026-02-30T09:00'))
+    ).rejects.toThrow(/start time/i);
+    // A fake due is refused at the service too, so no path can store one.
+    await expect(
+      service.createTask({ ...taskInput(workspace.id), due: '2026-02-30' })
+    ).rejects.toThrow(/task due date/i);
 
     const created = await service.createTask(taskInput(workspace.id));
     await expect(

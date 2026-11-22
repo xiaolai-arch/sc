@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createWorkspaceService } from '../../src/main/workspace/create-workspace-service';
+import { assertIsoDate, assertLocalDateTime } from '../../src/main/workspace/paths';
 
 let root: string;
 let scratch: string;
@@ -22,6 +23,31 @@ afterEach(async () => {
 });
 
 const ESCAPES = ['../escape', '..\\escape', '../../etc/passwd', '/etc', 'a/b', '.', '..', 'kaoyan/../../evil'];
+
+test('assertIsoDate refuses days the calendar rolls over', () => {
+  // The old rule only rejected a NaN parse, but V8 rolls an impossible day
+  // over instead (`2026-02-30` → March 2), so it was accepted. The shared
+  // strict check refuses it, which also covers assertLocalDateTime's date part.
+  for (const fake of ['2026-02-30', '2026-04-31', '2026-06-31', '2026-11-31']) {
+    expect(() => assertIsoDate(fake, 'task due date')).toThrow(
+      'Invalid task due date: expected a YYYY-MM-DD date'
+    );
+  }
+  // 2026 is not a leap year; 2024 is.
+  expect(() => assertIsoDate('2026-02-29', 'task due date')).toThrow(/Invalid task due date/);
+  expect(assertIsoDate('2024-02-29', 'task due date')).toBe('2024-02-29');
+  expect(assertIsoDate('2026-12-31', 'task due date')).toBe('2026-12-31');
+  // Malformed shapes are still refused.
+  for (const bad of ['2026-1-01', '12-01', '2026/12/01', '明天', '']) {
+    expect(() => assertIsoDate(bad, 'task due date')).toThrow(/Invalid task due date/);
+  }
+  // assertLocalDateTime keeps its wall-clock check and now also rejects a fake
+  // day, since its date part goes through assertIsoDate.
+  expect(assertLocalDateTime('2026-11-01T09:00', 'task start time')).toBe('2026-11-01T09:00');
+  expect(() => assertLocalDateTime('2026-02-30T09:00', 'task start time')).toThrow(
+    /Invalid task start time/
+  );
+});
 
 test('getWorkspaceSnapshot rejects path escapes in workspace ids', async () => {
   const service = createWorkspaceService(root);

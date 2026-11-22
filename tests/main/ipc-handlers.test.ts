@@ -441,6 +441,41 @@ test('rejects an invalid task time or due date in Chinese before the service', a
   expect(updateWorkspaceTask).toHaveBeenCalledTimes(2);
 });
 
+test('createTask rejects a fake due in Chinese before the service', async () => {
+  // sc-review: the create path had no due guard, so `2026-02-30` (which the
+  // Date parser rolls over to 03-02) reached the vault while update refused it.
+  const createTask = vi.fn().mockResolvedValue({ id: 'task-1' });
+  const { context } = await makeContext();
+  const handlers = createIpcHandlers({ ...context.api, createTask });
+
+  await expect(
+    handlers.createTask({
+      workspaceId: 'ws-1',
+      title: '极限',
+      subject: '数学',
+      durationMin: 30,
+      acceptance: '',
+      due: '2026-02-30'
+    })
+  ).rejects.toThrow('任务截止日期无效。');
+  expect(createTask).not.toHaveBeenCalled();
+
+  // A real date still passes through untouched, and omitting due is fine.
+  await expect(
+    handlers.createTask({
+      workspaceId: 'ws-1',
+      title: '极限',
+      subject: '数学',
+      durationMin: 30,
+      acceptance: '',
+      due: '2026-03-02'
+    })
+  ).resolves.toEqual({ id: 'task-1' });
+  expect(createTask).toHaveBeenCalledWith(
+    expect.objectContaining({ due: '2026-03-02' })
+  );
+});
+
 test('reviews a short mistake over IPC with its typed answer', async () => {
   const reviewMistake = vi.fn().mockResolvedValue({ questionId: 'q-1', correct: true });
   const practice = {

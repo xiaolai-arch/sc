@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { isLocalDateTime } from '../../shared/date';
+import { isLocalDate, isLocalDateTime } from '../../shared/date';
 
 /**
  * Vault layout (Obsidian-readable markdown + YAML frontmatter):
@@ -26,7 +26,6 @@ import { isLocalDateTime } from '../../shared/date';
 // still rejecting `/`, `\`, `.`, whitespace, and anything else that could
 // escape the vault root.
 const SAFE_SEGMENT = /^[\p{L}\p{N}_][\p{L}\p{N}_-]*$/u;
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function assertSafeSegment(value: string, label: string): string {
   if (typeof value !== 'string' || !SAFE_SEGMENT.test(value)) {
@@ -35,12 +34,15 @@ export function assertSafeSegment(value: string, label: string): string {
   return value;
 }
 
+/**
+ * True only for a real calendar date written exactly as YYYY-MM-DD.
+ *
+ * Delegates to the shared strict check, so a day the `Date` constructor would
+ * roll over (`2026-02-30` parses as March 2, not NaN) is refused instead of
+ * being written to the vault as a file date.
+ */
 export function assertIsoDate(value: string, label: string): string {
-  if (
-    typeof value !== 'string' ||
-    !ISO_DATE.test(value) ||
-    Number.isNaN(new Date(`${value}T00:00:00Z`).getTime())
-  ) {
+  if (!isLocalDate(value)) {
     throw new Error(`Invalid ${label}: expected a YYYY-MM-DD date`);
   }
   return value;
