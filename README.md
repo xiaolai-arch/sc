@@ -134,7 +134,7 @@ npm run package:win   # 快速验证：dist/win-unpacked/ASAKI.exe
 npm run dist:win      # 安装包 + 便携版
 ```
 
-`dist:win` 生成 `dist/ASAKI-1.0.0-x64-setup.exe`（NSIS 安装包）和 `dist/ASAKI-1.0.0-x64-portable.exe`（免安装）。未签名产物首次运行会触发 SmartScreen 提示；签名方式见 `docs/releases/windows.md`。e2e 在 Windows 上通过临时 `.cmd` shim 启动 fake CLI，CI 会同时跑 macOS 和 Windows。
+`dist:win` 生成 `dist/ASAKI-<version>-x64-setup.exe`（NSIS 安装包）和 `dist/ASAKI-<version>-x64-portable.exe`（免安装）。未签名产物首次运行会触发 SmartScreen 提示；签名方式见 `docs/releases/windows.md`。e2e 在 Windows 上通过临时 `.cmd` shim 启动 fake CLI，CI 会同时跑 macOS 和 Windows。
 
 ## 测试
 
@@ -188,7 +188,7 @@ npm run package:win            # build + 未签名 dist/win-unpacked
 npm run dist:win               # build + NSIS 安装包 + 便携版
 ```
 
-产物在 `dist/`，例如 `dist/mac-arm64/ASAKI.app`、`dist/ASAKI-1.0.0-arm64.dmg`、`dist/ASAKI-1.0.0-x64-setup.exe`、`dist/ASAKI-1.0.0-x64-portable.exe`。
+产物在 `dist/`，例如 `dist/mac-arm64/ASAKI.app`、`dist/ASAKI-<version>-arm64.dmg`、`dist/ASAKI-<version>-x64-setup.exe`、`dist/ASAKI-<version>-x64-portable.exe`。
 
 默认不签名，本地没有证书也能构建：
 

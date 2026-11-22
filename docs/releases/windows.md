@@ -32,7 +32,7 @@ $env:CSC_KEY_PASSWORD = "pfx password"
 npm run dist:win
 ```
 
-也可以把证书安装到 Windows 证书存储，并用 `CSC_NAME` 指定。签名后可用 `signtool verify /pa /v "dist\ASAKI-1.0.0-x64-setup.exe"` 验证。
+也可以把证书安装到 Windows 证书存储，并用 `CSC_NAME` 指定。签名后可用 `signtool verify /pa /v "dist\ASAKI-<version>-x64-setup.exe"` 验证。
 
 ## 图标
 
