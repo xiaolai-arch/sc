@@ -221,6 +221,65 @@ test('pending returns only open promises due on or before the day, oldest first'
   });
 });
 
+test('listSummaries returns the display projection, open by due then createdAt', async () => {
+  await withVault(async (root) => {
+    const service = createCommitmentService({ root, now: () => NOW });
+    // Created out of due order on purpose: the projection sorts, not the file.
+    const late = await service.create({
+      text: '背完这一课的单词',
+      due: '2026-11-25',
+      workspaceId: 'ws-exam'
+    });
+    const early = await service.create({ text: '做完极限基础', due: '2026-11-23' });
+
+    const summaries = await service.listSummaries();
+    expect(summaries.map((entry) => entry.id)).toEqual([early.id, late.id]);
+    // Same due date falls back to createdAt, so insertion order holds.
+    const tieA = await service.create({ text: '同日的一条', due: '2026-11-23' });
+    const tied = await service.listSummaries();
+    expect(tied.map((entry) => entry.id)).toEqual([early.id, tieA.id, late.id]);
+
+    // The projection carries exactly the display fields; no file internals.
+    expect(summaries[0]).toEqual({
+      id: early.id,
+      text: '做完极限基础',
+      due: '2026-11-23',
+      status: 'open',
+      createdAt: early.createdAt
+    });
+    // Optional fields appear only when the record has them.
+    expect(tied[2]).toMatchObject({ workspaceId: 'ws-exam' });
+    expect(summaries[0].resolvedAt).toBeUndefined();
+  });
+});
+
+test('listSummaries omits resolved by default and appends them when asked', async () => {
+  await withVault(async (root) => {
+    const service = createCommitmentService({ root, now: () => NOW });
+    const kept = await service.create({ text: '还在做的一件', due: '2026-11-24' });
+    const doneEarly = await service.create({ text: '早先做完的一件', due: '2026-11-20' });
+    const doneLate = await service.create({ text: '刚做完的一件', due: '2026-11-21' });
+    // Close them in the opposite order of their resolvedAt stamps.
+    await service.resolve({ id: doneLate.id, outcome: 'done' });
+    const later = new Date('2026-11-22T15:00:00');
+    const laterService = createCommitmentService({ root, now: () => later });
+    await laterService.resolve({ id: doneEarly.id, outcome: 'dropped' });
+
+    const openOnly = await service.listSummaries();
+    expect(openOnly.map((entry) => entry.id)).toEqual([kept.id]);
+
+    const withResolved = await service.listSummaries({ includeResolved: true });
+    expect(withResolved.map((entry) => entry.id)).toEqual([
+      kept.id,
+      // Most recently resolved first: doneEarly (dropped later) before doneLate.
+      doneEarly.id,
+      doneLate.id
+    ]);
+    expect(withResolved[1]).toMatchObject({ status: 'dropped', resolvedAt: later.toISOString() });
+    expect(withResolved[2]).toMatchObject({ status: 'done', resolvedAt: NOW.toISOString() });
+  });
+});
+
 test('resolveCommitmentDue maps the phrasings the user actually says', () => {
   // 2026-11-22 is a Sunday; 2026-11-23 a Monday.
   const sunday = new Date('2026-11-22T09:00:00');

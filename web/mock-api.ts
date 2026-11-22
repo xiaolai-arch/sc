@@ -103,6 +103,7 @@ import { buildTemplatePlan } from '../src/shared/plan-template';
 import type { SearchResult, SearchResultKind } from '../src/shared/search';
 import { DAILY_WORKSPACE_ID } from '../src/shared/conversations';
 import type { CommitmentSummary } from '../src/shared/notifications';
+import type { WeekAvailabilitySummary } from '../src/shared/ipc';
 import type {
   CreateProfileEntryInput,
   DeleteProfileEntryInput,
@@ -147,6 +148,8 @@ interface MockState {
   profile: ProfileEntry[];
   /** Read-only promises, same shape and rules as the vault service. */
   commitments: CommitmentSummary[];
+  /** Weeks from this week on that the user said are especially full. */
+  weekAvailability: WeekAvailabilitySummary[];
 }
 
 const demoProfile: ProfileEntry[] = [
@@ -288,6 +291,7 @@ function defaultState(): MockState {
     reviews: [],
     conversations: [],
     commitments: [],
+    weekAvailability: [],
     plans: [],
     knowledgeTopics: [],
     knowledgeNotes: {},
@@ -349,6 +353,9 @@ function readState(storage: Storage | null): MockState {
         : [],
       commitments: Array.isArray(parsed.commitments)
         ? (parsed.commitments as CommitmentSummary[])
+        : [],
+      weekAvailability: Array.isArray(parsed.weekAvailability)
+        ? (parsed.weekAvailability as WeekAvailabilitySummary[])
         : []
     };
   } catch {
@@ -2329,9 +2336,11 @@ export function createMockApi(
         delete reminder.lastError;
       } else if (input.state === 'done') {
         reminder.state = 'done';
+        reminder.doneAt = formatLocalDate(new Date());
         delete reminder.postponedTo;
       } else if (input.state === 'pending') {
         reminder.state = 'pending';
+        delete reminder.doneAt;
         delete reminder.postponedTo;
         delete reminder.lastError;
       } else if (input.state !== undefined) {
@@ -2360,6 +2369,68 @@ export function createMockApi(
               (a.createdAt ?? '').localeCompare(b.createdAt ?? '')
           )
       );
+    },
+
+    async listCommitments(input?: { includeResolved?: boolean }): Promise<CommitmentSummary[]> {
+      const open = state.commitments
+        .filter((entry) => entry.status === 'open')
+        .sort(
+          (a, b) =>
+            a.due.localeCompare(b.due) ||
+            (a.createdAt ?? '').localeCompare(b.createdAt ?? '')
+        );
+      if (input?.includeResolved !== true) return structuredClone(open);
+      const resolved = state.commitments
+        .filter((entry) => entry.status !== 'open')
+        .sort(
+          (a, b) =>
+            (b.resolvedAt ?? '').localeCompare(a.resolvedAt ?? '') ||
+            a.due.localeCompare(b.due)
+        );
+      return structuredClone([...open, ...resolved]);
+    },
+
+    async resolveCommitmentEntry(input: {
+      id: string;
+      action: 'reschedule' | 'drop' | 'done';
+      due?: string;
+    }): Promise<CommitmentSummary> {
+      const entry = state.commitments.find((item) => item.id === input.id);
+      if (!entry) throw new Error('没有找到这条承诺。');
+      if (input.action === 'reschedule') {
+        const due = (input.due ?? '').trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) throw new Error('新日期格式必须为 YYYY-MM-DD。');
+        entry.due = due;
+        entry.status = 'open';
+        delete entry.resolvedAt;
+      } else {
+        entry.status = input.action === 'done' ? 'done' : 'dropped';
+        entry.resolvedAt = new Date().toISOString();
+      }
+      persist();
+      return structuredClone(entry);
+    },
+
+    async listWeekAvailability(): Promise<WeekAvailabilitySummary[]> {
+      // Weeks from this week on, newest first — the same rule as the vault.
+      const monday = (() => {
+        const now = new Date();
+        const value = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        value.setDate(value.getDate() - ((value.getDay() + 6) % 7));
+        return formatLocalDate(value);
+      })();
+      return structuredClone(
+        state.weekAvailability
+          .filter((record) => record.weekStart >= monday)
+          .sort((a, b) => b.weekStart.localeCompare(a.weekStart))
+      );
+    },
+
+    async clearWeekAvailability(input: { weekStart: string }): Promise<void> {
+      state.weekAvailability = state.weekAvailability.filter(
+        (record) => record.weekStart !== input.weekStart
+      );
+      persist();
     },
 
     async listConversations(): Promise<ConversationSummary[]> {

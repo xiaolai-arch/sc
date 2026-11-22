@@ -1,6 +1,12 @@
 import { join } from 'node:path';
-import { formatLocalDate } from '../shared/date';
-import type { ListReviewsInput, ReviewRecord, StudyCoachApi } from '../shared/ipc';
+import { formatLocalDate, isLocalDate } from '../shared/date';
+import type {
+  ListCommitmentsInput,
+  ListReviewsInput,
+  ResolveCommitmentEntryInput,
+  ReviewRecord,
+  StudyCoachApi
+} from '../shared/ipc';
 import type { CommitmentSummary } from '../shared/notifications';
 import type { KnowledgeService } from '../shared/knowledge';
 import type { MemoryService } from '../shared/memory';
@@ -240,6 +246,15 @@ function resolveModelClient(
 function reviewDateFromFile(fileName: string): string | null {
   const match = /^(\d{4}-\d{2}-\d{2})\.md$/.exec(fileName);
   return match === null ? null : (match[1] as string);
+}
+
+/** The Monday starting `date`'s local week, as `YYYY-MM-DD`. */
+function mondayOfLocalDate(date: string): string {
+  const [year, month, day] = date.split('-').map(Number);
+  const value = new Date(year, (month ?? 1) - 1, day ?? 1);
+  // getDay(): 0 = Sunday; shift so Monday is the first day of the week.
+  value.setDate(value.getDate() - ((value.getDay() + 6) % 7));
+  return formatLocalDate(value);
 }
 
 /**
@@ -644,6 +659,40 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       }
     }
 
+        /**
+     * The mute-resume facts for the first allowed check after a mute ended.
+     *
+     * Two write paths exist: a manual 恢复提醒 click stores `resumedFrom` (and
+     * clears `snoozedUntil`); a natural expiry leaves the past `snoozedUntil`
+     * in place. Peek reads whichever is pending (resume first), consume clears
+     * exactly that key and nothing else, so an untouched settings file keeps
+     * its bytes.
+     */
+    async function peekResume(date: string): Promise<string | null> {
+      const notifications = (await settings.get()).notifications;
+      if (
+        isLocalDate(notifications.resumedFrom) &&
+        notifications.resumedFrom! <= date
+      ) {
+        return notifications.resumedFrom!;
+      }
+      if (isLocalDate(notifications.snoozedUntil) && notifications.snoozedUntil < date) {
+        return notifications.snoozedUntil;
+      }
+      return null;
+    }
+
+    async function consumeResume(): Promise<void> {
+      const notifications = (await settings.get()).notifications;
+      if (isLocalDate(notifications.resumedFrom)) {
+        await settings.update({ notifications: { resumedFrom: '' } });
+        return;
+      }
+      if (isLocalDate(notifications.snoozedUntil) && notifications.snoozedUntil < today()) {
+        await settings.update({ notifications: { snoozedUntil: '' } });
+      }
+    }
+
     const checkIns = new ProactiveCheckInService({
       conversationStore,
       workspaceService: workspace,
@@ -659,6 +708,9 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       getWeeklyHonest: readWeeklyHonest,
       // Read-only promise revisit: at most one line, only on the morning.
       getDueCommitment: readDueCommitment,
+      // The one mute-resume sentence: peeked before composing, consumed once.
+      getResume: () => peekResume(today()),
+      consumeResume,
       now
     });
 
@@ -1075,6 +1127,53 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       }
       const pending = await (await getServices()).commitments.pending(date);
       return pending.map(summarizeCommitment);
+    },
+    /**
+     * The reminders page projection: open promises by due date, optionally with
+     * closed entries appended. Read-only; acting on one uses the channel below.
+     */
+    async listCommitments(input?: ListCommitmentsInput): Promise<CommitmentSummary[]> {
+      return (await getServices()).commitments.listSummaries({
+        ...(input?.includeResolved !== undefined
+          ? { includeResolved: input.includeResolved }
+          : {})
+      });
+    },
+    /**
+     * 改期 / 放下 / 完成, all through the existing `resolve` semantics. A
+     * reschedule keeps the entry open with the new date; the other two close it.
+     */
+    async resolveCommitmentEntry(
+      input: ResolveCommitmentEntryInput
+    ): Promise<CommitmentSummary> {
+      const service = (await getServices()).commitments;
+      if (input.action === 'reschedule') {
+        return summarizeCommitment(
+          await service.resolve({ id: input.id, newDue: input.due })
+        );
+      }
+      return summarizeCommitment(
+        await service.resolve({
+          id: input.id,
+          outcome: input.action === 'done' ? 'done' : 'dropped'
+        })
+      );
+    },
+    /** Weeks from this week on, newest first; older weeks are not shown. */
+    async listWeekAvailability() {
+      const monday = mondayOfLocalDate(today());
+      const records = await (await getServices()).weekAvailability.list();
+      return records
+        .filter((record) => record.weekStart >= monday)
+        .sort((a, b) => b.weekStart.localeCompare(a.weekStart))
+        .map((record) => ({
+          weekStart: record.weekStart,
+          busyDates: [...record.busyDates],
+          ...(record.note ? { note: record.note } : {})
+        }));
+    },
+    async clearWeekAvailability(input: { weekStart: string }): Promise<void> {
+      await (await getServices()).weekAvailability.clear(input.weekStart);
     },
     async planWorkspace(input) {
       const services = await getServices();

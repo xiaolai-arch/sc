@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { homeGreeting } from '../../src/shared/greeting';
+import { addLocalDays, formatLocalDate } from '../../src/shared/date';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { sendPrompt } from './send-prompt';
 import { Workspace } from '../../src/renderer/shell/Workspace';
 import { RemindersSection, ReviewSection } from '../../src/renderer/shell/ProjectSections';
 import { FOCUS_DURATION_MS } from '../../src/renderer/shell/focus-timer';
-import { createMockApi } from '../../web/mock-api';
+import { createMockApi, MOCK_STORAGE_KEY } from '../../web/mock-api';
 import { pickOption } from './select-option';
 
 function setup() {
@@ -373,7 +374,7 @@ test('rolls the reminder switch back when saving fails', async () => {
   spy.mockRestore();
 });
 
-test('shows reminder lifecycle chips and postpones, completes and re-enables', async () => {
+test('completing a reminder is quiet for today and re-enables the same day', async () => {
   const api = setup();
   await screen.findByText(homeGreeting('xiaolai', new Date()));
   await userEvent.click(navButton('提醒'));
@@ -410,21 +411,91 @@ test('shows reminder lifecycle chips and postpones, completes and re-enables', a
   });
 
   await userEvent.click(screen.getByRole('button', { name: '标为完成：早间计划' }));
+  // One factual line right after the action, no dialog (acceptance 22).
+  expect(await screen.findByText('今天不再提醒。明天照常。')).toBeInTheDocument();
   await waitFor(() => expect(row().getByText('已完成')).toBeInTheDocument());
   expect(screen.queryByRole('button', { name: '延后 10 分钟：早间计划' })).not.toBeInTheDocument();
   await waitFor(async () => {
     const reminder = (await api.getReminders()).find((entry) => entry.id === 'r1');
+    // Completion writes the calendar day it applies to, not a permanent off.
     expect(reminder?.state).toBe('done');
     expect(reminder?.enabled).toBe(true);
+    expect(reminder?.doneAt).toBe(formatLocalDate(new Date()));
   });
 
+  // Same day: the user can still turn it back on right away.
   await userEvent.click(screen.getByRole('button', { name: '重新启用：早间计划' }));
   await waitFor(() => expect(row().getByText('待触发')).toBeInTheDocument());
   await waitFor(async () => {
     const reminder = (await api.getReminders()).find((entry) => entry.id === 'r1');
     expect(reminder?.state).toBe('pending');
     expect(reminder?.enabled).toBe(true);
+    expect(reminder?.doneAt).toBeUndefined();
   });
+});
+
+test('a reminder completed today is back to 待触发 the next day without a re-enable', async () => {
+  // Seed the storage the mock reads: one reminder finished yesterday. The
+  // judgement lives in effectiveReminderState(reminder, today), so the page
+  // must show it as pending again — no 重新启用 button, daily buttons back.
+  localStorage.clear();
+  const yesterday = addLocalDays(formatLocalDate(new Date()), -1);
+  localStorage.setItem(
+    MOCK_STORAGE_KEY,
+    JSON.stringify({
+      reminders: [
+        { id: 'r1', time: '08:00', label: '早间计划', enabled: true, state: 'done', doneAt: yesterday }
+      ]
+    })
+  );
+  const api = createMockApi(localStorage, { streamPace: 0.05 });
+  window.studyCoach = api;
+  window.studyCoachPrototype = { reset: vi.fn() };
+  render(<Workspace hasApiKey={false} onRefresh={vi.fn()} />);
+
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
+  await userEvent.click(navButton('提醒'));
+
+  const row = () => {
+    const toggle = screen.getByRole('switch', { name: '早间计划 提醒开关' });
+    return within(toggle.closest('div') as HTMLElement);
+  };
+  expect(row().getByText('待触发')).toBeInTheDocument();
+  // The stored record is untouched — no write happened to "reset" it.
+  const stored = (await api.getReminders()).find((entry) => entry.id === 'r1');
+  expect(stored?.state).toBe('done');
+  expect(stored?.doneAt).toBe(yesterday);
+  // No re-enable button: there is nothing to re-enable.
+  expect(screen.queryByRole('button', { name: '重新启用：早间计划' })).not.toBeInTheDocument();
+  // The daily actions are back, so today's occurrence can be handled again.
+  expect(screen.getByRole('button', { name: '标为完成：早间计划' })).toBeInTheDocument();
+});
+
+test('completing a weekday reminder names the next matching day', async () => {
+  // Pin the clock to a Friday so 下次提醒: 周一 is a fact, not a guess.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(new Date(2026, 10, 27, 10, 0, 0)); // 2026-11-27, a Friday
+  try {
+    const api = setup();
+    await screen.findByText(homeGreeting('xiaolai', new Date()));
+    await userEvent.click(navButton('提醒'));
+
+    await userEvent.type(screen.getByLabelText('提醒内容'), '跑步');
+    await pickOption('提醒重复', '工作日');
+    await userEvent.click(screen.getByRole('button', { name: '添加提醒' }));
+    expect(await screen.findByRole('switch', { name: '跑步 提醒开关' })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: '标为完成：跑步' }));
+    // Weekdays only: the next occurrence is Monday, not "tomorrow".
+    expect(await screen.findByText('今天不再提醒。下次提醒：周一')).toBeInTheDocument();
+    // No dialog — the confirmation is one status line.
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    const stored = (await api.getReminders()).find((entry) => entry.label === '跑步');
+    expect(stored?.state).toBe('done');
+    expect(stored?.doneAt).toBe('2026-11-27');
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test('offers one reminder CTA in the empty state and none when reminders exist', () => {

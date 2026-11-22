@@ -7,7 +7,7 @@ import {
   isMutedOn
 } from './date';
 import type { Reminder } from './workspace';
-import { reminderState } from './workspace';
+import { effectiveReminderState, reminderState } from './workspace';
 
 /**
  * The read-only shape of a promise, as the notification center sees it. The
@@ -92,7 +92,9 @@ export function collectNotifications({
 
   for (const reminder of reminders) {
     const state = reminderState(reminder);
-    if (!reminder.enabled || state === 'done') continue;
+    // `done` only suppresses the day it was finished; from the next day the
+    // shared rule reads it as pending. Legacy `done` without `doneAt` stays done.
+    if (!reminder.enabled || effectiveReminderState(reminder, today) === 'done') continue;
 
     const postponed = state === 'postponed' && isLocalDateTime(reminder.postponedTo);
     const firedDay = reminder.firedAt ? localDayOf(reminder.firedAt) : null;

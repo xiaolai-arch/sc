@@ -67,6 +67,12 @@ export interface ResolveCommitmentInput {
  */
 export interface CommitmentService {
   list(): Promise<Commitment[]>;
+  /**
+   * Display projection for the reminders page: open promises by due date, then
+   * `createdAt`, with closed entries appended (most recently resolved first)
+   * only when `includeResolved` is set. Never invents fields.
+   */
+  listSummaries(input?: { includeResolved?: boolean }): Promise<CommitmentSummaryRecord[]>;
   create(input: CreateCommitmentInput): Promise<Commitment>;
   resolve(input: ResolveCommitmentInput): Promise<Commitment>;
   /** Open promises due on or before `byDate`, most overdue first. */
@@ -140,6 +146,25 @@ export function createCommitmentService(
   return {
     async list(): Promise<Commitment[]> {
       return readAll();
+    },
+
+    async listSummaries(input): Promise<CommitmentSummaryRecord[]> {
+      const commitments = await readAll();
+      const open = commitments
+        .filter((entry) => entry.status === 'open')
+        .sort(
+          (a, b) => a.due.localeCompare(b.due) || a.createdAt.localeCompare(b.createdAt)
+        );
+      const summaries = open.map(summarizeCommitment);
+      if (input?.includeResolved !== true) return summaries;
+      const resolved = commitments
+        .filter((entry) => entry.status !== 'open')
+        .sort(
+          (a, b) =>
+            (b.resolvedAt ?? '').localeCompare(a.resolvedAt ?? '') ||
+            a.due.localeCompare(b.due)
+        );
+      return [...summaries, ...resolved.map(summarizeCommitment)];
     },
 
     async create(input: CreateCommitmentInput): Promise<Commitment> {

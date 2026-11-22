@@ -1350,6 +1350,7 @@ function commitmentStub(
       createdAt: '2026-11-22T08:00:00.000Z'
     }),
     pending: async () => [],
+    listSummaries: async () => [],
     ...overrides
   };
 }

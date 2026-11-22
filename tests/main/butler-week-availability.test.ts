@@ -19,6 +19,7 @@ function availabilityStub(overrides: Partial<AvailabilityService> = {}): Availab
   return {
     list: async () => [],
     busyDatesBetween: async () => [],
+    clear: async () => undefined,
     set: async (input: SetWeekAvailabilityInput): Promise<WeekAvailability> => ({
       id: 'wa-new',
       weekStart: input.weekStart,

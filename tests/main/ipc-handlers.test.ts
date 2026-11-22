@@ -286,6 +286,107 @@ test('reads pending promises for the day and rejects a bad date early', async ()
   expect(listPendingCommitments).toHaveBeenCalledTimes(1);
 });
 
+test('acts on commitments and week availability over IPC', async () => {
+  const listCommitments = vi.fn().mockResolvedValue([]);
+  const resolveCommitmentEntry = vi
+    .fn()
+    .mockResolvedValue({ id: 'cm-1', text: '整理错题', due: '2026-11-25', status: 'open', createdAt: '2026-11-21T08:00:00.000Z' });
+  const listWeekAvailability = vi.fn().mockResolvedValue([]);
+  const clearWeekAvailability = vi.fn().mockResolvedValue(undefined);
+  const { context } = await makeContext();
+  const handlers = createIpcHandlers({
+    ...context.api,
+    listCommitments,
+    resolveCommitmentEntry,
+    listWeekAvailability,
+    clearWeekAvailability
+  });
+
+  await handlers.listCommitments({ includeResolved: true });
+  expect(listCommitments).toHaveBeenCalledWith({ includeResolved: true });
+  // No argument at all means the default open-only projection.
+  await handlers.listCommitments();
+  expect(listCommitments).toHaveBeenLastCalledWith({});
+
+  await handlers.resolveCommitmentEntry({ id: 'cm-1', action: 'reschedule', due: '2026-11-25' });
+  expect(resolveCommitmentEntry).toHaveBeenCalledWith({
+    id: 'cm-1',
+    action: 'reschedule',
+    due: '2026-11-25'
+  });
+  await handlers.resolveCommitmentEntry({ id: 'cm-2', action: 'drop' });
+  expect(resolveCommitmentEntry).toHaveBeenLastCalledWith({ id: 'cm-2', action: 'drop' });
+
+  await handlers.listWeekAvailability();
+  expect(listWeekAvailability).toHaveBeenCalledTimes(1);
+  await handlers.clearWeekAvailability({ weekStart: '2026-11-23' });
+  expect(clearWeekAvailability).toHaveBeenCalledWith({ weekStart: '2026-11-23' });
+
+  // Bad shapes are rejected in Chinese before any service call.
+  await expect(
+    handlers.listCommitments({ includeResolved: 'yes' } as never)
+  ).rejects.toThrow('includeResolved 必须是布尔值。');
+  await expect(
+    handlers.resolveCommitmentEntry({ id: 'cm-1', action: 'maybe' } as never)
+  ).rejects.toThrow('承诺操作无效。');
+  await expect(
+    handlers.resolveCommitmentEntry({ id: 'cm-1', action: 'reschedule', due: '周五' })
+  ).rejects.toThrow('新日期格式必须为 YYYY-MM-DD。');
+  await expect(
+    handlers.resolveCommitmentEntry({ id: '', action: 'done' })
+  ).rejects.toThrow('承诺 ID不能为空。');
+  // IPC validates the shape only; "must be a Monday" stays in the service.
+  await expect(
+    handlers.clearWeekAvailability({ weekStart: '2026-11-2' })
+  ).rejects.toThrow('周起始日格式必须为 YYYY-MM-DD。');
+  await expect(handlers.clearWeekAvailability(null)).rejects.toThrow(
+    '清除一周安排参数无效。'
+  );
+  expect(resolveCommitmentEntry).toHaveBeenCalledTimes(2);
+});
+
+test('rejects an invalid task time or due date in Chinese before the service', async () => {
+  const createTask = vi.fn();
+  const updateWorkspaceTask = vi.fn();
+  const { context } = await makeContext();
+  const handlers = createIpcHandlers({
+    ...context.api,
+    createTask,
+    updateWorkspaceTask
+  });
+
+  // A bad 固定开始时间 never reaches the vault (acceptance 15).
+  await expect(
+    handlers.createTask({
+      workspaceId: 'ws-1',
+      title: '极限',
+      subject: '数学',
+      durationMin: 30,
+      acceptance: '',
+      startAt: '昨天晚上'
+    })
+  ).rejects.toThrow('任务开始时间无效。');
+  await expect(
+    handlers.updateWorkspaceTask({ taskId: 't1', startAt: '2026-11-23 23:30' })
+  ).rejects.toThrow('任务开始时间无效。');
+  // Clearing with null is the supported way and passes through untouched.
+  await expect(
+    handlers.updateWorkspaceTask({ taskId: 't1', startAt: null })
+  ).resolves.toBeUndefined();
+  expect(updateWorkspaceTask).toHaveBeenCalledWith({ taskId: 't1', startAt: null });
+
+  // The same guard covers 截止日期: only a whole local date passes.
+  await expect(
+    handlers.updateWorkspaceTask({ taskId: 't1', due: '12-01' })
+  ).rejects.toThrow('任务截止日期无效。');
+  await expect(
+    handlers.updateWorkspaceTask({ taskId: 't1', due: null })
+  ).resolves.toBeUndefined();
+
+  expect(createTask).not.toHaveBeenCalled();
+  expect(updateWorkspaceTask).toHaveBeenCalledTimes(2);
+});
+
 test('reviews a short mistake over IPC with its typed answer', async () => {
   const reviewMistake = vi.fn().mockResolvedValue({ questionId: 'q-1', correct: true });
   const practice = {

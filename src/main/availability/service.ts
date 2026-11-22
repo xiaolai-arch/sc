@@ -34,6 +34,11 @@ export interface AvailabilityService {
   busyDatesBetween(from: string, to: string): Promise<string[]>;
   /** Inserts or replaces the record for `weekStart`'s week. */
   set(input: SetWeekAvailabilityInput): Promise<WeekAvailability>;
+  /**
+   * Removes only `weekStart`'s week; every other week keeps its exact bytes.
+   * Clearing a week that is not stored is a no-op and writes nothing.
+   */
+  clear(weekStart: string): Promise<void>;
 }
 
 export interface AvailabilityServiceOptions {
@@ -135,6 +140,17 @@ export function createAvailabilityService(
         ].sort((a, b) => a.weekStart.localeCompare(b.weekStart));
         await writeAll(next);
         return record;
+      });
+    },
+
+    async clear(weekStartValue: string): Promise<void> {
+      const weekStart = requireWeekStart(weekStartValue);
+      return runExclusively(async () => {
+        const records = await readAll();
+        const remaining = records.filter((entry) => entry.weekStart !== weekStart);
+        // Idempotent: an absent week leaves the file (and its bytes) untouched.
+        if (remaining.length === records.length) return;
+        await writeAll(remaining);
       });
     }
   };

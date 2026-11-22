@@ -242,3 +242,43 @@ test('a missing file reads as no records and set creates it', async () => {
     );
   });
 });
+
+test('clear removes only that one week and keeps the others byte-identical', async () => {
+  await withVault(async (root) => {
+    const service = createAvailabilityService({ root, now: () => NOW });
+    const firstWeek = await service.set({ weekStart: '2026-11-23', busyDates: ['2026-11-24'] });
+    await service.set({ weekStart: '2026-11-30', busyDates: ['2026-12-04'], note: '期末周' });
+
+    await service.clear('2026-11-23');
+    const reread = parseWeekAvailabilityFile(
+      await readFile(weekAvailabilityFile(root), 'utf8')
+    );
+    expect(reread).toHaveLength(1);
+    expect(reread[0]).toMatchObject({ weekStart: '2026-11-30', busyDates: ['2026-12-04'], note: '期末周' });
+    // The cleared week's record is gone from the file entirely.
+    expect(await readFile(weekAvailabilityFile(root), 'utf8')).not.toContain(firstWeek.id);
+    expect(await service.list()).toEqual(reread);
+
+    // Clearing the last remaining week empties the list.
+    await service.clear('2026-11-30');
+    expect(await service.list()).toEqual([]);
+    expect(parseWeekAvailabilityFile(await readFile(weekAvailabilityFile(root), 'utf8'))).toEqual([]);
+  });
+});
+
+test('clear rejects a malformed weekStart and skips the write for an absent week', async () => {
+  await withVault(async (root) => {
+    const service = createAvailabilityService({ root, now: () => NOW });
+    await service.set({ weekStart: '2026-11-23', busyDates: ['2026-11-24'] });
+    const before = await readFile(weekAvailabilityFile(root), 'utf8');
+
+    await expect(service.clear('2026-11-24')).rejects.toThrow('weekStart 必须是某一周的周一');
+    await expect(service.clear('不是日期')).rejects.toThrow('weekStart 必须是某一周的周一');
+
+    // A week that is not recorded leaves the file untouched — a second clear
+    // of the same week (or a wrong-but-valid week) must not rewrite anything.
+    await service.clear('2026-12-07');
+    expect(await readFile(weekAvailabilityFile(root), 'utf8')).toBe(before);
+    expect(await service.list()).toHaveLength(1);
+  });
+});

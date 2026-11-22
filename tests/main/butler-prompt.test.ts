@@ -220,6 +220,90 @@ test('teaches the promise-only commitment rule with both tools', () => {
   expect(BUTLER_SYSTEM_PROMPT).toContain('不要安排用户没说过的事');
 });
 
+test('renders the open-promise section bounded at three entries', () => {
+  const commitment = (id: string, text: string, due: string) => ({
+    id,
+    text,
+    due,
+    status: 'open' as const,
+    createdAt: '2026-11-20T08:00:00.000Z'
+  });
+  const prompt = buildSystemPrompt({
+    now: new Date('2026-11-22T12:00:00.000Z'),
+    workspaces: [],
+    tasks: [],
+    memory: [],
+    profile: [],
+    knowledge: [],
+    commitments: [
+      commitment('cm-1', '背完这一课的单词', '2026-11-20'),
+      commitment('cm-2', '做完极限基础', '2026-11-21'),
+      commitment('cm-3', '给妈妈打电话', '2026-11-22'),
+      commitment('cm-4', '写完周记', '2026-11-23')
+    ],
+    contextError: false
+  });
+
+  // Header, then one line per promise in the fixed format.
+  expect(prompt).toContain('未结案承诺（用户亲口答应的事，不是任务）：');
+  expect(prompt).toContain('- 「背完这一课的单词」（原定 11-20）');
+  expect(prompt).toContain('- 「做完极限基础」（原定 11-21）');
+  expect(prompt).toContain('- 「给妈妈打电话」（原定 11-22）');
+  // The fourth promise is an honest count, never silently dropped.
+  expect(prompt).toContain('还有 1 条未列出。');
+  expect(prompt).not.toContain('写完周记');
+
+  // Over-long text is clipped inside the same line format.
+  const long = buildSystemPrompt({
+    now: new Date('2026-11-22T12:00:00.000Z'),
+    workspaces: [],
+    tasks: [],
+    memory: [],
+    profile: [],
+    knowledge: [],
+    commitments: [commitment('cm-long', '长'.repeat(200), '2026-11-22')],
+    contextError: false
+  });
+  expect(long).toContain(`- 「${'长'.repeat(119)}…」（原定 11-22）`);
+});
+
+test('an empty or absent commitment list leaves the prompt byte-identical', () => {
+  const context = {
+    now: new Date('2026-11-22T12:00:00.000Z'),
+    workspaces: [
+      {
+        id: 'kaoyan',
+        name: '考研',
+        kind: 'exam' as const,
+        color: '#0071e3',
+        goal: '上岸',
+        description: ''
+      }
+    ],
+    tasks: [
+      {
+        id: 't-1',
+        workspaceId: 'kaoyan',
+        title: '极限',
+        subject: '数学',
+        durationMin: 45,
+        acceptance: '完成 10 题',
+        status: 'pending' as const
+      }
+    ],
+    memory: [],
+    profile: [],
+    knowledge: [],
+    contextError: false
+  };
+
+  const baseline = buildSystemPrompt(context);
+  expect(baseline).not.toContain('未结案承诺');
+  // The service always fills `commitments: []` on an empty vault; that must
+  // not change a single byte for users with no promises recorded.
+  expect(buildSystemPrompt({ ...context, commitments: [] })).toBe(baseline);
+});
+
 test('replies to 「我卡住了」 with exactly one smallest next action', () => {
   // One action, not a plan: the stuck signal is about starting, not knowing.
   expect(BUTLER_SYSTEM_PROMPT).toContain('只回一个最小的下一步动作');

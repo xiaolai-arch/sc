@@ -7,6 +7,11 @@ import { formatLocalDate, formatLocalDateTime } from '../../shared/date';
 import { friendlyErrorMessage } from '../../shared/errors';
 import { reviewStreak } from '../../shared/review-stats';
 import type { ReviewRecord, StudyCoachApi } from '../../shared/ipc';
+import type {
+  ListCommitmentsInput,
+  ResolveCommitmentEntryInput,
+  WeekAvailabilitySummary
+} from '../../shared/ipc';
 import type { CommitmentSummary } from '../../shared/notifications';
 import type {
   CreateKnowledgeTopicInput,
@@ -87,6 +92,10 @@ type WorkspaceDataState = {
   reminders: Reminder[];
   /** Open promises due today or earlier; feeds the notification center. */
   pendingCommitments: CommitmentSummary[];
+  /** Every promise (open + closed) for the reminders page, closed included. */
+  commitments: CommitmentSummary[];
+  /** Weeks from this week on the user said are especially full. */
+  weekAvailability: WeekAvailabilitySummary[];
   longPlans: LongPlan[];
   knowledgeTopics: KnowledgeTopic[];
   practiceSets: PracticeSet[];
@@ -129,6 +138,9 @@ export type WorkspaceData = WorkspaceDataState & {
   createReminder: (input: CreateReminderInput) => Promise<Reminder>;
   updateReminder: (input: UpdateReminderInput) => Promise<Reminder>;
   deleteReminder: (input: DeleteReminderInput) => Promise<void>;
+  listCommitments: (input?: ListCommitmentsInput) => Promise<CommitmentSummary[]>;
+  resolveCommitmentEntry: (input: ResolveCommitmentEntryInput) => Promise<CommitmentSummary>;
+  clearWeekAvailability: (weekStart: string) => Promise<void>;
   createMemory: (input: CreateMemoryInput) => Promise<MemoryRecord>;
   updateMemory: (input: UpdateMemoryInput) => Promise<MemoryRecord>;
   deleteMemory: (input: DeleteMemoryInput) => Promise<void>;
@@ -227,6 +239,8 @@ export function useWorkspaceData(): WorkspaceData {
     reviews: [],
     reminders: [],
     pendingCommitments: [],
+    commitments: [],
+    weekAvailability: [],
     longPlans: [],
     knowledgeTopics: [],
     ...EMPTY_PRACTICE,
@@ -243,13 +257,19 @@ export function useWorkspaceData(): WorkspaceData {
       const api = apiOrThrow();
       // The notification center reads promises separately and never blocks the
       // rest of the dataset: a failing read leaves an honest empty list.
-      const [workspaces, reminders, pendingCommitments] = await Promise.all([
-        api.listWorkspaces(),
-        api.getReminders(),
-        api
-          .listPendingCommitments({ byDate: formatLocalDate(new Date()) })
-          .catch(() => [] as CommitmentSummary[])
-      ]);
+      const [workspaces, reminders, pendingCommitments, commitments, weekAvailability] =
+        await Promise.all([
+          api.listWorkspaces(),
+          api.getReminders(),
+          api
+            .listPendingCommitments({ byDate: formatLocalDate(new Date()) })
+            .catch(() => [] as CommitmentSummary[]),
+          // Local and cheap: one read gives the reminders page open + closed.
+          api
+            .listCommitments({ includeResolved: true })
+            .catch(() => [] as CommitmentSummary[]),
+          api.listWeekAvailability().catch(() => [] as WeekAvailabilitySummary[])
+        ]);
       const workspaceIds = workspaces.map((workspace) => workspace.id);
       // A failing slice must not look like an empty one: remember it and keep
       // the successful data visible while the banner offers a retry.
@@ -296,6 +316,8 @@ export function useWorkspaceData(): WorkspaceData {
         reviews,
         reminders,
         pendingCommitments,
+        commitments,
+        weekAvailability,
         longPlans,
         knowledgeTopics,
         ...practice,
@@ -806,9 +828,13 @@ export function useWorkspaceData(): WorkspaceData {
             delete next.lastError;
           } else if (input.state === 'done') {
             next.state = 'done';
+            // Remember the day it was finished so the row reads back as
+            // pending from tomorrow via effectiveReminderState.
+            next.doneAt = formatLocalDate(new Date());
             delete next.postponedTo;
           } else if (input.state === 'pending') {
             next.state = 'pending';
+            delete next.doneAt;
             delete next.postponedTo;
             delete next.lastError;
           } else if (input.state !== undefined) {
@@ -841,6 +867,35 @@ export function useWorkspaceData(): WorkspaceData {
     setState((current) => ({
       ...current,
       reminders: current.reminders.filter((reminder) => reminder.id !== input.id)
+    }));
+  }, []);
+
+  const listCommitments = useCallback(
+    async (input?: ListCommitmentsInput) => apiOrThrow().listCommitments(input),
+    []
+  );
+
+  /**
+   * 改期 / 放下 / 完成 a promise. The result already carries the new record, but
+   * a full reload keeps the reminders list, the open/closed split and the
+   * notification digest mutually consistent.
+   */
+  const resolveCommitmentEntry = useCallback(
+    async (input: ResolveCommitmentEntryInput) => {
+      const summary = await apiOrThrow().resolveCommitmentEntry(input);
+      await reload();
+      return summary;
+    },
+    [reload]
+  );
+
+  const clearWeekAvailability = useCallback(async (weekStart: string) => {
+    await apiOrThrow().clearWeekAvailability({ weekStart });
+    setState((current) => ({
+      ...current,
+      weekAvailability: current.weekAvailability.filter(
+        (entry) => entry.weekStart !== weekStart
+      )
     }));
   }, []);
 
@@ -890,6 +945,9 @@ export function useWorkspaceData(): WorkspaceData {
     createReminder,
     updateReminder,
     deleteReminder,
+    listCommitments,
+    resolveCommitmentEntry,
+    clearWeekAvailability,
     createMemory,
     updateMemory,
     deleteMemory,

@@ -1,10 +1,19 @@
 import { useState } from 'react';
-import { formatLocalDate, formatMonthDay, isMutedOn } from '../../shared/date';
+import {
+  addLocalDays,
+  formatLocalDate,
+  formatMonthDay,
+  isLocalDate,
+  isLocalDateTime,
+  isMutedOn
+} from '../../shared/date';
 import { friendlyErrorMessage } from '../../shared/errors';
 import { cn } from '../ui/cn';
 import { CheckIcon } from '../ui/icons';
 import { Select } from '../ui/Select';
-import { MAX_TASK_CUE_LENGTH } from '../../shared/workspace';
+import { effectiveReminderState, daysUntilTarget, MAX_TASK_CUE_LENGTH } from '../../shared/workspace';
+import type { CommitmentSummary } from '../../shared/notifications';
+import type { ResolveCommitmentEntryInput } from '../../shared/ipc';
 import type { ReviewRecord } from '../../shared/ipc';
 import {
   TASK_REPEAT_LABELS,
@@ -172,8 +181,25 @@ function shortLocalDateTime(value: string): string {
   return value.length >= 16 ? `${value.slice(5, 10)} ${value.slice(11, 16)}` : value;
 }
 
-function reminderStateOf(reminder: Reminder): ReminderState {
-  return reminder.state ?? 'pending';
+function reminderStateOf(reminder: Reminder, today: string): ReminderState {
+  // The single next-day rule: `done` only holds on the day it was set.
+  return effectiveReminderState(reminder, today);
+}
+
+/**
+ * What the user sees right after 标为完成, in one line: a weekly reminder says
+ * which weekday comes next, a daily one says tomorrow. Computed from the
+ * passed-in today and the reminder's own `days`, never from a fresh clock.
+ */
+function completionNotice(reminder: Reminder, today: string): string {
+  const days = reminder.days ?? [];
+  if (days.length === 0) return '今天不再提醒。明天照常。';
+  const base = new Date(`${today}T00:00:00`).getDay();
+  for (let offset = 1; offset <= 7; offset += 1) {
+    const weekday = (base + offset) % 7;
+    if (days.includes(weekday)) return `今天不再提醒。下次提醒：周${WEEKDAY_NAMES[weekday]}`;
+  }
+  return '今天不再提醒。明天照常。';
 }
 
 function statusDot(status: WorkspaceTask['status']) {
@@ -261,6 +287,8 @@ type TaskDraft = {
   duration: string;
   acceptance: string;
   cue: string;
+  due: string;
+  startAt: string;
   repeat: TaskRepeat | '';
 };
 
@@ -271,6 +299,8 @@ function draftFrom(task: WorkspaceTask): TaskDraft {
     duration: String(task.durationMin),
     acceptance: task.acceptance,
     cue: task.cue ?? '',
+    due: task.due ?? '',
+    startAt: task.startAt ?? '',
     repeat: task.repeat ?? ''
   };
 }
@@ -303,6 +333,8 @@ export function PlanSection({
     duration: '30',
     acceptance: '',
     cue: '',
+    due: '',
+    startAt: '',
     repeat: ''
   });
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -318,6 +350,22 @@ export function PlanSection({
     return Math.round(minutes);
   }
 
+  /** '' keeps/clears nothing; a filled field must be a real date. */
+  function parseDraftDue(value: string): string | null {
+    const due = value.trim();
+    if (!due) return null;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) throw new Error('截止日期需为 YYYY-MM-DD 格式的日期。');
+    return due;
+  }
+
+  /** '' means no pinned time; a filled field must be a local datetime. */
+  function parseDraftStartAt(value: string): string | null {
+    const startAt = value.trim();
+    if (!startAt) return null;
+    if (!isLocalDateTime(startAt)) throw new Error('固定开始时间无效，需要具体的日期和时刻。');
+    return startAt;
+  }
+
   async function createTask() {
     if (!workspace || !onCreateTask || creatingPending) return;
     const title = newDraft.title.trim();
@@ -330,6 +378,15 @@ export function PlanSection({
       setCreateError('任务时长需要大于 0 分钟。');
       return;
     }
+    let due: string | null;
+    let startAt: string | null;
+    try {
+      due = parseDraftDue(newDraft.due);
+      startAt = parseDraftStartAt(newDraft.startAt);
+    } catch (cause) {
+      setCreateError(messageOf(cause));
+      return;
+    }
     setCreatingPending(true);
     setCreateError(null);
     try {
@@ -340,9 +397,20 @@ export function PlanSection({
         durationMin,
         acceptance: newDraft.acceptance.trim(),
         ...(newDraft.cue.trim() ? { cue: newDraft.cue.trim() } : {}),
+        ...(due ? { due } : {}),
+        ...(startAt ? { startAt } : {}),
         ...(newDraft.repeat ? { repeat: newDraft.repeat } : {})
       });
-      setNewDraft({ title: '', subject: '', duration: '30', acceptance: '', cue: '', repeat: '' });
+      setNewDraft({
+        title: '',
+        subject: '',
+        duration: '30',
+        acceptance: '',
+        cue: '',
+        due: '',
+        startAt: '',
+        repeat: ''
+      });
       setCreating(false);
     } catch (cause) {
       setCreateError(messageOf(cause));
@@ -363,6 +431,15 @@ export function PlanSection({
       setTaskError({ id: task.id, message: '任务时长需要大于 0 分钟。' });
       return;
     }
+    let due: string | null;
+    let startAt: string | null;
+    try {
+      due = parseDraftDue(editDraft.due);
+      startAt = parseDraftStartAt(editDraft.startAt);
+    } catch (cause) {
+      setTaskError({ id: task.id, message: messageOf(cause) });
+      return;
+    }
     setPendingTaskId(task.id);
     setTaskError(null);
     try {
@@ -373,6 +450,9 @@ export function PlanSection({
         durationMin,
         acceptance: editDraft.acceptance,
         cue: editDraft.cue.trim() || null,
+        // An emptied field clears the stored value; null is the contract.
+        due,
+        startAt,
         repeat: editDraft.repeat || null
       });
       setEditingId(null);
@@ -481,6 +561,32 @@ export function PlanSection({
           onChange={(event) => onChange({ ...draft, cue: event.target.value })}
           className={`${inputClass} sm:col-span-2`}
         />
+        <label className="sm:col-span-2 grid gap-2 sm:grid-cols-2">
+          <span className="grid gap-1">
+            <input
+              aria-label={`${keyPrefix}截止日期`}
+              type="date"
+              value={draft.due}
+              onChange={(event) => onChange({ ...draft, due: event.target.value })}
+              className={inputClass}
+            />
+            <span className="text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
+              截止日期只是「什么时候之前要做完」。
+            </span>
+          </span>
+          <span className="grid gap-1">
+            <input
+              aria-label={`${keyPrefix}固定开始时间`}
+              type="datetime-local"
+              value={draft.startAt}
+              onChange={(event) => onChange({ ...draft, startAt: event.target.value })}
+              className={inputClass}
+            />
+            <span className="text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
+              固定开始时间会占住时间表，不会被自动排程挪走。
+            </span>
+          </span>
+        </label>
         <Select
           aria-label={`${keyPrefix}重复`}
           size="sm"
@@ -1509,8 +1615,8 @@ export function ReviewSection({ workspace, reviews, onPrompt }: ReviewSectionPro
   );
 }
 
-function ReminderStateChip({ reminder }: { reminder: Reminder }) {
-  const state = reminderStateOf(reminder);
+function ReminderStateChip({ reminder, today }: { reminder: Reminder; today: string }) {
+  const state = reminderStateOf(reminder, today);
   const chip = REMINDER_STATE_CHIPS[state];
   // The postponed time belongs in the badge itself: a tooltip is not visible at
   // a glance, and users need to know when the reminder will actually fire.
@@ -1535,6 +1641,238 @@ function ReminderStateChip({ reminder }: { reminder: Reminder }) {
     >
       {detail ? `${chip.label} · ${detail}` : chip.label}
     </span>
+  );
+}
+
+type CommitmentsSectionProps = {
+  /** Every promise: open first, closed appended, as the service projects them. */
+  commitments: CommitmentSummary[];
+  workspaces: Workspace[];
+  today: string;
+  onResolve: (input: ResolveCommitmentEntryInput) => Promise<CommitmentSummary>;
+  onPrompt: (prompt: string) => void;
+};
+
+/**
+ * 「承诺」: the promises the user spoke in chat, with the three corrections the
+ * reminders page now owns (改期 / 放下 / 完成). These are not tasks; the copy
+ * says so. A project opted out of check-ins still shows its promise, tagged so
+ * the user is not left wondering why it was never asked about.
+ */
+export function CommitmentsSection({
+  commitments,
+  workspaces,
+  today,
+  onResolve,
+  onPrompt
+}: CommitmentsSectionProps) {
+  const [showResolved, setShowResolved] = useState(false);
+  const [reschedulingId, setReschedulingId] = useState<string | null>(null);
+  const [rescheduleDate, setRescheduleDate] = useState('');
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const checkInOff = new Set(
+    workspaces.filter((workspace) => workspace.checkIn === 'off').map((workspace) => workspace.id)
+  );
+  const open = commitments
+    .filter((entry) => entry.status === 'open')
+    .sort(
+      (a, b) =>
+        Number(b.due < today) - Number(a.due < today) ||
+        a.due.localeCompare(b.due) ||
+        (a.createdAt ?? '').localeCompare(b.createdAt ?? '')
+    );
+  const resolved = commitments.filter((entry) => entry.status !== 'open');
+  const maxDate = addLocalDays(today, 365);
+
+  async function runAction(
+    entry: CommitmentSummary,
+    input: ResolveCommitmentEntryInput
+  ): Promise<void> {
+    setPendingId(entry.id);
+    setError(null);
+    try {
+      await onResolve(input);
+      setReschedulingId(null);
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setPendingId(null);
+    }
+  }
+
+  async function saveReschedule(entry: CommitmentSummary): Promise<void> {
+    const due = rescheduleDate.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) {
+      setError('请选择一个新的日期。');
+      return;
+    }
+    if (due < today) {
+      setError('新日期不能早于今天。');
+      return;
+    }
+    if (due > maxDate) {
+      setError('新日期不能超过 365 天以后。');
+      return;
+    }
+    await runAction(entry, { id: entry.id, action: 'reschedule', due });
+  }
+
+  function overdueDays(entry: CommitmentSummary): number | null {
+    const days = daysUntilTarget(entry.due, today);
+    return days !== null && days < 0 ? -days : null;
+  }
+
+  function startReschedule(entry: CommitmentSummary): void {
+    setError(null);
+    setReschedulingId(entry.id);
+    setRescheduleDate(entry.due < today ? today : entry.due);
+  }
+
+  return (
+    <div className="mt-8">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <h3 className="text-[16px] font-semibold tracking-tight text-[#1d1d1f] dark:text-[#f5f5f7]">
+          承诺
+        </h3>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={showResolved}
+          aria-label="显示已结束"
+          onClick={() => setShowResolved((current) => !current)}
+          className={actionClass}
+        >
+          {showResolved ? '隐藏已结束' : '显示已结束'}
+        </button>
+      </div>
+      <p className="mb-3 text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
+        你说过的、还开着的事。这里能改日期，也能放下。
+      </p>
+      {error ? (
+        <p role="alert" className="mb-2 text-[12px] text-[#d70015] dark:text-[#ff7b72]">
+          {error}
+        </p>
+      ) : null}
+      {open.length === 0 && (!showResolved || resolved.length === 0) ? (
+        <div className="rounded-2xl border border-dashed border-gray-300/80 px-4 py-6 text-center dark:border-white/10">
+          <p className="text-[13px] leading-6 text-gray-500 dark:text-[#8e8e93]">
+            还没有记下的承诺。你在对话里说「我明天做 X」，阿咲才会记一条。
+          </p>
+          <button
+            type="button"
+            onClick={() => onPrompt('我明天想做：')}
+            className="mt-3 rounded-full px-3 py-1.5 text-[13px] font-medium text-[#0071e3] transition-all duration-300 hover:bg-[#0071e3]/10 hover:opacity-80 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#4da3ff] dark:hover:bg-[#0a84ff]/20"
+          >
+            在对话里说一件事
+          </button>
+        </div>
+      ) : (
+        <div className="divide-y divide-gray-100 dark:divide-white/[0.08]">
+          {open.map((entry) => {
+            const overdue = overdueDays(entry);
+            const busy = pendingId === entry.id;
+            const editing = reschedulingId === entry.id;
+            const off = entry.workspaceId !== undefined && checkInOff.has(entry.workspaceId);
+            return (
+              <div key={entry.id} className="py-2">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                  <span className="min-w-0 flex-1 text-[13px] text-[#1d1d1f] dark:text-[#f5f5f7]">
+                    {entry.text}
+                  </span>
+                  <span className="shrink-0 text-[11px] tabular-nums text-gray-500 dark:text-[#a1a1a6]">
+                    原定 {entry.due.slice(5)}
+                    {overdue !== null ? ` · 已过期 ${overdue} 天` : ''}
+                  </span>
+                  {off ? (
+                    <span className="shrink-0 rounded-full bg-black/[0.05] px-1.5 py-0.5 text-[11px] text-gray-400 dark:bg-white/[0.08] dark:text-[#8e8e93]">
+                      不会主动问你
+                    </span>
+                  ) : null}
+                  <button
+                    type="button"
+                    aria-label={`改期：${entry.text}`}
+                    disabled={busy}
+                    onClick={() => startReschedule(entry)}
+                    className={cn(actionClass, 'shrink-0 whitespace-nowrap')}
+                  >
+                    改期
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`放下：${entry.text}`}
+                    disabled={busy}
+                    onClick={() => void runAction(entry, { id: entry.id, action: 'drop' })}
+                    className={cn(actionClass, 'shrink-0 whitespace-nowrap')}
+                  >
+                    放下
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`完成：${entry.text}`}
+                    disabled={busy}
+                    onClick={() => void runAction(entry, { id: entry.id, action: 'done' })}
+                    className={cn(actionClass, 'shrink-0 whitespace-nowrap')}
+                  >
+                    完成
+                  </button>
+                </div>
+                {editing ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <input
+                      type="date"
+                      aria-label={`新日期：${entry.text}`}
+                      value={rescheduleDate}
+                      min={today}
+                      max={maxDate}
+                      onChange={(event) => setRescheduleDate(event.target.value)}
+                      className={`${inputClass} w-[150px] shrink-0`}
+                    />
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void saveReschedule(entry)}
+                      className={primaryButtonClass}
+                    >
+                      保存
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReschedulingId(null);
+                        setError(null);
+                      }}
+                      className={actionClass}
+                    >
+                      取消
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+          {showResolved
+            ? resolved.map((entry) => (
+                <div key={entry.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 py-2">
+                  <span className="min-w-0 flex-1 text-[13px] text-gray-400 line-through dark:text-[#8e8e93]">
+                    {entry.text}
+                  </span>
+                  <span className="shrink-0 text-[11px] text-gray-400 dark:text-[#8e8e93]">
+                    {entry.status === 'done' ? '已完成' : '已放下'}
+                    {entry.resolvedAt && isLocalDate(entry.resolvedAt.slice(0, 10))
+                      ? ` · ${formatMonthDay(entry.resolvedAt.slice(0, 10))}`
+                      : ''}
+                  </span>
+                </div>
+              ))
+            : null}
+        </div>
+      )}
+      <p className="mt-2 text-[11px] leading-5 text-gray-400 dark:text-[#8e8e93]">
+        这是你答应的事，不是任务。
+      </p>
+    </div>
   );
 }
 
@@ -1570,6 +1908,7 @@ export function RemindersSection({
   const [editLabel, setEditLabel] = useState('');
   const [editRepeat, setEditRepeat] = useState<ReminderRepeat>('daily');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [lifecycleNotice, setLifecycleNotice] = useState<string | null>(null);
   // The stored date is the last muted day; today is only used to choose the
   // copy, never to re-derive the target date.
   const today = formatLocalDate(new Date());
@@ -1612,8 +1951,11 @@ export function RemindersSection({
   ) {
     setPendingReminderId(reminder.id);
     setReminderError(null);
+    setLifecycleNotice(null);
     try {
       await onUpdateReminder({ id: reminder.id, ...patch });
+      // One factual line after 标为完成; nothing pops up.
+      if (patch.state === 'done') setLifecycleNotice(completionNotice(reminder, today));
     } catch (cause) {
       setReminderError(messageOf(cause));
     } finally {
@@ -1745,6 +2087,14 @@ export function RemindersSection({
       >
         提醒只在 ASAKI 运行时发出。电脑休眠醒来后，错过的那次最多补一次，不会重复播放；应用退出期间不会提醒。
       </p>
+      {lifecycleNotice ? (
+        <p
+          role="status"
+          className="mb-3 text-[12px] leading-5 text-[#1d7f3a] dark:text-[#7ee2a0]"
+        >
+          {lifecycleNotice}
+        </p>
+      ) : null}
       {reminders.length === 0 ? (
         <Empty
           text="还没有提醒。"
@@ -1819,8 +2169,8 @@ export function RemindersSection({
                       {repeatLabel(reminder.days)}
                     </span>
                   </span>
-                  <ReminderStateChip reminder={reminder} />
-                  {reminderStateOf(reminder) === 'done' ? (
+                  <ReminderStateChip reminder={reminder} today={today} />
+                  {reminderStateOf(reminder, today) === 'done' ? (
                     <button
                       type="button"
                       aria-label={`重新启用：${reminder.label}`}

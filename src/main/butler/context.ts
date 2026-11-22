@@ -1,5 +1,7 @@
 import { isActiveKnowledgeTopic } from '../../shared/knowledge';
 import type { KnowledgeService } from '../../shared/knowledge';
+import type { CommitmentSummary } from '../../shared/notifications';
+import type { CommitmentService } from '../commitments/service';
 import { activeProfileEntries, type ProfileEntry, type ProfileService } from '../../shared/profile';
 import type {
   MemoryItem,
@@ -26,6 +28,11 @@ export interface ButlerContext {
   profile: ProfileEntry[];
   /** Active topics (usually mastered + learning) the butler should remember. */
   knowledge: KnowledgeTopicContext[];
+  /**
+   * Open promises, oldest due first. Rendered as the bounded 未结案承诺 section;
+   * absent/empty leaves the prompt byte-identical to the pre-commitments one.
+   */
+  commitments?: CommitmentSummary[];
   /** True when at least part of the local data could not be read. */
   contextError: boolean;
 }
@@ -35,7 +42,16 @@ const MAX_CONTEXT_KNOWLEDGE_NOTES = 8;
 const MAX_CONTEXT_NOTE_CHARS = 240;
 
 function emptyContext(now: Date, contextError = false): ButlerContext {
-  return { now, workspaces: [], tasks: [], memory: [], profile: [], knowledge: [], contextError };
+  return {
+    now,
+    workspaces: [],
+    tasks: [],
+    memory: [],
+    profile: [],
+    knowledge: [],
+    commitments: [],
+    contextError
+  };
 }
 
 /** Mastered first, then most recently touched; a broken vault means no topics. */
@@ -72,12 +88,29 @@ export async function gatherContext(
   input: SendMessageInput,
   now: Date,
   knowledgeService: KnowledgeService | null = null,
-  profileService: ProfileService | null = null
+  profileService: ProfileService | null = null,
+  commitmentService: CommitmentService | null = null
 ): Promise<ButlerContext> {
   const context = await collectContext(workspaceService, input, now);
   context.knowledge = await selectKnowledge(knowledgeService, input.workspaceId);
   context.profile = await selectProfile(profileService);
+  context.commitments = await selectCommitments(commitmentService);
   return context;
+}
+
+/**
+ * Open promises for the 未结案承诺 section. Best-effort: a broken commitments
+ * file means no section, never a failed turn.
+ */
+async function selectCommitments(
+  commitmentService: CommitmentService | null
+): Promise<CommitmentSummary[]> {
+  if (commitmentService === null) return [];
+  try {
+    return await commitmentService.listSummaries();
+  } catch {
+    return [];
+  }
 }
 
 /** Stable profile facts; a model guess is included but marked as a candidate. */

@@ -52,6 +52,9 @@ export const BUTLER_SYSTEM_PROMPT = `你是阿咲，用户的个人管家，同�
 
 const MAX_PROMPT_TASKS = 10;
 const MAX_PROMPT_MEMORY = 8;
+/** Open promises the prompt lists; the rest is one honest count line. */
+const MAX_PROMPT_COMMITMENTS = 3;
+const MAX_PROMPT_COMMITMENT_TEXT = 120;
 /** Kept equal to the references list so "本次参考" names every prompt fact. */
 const MAX_PROMPT_PROFILE = MAX_PROFILE_REFERENCES;
 const MAX_PROMPT_EVIDENCE = 3;
@@ -171,6 +174,20 @@ function renderContext(context: ButlerContext): string {
     lines.push(
       `当前聚焦任务：${context.focusTask.title}（${context.focusTask.status}，${context.focusTask.durationMin} 分钟，ID：${context.focusTask.id}）`
     );
+  }
+
+  // Open promises the user made in chat. Empty means no section, so the prompt
+  // stays byte-identical to the pre-commitments baseline.
+  const commitments = context.commitments ?? [];
+  if (commitments.length > 0) {
+    lines.push('未结案承诺（用户亲口答应的事，不是任务）：');
+    for (const commitment of commitments.slice(0, MAX_PROMPT_COMMITMENTS)) {
+      const text = clipPromptText(commitment.text, MAX_PROMPT_COMMITMENT_TEXT);
+      lines.push(`- 「${text}」（原定 ${commitment.due.slice(5)}）`);
+    }
+    if (commitments.length > MAX_PROMPT_COMMITMENTS) {
+      lines.push(`还有 ${commitments.length - MAX_PROMPT_COMMITMENTS} 条未列出。`);
+    }
   }
 
   if (context.profile.length > 0) {
