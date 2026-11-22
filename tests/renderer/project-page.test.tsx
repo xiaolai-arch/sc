@@ -512,6 +512,7 @@ test('offers one reminder CTA in the empty state and none when reminders exist',
     enabled: true
   }));
   const props = {
+    today: '2026-11-21',
     onCreateReminder,
     onUpdateReminder,
     snoozedUntil: '',
@@ -532,6 +533,40 @@ test('offers one reminder CTA in the empty state and none when reminders exist',
   );
   // Once a reminder exists the empty-state CTA (and its duplicate) is gone.
   expect(screen.queryByRole('button', { name: '让阿咲设提醒' })).not.toBeInTheDocument();
+});
+
+test('the reminders section reads the caller\'s today, never its own clock', () => {
+  // Review baseline 1: `today` belongs to the caller. If this section ever
+  // recomputes it with `new Date()`, the system clock below (2026-11-22) wins
+  // and the badge stays 已完成 — this assertion would go red.
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(new Date(2026, 10, 22, 12, 0));
+    render(
+      <RemindersSection
+        reminders={[
+          { id: 'r1', time: '08:00', label: '早间计划', enabled: true, state: 'done', doneAt: '2026-11-22' }
+        ]}
+        today="2026-11-23"
+        onCreateReminder={vi.fn()}
+        onUpdateReminder={vi.fn()}
+        snoozedUntil="2026-11-23"
+        onSnoozeCheckIns={vi.fn()}
+        onResumeCheckIns={vi.fn()}
+        onPrompt={vi.fn()}
+      />
+    );
+
+    // done yesterday relative to the passed-in today: pending again, and no
+    // 重新启用 button (there is nothing to re-enable).
+    expect(screen.getByText('待触发')).toBeInTheDocument();
+    expect(screen.queryByText('已完成')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重新启用：早间计划' })).not.toBeInTheDocument();
+    // The mute copy takes the same today: the last muted day is today.
+    expect(screen.getByText('今天已静音，明天恢复')).toBeInTheDocument();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test('the project review empty state offers a single entry', () => {

@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import {
   addLocalDays,
-  formatLocalDate,
   formatMonthDay,
   isLocalDate,
   isLocalDateTime,
@@ -1878,6 +1877,8 @@ export function CommitmentsSection({
 
 type RemindersSectionProps = {
   reminders: Reminder[];
+  /** The shell's single clock, forwarded here — never re-derived in the section. */
+  today: string;
   onCreateReminder: (input: CreateReminderInput) => Promise<Reminder>;
   onUpdateReminder: (input: UpdateReminderInput) => Promise<Reminder>;
   onDeleteReminder?: (input: DeleteReminderInput) => Promise<void>;
@@ -1889,6 +1890,7 @@ type RemindersSectionProps = {
 
 export function RemindersSection({
   reminders,
+  today,
   onCreateReminder,
   onUpdateReminder,
   onDeleteReminder,
@@ -1910,8 +1912,9 @@ export function RemindersSection({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [lifecycleNotice, setLifecycleNotice] = useState<string | null>(null);
   // The stored date is the last muted day; today is only used to choose the
-  // copy, never to re-derive the target date.
-  const today = formatLocalDate(new Date());
+  // copy, never to re-derive the target date. It comes from the caller so the
+  // badge, the 重新启用 button and the mute copy all share one clock with the
+  // rest of the page — a clock this section does not own.
   const muted = isMutedOn(snoozedUntil, today);
 
   async function addReminder() {

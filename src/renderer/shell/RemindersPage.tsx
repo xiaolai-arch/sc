@@ -47,6 +47,7 @@ export function RemindersPage({
       <div className="max-w-[720px]">
         <RemindersSection
           reminders={reminders}
+          today={today}
           onCreateReminder={onCreateReminder}
           onUpdateReminder={onUpdateReminder}
           onDeleteReminder={onDeleteReminder}
