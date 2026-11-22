@@ -1,6 +1,7 @@
 import type { PracticeAttempt, PracticeMistake } from '../../src/shared/practice';
 import {
   WEEKLY_HONEST_WEEKS,
+  projectResolvedCommitment,
   weeklyAccuracyBySubject,
   weeklyHonest,
   type WeeklyHonestCommitment
@@ -274,6 +275,49 @@ describe('accountability clause', () => {
     expect(result.accountability).toBe(
       '你说过要做「写完第三章」，你告诉过 小林 的时间是 2026-11-20'
     );
+  });
+
+  test('a workspaceId on the record is accepted and leaves the sentence byte-identical', () => {
+    // The projection now carries `workspaceId`; nothing consumes it yet, so a
+    // record with one and a record without must produce the same sentence.
+    const withProject = weeklyHonest({
+      today: TODAY,
+      attempts: [],
+      mistakes: [],
+      accountabilityName: '小林',
+      resolvedCommitments: [resolved({ workspaceId: 'ws-exam' })]
+    });
+    const withoutProject = weeklyHonest({
+      today: TODAY,
+      attempts: [],
+      mistakes: [],
+      accountabilityName: '小林',
+      resolvedCommitments: [resolved()]
+    });
+    expect(withProject.accountability).toBe(withoutProject.accountability);
+    expect(withProject.accountability).toBe(
+      '你说过要做「写完第三章」，你告诉过 小林 的时间是 2026-11-20'
+    );
+  });
+
+  test('projectResolvedCommitment carries workspaceId only when the record has one', () => {
+    const base = {
+      id: 'cm-1',
+      text: '写完第三章',
+      due: '2026-11-20',
+      status: 'done' as const,
+      resolvedAt: '2026-11-19T10:00:00'
+    };
+    // With a project: the key is present and equal.
+    expect(projectResolvedCommitment({ ...base, workspaceId: 'ws-exam' })).toEqual({
+      ...base,
+      workspaceId: 'ws-exam'
+    });
+    // Without one: the key is absent, not present-and-undefined, so deep
+    // equality and serialization see the record's own shape.
+    const without = projectResolvedCommitment(base);
+    expect(without).toEqual(base);
+    expect(Object.prototype.hasOwnProperty.call(without, 'workspaceId')).toBe(false);
   });
 
   test('is absent when the name is blank or missing', () => {

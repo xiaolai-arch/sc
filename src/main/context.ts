@@ -31,6 +31,7 @@ import {
 } from './commitments/service';
 import { ProactiveCheckInService } from './check-ins/proactive-check-in-service';
 import {
+  projectResolvedCommitment,
   weeklyAccuracyBySubject,
   weeklyHonest,
   type WeeklyHonest,
@@ -617,13 +618,16 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
                     (entry.status === 'done' || entry.status === 'dropped') &&
                     entry.resolvedAt !== undefined
                 )
-                .map((entry) => ({
-                  id: entry.id,
-                  text: entry.text,
-                  due: entry.due,
-                  status: entry.status as 'done' | 'dropped',
-                  resolvedAt: entry.resolvedAt as string
-                }));
+                .map((entry) =>
+                  projectResolvedCommitment({
+                    id: entry.id,
+                    text: entry.text,
+                    due: entry.due,
+                    status: entry.status as 'done' | 'dropped',
+                    resolvedAt: entry.resolvedAt as string,
+                    ...(entry.workspaceId ? { workspaceId: entry.workspaceId } : {})
+                  })
+                );
         return weeklyHonest({
           attempts,
           mistakes,
