@@ -22,9 +22,17 @@ const DEFAULT_NOTIFICATIONS = createDefaultSettings('').notifications;
  */
 function normalizeNotifications(value: NotificationSettings | undefined): NotificationSettings {
   const current = value ?? DEFAULT_NOTIFICATIONS;
+  // `resumedFrom` exists only while a mute resume is pending. An empty or
+  // malformed value is dropped rather than carried, so a settings file written
+  // before this feature round-trips byte-identically.
+  const resumedFrom =
+    typeof current.resumedFrom === 'string' && DATE_PATTERN.test(current.resumedFrom)
+      ? current.resumedFrom
+      : undefined;
+  const { resumedFrom: _ignoredResumedFrom, ...rest } = current;
   return {
     ...DEFAULT_NOTIFICATIONS,
-    ...current,
+    ...rest,
     weekly:
       typeof current.weekly === 'string' && TIME_PATTERN.test(current.weekly)
         ? current.weekly
@@ -40,7 +48,8 @@ function normalizeNotifications(value: NotificationSettings | undefined): Notifi
     behindScheduleEnabled:
       typeof current.behindScheduleEnabled === 'boolean'
         ? current.behindScheduleEnabled
-        : DEFAULT_NOTIFICATIONS.behindScheduleEnabled
+        : DEFAULT_NOTIFICATIONS.behindScheduleEnabled,
+    ...(resumedFrom ? { resumedFrom } : {})
   };
 }
 
@@ -193,6 +202,17 @@ function validateNotifications(value: unknown): Partial<NotificationSettings> {
     }
     result.snoozedUntil = trimmed;
   }
+  if (value.resumedFrom !== undefined) {
+    if (typeof value.resumedFrom !== 'string') {
+      throw new Error('恢复日期格式无效。');
+    }
+    const trimmed = value.resumedFrom.trim();
+    // '' clears the pending resume; a date must be a real local day.
+    if (trimmed !== '' && !DATE_PATTERN.test(trimmed)) {
+      throw new Error('恢复日期格式必须为 YYYY-MM-DD。');
+    }
+    result.resumedFrom = trimmed;
+  }
   return result;
 }
 
@@ -221,6 +241,13 @@ function validateBudget(value: unknown): AppSettings['budget'] | undefined {
 
 function mergeSettings(current: AppSettings, patch: unknown): AppSettings {
   if (!isRecord(patch)) throw new Error('设置参数无效。');
+  // `resumedFrom` is stored only while a mute resume is pending: an empty
+  // patch value clears it (and the key) rather than writing a blank string.
+  const notifications = {
+    ...current.notifications,
+    ...(patch.notifications === undefined ? {} : validateNotifications(patch.notifications))
+  };
+  if (notifications.resumedFrom === '') delete notifications.resumedFrom;
   const next: AppSettings = {
     displayName:
       patch.displayName === undefined
@@ -228,10 +255,7 @@ function mergeSettings(current: AppSettings, patch: unknown): AppSettings {
         : nonEmptyString(patch.displayName, '称呼'),
     vaultPath: patch.vaultPath === undefined ? current.vaultPath : nonEmptyString(patch.vaultPath, 'Vault 路径'),
     provider: patch.provider === undefined ? current.provider : validateProvider(patch.provider),
-    notifications: {
-      ...current.notifications,
-      ...(patch.notifications === undefined ? {} : validateNotifications(patch.notifications))
-    },
+    notifications,
     budget: {
       ...current.budget,
       ...(validateBudget(patch.budget) ?? {})

@@ -1,4 +1,5 @@
 import type { ButlerContext } from '../butler/context';
+import { formatMonthDay } from '../../shared/date';
 import {
   buildBehindScheduleNotification,
   isTaskForDate
@@ -157,6 +158,25 @@ export function weeklyHonestLines(
 /** The one Sunday-review question about which days next week are packed. */
 export const WEEK_AVAILABILITY_QUESTION =
   '下周哪几天会特别满？回我一句就行，那几天我只给你排一件小事。';
+
+/**
+ * The one sentence that names the end of a mute: `你之前暂停到 11月20日，
+ * 今天是恢复的第一天。` Null (and therefore absent) unless `day` is a real
+ * local date on or before `date`.
+ *
+ * This sentence is deliberately *not* handed to the model: it is appended
+ * after whatever text (template or model) came out, so it appears exactly once
+ * by construction — the code owns both the presence and the count, and no
+ * substring test on model output can produce a false duplicate or a miss.
+ */
+export function resumeCheckInLine(
+  day: string | null | undefined,
+  date: string
+): string {
+  if (!day || !isLocalIsoDate(day) || !isLocalIsoDate(date)) return '';
+  if (day > date) return '';
+  return `你之前暂停到 ${formatMonthDay(day)}，今天是恢复的第一天。`;
+}
 
 /**
  * The availability question line, or '' when there is no workspace to plan

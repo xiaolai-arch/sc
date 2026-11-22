@@ -67,6 +67,13 @@ export interface NotificationSettings {
   behindScheduleEnabled: boolean;
   /** Local date (YYYY-MM-DD) that pauses proactive check-ins; '' clears it. */
   snoozedUntil?: string;
+  /**
+   * The last muted day of a mute that just ended (`YYYY-MM-DD`). The first
+   * proactive check-in after the mute appends one factual sentence built from
+   * it, then the field is cleared — so the key is only ever serialized while a
+   * resume is pending, and a settings file without it round-trips unchanged.
+   */
+  resumedFrom?: string;
   dndStart: string;
   dndEnd: string;
 }

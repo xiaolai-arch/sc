@@ -1,6 +1,7 @@
 import {
   buildCheckInPrompt,
   buildCheckInTemplate,
+  resumeCheckInLine,
   WEEK_AVAILABILITY_QUESTION,
   weekAvailabilityQuestion,
   type WeeklyOverviewLike
@@ -512,4 +513,33 @@ test('the question never enters the model prompt or other triggers', () => {
 test('weekAvailabilityQuestion is empty without a workspace', () => {
   expect(weekAvailabilityQuestion(context)).toBe(WEEK_AVAILABILITY_QUESTION);
   expect(weekAvailabilityQuestion(NO_WORKSPACE)).toBe('');
+});
+
+// --- the mute-resume line ----------------------------------------------------
+
+test('resumeCheckInLine produces exactly one factual first-day sentence', () => {
+  expect(resumeCheckInLine('2026-11-07', DATE)).toBe(
+    '你之前暂停到 11月7日，今天是恢复的第一天。'
+  );
+  // The same day is still the first day back.
+  expect(resumeCheckInLine(DATE, DATE)).toBe(
+    '你之前暂停到 11月8日，今天是恢复的第一天。'
+  );
+  // A day after the check-in, a junk day, or nothing pending says nothing.
+  expect(resumeCheckInLine('2026-11-09', DATE)).toBe('');
+  expect(resumeCheckInLine('上周', DATE)).toBe('');
+  expect(resumeCheckInLine(null, DATE)).toBe('');
+  expect(resumeCheckInLine(undefined, DATE)).toBe('');
+  expect(resumeCheckInLine('', DATE)).toBe('');
+});
+
+test('the resume sentence is never handed to the model', () => {
+  for (const trigger of ['morning', 'evening', 'weekly', 'behind'] as const) {
+    const prompt = buildCheckInPrompt(context, trigger, DATE, null, null, null);
+    expect(prompt).not.toContain('恢复的第一天');
+    expect(prompt).not.toContain('暂停到');
+  }
+  // The prompt builder signature has no resume input at all, so no call site
+  // can leak it into a model prompt by accident.
+  expect(buildCheckInPrompt.length).toBeLessThanOrEqual(6);
 });

@@ -246,6 +246,86 @@ test('validates and clears the snoozed date', async () => {
   expect(cleared.notifications.snoozedUntil).toBe('');
 });
 
+test('tracks the pending mute resume and clears it like the snooze', async () => {
+  const dir = await tempDir();
+  try {
+    const filePath = join(dir, 'state.json');
+    const store = new JsonStateStore({
+      filePath,
+      createDefault: () => createDefaultAppState('/tmp/resume-vault')
+    });
+    const service = new SettingsService(store);
+
+    // Absent until a resume is pending.
+    expect((await service.get()).notifications.resumedFrom).toBeUndefined();
+    const set = await service.update({
+      notifications: { resumedFrom: '2026-11-20' } as never
+    });
+    expect(set.notifications.resumedFrom).toBe('2026-11-20');
+    expect(await readFile(filePath, 'utf8')).toContain('"resumedFrom": "2026-11-20"');
+
+    // '' clears the pending resume; the key leaves the file entirely.
+    const cleared = await service.update({
+      notifications: { resumedFrom: '' } as never
+    });
+    expect(cleared.notifications.resumedFrom).toBeUndefined();
+    expect(await readFile(filePath, 'utf8')).not.toContain('resumedFrom');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('rejects a malformed resumedFrom without mutating stored values', async () => {
+  const { service } = memorySettings();
+  await expect(
+    service.update({ notifications: { resumedFrom: '2026-11-1' } as never })
+  ).rejects.toThrow('恢复日期格式必须为 YYYY-MM-DD。');
+  await expect(
+    service.update({ notifications: { resumedFrom: 7 } as never })
+  ).rejects.toThrow('恢复日期格式无效。');
+  expect((await service.get()).notifications.resumedFrom).toBeUndefined();
+});
+
+test('a malformed stored resumedFrom is dropped on read', async () => {
+  const defaults = createDefaultSettings('/tmp/old-vault');
+  const state = new JsonStateStore({
+    filePath: null,
+    createDefault: () => ({
+      onboarded: true,
+      settings: {
+        ...defaults,
+        notifications: { ...defaults.notifications, resumedFrom: '上周' } as never
+      }
+    })
+  });
+  const service = new SettingsService(state);
+  expect((await service.get()).notifications.resumedFrom).toBeUndefined();
+});
+
+test('legacy settings without resumedFrom round-trip byte-identically', async () => {
+  const dir = await tempDir();
+  try {
+    const filePath = join(dir, 'state.json');
+    const defaults = createDefaultSettings('/tmp/legacy-resume-vault');
+    const legacy = `${JSON.stringify({ onboarded: true, settings: defaults }, null, 2)}\n`;
+    await writeFile(filePath, legacy, 'utf8');
+
+    const store = new JsonStateStore({
+      filePath,
+      createDefault: () => createDefaultAppState('/tmp/ignored')
+    });
+    const service = new SettingsService(store);
+    expect((await service.get()).notifications.resumedFrom).toBeUndefined();
+    expect(await readFile(filePath, 'utf8')).toBe(legacy);
+
+    // A save of an unrelated notification setting still does not introduce it.
+    await service.update({ notifications: { morning: '07:15' } as never });
+    expect(await readFile(filePath, 'utf8')).not.toContain('resumedFrom');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('saves a trimmed display name and rejects a blank one', async () => {
   const { service } = memorySettings();
 
