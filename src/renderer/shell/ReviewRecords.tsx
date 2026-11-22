@@ -44,7 +44,7 @@ export function ReviewRecords({
         </p>
         {hasOtherWorkspaces ? (
           <p className="mt-1 text-[12px] leading-5 text-gray-400 dark:text-[#8e8e93]">
-            其他工作区还有 {reviews.length} 条复盘，切换上方筛选即可查看。
+            其他项目还有 {reviews.length} 条复盘，切换上方筛选即可查看。
           </p>
         ) : null}
         <button

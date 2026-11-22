@@ -59,7 +59,7 @@ test('starts a new draft and reopens a previous conversation', async () => {
 test('opens the projects page and filters by project', async () => {
   setup();
   await screen.findByText(homeGreeting('xiaolai', new Date()));
-  await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
+  await userEvent.click(screen.getByRole('button', { name: '全部项目' }));
   expect(await screen.findByText('外刊精读')).toBeInTheDocument();
 
   await pickOption('切换项目', '考研');
@@ -75,7 +75,7 @@ test('records a note and previews it from the records tab', async () => {
   await sendPrompt('记一下：今天数学卡在极限');
   expect((await screen.findAllByText(/记下了/, {}, { timeout: 3000 })).length).toBeGreaterThan(0);
 
-  await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
+  await userEvent.click(screen.getByRole('button', { name: '全部项目' }));
   await pickOption('切换项目', '考研');
   const noteButton = await screen.findByRole(
     'button',
@@ -122,7 +122,7 @@ test('creates a project through the conversation', async () => {
     await screen.findByText(/已(创建|找到)项目「考研」/, {}, { timeout: 3000 })
   ).toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
+  await userEvent.click(screen.getByRole('button', { name: '全部项目' }));
   await pickOption('切换项目', '考研');
   expect(await screen.findByRole('heading', { name: '考研' })).toBeInTheDocument();
   expect(await screen.findByText('2027 考研：数学一 / 英语一 / 政治')).toBeInTheDocument();
@@ -131,7 +131,7 @@ test('creates a project through the conversation', async () => {
 test('opens practice from the projects page', async () => {
   setup();
   await screen.findByText(homeGreeting('xiaolai', new Date()));
-  await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
+  await userEvent.click(screen.getByRole('button', { name: '全部项目' }));
 
   await userEvent.click(screen.getByRole('button', { name: '练习' }));
   expect((await screen.findAllByText('极限基础 3 题')).length).toBeGreaterThan(0);
@@ -153,7 +153,7 @@ test('marks a model set 待核对 and clears it after 我看过了', async () =>
 
   render(<Workspace hasApiKey={false} onRefresh={vi.fn()} />);
   await screen.findByText(homeGreeting('xiaolai', new Date()));
-  await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
+  await userEvent.click(screen.getByRole('button', { name: '全部项目' }));
   await userEvent.click(screen.getByRole('button', { name: '练习' }));
 
   expect((await screen.findAllByText('阿咲出的小测')).length).toBeGreaterThan(0);
@@ -177,7 +177,7 @@ test('marks a model set 待核对 and clears it after 我看过了', async () =>
 test('edits and deletes a practice set from the practice sidebar', async () => {
   const api = setup();
   await screen.findByText(homeGreeting('xiaolai', new Date()));
-  await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
+  await userEvent.click(screen.getByRole('button', { name: '全部项目' }));
   await userEvent.click(screen.getByRole('button', { name: '练习' }));
 
   await userEvent.click(

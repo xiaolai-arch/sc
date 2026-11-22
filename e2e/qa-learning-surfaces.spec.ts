@@ -406,7 +406,7 @@ test.describe('learning surfaces (heatmap, accuracy trend, mistake sheet, countd
 
       // 学习 surface: the projects page's 练习 entry opens the pane whose
       // mistake book (错题本) sits at the bottom.
-      await page.getByRole('button', { name: '全部工作区' }).click();
+      await page.getByRole('button', { name: '全部项目' }).click();
       await expect(page.locator('header').getByText('项目', { exact: true })).toBeVisible();
       await page.getByRole('button', { name: '练习', exact: true }).click();
 

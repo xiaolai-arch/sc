@@ -110,7 +110,7 @@ test('submits the exact backfill input and refreshes after success', async () =>
   await userEvent.click(screen.getByRole('button', { name: '补录复盘' }));
 
   fireEvent.change(screen.getByLabelText('日期'), { target: { value: '2026-10-31' } });
-  await pickOption('工作区', '考研');
+  await pickOption('项目', '考研');
   await userEvent.type(screen.getByLabelText('完成'), '完成数学 10 题');
   await userEvent.type(screen.getByLabelText('卡点'), '极限定义');
   await userEvent.type(screen.getByLabelText('明天'), '复盘错题');
@@ -139,7 +139,7 @@ test('refuses to create a second review for the same date and workspace', async 
   await userEvent.click(screen.getByRole('button', { name: '补录复盘' }));
   // The form now defaults to the first project, so pick 全局 explicitly to
   // collide with the existing workspace-less review.
-  await pickOption('工作区', '全局（不选工作区）');
+  await pickOption('项目', '全局（不选项目）');
   fireEvent.change(screen.getByLabelText('日期'), { target: { value: '2026-10-30' } });
   await userEvent.type(screen.getByLabelText('完成'), '重复的一次');
   await userEvent.click(screen.getByRole('button', { name: '保存' }));
@@ -153,7 +153,7 @@ test('defaults the backfill workspace to the first project so synthesis runs', a
   renderPage({ onSubmitReview });
 
   await userEvent.click(screen.getByRole('button', { name: '补录复盘' }));
-  expect(screen.getByLabelText('工作区')).toHaveTextContent('考研');
+  expect(screen.getByLabelText('项目')).toHaveTextContent('考研');
 
   fireEvent.change(screen.getByLabelText('日期'), { target: { value: '2026-10-31' } });
   await userEvent.type(screen.getByLabelText('完成'), '完成数学 10 题');
@@ -208,13 +208,13 @@ test('keeps filtering reviews by workspace', async () => {
   expect(screen.getByText('完成：完成外刊精读')).toBeInTheDocument();
   expect(screen.getByText('完成：完成全局整理')).toBeInTheDocument();
 
-  await pickOption('按工作区筛选复盘', '考研');
+  await pickOption('按项目筛选复盘', '考研');
 
   expect(screen.getByText('完成：完成数学 10 题')).toBeInTheDocument();
   expect(screen.queryByText('完成：完成外刊精读')).not.toBeInTheDocument();
   expect(screen.queryByText('完成：完成全局整理')).not.toBeInTheDocument();
 
-  await pickOption('按工作区筛选复盘', '全部工作区');
+  await pickOption('按项目筛选复盘', '全部项目');
 
   expect(screen.getByText('完成：完成外刊精读')).toBeInTheDocument();
   expect(screen.getByText('完成：完成全局整理')).toBeInTheDocument();
@@ -223,10 +223,10 @@ test('keeps filtering reviews by workspace', async () => {
 test('explains when only other workspaces have reviews', async () => {
   renderPage({ reviews: [makeReview({ completed: '完成数学 10 题' })] });
 
-  await pickOption('按工作区筛选复盘', '英语');
+  await pickOption('按项目筛选复盘', '英语');
 
   expect(screen.getByText('「英语」还没有复盘记录。')).toBeInTheDocument();
   expect(
-    screen.getByText('其他工作区还有 1 条复盘，切换上方筛选即可查看。')
+    screen.getByText('其他项目还有 1 条复盘，切换上方筛选即可查看。')
   ).toBeInTheDocument();
 });

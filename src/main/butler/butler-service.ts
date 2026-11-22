@@ -741,7 +741,7 @@ export class ButlerServiceImpl implements ButlerService {
         content: JSON.stringify({
           ok: false,
           tool: call.name,
-          error: '本地工作区服务未连接，无法执行工具。'
+          error: '本地项目服务未连接，无法执行工具。'
         })
       };
     }

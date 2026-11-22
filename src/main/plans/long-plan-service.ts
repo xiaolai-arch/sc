@@ -323,7 +323,7 @@ export function createLongPlanService(options: LongPlanServiceOptions): LongPlan
   async function readWorkspace(workspaceId: string): Promise<Workspace> {
     const workspaces = await options.workspaceService.listWorkspaces();
     const workspace = workspaces.find((entry) => entry.id === workspaceId);
-    if (!workspace) throw new Error('工作区不存在。');
+    if (!workspace) throw new Error('项目不存在。');
     return workspace;
   }
 

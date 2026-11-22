@@ -158,7 +158,7 @@ async function waitForShell(page: Page): Promise<void> {
 }
 
 async function openProjects(page: Page): Promise<void> {
-  await page.getByRole('button', { name: '全部工作区' }).click();
+  await page.getByRole('button', { name: '全部项目' }).click();
   await expect(page.locator('header').getByText('项目', { exact: true })).toBeVisible();
 }
 

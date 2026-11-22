@@ -499,7 +499,7 @@ export function LongPlanPage({
   );
   const workspaceName = useMemo(() => {
     const map = new Map(workspaces.map((workspace) => [workspace.id, workspace.name]));
-    return (id: string) => map.get(id) ?? '工作区';
+    return (id: string) => map.get(id) ?? '项目';
   }, [workspaces]);
   const progress = selectedPlan ? planProgress(selectedPlan) : null;
   const basis = selectedPlan ? planBasis(selectedPlan) : 'model';
@@ -602,7 +602,7 @@ export function LongPlanPage({
       return;
     }
     if (!form.workspaceId) {
-      setFormError('请先创建一个工作区。');
+      setFormError('请先创建一个项目。');
       return;
     }
     setCreating(true);
@@ -751,7 +751,7 @@ export function LongPlanPage({
           </button>
           {workspaces.length === 0 ? (
             <p className="mt-3 text-[12px] text-gray-400 dark:text-[#8e8e93]">
-              先在对话里创建一个工作区。
+              先在对话里创建一个项目。
             </p>
           ) : null}
         </div>
@@ -1013,7 +1013,7 @@ export function LongPlanPage({
                 htmlFor="long-plan-workspace"
                 className="mb-1.5 block text-[12px] font-medium text-gray-500 dark:text-[#a1a1a6]"
               >
-                工作区
+                项目
               </label>
               <Select
                 id="long-plan-workspace"

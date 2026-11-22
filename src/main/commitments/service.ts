@@ -13,6 +13,33 @@ import {
 
 export type { Commitment } from './records';
 
+/**
+ * The read-only projection the notification center consumes. Resolving a
+ * promise still goes through chat, so nothing here writes.
+ */
+export interface CommitmentSummaryRecord {
+  id: string;
+  text: string;
+  due: string;
+  status: 'open' | 'done' | 'dropped';
+  createdAt: string;
+  resolvedAt?: string;
+  workspaceId?: string;
+}
+
+/** Trims a record to the display fields; no reordering or inventing fields. */
+export function summarizeCommitment(commitment: Commitment): CommitmentSummaryRecord {
+  return {
+    id: commitment.id,
+    text: commitment.text,
+    due: commitment.due,
+    status: commitment.status,
+    createdAt: commitment.createdAt,
+    ...(commitment.resolvedAt ? { resolvedAt: commitment.resolvedAt } : {}),
+    ...(commitment.workspaceId ? { workspaceId: commitment.workspaceId } : {})
+  };
+}
+
 export interface CreateCommitmentInput {
   /** The promise in the user's own words, at most `MAX_COMMITMENT_TEXT` chars. */
   text: string;

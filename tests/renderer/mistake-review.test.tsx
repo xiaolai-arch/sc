@@ -206,8 +206,8 @@ test('reviews a real mistake from the practice panel and records the answer', as
   expect((await api.getPracticeMistakes('kaoyan'))[0]?.correctStreak).toBe(0);
 
   render(<Workspace hasApiKey={false} onRefresh={vi.fn()} />);
-  await screen.findByRole('button', { name: '全部工作区' });
-  await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
+  await screen.findByRole('button', { name: '全部项目' });
+  await userEvent.click(screen.getByRole('button', { name: '全部项目' }));
   await userEvent.click(await screen.findByRole('button', { name: '练习' }));
 
   await userEvent.click(

@@ -131,14 +131,14 @@ function renderContext(context: ButlerContext): string {
 
   if (context.workspaces.length > 0) {
     lines.push(
-      `工作区：${context.workspaces
+      `项目：${context.workspaces
         .map((workspace) => `${workspace.name}（${workspace.kind}，ID：${workspace.id}）`)
         .join('、')}`
     );
   }
 
   if (context.workspace) {
-    lines.push(`当前工作区：${context.workspace.name}（${context.workspace.kind}），ID：${context.workspace.id}`);
+    lines.push(`当前项目：${context.workspace.name}（${context.workspace.kind}），ID：${context.workspace.id}`);
     if (context.workspace.goal) {
       lines.push(`目标：${context.workspace.goal}`);
     }
@@ -146,7 +146,7 @@ function renderContext(context: ButlerContext): string {
       lines.push(`说明：${context.workspace.description}`);
     }
   } else if (context.workspaceId) {
-    lines.push(`当前工作区 ID：${context.workspaceId}`);
+    lines.push(`当前项目 ID：${context.workspaceId}`);
   }
 
   const activeTasks = context.tasks.filter(

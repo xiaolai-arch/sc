@@ -93,7 +93,7 @@ function buildMessages(source: ReviewSynthesisSource): ModelMessage[] {
     'kind 说明该条记忆的类型：weakness=薄弱点，strength=优势/进展，preference=学习偏好，plan=接下来的打算，fact=其他值得记住的事实。'
   ].join('\n');
   const user = [
-    `工作区：${source.workspaceName}`,
+    `项目：${source.workspaceName}`,
     source.workspaceGoal ? `目标：${source.workspaceGoal}` : null,
     `复盘日期：${source.date}`,
     '复盘回答（completed=完成了什么，stuck=卡在哪里，tomorrow=明天做什么）：',

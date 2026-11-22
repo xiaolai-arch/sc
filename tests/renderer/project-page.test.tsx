@@ -26,7 +26,7 @@ function navButton(name: string) {
 
 async function openProjects() {
   await screen.findByText(homeGreeting('xiaolai', new Date()));
-  await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
+  await userEvent.click(screen.getByRole('button', { name: '全部项目' }));
 }
 
 async function reopenProjects() {
@@ -135,7 +135,7 @@ test('records 25 minutes exactly once when focus completes', async () => {
   });
   await act(async () => {});
   await act(async () => {
-    screen.getByRole('button', { name: '全部工作区' }).click();
+    screen.getByRole('button', { name: '全部项目' }).click();
   });
   expect(screen.getByRole('button', { name: '专注：极限与连续' })).toBeInTheDocument();
 
@@ -479,7 +479,7 @@ test('routes a project prompt to the selected project, not the open chat', async
     expect(screen.queryByRole('button', { name: '停止生成' })).not.toBeInTheDocument()
   );
 
-  await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
+  await userEvent.click(screen.getByRole('button', { name: '全部项目' }));
   await pickOption('切换项目', '考研');
   await userEvent.click(screen.getByRole('button', { name: '让阿咲调整' }));
 

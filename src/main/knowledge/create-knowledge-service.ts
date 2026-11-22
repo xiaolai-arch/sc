@@ -112,7 +112,7 @@ function normalizeSummary(value: unknown): string {
 
 function normalizeWorkspace(value: unknown): string | undefined {
   if (value === undefined || value === null) return undefined;
-  if (typeof value !== 'string') throw new Error('所属工作区无效。');
+  if (typeof value !== 'string') throw new Error('所属项目无效。');
   const workspaceId = value.trim();
   if (!workspaceId) return undefined;
   return assertSafeSegment(workspaceId, 'workspace id');

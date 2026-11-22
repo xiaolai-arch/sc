@@ -148,7 +148,7 @@ test('loads history and uses the conversation workspace over the send workspace'
       message: '你好'
     });
 
-    expect(client.calls[0]?.messages[0]?.content).toContain('当前工作区：考研');
+    expect(client.calls[0]?.messages[0]?.content).toContain('当前项目：考研');
     expect(
       client.calls[0]?.messages.slice(1).map((entry) => ({
         role: entry.role,

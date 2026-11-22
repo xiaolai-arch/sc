@@ -181,7 +181,7 @@ describe('WorkspacePlanner', () => {
     expect(client.calls).toHaveLength(1);
 
     const prompt = joinPrompt(client);
-    expect(prompt).toContain('工作区目标：2027 考研上岸');
+    expect(prompt).toContain('项目目标：2027 考研上岸');
     expect(prompt).toContain('极限错题整理');
     expect(prompt).toContain('等价无穷小仍有混淆');
     expect(prompt).toContain('晚上效率更高');

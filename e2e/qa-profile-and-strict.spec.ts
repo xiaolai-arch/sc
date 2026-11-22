@@ -304,7 +304,7 @@ async function saveSettings(page: Page): Promise<void> {
 }
 
 async function openPractice(page: Page): Promise<void> {
-  await page.getByRole('button', { name: '全部工作区' }).click();
+  await page.getByRole('button', { name: '全部项目' }).click();
   await expect(page.locator('header').getByText('项目', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '练习', exact: true }).click();
   await expect(page.getByRole('button', { name: '关闭练习' })).toBeVisible();

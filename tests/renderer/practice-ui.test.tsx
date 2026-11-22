@@ -448,14 +448,14 @@ describe('mistake review sheet', () => {
   it('shows the error line when the export is rejected', async () => {
     const user = userEvent.setup();
     const onExportMistakeSheet = vi.fn(async () => {
-      throw new Error('工作区不存在');
+      throw new Error('项目不存在');
     });
 
     renderPane({ mistakes: mistakes(), onExportMistakeSheet });
     await user.click(screen.getByRole('button', { name: '导出复习单' }));
 
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('工作区不存在');
+    expect(alert).toHaveTextContent('项目不存在');
     expect(screen.queryByText(/已保存：/)).not.toBeInTheDocument();
   });
 

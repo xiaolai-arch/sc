@@ -44,7 +44,7 @@ test('validates memory payloads', async () => {
   const { api } = fakeApi();
   const handlers = createIpcHandlers(api);
 
-  await expect(handlers.updateMemory({ id: 'm1', text: 'x' })).rejects.toThrow(/工作区 ID/);
+  await expect(handlers.updateMemory({ id: 'm1', text: 'x' })).rejects.toThrow(/项目 ID/);
   await expect(handlers.updateMemory({ workspaceId: 'ws-1', text: 'x' })).rejects.toThrow(
     /记忆 ID/
   );
@@ -55,5 +55,5 @@ test('validates memory payloads', async () => {
     handlers.updateMemory({ workspaceId: 'ws-1', id: 'm1', kind: 'mystery' })
   ).rejects.toThrow(/记忆类型/);
   await expect(handlers.deleteMemory({ workspaceId: 'ws-1' })).rejects.toThrow(/记忆 ID/);
-  await expect(handlers.deleteMemory({ id: 'm1' })).rejects.toThrow(/工作区 ID/);
+  await expect(handlers.deleteMemory({ id: 'm1' })).rejects.toThrow(/项目 ID/);
 });

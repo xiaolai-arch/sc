@@ -27,7 +27,7 @@ export interface WorkspacePlanPrompt {
   user: string;
 }
 
-export const WORKSPACE_PLAN_SYSTEM_PROMPT = `你是 阿咲 的规划助手。你要根据工作区目标、最近记录和今天的可用时间，为用户安排今天可执行的任务。
+export const WORKSPACE_PLAN_SYSTEM_PROMPT = `你是 阿咲 的规划助手。你要根据项目目标、最近记录和今天的可用时间，为用户安排今天可执行的任务。
 规则：
 - 只输出一个 JSON 对象，不要 Markdown、解释或代码围栏。
 - 输出 1-5 个任务，按优先级排序。
@@ -50,14 +50,14 @@ export function buildWorkspacePlanPrompt(input: WorkspacePlanPromptInput): Works
           `这天用户说特别满：只安排 1 个不超过 ${BUSY_DAY_MINUTES} 分钟的小任务，不要凑满时间。`
         ]
       : []),
-    `工作区：${input.workspace.name}（${input.workspace.kind}）`
+    `项目：${input.workspace.name}（${input.workspace.kind}）`
   ];
 
   if (input.workspace.goal.trim()) {
-    lines.push(`工作区目标：${input.workspace.goal.trim()}`);
+    lines.push(`项目目标：${input.workspace.goal.trim()}`);
   }
   if (input.workspace.description.trim()) {
-    lines.push(`工作区说明：${input.workspace.description.trim()}`);
+    lines.push(`项目说明：${input.workspace.description.trim()}`);
   }
   // A target date turns planning into countdown-driven planning. Absent or
   // unreadable, nothing is added, so the prompt stays byte-identical.

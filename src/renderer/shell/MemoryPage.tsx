@@ -36,18 +36,18 @@ export function MemoryPage({
   return (
     <PageFrame
       title="记忆"
-      subtitle={filteredWorkspace?.name ?? '全部工作区'}
+      subtitle={filteredWorkspace?.name ?? '全部项目'}
       onOpenSidebar={onOpenSidebar}
       action={
         workspaces.length > 0 ? (
           <Select
-            aria-label="按工作区筛选记忆"
+            aria-label="按项目筛选记忆"
             size="sm"
             fullWidth={false}
             value={filterId}
             onChange={(event) => setFilterId(event.target.value)}
           >
-            <option value="">全部工作区</option>
+            <option value="">全部项目</option>
             {workspaces.map((workspace) => (
               <option key={workspace.id} value={workspace.id}>
                 {workspace.name}

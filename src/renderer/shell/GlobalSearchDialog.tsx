@@ -19,7 +19,7 @@ type GlobalSearchDialogProps = {
 };
 
 const KIND_LABELS: Record<SearchResultKind, string> = {
-  workspace: '工作区',
+  workspace: '项目',
   note: '笔记',
   task: '任务',
   memory: '记忆',
@@ -186,14 +186,14 @@ export function GlobalSearchDialog({
     if (item.source === 'conversation') {
       const id = item.conversation.workspaceId;
       if (!id) return item.conversation.kind === 'check-in' ? '日常' : null;
-      return workspaceNames.get(id) ?? '工作区';
+      return workspaceNames.get(id) ?? '项目';
     }
     if (item.result.kind === 'knowledge-topic') {
       if (!item.result.workspaceId) return '知识库';
-      return `${workspaceNames.get(item.result.workspaceId) ?? '工作区'} · 知识库`;
+      return `${workspaceNames.get(item.result.workspaceId) ?? '项目'} · 知识库`;
     }
     if (!item.result.workspaceId) return null;
-    return workspaceNames.get(item.result.workspaceId) ?? '工作区';
+    return workspaceNames.get(item.result.workspaceId) ?? '项目';
   }
 
   return (

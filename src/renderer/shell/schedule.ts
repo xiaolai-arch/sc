@@ -69,7 +69,7 @@ function entryFor(
     time: formatTime(minutes),
     title: task.title,
     detail: `${duration} 分钟 · ${task.subject}`,
-    tag: workspace?.name ?? '工作区',
+    tag: workspace?.name ?? '项目',
     workspaceId: task.workspaceId,
     status: task.status,
     durationMin: duration,

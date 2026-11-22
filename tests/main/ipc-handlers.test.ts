@@ -194,7 +194,7 @@ test('exports the mistake review sheet through the practice service', async () =
 
   // The empty id and the bad dueOnly never reach the service.
   await expect(handlers.exportMistakeSheet({ workspaceId: '' })).rejects.toThrow(
-    '工作区 ID不能为空。'
+    '项目 ID不能为空。'
   );
   await expect(
     handlers.exportMistakeSheet({ workspaceId: 'kaoyan', dueOnly: 'yes' })
@@ -247,6 +247,45 @@ test('submits a short answer with a typed response and a self-assessment', async
   expect(submitShortAnswer).toHaveBeenCalledTimes(1);
 });
 
+test('reads pending promises for the day and rejects a bad date early', async () => {
+  const listPendingCommitments = vi.fn().mockResolvedValue([
+    {
+      id: 'cm-1',
+      text: '整理错题',
+      due: '2026-11-22',
+      status: 'open',
+      createdAt: '2026-11-21T08:00:00.000Z'
+    }
+  ]);
+  const { context } = await makeContext();
+  const handlers = createIpcHandlers({
+    ...context.api,
+    listPendingCommitments
+  });
+
+  const pending = await handlers.listPendingCommitments({ byDate: '2026-11-22' });
+  expect(pending).toEqual([
+    {
+      id: 'cm-1',
+      text: '整理错题',
+      due: '2026-11-22',
+      status: 'open',
+      createdAt: '2026-11-21T08:00:00.000Z'
+    }
+  ]);
+  expect(listPendingCommitments).toHaveBeenCalledWith({ byDate: '2026-11-22' });
+
+  // A blank or malformed day never reaches the service.
+  await expect(handlers.listPendingCommitments({ byDate: '' })).rejects.toThrow(
+    '日期不能为空。'
+  );
+  await expect(handlers.listPendingCommitments({ byDate: '22-11-2026' })).rejects.toThrow(
+    '日期格式必须为 YYYY-MM-DD。'
+  );
+  await expect(handlers.listPendingCommitments(null)).rejects.toThrow('读取承诺参数无效。');
+  expect(listPendingCommitments).toHaveBeenCalledTimes(1);
+});
+
 test('reviews a short mistake over IPC with its typed answer', async () => {
   const reviewMistake = vi.fn().mockResolvedValue({ questionId: 'q-1', correct: true });
   const practice = {
@@ -284,7 +323,7 @@ test('rejects malformed handler parameters before they reach services', async ()
   const { context, workspace } = await makeContext();
   const handlers = createIpcHandlers(context.api);
 
-  await expect(handlers.getWorkspaceSnapshot('   ')).rejects.toThrow('工作区 ID不能为空。');
+  await expect(handlers.getWorkspaceSnapshot('   ')).rejects.toThrow('项目 ID不能为空。');
   await expect(
     handlers.createTask({ workspaceId: 'ws-1', subject: '数学', durationMin: 30, acceptance: '完成' })
   ).rejects.toThrow('任务标题不能为空。');
@@ -336,7 +375,7 @@ test('rejects malformed handler parameters before they reach services', async ()
   );
   await expect(handlers.send({ message: '   ' })).rejects.toThrow('消息内容不能为空。');
   await expect(handlers.setApiKey(42)).rejects.toThrow('API key不能为空。');
-  await expect(handlers.createWorkspace(null)).rejects.toThrow('创建工作区参数无效。');
+  await expect(handlers.createWorkspace(null)).rejects.toThrow('创建项目参数无效。');
   await expect(
     handlers.createLongPlan({ workspaceId: 'ws-1', goal: '学会 Agent', weeks: 0 })
   ).rejects.toThrow('周数必须在 1 到 16 之间。');

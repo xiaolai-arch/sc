@@ -19,7 +19,7 @@ function setup() {
 test('updates the project check-in preference and keeps it', async () => {
   const api = setup();
   await screen.findByText(homeGreeting('xiaolai', new Date()));
-  await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
+  await userEvent.click(screen.getByRole('button', { name: '全部项目' }));
   await pickOption('切换项目', '考研');
 
   const select = await screen.findByLabelText('参与检查');

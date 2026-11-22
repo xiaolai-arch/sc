@@ -177,7 +177,9 @@ export const IPC_CHANNELS = {
   // Appended after the profile batch for the same stability reason.
   setConversationPermissions: 'study-coach:conversations:set-permissions',
   // Free recall: appended last so every existing channel keeps its position.
-  submitPracticeShortAnswer: 'study-coach:practice:submit-short-answer'
+  submitPracticeShortAnswer: 'study-coach:practice:submit-short-answer',
+  // Read-only promises; appended last so every existing channel keeps its position.
+  listPendingCommitments: 'study-coach:commitments:pending'
 } as const;
 
 /** Streaming uses a separate request/event pair so the request map stays stable. */
@@ -313,11 +315,11 @@ function requireTaskCue(
 }
 
 function requireCreateWorkspace(value: unknown): CreateWorkspaceInput {
-  const input = requireObject(value, '创建工作区');
-  requireString(input.name, '工作区名称');
-  requireString(input.kind, '工作区类型');
-  requireString(input.goal, '工作区目标');
-  requireString(input.description, '工作区描述');
+  const input = requireObject(value, '创建项目');
+  requireString(input.name, '项目名称');
+  requireString(input.kind, '项目类型');
+  requireString(input.goal, '项目目标');
+  requireString(input.description, '项目描述');
   return input as unknown as CreateWorkspaceInput;
 }
 
@@ -327,8 +329,8 @@ function requireUpdateWorkspace(value: unknown): UpdateWorkspaceInput {
   if (checkIn !== undefined && checkIn !== 'daily' && checkIn !== 'off') {
     throw new Error('检查频率无效。');
   }
-  const goal = optionalString(input.goal, '工作区目标');
-  const description = optionalString(input.description, '工作区描述');
+  const goal = optionalString(input.goal, '项目目标');
+  const description = optionalString(input.description, '项目描述');
   let availableMinutes: number | undefined;
   if (input.availableMinutes !== undefined) {
     if (
@@ -349,8 +351,8 @@ function requireUpdateWorkspace(value: unknown): UpdateWorkspaceInput {
     else throw new Error('目标日期需为 YYYY-MM-DD 格式的日期。');
   }
   return {
-    workspaceId: requireString(input.workspaceId, '工作区 ID'),
-    ...(input.name !== undefined ? { name: requireString(input.name, '工作区名称') } : {}),
+    workspaceId: requireString(input.workspaceId, '项目 ID'),
+    ...(input.name !== undefined ? { name: requireString(input.name, '项目名称') } : {}),
     ...(input.goal !== undefined ? { goal: goal ?? '' } : {}),
     ...(input.description !== undefined ? { description: description ?? '' } : {}),
     ...(checkIn !== undefined ? { checkIn: checkIn as 'daily' | 'off' } : {}),
@@ -361,12 +363,12 @@ function requireUpdateWorkspace(value: unknown): UpdateWorkspaceInput {
 
 function requireDeleteWorkspace(value: unknown): string {
   const input = requireObject(value, '删除项目');
-  return requireString(input.workspaceId, '工作区 ID');
+  return requireString(input.workspaceId, '项目 ID');
 }
 
 function requireCreateTask(value: unknown): CreateTaskInput {
   const input = requireObject(value, '创建任务');
-  requireString(input.workspaceId, '工作区 ID');
+  requireString(input.workspaceId, '项目 ID');
   requireString(input.title, '任务标题');
   requireString(input.subject, '任务科目');
   // 验收标准 is optional in the UI; an empty string means the user skipped it.
@@ -452,7 +454,7 @@ function requireDeleteTask(value: unknown): DeleteTaskInput {
 
 function requireCreateNote(value: unknown): CreateNoteInput {
   const input = requireObject(value, '创建笔记');
-  requireString(input.workspaceId, '工作区 ID');
+  requireString(input.workspaceId, '项目 ID');
   requireString(input.title, '笔记标题');
   requireString(input.body, '笔记正文');
   return input as unknown as CreateNoteInput;
@@ -552,7 +554,7 @@ function requireReview(value: unknown): SubmitReviewInput {
 function requireSend(value: unknown): SendMessageInput {
   const input = requireObject(value, '发送消息');
   requireString(input.message, '消息内容');
-  optionalString(input.workspaceId, '工作区 ID');
+  optionalString(input.workspaceId, '项目 ID');
   optionalString(input.taskId, '任务 ID');
   const permissions =
     input.permissions === undefined ? undefined : requirePermissions(input.permissions);
@@ -597,7 +599,7 @@ function requireCreateConversation(value: unknown): CreateConversationInput {
   if (kind !== undefined && kind !== 'chat' && kind !== 'check-in') {
     throw new Error('对话类型无效。');
   }
-  const workspaceId = optionalString(input.workspaceId, '工作区 ID');
+  const workspaceId = optionalString(input.workspaceId, '项目 ID');
   const permissions =
     input.permissions === undefined ? undefined : requirePermissions(input.permissions);
   return {
@@ -751,7 +753,7 @@ function optionalNonNegativeInteger(value: unknown, label: string): number | und
 
 function requirePracticeDue(value: unknown): { workspaceId: string; date: string } {
   const input = requireObject(value, '错题到期');
-  requireString(input.workspaceId, '工作区 ID');
+  requireString(input.workspaceId, '项目 ID');
   requireString(input.date, '日期');
   return input as unknown as { workspaceId: string; date: string };
 }
@@ -794,9 +796,16 @@ function requireSubmitShortAnswer(value: unknown): SubmitShortAnswerInput {
   };
 }
 
+/** Local date the notification center asks about; a bad shape must not reach the vault. */
+function requirePendingCommitments(value: unknown): { byDate: string } {
+  const input = requireObject(value, '读取承诺');
+  const byDate = requireString(input.byDate, '日期');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(byDate)) throw new Error('日期格式必须为 YYYY-MM-DD。');
+  return { byDate };
+}
+
 /**
- * Provenance crossing IPC. Absent (and `user`) means a hand-made set; only
- * `model` is meaningful, and a stray value is rejected so a typo cannot make a
+ * Provenance crossing IPC. Absent (and `user`) means a hand-made set; only * `model` is meaningful, and a stray value is rejected so a typo cannot make a
  * set silently claim to be hand-made.
  */
 function optionalPracticeSource(value: unknown): 'user' | 'model' | undefined {
@@ -815,7 +824,7 @@ function requireReviewTimestamp(value: unknown): string {
 
 function requireCreatePracticeSet(value: unknown): CreatePracticeSetInput {
   const input = requireObject(value, '创建练习');
-  requireString(input.workspaceId, '工作区 ID');
+  requireString(input.workspaceId, '项目 ID');
   requireString(input.title, '练习标题');
   if (!Array.isArray(input.questions) || input.questions.length === 0) {
     throw new Error('练习题目不能为空。');
@@ -893,7 +902,7 @@ function requireSetMistakeResolved(value: unknown): SetMistakeResolvedInput {
 
 function requireExportMistakeSheet(value: unknown): ExportMistakeSheetInput {
   const input = requireObject(value, '导出复习单');
-  const workspaceId = requireString(input.workspaceId, '工作区 ID');
+  const workspaceId = requireString(input.workspaceId, '项目 ID');
   if (input.dueOnly !== undefined && typeof input.dueOnly !== 'boolean') {
     throw new Error('导出范围参数无效。');
   }
@@ -905,7 +914,7 @@ function requireExportMistakeSheet(value: unknown): ExportMistakeSheetInput {
 
 function requireSynthesizeMemory(value: unknown): SynthesizeMemoryInput {
   const input = requireObject(value, '生成记忆');
-  requireString(input.workspaceId, '工作区 ID');
+  requireString(input.workspaceId, '项目 ID');
   requireString(input.date, '复盘日期');
   requireObject(input.answers, '复盘答案');
   return input as unknown as SynthesizeMemoryInput;
@@ -923,7 +932,7 @@ function requireMemoryKind(value: unknown): MemoryKind {
 function requireUpdateMemory(value: unknown): UpdateMemoryInput {
   const input = requireObject(value, '更新记忆');
   return {
-    workspaceId: requireString(input.workspaceId, '工作区 ID'),
+    workspaceId: requireString(input.workspaceId, '项目 ID'),
     id: requireString(input.id, '记忆 ID'),
     ...(input.text !== undefined ? { text: requireString(input.text, '记忆内容') } : {}),
     ...(input.kind !== undefined ? { kind: requireMemoryKind(input.kind) } : {})
@@ -933,7 +942,7 @@ function requireUpdateMemory(value: unknown): UpdateMemoryInput {
 function requireCreateMemory(value: unknown): CreateMemoryInput {
   const input = requireObject(value, '新增记忆');
   return {
-    workspaceId: requireString(input.workspaceId, '工作区 ID'),
+    workspaceId: requireString(input.workspaceId, '项目 ID'),
     text: requireString(input.text, '记忆内容'),
     kind: requireMemoryKind(input.kind)
   };
@@ -942,7 +951,7 @@ function requireCreateMemory(value: unknown): CreateMemoryInput {
 function requireDeleteMemory(value: unknown): DeleteMemoryInput {
   const input = requireObject(value, '删除记忆');
   return {
-    workspaceId: requireString(input.workspaceId, '工作区 ID'),
+    workspaceId: requireString(input.workspaceId, '项目 ID'),
     id: requireString(input.id, '记忆 ID')
   };
 }
@@ -1063,7 +1072,7 @@ function knowledgeAliases(value: unknown): string[] | undefined {
 function knowledgeWorkspace(value: unknown, allowNull: boolean): string | null | undefined {
   if (value === undefined) return undefined;
   if (value === null && allowNull) return null;
-  if (typeof value !== 'string') throw new Error('所属工作区无效。');
+  if (typeof value !== 'string') throw new Error('所属项目无效。');
   return value.trim();
 }
 
@@ -1155,7 +1164,7 @@ function requireSaveKnowledgeNote(value: unknown): SaveKnowledgeNoteInput {
 
 function requirePlanWorkspace(value: unknown): PlanWorkspaceInput {
   const input = requireObject(value, '生成计划');
-  requireString(input.workspaceId, '工作区 ID');
+  requireString(input.workspaceId, '项目 ID');
   optionalString(input.date, '计划日期');
   optionalPositiveNumber(input.availableMinutes, '可用时长');
   return input as unknown as PlanWorkspaceInput;
@@ -1201,7 +1210,7 @@ function requireUpdateLongPlan(value: unknown): UpdateLongPlanInput {
 
 function requireCreateLongPlan(value: unknown): CreateLongPlanInput {
   const input = requireObject(value, '生成长期计划');
-  const workspaceId = requireString(input.workspaceId, '工作区 ID');
+  const workspaceId = requireString(input.workspaceId, '项目 ID');
   const goal = requireString(input.goal, '计划目标');
   if (
     typeof input.weeks !== 'number' ||
@@ -1352,7 +1361,7 @@ function requireSearchWorkspace(value: unknown): {
   limit?: number;
 } {
   const input = requireObject(value, '搜索');
-  requireString(input.workspaceId, '工作区 ID');
+  requireString(input.workspaceId, '项目 ID');
   requireString(input.query, '搜索关键词');
   const limit = optionalPositiveNumber(input.limit, '结果数量');
   return {
@@ -1375,7 +1384,7 @@ function requireSearchAll(value: unknown): { query: string; limit?: number } {
 function requireListReviews(value: unknown): { workspaceId?: string; limit?: number } {
   if (value === undefined || value === null) return {};
   const input = requireObject(value, '读取复盘');
-  const workspaceId = optionalString(input.workspaceId, '工作区 ID');
+  const workspaceId = optionalString(input.workspaceId, '项目 ID');
   const limit = optionalPositiveNumber(input.limit, '结果数量');
   return {
     ...(workspaceId !== undefined ? { workspaceId } : {}),
@@ -1425,12 +1434,12 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
       return api.updateWorkspace(parsed);
     },
     getWorkspaceSnapshot: async (input) =>
-      api.getWorkspaceSnapshot(requireString(input, '工作区 ID')),
+      api.getWorkspaceSnapshot(requireString(input, '项目 ID')),
     createTask: async (input) => api.createTask(requireCreateTask(input)),
     updateWorkspaceTask: async (input) => api.updateWorkspaceTask(requireUpdateWorkspaceTask(input)),
     createNote: async (input) => api.createNote(requireCreateNote(input)),
     updateNote: async (input) => api.updateNote(requireUpdateNote(input)),
-    getMemory: async (input) => api.getMemory(optionalString(input, '工作区 ID')),
+    getMemory: async (input) => api.getMemory(optionalString(input, '项目 ID')),
     getReminders: async () => api.getReminders(),
     createReminder: async (input) => {
       const parsed = requireCreateReminder(input);
@@ -1445,7 +1454,7 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
     submitReview: async (input) => api.submitReview(requireReview(input)),
     listReviews: async (input) => api.listReviews(requireListReviews(input)),
     planWorkspace: async (input) => api.planWorkspace(requirePlanWorkspace(input)),
-    listLongPlans: async (input) => api.listLongPlans(optionalString(input, '工作区 ID')),
+    listLongPlans: async (input) => api.listLongPlans(optionalString(input, '项目 ID')),
     getLongPlan: async (input) => api.getLongPlan(requireString(input, '计划 ID')),
     createLongPlan: async (input) => api.createLongPlan(requireCreateLongPlan(input)),
     recalibrateLongPlan: async (input) =>
@@ -1453,19 +1462,21 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
     setLongPlanItemDone: async (input) =>
       api.setLongPlanItemDone(requireLongPlanItemDone(input)),
     deleteLongPlan: async (input) => api.deleteLongPlan(requireString(input, '计划 ID')),
-    listPracticeSets: async (input) => api.listPracticeSets(requireString(input, '工作区 ID')),
+    listPracticeSets: async (input) => api.listPracticeSets(requireString(input, '项目 ID')),
     getPracticeSet: async (input) => api.getPracticeSet(requireString(input, '练习 ID')),
     createPracticeSet: async (input) => api.createPracticeSet(requireCreatePracticeSet(input)),
     submitPracticeAnswer: async (input) => api.submitPracticeAnswer(requireSubmitAnswer(input)),
     submitPracticeShortAnswer: async (input) =>
       api.submitPracticeShortAnswer(requireSubmitShortAnswer(input)),
-    getPracticeMistakes: async (input) => api.getPracticeMistakes(requireString(input, '工作区 ID')),
+    listPendingCommitments: async (input) =>
+      api.listPendingCommitments(requirePendingCommitments(input)),
+    getPracticeMistakes: async (input) => api.getPracticeMistakes(requireString(input, '项目 ID')),
     getPracticeDue: async (input) => api.getPracticeDue(requirePracticeDue(input)),
     listPracticeAttempts: async (input) =>
-      api.listPracticeAttempts(requireString(input, '工作区 ID')),
-    listMemory: async (input) => api.listMemory(optionalString(input, '工作区 ID')),
+      api.listPracticeAttempts(requireString(input, '项目 ID')),
+    listMemory: async (input) => api.listMemory(optionalString(input, '项目 ID')),
     synthesizeMemory: async (input) => api.synthesizeMemory(requireSynthesizeMemory(input)),
-    getMemoryProfile: async (input) => api.getMemoryProfile(optionalString(input, '工作区 ID')),
+    getMemoryProfile: async (input) => api.getMemoryProfile(optionalString(input, '项目 ID')),
     createMemory: async (input) => {
       const parsed = requireCreateMemory(input);
       if (!api.createMemory) throw new Error('当前存储不支持新增记忆。');
@@ -1480,7 +1491,7 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
       api.updateProfileEntry(requireUpdateProfileEntry(input)),
     deleteProfileEntry: async (input) =>
       api.deleteProfileEntry(requireDeleteProfileEntry(input)),
-    listKnowledgeTopics: async (input) => api.listKnowledgeTopics(optionalString(input, '工作区 ID')),
+    listKnowledgeTopics: async (input) => api.listKnowledgeTopics(optionalString(input, '项目 ID')),
     createKnowledgeTopic: async (input) =>
       api.createKnowledgeTopic(requireCreateKnowledgeTopic(input)),
     updateKnowledgeTopic: async (input) =>
@@ -1979,6 +1990,7 @@ export function createStudyCoachBridge(
     exportMistakeSheet: (input) => call(IPC_CHANNELS.exportMistakeSheet, input),
     submitPracticeShortAnswer: (input) =>
       call(IPC_CHANNELS.submitPracticeShortAnswer, input),
+    listPendingCommitments: (input) => call(IPC_CHANNELS.listPendingCommitments, input),
     async stream(input, onEvent) {
       const requestId = createRequestId();
       const unsubscribe = subscribe?.(BUTLER_STREAM_CHANNELS.event, (payload) => {

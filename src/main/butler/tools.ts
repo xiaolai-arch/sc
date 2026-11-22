@@ -306,7 +306,7 @@ export function createButlerTools(): ButlerToolDefinition[] {
       async execute(input, context) {
         const createReminder = context.workspace.createReminder;
         if (!createReminder) {
-          throw new ToolInputError('当前工作区不支持写入提醒。');
+          throw new ToolInputError('当前项目不支持写入提醒。');
         }
         const time = requiredString(input, 'time');
         const label = requiredString(input, 'label');
@@ -317,7 +317,7 @@ export function createButlerTools(): ButlerToolDefinition[] {
     {
       name: 'save_review',
       description:
-        '保存一次复盘，并在有工作区时同步更新记忆。日期省略时使用今天；workspaceId 省略时使用当前项目。',
+        '保存一次复盘，并在有项目时同步更新记忆。日期省略时使用今天；workspaceId 省略时使用当前项目。',
       parameters: {
         type: 'object',
         properties: {
@@ -387,7 +387,7 @@ export function createButlerTools(): ButlerToolDefinition[] {
     {
       name: 'plan_workspace',
       description:
-        '用工作区 planner 生成一份今日/本周计划，并把计划中的任务写入当前项目。适合用户说「帮我排计划」时使用。',
+        '用项目 planner 生成一份今日/本周计划，并把计划中的任务写入当前项目。适合用户说「帮我排计划」时使用。',
       parameters: {
         type: 'object',
         properties: {
@@ -543,7 +543,7 @@ export function createButlerTools(): ButlerToolDefinition[] {
         }
         const update = context.workspace.updateWorkspace;
         if (!update) {
-          throw new ToolInputError('当前工作区不支持更新项目。');
+          throw new ToolInputError('当前项目不支持更新项目。');
         }
         const name = optionalString(input, 'name');
         const goal = optionalString(input, 'goal');
@@ -571,14 +571,14 @@ export function createButlerTools(): ButlerToolDefinition[] {
     {
       name: 'get_today_plan',
       description:
-        '读取今天的计划与任务，以及到了回访日的知识主题（revisits：今天该让学习者自测的主题，主动提议抽几道题）。可以指定工作区；省略 workspaceId 时汇总所有工作区的任务。',
+        '读取今天的计划与任务，以及到了回访日的知识主题（revisits：今天该让学习者自测的主题，主动提议抽几道题）。可以指定项目；省略 workspaceId 时汇总所有项目的任务。',
       requiresWrite: false,
       parameters: {
         type: 'object',
         properties: {
           workspaceId: {
             type: 'string',
-            description: '工作区 ID；省略时汇总所有工作区'
+            description: '项目 ID；省略时汇总所有项目'
           }
         },
         additionalProperties: false
@@ -605,7 +605,7 @@ export function createButlerTools(): ButlerToolDefinition[] {
           result.status === 'fulfilled' ? [result.value] : []
         );
         if (workspaces.length > 0 && snapshots.length === 0) {
-          throw new Error('读取工作区失败，暂时无法获取今日计划。');
+          throw new Error('读取项目失败，暂时无法获取今日计划。');
         }
         return summarizePlan(
           snapshots,
@@ -618,14 +618,14 @@ export function createButlerTools(): ButlerToolDefinition[] {
     {
       name: 'write_note',
       description:
-        '把一条内容写入本地笔记。需要 title 和 body；workspaceId 省略时写入当前工作区。',
+        '把一条内容写入本地笔记。需要 title 和 body；workspaceId 省略时写入当前项目。',
       parameters: {
         type: 'object',
         properties: {
-          workspaceId: { type: 'string', description: '工作区 ID；省略时使用当前工作区' },
+          workspaceId: { type: 'string', description: '项目 ID；省略时使用当前项目' },
           title: { type: 'string', description: '笔记标题' },
           body: { type: 'string', description: '笔记正文（markdown）' },
-          subject: { type: 'string', description: '科目或主题；省略时使用工作区名称' },
+          subject: { type: 'string', description: '科目或主题；省略时使用项目名称' },
           tags: {
             type: 'array',
             items: { type: 'string' },
@@ -639,7 +639,7 @@ export function createButlerTools(): ButlerToolDefinition[] {
       async execute(input, context) {
         const workspaceId = optionalString(input, 'workspaceId') ?? context.workspaceId;
         if (!workspaceId) {
-          throw new ToolInputError('缺少 workspaceId：请先选择工作区，或说明要写到哪个工作区。');
+          throw new ToolInputError('缺少 workspaceId：请先选择项目，或说明要写到哪个项目。');
         }
         const title = requiredString(input, 'title');
         const body = requiredString(input, 'body');
@@ -736,14 +736,14 @@ export function createButlerTools(): ButlerToolDefinition[] {
     },
     {
       name: 'get_memory',
-      description: '读取阿咲关于用户的长期记忆，可以按工作区过滤。',
+      description: '读取阿咲关于用户的长期记忆，可以按项目过滤。',
       requiresWrite: false,
       parameters: {
         type: 'object',
         properties: {
           workspaceId: {
             type: 'string',
-            description: '工作区 ID；省略时读取全部记忆'
+            description: '项目 ID；省略时读取全部记忆'
           }
         },
         additionalProperties: false
@@ -774,7 +774,7 @@ export function createButlerTools(): ButlerToolDefinition[] {
           note: { type: 'string', description: '这次提到它的上下文，例如今天学了什么' },
           workspaceId: {
             type: 'string',
-            description: '工作区 ID；省略时使用当前工作区，也没有则为全局主题'
+            description: '项目 ID；省略时使用当前项目，也没有则为全局主题'
           }
         },
         required: ['name'],
@@ -1086,7 +1086,7 @@ export function createButlerTools(): ButlerToolDefinition[] {
         type: 'object',
         properties: {
           title: { type: 'string', description: '练习标题，例如：极限概念小测' },
-          subject: { type: 'string', description: '科目或主题；省略时使用工作区名称' },
+          subject: { type: 'string', description: '科目或主题；省略时使用项目名称' },
           questions: {
             type: 'array',
             minItems: 3,
@@ -1304,7 +1304,7 @@ export async function executeButlerTool(
       content: toJson({
         ok: false,
         tool: call.name,
-        error: '当前是「仅可查看」权限，不能修改学习库。请让用户切到「工作区内修改」后再试。'
+        error: '当前是「仅可查看」权限，不能修改学习库。请让用户切到「项目内修改」后再试。'
       })
     };
   }

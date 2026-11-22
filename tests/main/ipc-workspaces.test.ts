@@ -29,13 +29,13 @@ test('routes workspace update and validates payloads', async () => {
   await handlers.updateWorkspace({ workspaceId: 'ws-1', checkIn: 'off' });
   expect(calls).toEqual([['update', { workspaceId: 'ws-1', checkIn: 'off' }]]);
 
-  await expect(handlers.updateWorkspace({})).rejects.toThrow(/工作区 ID/);
+  await expect(handlers.updateWorkspace({})).rejects.toThrow(/项目 ID/);
   await expect(
     handlers.updateWorkspace({ workspaceId: 'ws-1', checkIn: 'weekly' })
   ).rejects.toThrow(/检查频率/);
   await expect(
     handlers.updateWorkspace({ workspaceId: 'ws-1', name: '   ' })
-  ).rejects.toThrow(/工作区名称/);
+  ).rejects.toThrow(/项目名称/);
 });
 
 test('routes a project target date and rejects malformed ones', async () => {

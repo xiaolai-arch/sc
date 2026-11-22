@@ -100,7 +100,7 @@ test('shows this week’s overview on the review page and follows the workspace 
   expect(screen.getByText('1 / 2')).toBeInTheDocument();
   expect(screen.getByText('40 分钟')).toBeInTheDocument();
 
-  await pickOption('按工作区筛选复盘', '英语');
+  await pickOption('按项目筛选复盘', '英语');
   expect(screen.getByText('0 / 1')).toBeInTheDocument();
   expect(screen.getByText('0 分钟')).toBeInTheDocument();
 });

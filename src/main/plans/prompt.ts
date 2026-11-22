@@ -87,10 +87,10 @@ export function buildLongPlanPrompt({
       return [parts.join('；')];
     });
   const lines = [
-    `工作区：${workspace.name}（${workspace.kind}）`,
-    workspace.goal.trim() ? `工作区目标：${clip(workspace.goal, MAX_GOAL_LENGTH)}` : null,
+    `项目：${workspace.name}（${workspace.kind}）`,
+    workspace.goal.trim() ? `项目目标：${clip(workspace.goal, MAX_GOAL_LENGTH)}` : null,
     workspace.description.trim()
-      ? `工作区说明：${clip(workspace.description, MAX_NOTES_LENGTH)}`
+      ? `项目说明：${clip(workspace.description, MAX_NOTES_LENGTH)}`
       : null,
     `这次的目标：${clip(input.goal, MAX_GOAL_LENGTH)}`,
     `总周数：${input.weeks}`,

@@ -89,7 +89,7 @@ test('shows the active permission mode and switches it', () => {
   );
 
   const trigger = screen.getByRole('button', { name: '对话权限' });
-  expect(trigger).toHaveTextContent('工作区内修改');
+  expect(trigger).toHaveTextContent('项目内修改');
 
   fireEvent.click(trigger);
   fireEvent.click(screen.getByRole('radio', { name: /完全权限/ }));
@@ -116,7 +116,7 @@ test('marks the stored mode as checked in the selector', () => {
     'aria-checked',
     'true'
   );
-  expect(screen.getByRole('radio', { name: /工作区内修改/ })).toHaveAttribute(
+  expect(screen.getByRole('radio', { name: /项目内修改/ })).toHaveAttribute(
     'aria-checked',
     'false'
   );
