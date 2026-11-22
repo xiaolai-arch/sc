@@ -1405,7 +1405,10 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
           due: day.date,
           planId: plan.id,
           ...(week ? { planWeekId: week.id } : {}),
-          planItemId: day.id
+          planItemId: day.id,
+          // The task serves the plan's project goal; the main process fills
+          // this from the plan too, but naming it here keeps the call honest.
+          ...(workspace.goalId ? { goalId: workspace.goalId } : {})
         })
       )
     );

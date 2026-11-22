@@ -649,6 +649,16 @@ export function PlanSection({
                           {task.cue}
                         </span>
                       ) : null}
+                      {/* A plan-derived task names the goal it serves, when the
+                          goal it points at is the project being viewed. */}
+                      {workspace && task.goalId !== undefined && task.goalId === workspace.goalId ? (
+                        <span
+                          aria-label={`任务目标：${workspace.goal}`}
+                          className="mt-1 ml-1 inline-block max-w-full truncate rounded-full bg-[#0071e3]/10 px-1.5 py-0.5 text-[11px] text-[#0071e3] dark:bg-[#0a84ff]/15 dark:text-[#4da3ff]"
+                        >
+                          目标：{workspace.goal}
+                        </span>
+                      ) : null}
                     </div>
                     {task.status === 'done' ? (
                       <CheckIcon className="mt-1 h-3 w-3 text-[#34c759]" />
