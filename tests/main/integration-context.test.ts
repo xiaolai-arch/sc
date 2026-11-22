@@ -509,6 +509,72 @@ test('a butler-recorded promise comes back once on the next morning check-in', a
   expect(raw).toContain('status: open');
 });
 
+test('a promise follows the person: it is asked even when its project has check-in off', async () => {
+  // M2: a promise recorded inside a check-in-disabled project was dropped by
+  // `readDueCommitment`. The owner's semantics: a promise follows the person.
+  const dir = await tempDir();
+  const model = new FakeModelClient(['早上好。']);
+  const context = await createAppContext({
+    userDataPath: join(dir, 'user-data'),
+    defaultVaultPath: join(dir, 'vault'),
+    secretStore: new InMemorySecretStore(),
+    modelClient: model,
+    now: fixedNow
+  });
+  // One project stays on so the check itself is allowed to run; a second one is
+  // opted out of check-ins and holds the promise.
+  await context.api.createWorkspace({
+    name: '数学',
+    kind: 'study',
+    goal: '基础',
+    description: ''
+  });
+  const off = await context.api.createWorkspace({
+    name: '外刊精读',
+    kind: 'study',
+    goal: '读懂外刊',
+    description: ''
+  });
+  await context.api.updateWorkspace!({ workspaceId: off.id, checkIn: 'off' });
+  // A promise recorded against that project, due today.
+  await context.commitments.create({
+    text: '背 20 个单词',
+    due: '2026-10-31',
+    workspaceId: off.id
+  });
+
+  // Tasks/memory/topics from that project stay filtered out, but the promise
+  // is still asked, so the change is only about the promise.
+  const notification = await context.checkIns.check('morning', '2026-10-31');
+  expect(notification).not.toBeNull();
+  const conversation = await context.conversationStore.get(notification!.conversationId!);
+  expect(conversation?.messages[0]?.text).toContain(
+    '你说今天要做「背 20 个单词」，做了吗？'
+  );
+  // The opted-out project is not named in the prompt the model saw.
+  expect(model.calls.at(-1)?.messages[0]?.content).not.toContain(off.name);
+});
+
+test('a promise with no project is asked exactly as before', async () => {
+  const dir = await tempDir();
+  const context = await createAppContext({
+    userDataPath: join(dir, 'user-data'),
+    defaultVaultPath: join(dir, 'vault'),
+    secretStore: new InMemorySecretStore(),
+    modelClient: null,
+    now: fixedNow
+  });
+  // No workspace opt-out anywhere; the promise has no workspaceId.
+  await context.commitments.create({ text: '整理错题', due: '2026-10-31' });
+
+  const notification = await context.checkIns.check('morning', '2026-10-31');
+  expect(notification).not.toBeNull();
+  const conversation = await context.conversationStore.get(notification!.conversationId!);
+  expect(conversation?.messages[0]?.text).toContain(
+    '你说今天要做「整理错题」，做了吗？'
+  );
+});
+
 test('the accountability name reaches only the weekly clause, never a record', async () => {
   const dir = await tempDir();
   const model = new FakeModelClient([

@@ -638,21 +638,18 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     }
 
     /**
-     * The oldest promise due by `today`, for the morning line. Projects with
-     * check-in off are skipped, matching the rest of the check-in. Any read
-     * failure means null and the morning message keeps its previous shape.
+     * The oldest promise due by `today`, for the morning line.
+     *
+     * A promise follows the person, not the project: it is returned even when
+     * it was recorded inside a project whose check-in is off, because the user
+     * made that promise out loud and the morning check still owes them the
+     * question. Only tasks, memory and topics stay scoped to check-in projects.
+     * Any read failure means null and the morning message keeps its shape.
      */
     async function readDueCommitment(today: Date): Promise<{ text: string; due: string } | null> {
       try {
-        const off = new Set(
-          (await workspace.listWorkspaces())
-            .filter((entry) => entry.checkIn === 'off')
-            .map((entry) => entry.id)
-        );
         const pending = await commitments.pending(formatLocalDate(today));
-        const match = pending.find(
-          (entry) => entry.workspaceId === undefined || !off.has(entry.workspaceId)
-        );
+        const match = pending[0];
         return match === undefined ? null : { text: match.text, due: match.due };
       } catch {
         return null;
