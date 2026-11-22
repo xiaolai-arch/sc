@@ -325,13 +325,124 @@ Running 18 tests using 1 worker
 
 ---
 
+## 评审修复（第三轮，评审 sha `e57a4f6`）
+
+评审结论「有阻塞项」，只修这两条，其它明令不动（P3 `Date.parse` 坑、P2 提前手动恢复语义均留给 item 39 的 M1/M2，同批不拆）。
+
+### 阻断项 1：DND 会把「昨日已完成」改写为 pending 并留下脏 `doneAt`
+
+**问题**：P4 只把跳过判定换成 `effectiveReminderState`（`scheduler.ts:185`），而 trigger 仍携带原始 `reminderState(reminder)`，DND 分支据此决定是否写回 `pending`。同一条“次日恢复”规则出现第二处实现、用的是旧语义。
+
+**修法（选“trigger 不再携带原始 state”）**：`Trigger` 的 `reminderState?: ReminderState` 改为 `effectiveState?: ReminderState`（`src/main/scheduler/scheduler.ts:119`），在循环里只算一次：
+
+```ts
+const effectiveState = effectiveReminderState(reminder, date);   // :196
+if (effectiveState === 'done') continue;                          // :197
+```
+
+两处 `triggers.push` 都改用 `effectiveState`（`:216`、`:233`），DND 分支的判定读 `trigger.effectiveState`（`:451-452`）。同时删掉已无用的 `reminderState` import。
+
+**为什么选这一种**：评审给了两个选项（分支内再调一次 `effectiveReminderState`，或 trigger 不携带原始 state）。选后者是因为它在结构上排除了复发——没有地方再能拿到原始 `reminder.state` 去做 DND 判断，而“再调一次”仍留了一个“有人以后又去读原始 state”的入口。判定仍**只在 `effectiveReminderState` 一处**，scheduler 里没有任何日期比较。
+
+**新测试**：`tests/main/scheduler-reminders.test.ts`「DND never rewrites a reminder finished yesterday back to pending」——`state: done, doneAt: '2026-10-30'`，12:00 的每日提醒在 23:31（DND 23:00–07:00）tick，断言：进入 `suppressed` 且 `reason: 'dnd'`；`store.writes` 严格等于 `[]`（无任何 lifecycle 写）；`state` 仍 `done`；`doneAt` 仍 `2026-10-30`。反证已实测：把 push 改回 `reminder.state ?? 'pending'` 后该测试红于 `expect(store.writes).toEqual([])`。
+
+### 阻断项 2：改期「不早于今天」收口到服务层
+
+**语义边界下沉**：`src/main/commitments/service.ts:204-212`，在 `resolve` 里、拿到 `wanted` 之后：
+
+```ts
+if (wanted !== undefined && wanted < addLocalDays(now(), 0)) {
+  throw new Error('改期日期不能早于今天。');
+}
+```
+
+`now` 是服务构造时注入的时钟——`context.ts:370` 传的就是 main 侧既有的 `now`（与 `today()` 同源），**没有引入新时钟**，也没让 IPC 层知道“今天”。用 `addLocalDays(now(), 0)` 而非 `formatLocalDate`，是为了和本文件已有的日期算术保持同一条路径（本地日历日，不受 UTC 偏移影响）。
+
+**渲染层删拦截**：`src/renderer/shell/ProjectSections.tsx:1704-1720` 的 `saveReschedule` 去掉了 `if (due < today)` 分支；只保留格式校验与“不超 365 天”的 UX 上限（`:1715`）。日期选择器的 `min={today}` 仍在，属控件层面的引导。
+
+**IPC 保留格式校验、文案透传**：`requireResolveCommitmentEntry`（`ipc.ts:838-844`）只校验 `YYYY-MM-DD`；`改期日期不能早于今天。` 由服务层抛出，经 `serializeError` 原样透传（`friendlyErrorMessage` 不去改文案），**两层只有一份文案**。
+
+**web mock 对齐**：`web/mock-api.ts:2404-2406` 的 `resolveCommitmentEntry` 补上同一句、同一语义，让原型模式与真实 vault 行为一致（否则浏览器里能改到过去、Electron 里不能）。
+
+**测试**：
+- 服务层「resolve refuses to move a promise into the past, change or not」：`newDue` 为昨天、为更早、以及**保持原 `due` 不变**（`newDue === overdue.due`）三种都抛 `改期日期不能早于今天。`，且 `service.list()` 与改期前逐字段相同（无半写）；今天本身允许（闭区间）；`outcome` 结案不受影响。
+- 非界面路径「a past reschedule is refused through the real IPC channel, not just the UI」：直接 `createIpcHandlers(context.api)` 后调 `handlers.resolveCommitmentEntry`，绕开渲染层，传过去日期被拒、文件未被改写；今天则成功。反证已实测：注释掉服务层那三行后，这两条（服务层 + IPC）同时变红。
+- 渲染层原有「refuses a past date」改写为「defers the past-date rule to the service」：现在断言**调用会发出**、服务层的句子显示在页面上、编辑器保持打开，365 天上限仍在本地拦截且不发出调用。
+
+### 明确未动（按评审要求）
+
+- P3 `due` 校验的 `Date.parse` 坑（`ipc.ts` 里 `Number.isNaN(Date.parse(due))`，`2026-02-30` 不是 NaN）——留给 item 39 的 M1，与 `isTargetDate` 复用一起改。
+- P2 提前手动恢复语义（`context.ts` 的 `peekResume` 要求 `resumedFrom <= 今天`，手动恢复写未来日期）——留给 M1/M2。
+- `tests/renderer/project-editing.test.tsx` 的「非法值→空→保存为 null」回归测试未删。
+
+### 本轮门禁（真实输出，HEAD 见提交）
+
+**`npm run typecheck`**
+```
+> study-coach@1.1.0 typecheck
+> tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json
+```
+（无错误输出，退出码 0）
+
+**`npm run typecheck:e2e`**
+```
+> study-coach@1.1.0 typecheck:e2e
+> tsc --noEmit -p e2e/tsconfig.json
+```
+（无错误输出，退出码 0）
+
+**`npx vitest run --maxWorkers=4`**
+```
+ Test Files  198 passed (198)
+      Tests  1957 passed | 2 skipped (1959)
+   Start at  17:54:09
+   Duration  64.60s (tests 60%, environment 20%, setup 9%, import 7%, transform 2%, worker 1%)
+```
+
+**`npm run build`**
+```
+out/renderer/assets/settings-BxsW-7Iw.js           74.79 kB
+out/renderer/assets/knowledge-BcjkiER8.js         155.80 kB
+out/renderer/assets/index-CEGBThaf.js             438.71 kB
+out/renderer/assets/react-dom-BOxPwYkh.js         530.47 kB
+
+✓ built in 250ms
+```
+
+**`npm run test:e2e`（完整 tail，含 `18 passed`）**
+```
+Running 18 tests using 1 worker
+  ok  1 e2e\desktop.spec.ts:13:7 › ASAKI desktop › conversation-first project creation and persistence (4.7s)
+  ok  2 e2e\feature-smoke.spec.ts:14:7 › ASAKI feature smoke › all pages render and reminders, memories, reviews and topics persist (3.7s)
+  ok  3 e2e\iter30-commitments.spec.ts:77:7 › visible commitments (iter30 P0) › lists open promises, resurfaces an overdue one, and reschedules it on disk (1.7s)
+  ok  4 e2e\iter30-commitments.spec.ts:130:7 › visible commitments (iter30 P0) › 放下 removes the promise from the default list and records it as dropped (1.7s)
+  ok  5 e2e\iter30-commitments.spec.ts:176:7 › week availability (iter30 P1) › shows this week's packed days and clears only that week on disk (1.7s)
+  ok  6 e2e\qa-learning-flows.spec.ts:184:7 › learning-science flows › 简答题: reveal, 没答对, mistake book and exported review sheet (2.0s)
+  ok  7 e2e\qa-learning-flows.spec.ts:258:7 › learning-science flows › 把握度校准: a confidently wrong answer is counted, an unmarked one is not (2.2s)
+  ok  8 e2e\qa-learning-flows.spec.ts:341:7 › learning-science flows › 触发线索: 今日 renders the if-then line and it disappears when the cue is cleared (2.1s)
+  ok  9 e2e\qa-learning-flows.spec.ts:398:7 › learning-science flows › 交错混练: two sets alternate, state resets, mistakes land on the real sets (2.2s)
+  ok 10 e2e\qa-learning-flows.spec.ts:523:7 › learning-science flows › 掌握门控: phase two stays locked until every earlier check is ticked (1.9s)
+  ok 11 e2e\qa-learning-surfaces.spec.ts:349:7 › learning surfaces (heatmap, accuracy trend, mistake sheet, countdown) › 复盘 shows the study heatmap and the 8-week accuracy trend without horizontal overflow (1.7s)
+  ok 12 e2e\qa-learning-surfaces.spec.ts:398:7 › learning surfaces (heatmap, accuracy trend, mistake sheet, countdown) › 错题本 exports a review sheet under practice/review-sheets/ (1.9s)
+  ok 13 e2e\qa-learning-surfaces.spec.ts:440:7 › learning surfaces (heatmap, accuracy trend, mistake sheet, countdown) › 今日 and 长期计划 count down to the project target date (1.8s)
+  ok 14 e2e\qa-profile-and-strict.spec.ts:328:7 › 我的资料 and 更严的掌握判定 › 我的资料: add a fact, show a model guess as 待确认, persist across restart (3.2s)
+  ok 15 e2e\qa-profile-and-strict.spec.ts:393:7 › 我的资料 and 更严的掌握判定 › 更严掌握判定: choice stays active under strict, short resolves, off persists after restart (4.3s)
+  ok 16 e2e\qa-reminder-row.spec.ts:16:7 › reminder row layout (runtime QA guard) › keeps the reminder text readable at the default window size (2.7s)
+  ok 17 e2e\viewport-layout.spec.ts:165:9 › ASAKI viewport layout (P3) › conversation home lays out at 1366x768 (1.7s)
+  ok 18 e2e\viewport-layout.spec.ts:165:9 › ASAKI viewport layout (P3) › conversation home lays out at 1440x900 (1.8s)
+
+  18 passed (43.8s)
+```
+
+---
+
 ## 有意的偏差（供评审）
 
 **A. P2 的“只说一次”判据**：spec 界面段（`:105`）写的是“沿用 `promiseLine` 的‘模型没提就补上，提了就不重复’做法”。我**没有**在模型输出上做 `includes` 子串判断（评审基准 (3) 明确禁止），而是把这句话彻底排除在提示词之外、在两条路径的产物之后确定性追加。结果满足 spec 的行为要求（模板路径一条、模型路径一条、总共一次），实现方式与 spec 的具体措辞不同——这一处是对 spec 提示的**主动偏离**，理由见上。
 
 **B. 承诺数据在渲染层只取一次**：`useWorkspaceData` 一次性 `listCommitments({includeResolved:true})`，由 `CommitmentsSection` 客户端过滤“显示已结束”，而不是切换开关时再请求。减少一次往返，且开关即时；`listPendingCommitments`（通知中心）路径未动。
 
-**C. 改期日期的边界校验分工**：IPC 校验器只校验 `YYYY-MM-DD` 格式（`requireResolveCommitmentEntry`），“不早于今天 / 不超 365 天”的边界由渲染层（`CommitmentsSection.saveReschedule`）与服务层各自的既有约束保证。理由：IPC 层不掌握“今天”（避免在 main 侧再取一次时钟），且 `service.resolve` 只负责日期合法性与写入。若评审要求 main 侧也拦截过期改期，可另起一条约束，但会引入 main 侧时钟。
+**C. 改期日期的边界校验分工**（**已按评审意见收口，见「评审修复」第 2 条**）：初版 IPC 只在 `requireResolveCommitmentEntry` 校验 `YYYY-MM-DD` 格式，“不早于今天 / 不超 365 天”只在渲染层 `saveReschedule`，于是非界面入口能把承诺改到过去。评审判定这是「同一语义两层各写一份」。现已把 `newDue >= 今天` 下沉到服务层 `commitments/service.ts` 作为唯一权威，渲染层删掉该拦截，只保留“不超 365 天”这条 UX 上限。
 
 **D. acceptance 15 的 UI 层表述**：真实 `input[type=datetime-local]`（浏览器按规范）不接受 `昨天晚上` 这类非时间串，会自行清空，因此“客户端抛中文错误”在真实控件上不可达；验收的硬保证放在 IPC（`任务开始时间无效。`，createTask 从未被调用，不产生半写文件）。`project-editing.test.tsx` 另有一条测试记录该控件的真实行为（非法值→空→保存为 null）。
 
@@ -342,3 +453,4 @@ Running 18 tests using 1 worker
 - 新增：`tests/main/reminders-records.test.ts`、`tests/renderer/reminders-commitments.test.tsx`、`tests/renderer/week-availability-panel.test.tsx`、`e2e/iter30-commitments.spec.ts`
 - 扩展：`tests/main/commitments.test.ts`、`availability.test.ts`、`settings-service.test.ts`、`ipc-preload.test.ts`、`ipc-handlers.test.ts`、`butler-prompt.test.ts`、`check-in-prompt.test.ts`、`proactive-check-in.test.ts`、`integration-context.test.ts`、`butler-tools.test.ts`（stub 补 `listSummaries`）、`butler-week-availability.test.ts`（stub 补 `clear`）；`tests/renderer/project-editing.test.tsx`、`schedule-page.test.tsx`、`today-overview.test.tsx`
 - 改写：`tests/main/scheduler-reminders.test.ts`、`tests/renderer/project-page.test.tsx`（见上）
+- 第三轮（评审修复）：`tests/main/scheduler-reminders.test.ts` 加「DND never rewrites a reminder finished yesterday back to pending」；`tests/main/commitments.test.ts` 加「resolve refuses to move a promise into the past, change or not」；`tests/main/ipc-handlers.test.ts` 加「a past reschedule is refused through the real IPC channel, not just the UI」；`tests/renderer/reminders-commitments.test.tsx` 把过去日期的用例改写为 delegating 语义
