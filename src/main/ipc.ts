@@ -399,8 +399,6 @@ function requireCreateTask(value: unknown): CreateTaskInput {
   return { ...input, ...(cue !== undefined ? { cue } : {}) } as unknown as CreateTaskInput;
 }
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
 function requireUpdateWorkspaceTask(value: unknown): UpdateWorkspaceTaskInput {
   const input = requireObject(value, '更新任务');
   requireString(input.taskId, '任务 ID');
@@ -447,7 +445,7 @@ function requireUpdateWorkspaceTask(value: unknown): UpdateWorkspaceTaskInput {
   if (
     input.due !== undefined &&
     input.due !== null &&
-    (typeof input.due !== 'string' || !ISO_DATE.test(input.due) || Number.isNaN(Date.parse(input.due)))
+    !isTargetDate(input.due)
   ) {
     throw new Error('任务截止日期无效。');
   }

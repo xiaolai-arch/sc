@@ -428,6 +428,11 @@ test('rejects an invalid task time or due date in Chinese before the service', a
   await expect(
     handlers.updateWorkspaceTask({ taskId: 't1', due: '12-01' })
   ).rejects.toThrow('任务截止日期无效。');
+  // A fake date the Date parser rolls over is refused too, so it never reaches
+  // the vault. This path is user-reachable through the task form.
+  await expect(
+    handlers.updateWorkspaceTask({ taskId: 't1', due: '2026-02-30' })
+  ).rejects.toThrow('任务截止日期无效。');
   await expect(
     handlers.updateWorkspaceTask({ taskId: 't1', due: null })
   ).resolves.toBeUndefined();
