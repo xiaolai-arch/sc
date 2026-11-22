@@ -112,18 +112,23 @@ test('the daily section has no trailing disclosure arrow', async () => {
   expect(daily.querySelectorAll('svg')).toHaveLength(1);
 });
 
-test('keeps the workspace list outside the nav scroll region so it stays visible', async () => {
+test('keeps the project list outside the nav scroll region so it stays visible', async () => {
   const { api } = setup();
   await mount(api);
 
   const navigation = screen.getByRole('navigation', { name: '主导航' });
-  expect(within(navigation).queryByText('工作区')).not.toBeInTheDocument();
+  expect(within(navigation).queryByText('项目')).not.toBeInTheDocument();
 
-  const header = screen.getByText('工作区');
-  const section = header.parentElement?.parentElement;
+  // The demo vault already contains a project literally named 项目, so the
+  // group heading is found by its own text node rather than by text alone.
+  const header = within(sidebar())
+    .getAllByText('项目')
+    .find((element) => element.parentElement?.parentElement?.className.includes('max-h-[45%]'));
+  expect(header).toBeDefined();
+  const section = header?.parentElement?.parentElement;
   expect(section).not.toBeNull();
   expect(section?.className).toContain('max-h-[45%]');
-  expect(within(section as HTMLElement).getByRole('button', { name: '新建工作区' })).toBeInTheDocument();
+  expect(within(section as HTMLElement).getByRole('button', { name: '新建项目' })).toBeInTheDocument();
   expect(
     within(section as HTMLElement).getByRole('button', { name: '考研' })
   ).toBeInTheDocument();
@@ -236,7 +241,7 @@ test('filters memories from the project list on the memory page', async () => {
     await screen.findByText('外刊表达积累有效，继续保持。')
   ).toBeInTheDocument();
 
-  await pickOption('按工作区筛选记忆', '考研');
+  await pickOption('按项目筛选记忆', '考研');
   expect(
     await screen.findByText('极限定义还不稳，建议先复习再做新题。')
   ).toBeInTheDocument();
@@ -244,7 +249,7 @@ test('filters memories from the project list on the memory page', async () => {
     expect(screen.queryByText('外刊表达积累有效，继续保持。')).not.toBeInTheDocument()
   );
 
-  await pickOption('按工作区筛选记忆', '全部工作区');
+  await pickOption('按项目筛选记忆', '全部项目');
   expect(
     await screen.findByText('外刊表达积累有效，继续保持。')
   ).toBeInTheDocument();

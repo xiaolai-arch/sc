@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { formatLocalDate } from '../shared/date';
 import type { ListReviewsInput, ReviewRecord, StudyCoachApi } from '../shared/ipc';
+import type { CommitmentSummary } from '../shared/notifications';
 import type { KnowledgeService } from '../shared/knowledge';
 import type { MemoryService } from '../shared/memory';
 import { createProfileService } from './memory/profile-service';
@@ -19,6 +20,7 @@ import { createModelClient, NoApiKeyError, type ModelClient } from './agent/mode
 import { createButlerService } from './butler/create-butler-service';
 import {
   createCommitmentService,
+  summarizeCommitment,
   type CommitmentService
 } from './commitments/service';
 import { ProactiveCheckInService } from './check-ins/proactive-check-in-service';
@@ -175,6 +177,8 @@ export interface AppContext {
   readonly planner: WorkspacePlanner;
   readonly longPlans: LongPlanService;
   readonly checkIns: ProactiveCheckInService;
+  /** Vault-level promises ("我明天做 X"); read-only for the shell. */
+  readonly commitments: CommitmentService;
   /** Created lazily so headless/test contexts never start a vault watcher. */
   readonly search: SearchService;
   /** Rebuilds workspace/butler from the persisted settings and secret store. */
@@ -200,6 +204,8 @@ interface ActiveServices {
   planner: WorkspacePlanner;
   longPlans: LongPlanService;
   checkIns: ProactiveCheckInService;
+  /** Vault-level promises; read-only for the notification center. */
+  commitments: CommitmentService;
   /** Days of a week the user said are packed (vault record, read-mostly). */
   weekAvailability: AvailabilityService;
   /** Lazily constructed; only a search call starts the chokidar watcher. */
@@ -671,6 +677,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       planner,
       longPlans,
       checkIns,
+      commitments,
       weekAvailability,
       get search() {
         return getSearchService();
@@ -1057,6 +1064,18 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     async listReviews(input) {
       return readReviews(input);
     },
+    /**
+     * Open promises for the notification center. Read-only and cheap: the
+     * butler keeps writing them, this only projects the display fields.
+     */
+    async listPendingCommitments(input: { byDate: string }): Promise<CommitmentSummary[]> {
+      const date = input?.byDate;
+      if (typeof date !== 'string' || date.trim().length === 0) {
+        throw new Error('日期不能为空。');
+      }
+      const pending = await (await getServices()).commitments.pending(date);
+      return pending.map(summarizeCommitment);
+    },
     async planWorkspace(input) {
       const services = await getServices();
       // A day the user said is especially full gets one small task instead of
@@ -1293,7 +1312,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     conversationStore,
     usage: usageStore,
     get workspace() {
-      if (!active) throw new Error('工作区服务尚未初始化。');
+      if (!active) throw new Error('项目服务尚未初始化。');
       return active.workspace;
     },
     get butler() {
@@ -1327,6 +1346,10 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     get checkIns() {
       if (!active) throw new Error('检查服务尚未初始化。');
       return active.checkIns;
+    },
+    get commitments() {
+      if (!active) throw new Error('承诺服务尚未初始化。');
+      return active.commitments;
     },
     get search() {
       if (!active) throw new Error('搜索服务尚未初始化。');

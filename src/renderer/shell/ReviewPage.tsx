@@ -171,20 +171,20 @@ export function ReviewPage({
   return (
     <PageFrame
       title="复盘"
-      subtitle={filteredWorkspace?.name ?? '全部工作区'}
+      subtitle={filteredWorkspace?.name ?? '全部项目'}
       onOpenSidebar={onOpenSidebar}
       action={
         showActions ? (
           <div className="flex items-center gap-2">
             {workspaces.length > 0 ? (
               <Select
-                aria-label="按工作区筛选复盘"
+                aria-label="按项目筛选复盘"
                 size="sm"
                 fullWidth={false}
                 value={filterId}
                 onChange={(event) => setFilterId(event.target.value)}
               >
-                <option value="">全部工作区</option>
+                <option value="">全部项目</option>
                 {workspaces.map((workspace) => (
                   <option key={workspace.id} value={workspace.id}>
                     {workspace.name}
@@ -241,13 +241,13 @@ export function ReviewPage({
               />
             </div>
             <div>
-              <Label htmlFor="review-workspace">工作区</Label>
+              <Label htmlFor="review-workspace">项目</Label>
               <Select
                 id="review-workspace"
                 value={workspaceId}
                 onChange={(event) => setWorkspaceId(event.target.value)}
               >
-                <option value="">全局（不选工作区）</option>
+                <option value="">全局（不选项目）</option>
                 {workspaces.map((workspace) => (
                   <option key={workspace.id} value={workspace.id}>
                     {workspace.name}

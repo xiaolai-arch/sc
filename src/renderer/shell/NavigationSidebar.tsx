@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as 
 import { cn } from '../ui/cn';
 import { DAILY_WORKSPACE_ID } from '../../shared/conversations';
 import {
+  BellIcon,
   BookOpenIcon,
   CalendarIcon,
   ClockIcon,
@@ -75,6 +76,12 @@ type NavigationSidebarProps = {
   onTogglePinned: (id: string, pinned: boolean) => void;
   onDeleteConversation: (id: string) => void;
   onOpenSearch: () => void;
+  /**
+   * True only while the notification digest has a row the user can act on.
+   * The dot is drawn from real data, never from an unread counter.
+   */
+  attention?: boolean;
+  onOpenNotifications?: () => void;
   /** How the user is addressed in the footer; defaults to the demo name. */
   displayName?: string;
   mobileOpen?: boolean;
@@ -220,6 +227,8 @@ export function NavigationSidebar({
   onTogglePinned,
   onDeleteConversation,
   onOpenSearch,
+  attention = false,
+  onOpenNotifications,
   displayName = 'xiaolai',
   mobileOpen = false,
   onCloseMobile
@@ -459,7 +468,7 @@ export function NavigationSidebar({
   function groupLabel(conversation: ConversationSummary): string {
     if (conversation.workspaceId === DAILY_WORKSPACE_ID) return '日常';
     if (conversation.workspaceId) {
-      return projectName(conversation.workspaceId) ?? '工作区';
+      return projectName(conversation.workspaceId) ?? '项目';
     }
     return conversation.kind === 'check-in' ? '日常' : '未分组';
   }
@@ -643,12 +652,12 @@ export function NavigationSidebar({
       <>
         <div className="flex items-center justify-between px-2.5 pb-1 pt-2">
           <p className="text-[11px] font-medium tracking-wide text-gray-400 dark:text-[#8e8e93]">
-            工作区
+            项目
           </p>
           {showAllButton ? (
             <button
               type="button"
-              aria-label="全部工作区"
+              aria-label="全部项目"
               onClick={onSelectAll}
               className="rounded-full px-1.5 py-0.5 text-[11px] text-gray-400 transition-colors duration-200 hover:bg-black/[0.04] hover:text-[#0071e3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:text-[#8e8e93] dark:hover:bg-white/[0.06] dark:hover:text-[#4da3ff]"
             >
@@ -765,7 +774,7 @@ export function NavigationSidebar({
           className="mt-1 flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-[12px] text-gray-500 transition-colors duration-200 hover:bg-black/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:text-[#8e8e93] dark:hover:bg-white/[0.06]"
         >
           <FolderPlusIcon className="h-4 w-4 shrink-0" />
-          新建工作区
+          新建项目
         </button>
       </>
     );
@@ -893,6 +902,26 @@ export function NavigationSidebar({
           {displayName.trim().slice(0, 1).toUpperCase() || 'x'}
         </span>
         <span className="min-w-0 flex-1 truncate text-[13px] text-gray-500 dark:text-[#a1a1a6]">{displayName}</span>
+        {onOpenNotifications ? (
+          <button
+            type="button"
+            aria-label="打开通知中心"
+            title="通知中心"
+            onClick={onOpenNotifications}
+            className="relative flex h-8 w-8 items-center justify-center rounded-full text-gray-500 transition-all duration-300 hover:bg-black/[0.04] hover:opacity-80 hover:text-black active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 motion-reduce:transition-none motion-reduce:active:scale-100 dark:text-[#8e8e93] dark:hover:bg-white/[0.06] dark:hover:text-[#f5f5f7]"
+          >
+            <BellIcon className="h-4 w-4" />
+            {attention ? (
+              // Only drawn when the digest really has an actionable row. The
+              // title carries the same fact for screen readers, which cannot
+              // see a bare dot.
+              <span
+                aria-hidden="true"
+                className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[#ff3b30] dark:bg-[#ff7b72]"
+              />
+            ) : null}
+          </button>
+        ) : null}
         <button
           type="button"
           aria-label="打开设置"

@@ -194,7 +194,7 @@ test('the project settings date input sets and clears the target date', async ()
     await screen.findByText(homeGreeting('xiaolai', new Date(2026, 10, 21, 10, 0, 0)), {}, {
       timeout: 4000
     });
-    await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
+    await userEvent.click(screen.getByRole('button', { name: '全部项目' }));
     await pickOption('切换项目', '考研');
 
     const input = await screen.findByLabelText('目标日期');
@@ -223,7 +223,7 @@ test('the project settings date input sets and clears the target date', async ()
         name: '日常'
       })
     );
-    await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
+    await userEvent.click(screen.getByRole('button', { name: '全部项目' }));
     await pickOption('切换项目', '考研');
     await userEvent.click(await screen.findByRole('button', { name: '清除' }));
     await vi.waitFor(async () => {

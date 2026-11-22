@@ -201,7 +201,7 @@ export function LearningPane({
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-6">
           <div className="mx-auto w-full max-w-[720px]">
             <div className="rounded-2xl bg-[#f5f5f7] p-6 dark:bg-[#1c1c1e]">
-              <p className="text-[14px] font-medium text-black dark:text-[#f5f5f7]">这个工作区还没有练习。</p>
+              <p className="text-[14px] font-medium text-black dark:text-[#f5f5f7]">这个项目还没有练习。</p>
               <p className="mt-1 text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
                 可以让阿咲当老师讲解，或者先从相关记录开始。
               </p>

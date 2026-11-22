@@ -305,7 +305,7 @@ test('rejects invalid goals, durations, dates and unknown workspaces', async () 
     ).rejects.toThrow(/起始日期/);
     await expect(
       service.create({ workspaceId: 'missing', goal: '学会 Agent', weeks: 4 })
-    ).rejects.toThrow(/工作区/);
+    ).rejects.toThrow(/项目/);
     await expect(
       service.create({
         workspaceId,

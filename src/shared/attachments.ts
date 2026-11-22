@@ -52,8 +52,8 @@ export const AGENT_PERMISSION_MODES: ReadonlyArray<{
   hint: string;
 }> = [
   { mode: 'readonly', label: '仅可查看', hint: '可以读学习库和联网查询，不做任何改动' },
-  { mode: 'workspace', label: '工作区内修改', hint: '允许整理和写入学习库中的文件' },
-  { mode: 'full', label: '完全权限', hint: '在工作区之上额外允许运行终端命令' }
+  { mode: 'workspace', label: '项目内修改', hint: '允许整理和写入学习库中的文件' },
+  { mode: 'full', label: '完全权限', hint: '在项目之内额外允许运行终端命令' }
 ];
 
 export function permissionsToMode(permissions: AgentPermissions): AgentPermissionMode {

@@ -459,9 +459,9 @@ function buildNativePrompt(request: ModelRequest, cwd: string): string {
   const withTools = Boolean(request.tools?.length) && !request.noTools;
   const environment = [
     '## 原生 agent 模式',
-    `你正在 ASAKI 的本地工作区中运行，当前目录：${cwd}`,
+    `你正在 ASAKI 的本地项目中运行，当前目录：${cwd}`,
     '你可以使用自己的原生联网、搜索、读文件工具来查资料和了解上下文。',
-    '只读取或修改这个工作区以及 ASAKI 的 vault；不要读取密钥、SSH、浏览器历史等私人数据。',
+    '只读取或修改这个项目以及 ASAKI 的 vault；不要读取密钥、SSH、浏览器历史等私人数据。',
     withTools
       ? [
           'ASAKI 的记录（项目、任务、长期计划、笔记、提醒、复盘、知识、记忆、档案）',

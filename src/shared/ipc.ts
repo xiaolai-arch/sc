@@ -34,6 +34,7 @@ import type {
 import type { LongPlanApi } from './plans';
 import type { PlanWorkspaceInput, WorkspacePlan } from './planning';
 import type { ProfileApi } from './profile';
+import type { CommitmentSummary } from './notifications';
 import type { SearchResult } from './search';
 import type { AppSettings, NotificationSettings, ProviderConfig, ReviewAnswers } from './types';
 import type { LocalCliScanResult } from './local-cli';
@@ -183,6 +184,16 @@ export interface SettingsPatch {
   accountabilityName?: string;
 }
 
+/**
+ * Read-only promises feed the notification center. Writing a promise stays in
+ * chat (`record_commitment` / `resolve_commitment`), so the renderer gets no
+ * create/resolve channel here.
+ */
+export interface PromiseApi {
+  /** Open promises due on or before `byDate` (local `YYYY-MM-DD`), oldest first. */
+  listPendingCommitments(input: { byDate: string }): Promise<CommitmentSummary[]>;
+}
+
 /** Local-only usage accounting; nothing leaves this machine. */
 export interface UsageApi {
   getUsageSummary(days?: number): Promise<UsageSummary>;
@@ -224,6 +235,7 @@ export interface StudyCoachApi
     SearchApi,
     PlannerApi,
     LongPlanApi,
+    PromiseApi,
     ConversationApi,
     UsageApi,
     VideoNotesApi {

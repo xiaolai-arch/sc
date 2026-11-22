@@ -218,6 +218,43 @@ test.describe('ASAKI viewport layout (P3)', () => {
           expect(layout.contentPaneCount, 'content column holds a single pane').toBe(1);
         });
 
+        await test.step('the notification center opens over the chat without squeezing it', async () => {
+          const before = await probeLayout(page);
+          await page.getByRole('button', { name: '打开通知中心' }).click();
+          const dialog = page.getByRole('dialog', { name: '通知中心' });
+          await expect(dialog).toBeVisible();
+
+          // An overlay, not a third column: the shell row still has two
+          // columns and the content column keeps its width.
+          const after = await probeLayout(page);
+          expect(after.rowColumns.length, 'shell row still renders two columns').toBe(2);
+          expect(after.contentPaneCount, 'content column still holds one pane').toBe(1);
+          expect(
+            closeTo(after.rowColumns[1].width, before.rowColumns[1].width, PX),
+            'the chat column keeps its width while the panel is open'
+          ).toBe(true);
+
+          // The panel itself fits inside the viewport (the shell is 768px tall
+          // at the smallest target, so a 70vh cap must stay usable).
+          const box = await dialog.boundingBox();
+          expect(box, 'the panel has a measured box').not.toBeNull();
+          expect(box!.width, 'panel fits the viewport width').toBeLessThanOrEqual(
+            after.viewport.width
+          );
+          expect(box!.height, 'panel fits the viewport height').toBeLessThanOrEqual(
+            after.viewport.height
+          );
+          expect(box!.x, 'panel starts inside the viewport').toBeGreaterThanOrEqual(0);
+          expect(box!.y, 'panel starts inside the viewport').toBeGreaterThanOrEqual(0);
+
+          // No new horizontal overflow while the panel is open.
+          expect(after.overflow.documentElement).toBe(false);
+          expect(after.overflow.body).toBe(false);
+
+          await page.getByRole('button', { name: '关闭通知中心' }).click();
+          await expect(dialog).toBeHidden();
+        });
+
         expect(pageErrors).toEqual([]);
       } finally {
         await launched.close();

@@ -457,8 +457,8 @@ export const demoReminders: Reminder[] = [
 export const demoStreak = 3;
 
 export function workspaceName(workspacesList: Workspace[], workspaceId: string | null) {
-  if (!workspaceId) return '全部工作区';
-  return workspacesList.find((workspace) => workspace.id === workspaceId)?.name ?? '全部工作区';
+  if (!workspaceId) return '全部项目';
+  return workspacesList.find((workspace) => workspace.id === workspaceId)?.name ?? '全部项目';
 }
 
 export function workspaceColor(workspacesList: Workspace[], workspaceId: string | null) {

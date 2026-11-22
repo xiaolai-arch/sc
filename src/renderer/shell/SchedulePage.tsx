@@ -21,7 +21,7 @@ type SchedulePageProps = {
 };
 
 const ADJUST_PROMPT =
-  '帮我调整今天的安排：结合各工作区的待办、优先级和预计时长，重新排一份具体时间表。';
+  '帮我调整今天的安排：结合各项目的待办、优先级和预计时长，重新排一份具体时间表。';
 
 const SNAP_MINUTES = 5;
 const EARLIEST_MINUTES = 5 * 60;
@@ -206,7 +206,7 @@ export function SchedulePage({
                 </>
               ) : (
                 <p className="mx-auto mt-2 max-w-[320px] text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
-                  告诉阿咲今天想推进什么，他会结合工作区里的任务排出顺序。
+                  告诉阿咲今天想推进什么，他会结合项目里的任务排出顺序。
                 </p>
               )}
               <button

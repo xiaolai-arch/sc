@@ -1110,7 +1110,7 @@ export function MemorySection({
     if (!onCreateMemory || creatingMemoryPending) return;
     const text = newMemoryText.trim();
     if (!targetWorkspaceId) {
-      setMemoryError({ id: 'new', message: '请选择一个工作区。' });
+      setMemoryError({ id: 'new', message: '请选择一个项目。' });
       return;
     }
     if (!text) {
@@ -1216,7 +1216,7 @@ export function MemorySection({
         >
           {!workspace && workspaces.length > 0 ? (
             <Select
-              aria-label="新记忆工作区"
+              aria-label="新记忆项目"
               size="sm"
               value={targetWorkspaceId}
               onChange={(event) => setNewMemoryWorkspaceId(event.target.value)}

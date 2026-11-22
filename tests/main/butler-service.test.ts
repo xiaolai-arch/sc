@@ -413,7 +413,7 @@ describe('ButlerServiceImpl replies', () => {
 
     const system = systemPromptOf(client);
     expect(system).toContain('当前聚焦任务：极限刷题');
-    expect(system).toContain('当前工作区：考研');
+    expect(system).toContain('当前项目：考研');
   });
 
   test('returns a template reply when no API key is available', async () => {
@@ -757,12 +757,12 @@ describe('ButlerServiceImpl tool calls', () => {
           }
         ]
       },
-      { text: '需要先选择工作区才能写笔记。', usage: { inputTokens: 5, outputTokens: 3 } }
+      { text: '需要先选择项目才能写笔记。', usage: { inputTokens: 5, outputTokens: 3 } }
     ]);
 
     const result = await makeService(client, workspace).send({ message: '记一下' });
 
-    expect(result.text).toBe('需要先选择工作区才能写笔记。');
+    expect(result.text).toBe('需要先选择项目才能写笔记。');
     const payload = JSON.parse(lastToolMessage(client, 1)?.content ?? '{}');
     expect(payload).toMatchObject({ ok: false, tool: 'write_note' });
     expect(payload.error).toContain('workspaceId');

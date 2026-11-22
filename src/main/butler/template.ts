@@ -34,13 +34,13 @@ export function buildTemplateReply(
 
   if (context.workspace) {
     const goal = context.workspace.goal ? `，目标：${context.workspace.goal}` : '';
-    lines.push(`当前工作区：${context.workspace.name}${goal}。`);
+    lines.push(`当前项目：${context.workspace.name}${goal}。`);
   } else if (context.workspaces.length > 0) {
     const names = context.workspaces
       .slice(0, 4)
       .map((workspace) => workspace.name)
       .join('、');
-    lines.push(`我看到你有 ${context.workspaces.length} 个工作区：${names}。`);
+    lines.push(`我看到你有 ${context.workspaces.length} 个项目：${names}。`);
   }
 
   const activeTasks = context.tasks.filter(

@@ -14,6 +14,8 @@ import {
   type MessageAttachment
 } from '../../shared/attachments';
 import type { ProviderConfig } from '../../shared/types';
+import type { CommitmentSummary } from '../../shared/notifications';
+import { collectNotifications } from '../../shared/notifications';
 import type { ButlerReference } from '../../shared/butler-stream';
 import type { PracticeMistake, PracticeSet } from '../../shared/practice';
 import type { SearchResult } from '../../shared/search';
@@ -55,6 +57,7 @@ import {
 import { PageFrame } from './PageFrame';
 import { ProjectsPage } from './ProjectsPage';
 import { QuickCaptureDialog } from './QuickCaptureDialog';
+import { NotificationCenter } from './NotificationCenter';
 import { RemindersPage } from './RemindersPage';
 import { ReviewPage } from './ReviewPage';
 import { SchedulePage } from './SchedulePage';
@@ -219,6 +222,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     practiceAttempts,
     memoryProfile,
     reminders,
+    pendingCommitments,
     longPlans,
     knowledgeTopics,
     loading,
@@ -290,6 +294,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
   const [snoozedUntil, setSnoozedUntil] = useState<string | null>(null);
   const [quickCaptureOpen, setQuickCaptureOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [knowledgeFocusTopicId, setKnowledgeFocusTopicId] = useState<string | null>(null);
   const [planFocusId, setPlanFocusId] = useState<string | null>(null);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
@@ -431,7 +436,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
   const homeGoal = currentWorkspace
     ? currentWorkspace.goal
     : chatScope === 'unfiled'
-      ? '还没有归入工作区的对话'
+      ? '还没有归入项目的对话'
       : '每天的检查、随手记和日常对话';
   const homeHint = currentWorkspace
     ? `在这里和阿咲聊${currentWorkspace.name}，或直接开始一个新对话。`
@@ -447,6 +452,22 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     null;
   const today = formatLocalDate(new Date());
   const dateLabel = formatChineseDate(today);
+  // A reminder comes due by the clock, not by a click, so the digest needs a
+  // clock of its own; without it the dot would wait for an unrelated render.
+  const [notificationClock, setNotificationClock] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNotificationClock(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  // Recomputed from the stores and that clock, never cached: a row disappears
+  // the moment the user acts on it elsewhere.
+  const notificationDigest = collectNotifications({
+    reminders,
+    commitments: pendingCommitments,
+    snoozedUntil,
+    now: new Date(notificationClock)
+  });
+  const notificationAttention = notificationDigest.items.length > 0;
   const dueRevisits = useMemo(
     () => dueRevisitTopics(knowledgeTopics, today),
     [knowledgeTopics, today]
@@ -1235,6 +1256,22 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     changeSection('settings');
   }
 
+  function openNotifications() {
+    setNotificationsOpen(true);
+  }
+
+  /**
+   * Resolving a promise happens in chat, which owns the commitment tools, so a
+   * row opens a draft there with the promise quoted. Nothing is sent for the
+   * user; the reply is still theirs to write.
+   */
+  function openCommitment(commitment: CommitmentSummary) {
+    guardSettings(() => {
+      applySection('chat');
+      setComposerText(`关于承诺「${commitment.text}」：`);
+    });
+  }
+
   /** Every "ask the butler" affordance lands in chat and sends the prompt. */
   function promptButler(prompt: string, workspaceIdOverride?: string) {
     if (typing) return;
@@ -1307,7 +1344,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
       setProjectId(null);
       setChatScope('daily');
       setSection('chat');
-      setComposerText('我想新建一个工作区：');
+      setComposerText('我想新建一个项目：');
     });
   }
 
@@ -1385,7 +1422,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
   /** Turn one long-plan day into ordinary tasks, so 今日安排 can schedule them. */
   async function addPlanDayToSchedule(plan: LongPlan, day: LongPlanDay) {
     const workspace = workspaces.find((entry) => entry.id === plan.workspaceId);
-    if (!workspace) throw new Error('计划所属的工作区不存在。');
+    if (!workspace) throw new Error('计划所属的项目不存在。');
     const taskCount = Math.max(1, day.tasks.length);
     const perTask = Math.max(
       15,
@@ -1484,7 +1521,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
   if (error && workspaces.length === 0) {
     return (
       <WorkspaceStatus
-        title="工作区加载失败"
+        title="项目加载失败"
         detail={error}
         actionLabel="重试"
         onAction={() => void retry()}
@@ -1550,6 +1587,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
           activeConversationId={conversations.active?.id ?? null}
           selectedProjectId={projectId}
           runStates={runStates}
+          attention={notificationAttention}
           onSectionChange={changeNavigation}
           onNewConversation={startDraft}
           onSelectConversation={selectConversation}
@@ -1561,6 +1599,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
           onTogglePinned={(id, pinned) => void togglePinnedConversation(id, pinned)}
           onDeleteConversation={(id) => void deleteConversation(id)}
           onOpenSearch={() => setSearchOpen(true)}
+          onOpenNotifications={openNotifications}
           mobileOpen={sidebarOpen}
           onCloseMobile={() => setSidebarOpen(false)}
         />
@@ -2052,6 +2091,21 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
           你有未保存的设置修改，离开后这些修改会丢失。
         </p>
       </Dialog>
+
+      {notificationsOpen ? (
+        <NotificationCenter
+          reminders={reminders}
+          commitments={pendingCommitments}
+          snoozedUntil={snoozedUntil}
+          today={today}
+          now={new Date(notificationClock)}
+          onOpenReminders={() => changeSection('reminders')}
+          onOpenMuteSettings={() => changeSection('reminders')}
+          onOpenCommitment={openCommitment}
+          onOpenToday={() => changeSection('today')}
+          onClose={() => setNotificationsOpen(false)}
+        />
+      ) : null}
 
       <FirstRunDialog
         open={needsOnboarding && !onboardingDone}

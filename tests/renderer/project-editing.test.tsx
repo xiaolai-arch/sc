@@ -17,7 +17,7 @@ function setup() {
 
 async function openProjectTasks() {
   await screen.findByText(homeGreeting('xiaolai', new Date()));
-  await userEvent.click(screen.getByRole('button', { name: '全部工作区' }));
+  await userEvent.click(screen.getByRole('button', { name: '全部项目' }));
   await pickOption('切换项目', '考研');
 }
 

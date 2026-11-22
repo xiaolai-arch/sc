@@ -212,8 +212,8 @@ test('rejects malformed planning, practice, memory and search inputs', async () 
   });
   const handlers = createIpcHandlers(context.api);
 
-  await expect(handlers.planWorkspace({})).rejects.toThrow('工作区 ID不能为空。');
-  await expect(handlers.listPracticeSets('   ')).rejects.toThrow('工作区 ID不能为空。');
+  await expect(handlers.planWorkspace({})).rejects.toThrow('项目 ID不能为空。');
+  await expect(handlers.listPracticeSets('   ')).rejects.toThrow('项目 ID不能为空。');
   await expect(
     handlers.createPracticeSet({ workspaceId: 'ws-1', title: 't', questions: [] })
   ).rejects.toThrow('练习题目不能为空。');
@@ -235,9 +235,9 @@ test('rejects malformed planning, practice, memory and search inputs', async () 
   await expect(
     handlers.getPracticeDue({ workspaceId: 'ws-1', date: '' })
   ).rejects.toThrow('日期不能为空。');
-  await expect(handlers.exportMistakeSheet({})).rejects.toThrow('工作区 ID不能为空。');
+  await expect(handlers.exportMistakeSheet({})).rejects.toThrow('项目 ID不能为空。');
   await expect(handlers.exportMistakeSheet({ workspaceId: '   ' })).rejects.toThrow(
-    '工作区 ID不能为空。'
+    '项目 ID不能为空。'
   );
   await expect(
     handlers.exportMistakeSheet({ workspaceId: 'ws-1', dueOnly: 'yes' })

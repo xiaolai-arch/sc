@@ -82,7 +82,7 @@ export function PracticeSetDialog({
   const [submitting, setSubmitting] = useState(false);
   const editing = set !== null;
   // On create the destination must be visible; fall back to the first project
-  // when the caller has no current workspace (e.g. opened from 全部工作区).
+  // when the caller has no current workspace (e.g. opened from 全部项目).
   const workspaceChoices = workspaces.length > 0 ? workspaces : null;
   const owningWorkspace = set
     ? (workspaces.find((workspace) => workspace.id === set.workspaceId) ?? null)
@@ -173,7 +173,7 @@ export function PracticeSetDialog({
   }
 
   function validate(): string | null {
-    if (!set && !targetWorkspaceId) return '缺少工作区信息，暂时无法创建练习集。';
+    if (!set && !targetWorkspaceId) return '缺少项目信息，暂时无法创建练习集。';
     if (!title.trim()) return '请填写标题。';
     for (let index = 0; index < questions.length; index += 1) {
       const question = questions[index];

@@ -563,7 +563,7 @@ export function KnowledgePage({
             />
           </label>
           <label className={labelClass}>
-            所属工作区
+            所属项目
             <Select
               size="field"
               value={form.workspaceId}
@@ -571,7 +571,7 @@ export function KnowledgePage({
               className="mt-1"
               disabled={saving}
             >
-              <option value="">全局（所有工作区）</option>
+              <option value="">全局（所有项目）</option>
               {workspaces.map((workspace) => (
                 <option key={workspace.id} value={workspace.id}>
                   {workspace.name}

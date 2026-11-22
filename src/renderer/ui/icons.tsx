@@ -180,6 +180,28 @@ export function MoonIcon({ className }: IconProps) {
   );
 }
 
+/**
+ * Bottom-bar notification center: a bell with no badge. The unread dot lives
+ * in the sidebar, drawn only from an actionable digest.
+ */
+export function BellIcon({ className }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={iconClassName(className)}
+    >
+      <path d="M18 8.25A6 6 0 016 8.25c0 4.32-1.79 6.99-3 8.25h18c-1.21-1.26-3-3.93-3-8.25z" />
+      <path d="M10.19 3.58a4.5 4.5 0 013.62 0M9.35 20.25a2.65 2.65 0 015.3 0" />
+    </svg>
+  );
+}
+
 export function SearchIcon({ className }: IconProps) {
   return (
     <svg

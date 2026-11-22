@@ -7,6 +7,7 @@ import { formatLocalDate, formatLocalDateTime } from '../../shared/date';
 import { friendlyErrorMessage } from '../../shared/errors';
 import { reviewStreak } from '../../shared/review-stats';
 import type { ReviewRecord, StudyCoachApi } from '../../shared/ipc';
+import type { CommitmentSummary } from '../../shared/notifications';
 import type {
   CreateKnowledgeTopicInput,
   KnowledgeBacklink,
@@ -84,6 +85,8 @@ type WorkspaceDataState = {
   memoryProfile: LearnerProfile | null;
   reviews: ReviewRecord[];
   reminders: Reminder[];
+  /** Open promises due today or earlier; feeds the notification center. */
+  pendingCommitments: CommitmentSummary[];
   longPlans: LongPlan[];
   knowledgeTopics: KnowledgeTopic[];
   practiceSets: PracticeSet[];
@@ -223,6 +226,7 @@ export function useWorkspaceData(): WorkspaceData {
     memoryProfile: null,
     reviews: [],
     reminders: [],
+    pendingCommitments: [],
     longPlans: [],
     knowledgeTopics: [],
     ...EMPTY_PRACTICE,
@@ -237,7 +241,15 @@ export function useWorkspaceData(): WorkspaceData {
     setState((current) => ({ ...current, loading: true, error: null }));
     try {
       const api = apiOrThrow();
-      const [workspaces, reminders] = await Promise.all([api.listWorkspaces(), api.getReminders()]);
+      // The notification center reads promises separately and never blocks the
+      // rest of the dataset: a failing read leaves an honest empty list.
+      const [workspaces, reminders, pendingCommitments] = await Promise.all([
+        api.listWorkspaces(),
+        api.getReminders(),
+        api
+          .listPendingCommitments({ byDate: formatLocalDate(new Date()) })
+          .catch(() => [] as CommitmentSummary[])
+      ]);
       const workspaceIds = workspaces.map((workspace) => workspace.id);
       // A failing slice must not look like an empty one: remember it and keep
       // the successful data visible while the banner offers a retry.
@@ -283,6 +295,7 @@ export function useWorkspaceData(): WorkspaceData {
         memoryProfile,
         reviews,
         reminders,
+        pendingCommitments,
         longPlans,
         knowledgeTopics,
         ...practice,

@@ -102,6 +102,7 @@ import type {
 import { buildTemplatePlan } from '../src/shared/plan-template';
 import type { SearchResult, SearchResultKind } from '../src/shared/search';
 import { DAILY_WORKSPACE_ID } from '../src/shared/conversations';
+import type { CommitmentSummary } from '../src/shared/notifications';
 import type {
   CreateProfileEntryInput,
   DeleteProfileEntryInput,
@@ -144,6 +145,8 @@ interface MockState {
   knowledgeNotes: Record<string, KnowledgeNote>;
   conversations: Conversation[];
   profile: ProfileEntry[];
+  /** Read-only promises, same shape and rules as the vault service. */
+  commitments: CommitmentSummary[];
 }
 
 const demoProfile: ProfileEntry[] = [
@@ -284,6 +287,7 @@ function defaultState(): MockState {
     settings: structuredClone(defaultSettings),
     reviews: [],
     conversations: [],
+    commitments: [],
     plans: [],
     knowledgeTopics: [],
     knowledgeNotes: {},
@@ -342,6 +346,9 @@ function readState(storage: Storage | null): MockState {
           : {},
       conversations: Array.isArray(parsed.conversations)
         ? (parsed.conversations as Conversation[])
+        : [],
+      commitments: Array.isArray(parsed.commitments)
+        ? (parsed.commitments as CommitmentSummary[])
         : []
     };
   } catch {
@@ -418,7 +425,7 @@ function butlerReply(
   if (/提醒/.test(text)) return '好，我会在 21:30 提醒你复盘（原型）。';
   if (/优先级|安排|排/.test(text)) {
     if (pendingTasks.length === 0) {
-      return '这个工作区还没有待办任务。先说一句要学什么，我记下来之后就能帮你排今天的安排。';
+      return '这个项目还没有待办任务。先说一句要学什么，我记下来之后就能帮你排今天的安排。';
     }
     const plan = pendingTasks
       .slice(0, 3)
@@ -536,7 +543,7 @@ export function createMockApi(
 
   function requireWorkspace(workspaceId: string) {
     const workspace = state.workspaces.find((entry) => entry.id === workspaceId);
-    if (!workspace) throw new Error('工作区不存在');
+    if (!workspace) throw new Error('项目不存在');
     return workspace;
   }
 
@@ -1727,7 +1734,7 @@ export function createMockApi(
 
     async createMemory(input: CreateMemoryInput): Promise<MemoryRecord> {
       const workspace = state.workspaces.find((entry) => entry.id === input.workspaceId);
-      if (!workspace) throw new Error('工作区不存在');
+      if (!workspace) throw new Error('项目不存在');
       const text = input.text.trim();
       if (!text) throw new Error('记忆内容不能为空。');
       if (!MOCK_MEMORY_KINDS.has(input.kind)) throw new Error('记忆类型无效。');
@@ -2314,6 +2321,20 @@ export function createMockApi(
       persist();
     },
 
+    async listPendingCommitments(input: { byDate: string }): Promise<CommitmentSummary[]> {
+      // Same rule the vault uses: still open and due on or before the day,
+      // most overdue first. Nothing is synthesized when there are none.
+      return structuredClone(
+        state.commitments
+          .filter((entry) => entry.status === 'open' && entry.due <= input.byDate)
+          .sort(
+            (a, b) =>
+              a.due.localeCompare(b.due) ||
+              (a.createdAt ?? '').localeCompare(b.createdAt ?? '')
+          )
+      );
+    },
+
     async listConversations(): Promise<ConversationSummary[]> {
       return state.conversations
         .filter((conversation) => conversation.messages.length > 0)
@@ -2546,7 +2567,7 @@ export function createMockApi(
       const reasoning = wantsExamProject
         ? '先确认目标、科目和每天可用时间，再创建项目并排第一批任务。'
         : wantsNote
-          ? '先确认要记录的内容，然后写入当前工作区。'
+          ? '先确认要记录的内容，然后写入当前项目。'
           : '先看今天的任务和最近的记忆，再给出 1-3 个可执行的下一步。';
 
       for (const chunk of chunkText(reasoning, 4)) {
@@ -2635,14 +2656,14 @@ export function createMockApi(
         await sleep(400 * pace);
         const recorded = recordNoteIfNeeded(input);
         step.status = recorded === null ? 'failed' : 'done';
-        if (recorded === null) step.detail = '没有可写入的工作区';
+        if (recorded === null) step.detail = '没有可写入的项目';
         onEvent({
           type: 'tool-result',
           id,
           name: 'write_note',
           ok: recorded !== null,
           label,
-          ...(recorded === null ? { detail: '没有可写入的工作区' } : {})
+          ...(recorded === null ? { detail: '没有可写入的项目' } : {})
         });
         await sleep(120 * pace);
       }

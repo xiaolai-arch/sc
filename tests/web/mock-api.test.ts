@@ -212,12 +212,12 @@ test('falls back to memory when storage is unavailable', async () => {
   } as unknown as Storage;
   const api = createMockApi(blocked);
   await api.completeWorkspaceOnboarding({
-    name: '内存工作区',
+    name: '内存项目',
     kind: 'study',
     goal: 'g',
     description: ''
   });
-  expect((await api.listWorkspaces()).some((workspace) => workspace.name === '内存工作区')).toBe(
+  expect((await api.listWorkspaces()).some((workspace) => workspace.name === '内存项目')).toBe(
     true
   );
 });
@@ -689,7 +689,7 @@ test('rejects a review-sheet export for an unknown workspace', async () => {
   localStorage.clear();
   const api = createMockApi(localStorage);
   await expect(api.exportMistakeSheet!({ workspaceId: 'missing' })).rejects.toThrow(
-    '工作区不存在'
+    '项目不存在'
   );
 });
 
