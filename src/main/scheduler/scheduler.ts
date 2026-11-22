@@ -1,6 +1,7 @@
 import { formatLocalDate, splitLocalDateTime } from '../../shared/date';
 import type { AppSettings } from '../../shared/types';
 import {
+  effectiveReminderState,
   reminderState,
   type Reminder,
   type ReminderState,
@@ -177,8 +178,11 @@ function buildTriggers(
   for (const reminder of reminders) {
     if (!reminder.enabled) continue;
     // `done` is a lifecycle state, not the schedule switch: a completed
-    // reminder stays quiet until the user re-enables it.
-    if (reminderState(reminder) === 'done') continue;
+    // reminder stays quiet for the day it was finished. From the next day
+    // `effectiveReminderState` reads it as pending, so a daily reminder
+    // resumes without a manual 重新启用. Legacy `done` without `doneAt` stays
+    // permanently quiet, exactly as before.
+    if (effectiveReminderState(reminder, date) === 'done') continue;
 
     const postponed = reminder.postponedTo
       ? splitLocalDateTime(reminder.postponedTo)
@@ -345,6 +349,9 @@ export class Scheduler {
       state: 'fired',
       firedAt: at.toISOString(),
       postponedTo: null,
+      // A fresh delivery supersedes yesterday's completion day, so the file
+      // matches "fired" and the next-day reset cannot act on it again.
+      doneAt: null,
       lastError: null
     });
   }
