@@ -93,6 +93,21 @@ async function setContentPaneSize(
       { timeout: 15_000, message: 'window content size never reached the target viewport' }
     )
     .toBeLessThanOrEqual(FRAME_ROUNDING_PX);
+
+  // Windows can apply the frame-rounding correction a beat after the call, so
+  // the renderer may report the target ±1 for a moment and then settle 1px
+  // smaller on its own. Layout is measured before and after an interaction, so
+  // wait for the exact target when the OS can reach it; on systems that can
+  // only get within one pixel the tolerance above remains the contract.
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const [actualWidth, actualHeight] = await page.evaluate(() => [
+      window.innerWidth,
+      window.innerHeight
+    ]);
+    if (actualWidth === width && actualHeight === height) break;
+    await page.waitForTimeout(100);
+  }
 }
 
 async function probeLayout(page: Page): Promise<LayoutProbe> {
@@ -227,6 +242,12 @@ test.describe('ASAKI viewport layout (P3)', () => {
           // An overlay, not a third column: the shell row still has two
           // columns and the content column keeps its width.
           const after = await probeLayout(page);
+          // The measurement only means anything if the window did not move
+          // between the two probes; a moved viewport is a setup problem, not a
+          // squeezed chat column.
+          expect(after.viewport, 'the viewport is the same before and after the panel opens').toEqual(
+            before.viewport
+          );
           expect(after.rowColumns.length, 'shell row still renders two columns').toBe(2);
           expect(after.contentPaneCount, 'content column still holds one pane').toBe(1);
           expect(
