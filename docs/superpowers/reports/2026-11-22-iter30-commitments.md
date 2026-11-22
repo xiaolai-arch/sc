@@ -234,8 +234,13 @@ test('a reminder completed today is back to 待触发 the next day without a re-
 `effectiveReminderState(reminder, today)` 的 `today` 全部来自调用方：
 - 调度器：`scheduler.ts:185` 用 `runTick` 里的 `formatLocalDate(at)`（`at = this.now()`，单一注入时钟）。
 - `TodayOverview`：`upcomingReminders(reminders, today)`，`today` 是组件 prop（`TodayOverview.tsx:226`）。
-- `ProjectSections`：`reminderStateOf(reminder, today)` / `ReminderStateChip({reminder, today})`，`today` 由调用方传入；`RemindersSection` 内部**既有的** `const today = formatLocalDate(new Date())` 是 iter30 之前就存在的（用于静音判定），本次未改其来源，也未新增别的组件级取时——新增的 `CommitmentsSection` 与 `completionNotice` 都显式接收 `today`。
-- 断言：`today-overview.test.tsx`「…returns on the next day」用两个固定 `today` 渲染同一条记录，无 `vi.setSystemTime` 也能翻转。
+- `notifications.ts:97` 用调用方传入的 `now` 推出当日。
+- `ProjectSections`：`reminderStateOf(reminder, today)` / `ReminderStateChip({reminder, today})`，`today` 由调用方传入。**修正（第二轮）**：`RemindersSection` 原先在 `:1914` 自己写 `const today = formatLocalDate(new Date())`，而 `RemindersPage.tsx:17` 早已持有 `today` 并传给了同页的 `CommitmentsSection`——同一页两个时钟。现已删除该行，`today` 改为 `RemindersSectionProps` 的必填 prop，由 `RemindersPage.tsx:50` 传下；`isMutedOn(snoozedUntil, today)`（静音文案）也跟着改用同一个值。
+- 关于 `TodayOverview.tsx:172` 的 `const now = new Date()`（`upcomingReminders` 内）：这是**有意保留**的，不属于漏网时钟。它只用来算此刻的分钟数，决定「接下来」里哪几条排前面（已在今天的排后）；它**不参与** done 判定——done 只看上方传入的 `today`。也就是说它影响的是顺序，不是状态，不会造成跨零点状态滞留。
+- 断言（acceptance 21）：`today-overview.test.tsx`「a reminder done today leaves 接下来 and returns on the next day」用两个固定 `today` 渲染同一条记录，无 `vi.setSystemTime` 也能翻转。
+
+**(1a) 新增测试钉住这次修正。**
+`tests/renderer/project-page.test.tsx`「the reminders section reads the caller's today, never its own clock」：`vi.setSystemTime(2026-11-22)` 固定系统时钟，但给 `RemindersSection` 传 `today="2026-11-23"`，一条 `doneAt: '2026-11-22'` 的提醒必须显示「待触发」且没有「重新启用」按钮；同时 `snoozedUntil="2026-11-23"` 必须显示「今天已静音，明天恢复」（静音文案同样取传入值）。我已实测其反证力：把 `ProjectSections.tsx` 临时改回本地时钟后，该测试立刻失败于 `getByText('待触发')`（渲染出的是「已完成」），恢复后通过——这正是评审基准第 1 条要防的退化。
 
 **(2) 投递成功后 `markFired` 清 `doneAt`。**
 `scheduler.ts:348-356` 的 patch 现为 `{state:'fired', firedAt, postponedTo:null, doneAt:null, lastError:null}`；`scheduler-reminders.test.ts:320`「delivery records fired with a timestamp」的精确 patch 断言已同步包含 `doneAt: null`，另有「…resumes the next day」断言投递后 `record` 无 `doneAt`。
@@ -249,6 +254,9 @@ test('a reminder completed today is back to 待触发 the next day without a re-
 ---
 
 ## 门禁真实输出（逐字）
+
+以下为**第二轮修正提交**（`RemindersSection` 改收 `today` prop）上的重跑结果；
+上一版 `749f9c4` 的输出见本节末尾的存档块，两者差别仅是新测试的计数。
 
 **`npm run typecheck`**
 ```
@@ -269,46 +277,51 @@ test('a reminder completed today is back to 待触发 the next day without a re-
  RUN  v5.0.5 C:/Users/34191/orca/workspaces/sc/iter30-commitments
 
  Test Files  198 passed (198)
-      Tests  1953 passed | 2 skipped (1955)
-   Start at  17:02:36
-   Duration  86.20s (tests 58%, environment 21%, setup 9%, import 8%, transform 4%, worker 1%)
+      Tests  1954 passed | 2 skipped (1956)
+   Start at  17:21:00
+   Duration  69.17s (tests 62%, environment 18%, setup 8%, import 7%, transform 4%, worker 1%)
 ```
 
 **`npm run build`**
 ```
+out/renderer/assets/review-UuUu9mf_.js             40.19 kB
+out/renderer/assets/plan-CEtKchPg.js               61.38 kB
 out/renderer/assets/settings-BxsW-7Iw.js           74.79 kB
 out/renderer/assets/knowledge-BcjkiER8.js         155.80 kB
-out/renderer/assets/index-D2K3XtrK.js             438.83 kB
+out/renderer/assets/index-8CPXnTdi.js             438.79 kB
 out/renderer/assets/react-dom-BOxPwYkh.js         530.47 kB
 
-✓ built in 249ms
+✓ built in 242ms
 ```
 
 **`npm run test:e2e`（完整 tail，含 `18 passed`）**
 ```
 Running 18 tests using 1 worker
-  ok  1 e2e\desktop.spec.ts:13:7 › ASAKI desktop › conversation-first project creation and persistence (5.5s)
-  ok  2 e2e\feature-smoke.spec.ts:14:7 › ASAKI feature smoke › all pages render and reminders, memories, reviews and topics persist (3.8s)
-  ok  3 e2e\iter30-commitments.spec.ts:77:7 › visible commitments (iter30 P0) › lists open promises, resurfaces an overdue one, and reschedules it on disk (1.6s)
+  ok  1 e2e\desktop.spec.ts:13:7 › ASAKI desktop › conversation-first project creation and persistence (4.6s)
+  ok  2 e2eeature-smoke.spec.ts:14:7 › ASAKI feature smoke › all pages render and reminders, memories, reviews and topics persist (2.9s)
+  ok  3 e2e\iter30-commitments.spec.ts:77:7 › visible commitments (iter30 P0) › lists open promises, resurfaces an overdue one, and reschedules it on disk (1.4s)
   ok  4 e2e\iter30-commitments.spec.ts:130:7 › visible commitments (iter30 P0) › 放下 removes the promise from the default list and records it as dropped (1.5s)
-  ok  5 e2e\iter30-commitments.spec.ts:176:7 › week availability (iter30 P1) › shows this week's packed days and clears only that week on disk (1.6s)
-  ok  6 e2e\qa-learning-flows.spec.ts:184:7 › learning-science flows › 简答题: reveal, 没答对, mistake book and exported review sheet (1.8s)
-  ok  7 e2e\qa-learning-flows.spec.ts:258:7 › learning-science flows › 把握度校准: a confidently wrong answer is counted, an unmarked one is not (2.0s)
-  ok  8 e2e\qa-learning-flows.spec.ts:341:7 › learning-science flows › 触发线索: 今日 renders the if-then line and it disappears when the cue is cleared (2.1s)
-  ok  9 e2e\qa-learning-flows.spec.ts:398:7 › learning-science flows › 交错混练: two sets alternate, state resets, mistakes land on the real sets (2.3s)
-  ok 10 e2e\qa-learning-flows.spec.ts:523:7 › learning-science flows › 掌握门控: phase two stays locked until every earlier check is ticked (2.1s)
-  ok 11 e2e\qa-learning-surfaces.spec.ts:349:7 › learning surfaces (heatmap, accuracy trend, mistake sheet, countdown) › 复盘 shows the study heatmap and the 8-week accuracy trend without horizontal overflow (1.8s)
-  ok 12 e2e\qa-learning-surfaces.spec.ts:398:7 › learning surfaces (heatmap, accuracy trend, mistake sheet, countdown) › 错题本 exports a review sheet under practice/review-sheets/ (2.0s)
-  ok 13 e2e\qa-learning-surfaces.spec.ts:440:7 › learning surfaces (heatmap, accuracy trend, mistake sheet, countdown) › 今日 and 长期计划 count down to the project target date (1.8s)
-  ok 14 e2e\qa-profile-and-strict.spec.ts:328:7 › 我的资料 and 更严的掌握判定 › 我的资料: add a fact, show a model guess as 待确认, persist across restart (3.3s)
-  ok 15 e2e\qa-profile-and-strict.spec.ts:393:7 › 我的资料 and 更严的掌握判定 › 更严掌握判定: choice stays active under strict, short resolves, off persists after restart (4.6s)
-  ok 16 e2e\qa-reminder-row.spec.ts:16:7 › reminder row layout (runtime QA guard) › keeps the reminder text readable at the default window size (2.8s)
-  ok 17 e2e\viewport-layout.spec.ts:165:9 › ASAKI viewport layout (P3) › conversation home lays out at 1366x768 (1.8s)
-  ok 18 e2e\viewport-layout.spec.ts:165:9 › ASAKI viewport layout (P3) › conversation home lays out at 1440x900 (1.8s)
-  18 passed (45.4s)
+  ok  5 e2e\iter30-commitments.spec.ts:176:7 › week availability (iter30 P1) › shows this week's packed days and clears only that week on disk (1.4s)
+  ok  6 e2e\qa-learning-flows.spec.ts:184:7 › learning-science flows › 简答题: reveal, 没答对, mistake book and exported review sheet (1.6s)
+  ok  7 e2e\qa-learning-flows.spec.ts:258:7 › learning-science flows › 把握度校准: a confidently wrong answer is counted, an unmarked one is not (1.8s)
+  ok  8 e2e\qa-learning-flows.spec.ts:341:7 › learning-science flows › 触发线索: 今日 renders the if-then line and it disappears when the cue is cleared (2.0s)
+  ok  9 e2e\qa-learning-flows.spec.ts:398:7 › learning-science flows › 交错混练: two sets alternate, state resets, mistakes land on the real sets (1.9s)
+  ok 10 e2e\qa-learning-flows.spec.ts:523:7 › learning-science flows › 掌握门控: phase two stays locked until every earlier check is ticked (1.5s)
+  ok 11 e2e\qa-learning-surfaces.spec.ts:349:7 › learning surfaces (heatmap, accuracy trend, mistake sheet, countdown) › 复盘 shows the study heatmap and the 8-week accuracy trend without horizontal overflow (1.3s)
+  ok 12 e2e\qa-learning-surfaces.spec.ts:398:7 › learning surfaces (heatmap, accuracy trend, mistake sheet, countdown) › 错题本 exports a review sheet under practice/review-sheets/ (1.5s)
+  ok 13 e2e\qa-learning-surfaces.spec.ts:440:7 › learning surfaces (heatmap, accuracy trend, mistake sheet, countdown) › 今日 and 长期计划 count down to the project target date (1.4s)
+  ok 14 e2e\qa-profile-and-strict.spec.ts:328:7 › 我的资料 and 更严的掌握判定 › 我的资料: add a fact, show a model guess as 待确认, persist across restart (2.8s)
+  ok 15 e2e\qa-profile-and-strict.spec.ts:393:7 › 我的资料 and 更严的掌握判定 › 更严掌握判定: choice stays active under strict, short resolves, off persists after restart (4.3s)
+  ok 16 e2e\qa-reminder-row.spec.ts:16:7 › reminder row layout (runtime QA guard) › keeps the reminder text readable at the default window size (2.7s)
+  ok 17 e2eiewport-layout.spec.ts:165:9 › ASAKI viewport layout (P3) › conversation home lays out at 1366x768 (1.7s)
+  ok 18 e2eiewport-layout.spec.ts:165:9 › ASAKI viewport layout (P3) › conversation home lays out at 1440x900 (1.7s)
+
+  18 passed (38.8s)
 ```
 
 以上五条门禁全部由我在本 worktree 中亲自运行，数字取自实际输出。
+
+**第一轮（`749f9c4`，修正前）存档**：vitest `Test Files 198 passed (198)` / `Tests 1953 passed | 2 skipped (1955)` / `Duration 86.20s`；build `✓ built in 249ms`（`index-D2K3XtrK.js 438.83 kB`）；e2e `18 passed (45.4s)`；两个 typecheck 同样退出码 0。
 
 ---
 
