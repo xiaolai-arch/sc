@@ -2,7 +2,6 @@ import { formatLocalDate, splitLocalDateTime } from '../../shared/date';
 import type { AppSettings } from '../../shared/types';
 import {
   effectiveReminderState,
-  reminderState,
   type Reminder,
   type ReminderState,
   type ReminderStatePatch,
@@ -110,8 +109,14 @@ interface Trigger {
   postponed?: boolean;
   /** Due immediately regardless of the clock (a stale postponement caught up). */
   catchUp?: boolean;
-  /** Lifecycle state as read this tick, so pending writes can be skipped. */
-  reminderState?: ReminderState;
+  /**
+   * The state that governs *today*, as computed by `effectiveReminderState`.
+   * Carrying the effective state (not the raw `reminder.state`) keeps the
+   * next-day rule in one place: the DND branch below writes `pending` only
+   * when this says the reminder is neither pending nor postponed, so a
+   * reminder finished yesterday is never rewritten back to pending at night.
+   */
+  effectiveState?: ReminderState;
 }
 
 const SNOOZE_INTERVAL_MS = 30_000;
@@ -182,7 +187,14 @@ function buildTriggers(
     // `effectiveReminderState` reads it as pending, so a daily reminder
     // resumes without a manual 重新启用. Legacy `done` without `doneAt` stays
     // permanently quiet, exactly as before.
-    if (effectiveReminderState(reminder, date) === 'done') continue;
+    //
+    // The same value travels with the trigger so the DND branch below never
+    // re-derives it: reading the raw `reminder.state` there would treat a
+    // promise finished yesterday as still `done` and rewrite it back to
+    // `pending` at night, leaving a `pending` + `doneAt` record the user never
+    // asked for. One rule, one computation.
+    const effectiveState = effectiveReminderState(reminder, date);
+    if (effectiveState === 'done') continue;
 
     const postponed = reminder.postponedTo
       ? splitLocalDateTime(reminder.postponedTo)
@@ -201,7 +213,7 @@ function buildTriggers(
         title: `提醒：${reminder.label}`,
         body: reminder.label,
         reminderId: reminder.id,
-        reminderState: reminderState(reminder)
+        effectiveState
       });
       continue;
     }
@@ -218,7 +230,7 @@ function buildTriggers(
       title: `提醒：${reminder.label}`,
       body: reminder.label,
       reminderId: reminder.id,
-      reminderState: reminderState(reminder)
+      effectiveState
     });
   }
 
@@ -436,8 +448,8 @@ export class Scheduler {
         if (
           trigger.kind === 'reminder' &&
           trigger.reminderId !== undefined &&
-          trigger.reminderState !== 'pending' &&
-          trigger.reminderState !== 'postponed'
+          trigger.effectiveState !== 'pending' &&
+          trigger.effectiveState !== 'postponed'
         ) {
           await this.writeReminderState(trigger.reminderId, { state: 'pending' });
         }

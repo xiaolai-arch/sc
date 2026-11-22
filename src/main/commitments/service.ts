@@ -201,6 +201,15 @@ export function createCommitmentService(
         throw new Error('请提供 outcome（done / dropped）或 newDue。');
       }
       const wanted = newDue ? newDue : undefined;
+      // The one authoritative lower bound for a reschedule. Every entry point
+      // goes through `resolve` — the reminders page, the IPC channel, the
+      // butler's resolve_commitment tool, and any script repairing the vault —
+      // so a promise can never be moved into the past behind the UI's back.
+      // `now` is the caller's clock (context.ts passes its single `now`), so
+      // this does not introduce a second source of "today".
+      if (wanted !== undefined && wanted < addLocalDays(now(), 0)) {
+        throw new Error('改期日期不能早于今天。');
+      }
       return runExclusively(async () => {
         const commitments = await readAll();
         const match = matchCommitment(commitments, id && id !== '' ? id : undefined, text);

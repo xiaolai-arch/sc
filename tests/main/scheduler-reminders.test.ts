@@ -397,6 +397,42 @@ describe('reminder lifecycle', () => {
     expect(store.writes).toHaveLength(0);
   });
 
+  test('DND never rewrites a reminder finished yesterday back to pending', async () => {
+    // The reminder was completed yesterday and is due again today, so
+    // effectiveReminderState reads it as pending. At 23:31 it falls inside
+    // DND. Reading the raw `state` here used to see `done` and write
+    // `{state:'pending'}` — leaving `pending` + `doneAt`, a combination the
+    // spec forbids and a badge that flips on its own at night.
+    const store = lifecycle([
+      {
+        id: 'water',
+        time: '12:00',
+        label: '喝水',
+        enabled: true,
+        state: 'done',
+        doneAt: '2026-10-30'
+      }
+    ]);
+    const scheduler = new Scheduler({
+      now: () => at(23, 31),
+      getSettings: async () =>
+        settings({ dndStart: '23:00', dndEnd: '07:00' }),
+      getReminders: store.getReminders,
+      onReminderState: store.onReminderState,
+      notify: () => undefined
+    });
+
+    const result = await scheduler.tick();
+    const suppressed = result.suppressed.filter((entry) => entry.kind === 'reminder');
+    expect(suppressed).toHaveLength(1);
+    expect(suppressed[0]).toMatchObject({ reason: 'dnd' });
+    // No lifecycle write at all: the record must stay exactly as the user left it.
+    expect(store.writes).toEqual([]);
+    const record = store.records.get('water')!;
+    expect(record.state).toBe('done');
+    expect(record.doneAt).toBe('2026-10-30');
+  });
+
   test('a postponed reminder persists, waits for the new time and fires once', async () => {
     // Simulates a restart: the same persisted reminder object is re-read on
     // every scheduler construction, so the postponement must come from disk.

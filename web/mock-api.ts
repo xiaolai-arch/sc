@@ -2400,6 +2400,10 @@ export function createMockApi(
       if (input.action === 'reschedule') {
         const due = (input.due ?? '').trim();
         if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) throw new Error('新日期格式必须为 YYYY-MM-DD。');
+        // Same authoritative bound as the vault service (commitments/service.ts):
+        // a promise cannot be moved into the past, and the copy is the service's.
+        const today = formatLocalDate(new Date());
+        if (due < today) throw new Error('改期日期不能早于今天。');
         entry.due = due;
         entry.status = 'open';
         delete entry.resolvedAt;

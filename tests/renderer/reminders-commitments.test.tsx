@@ -97,8 +97,14 @@ test('改期 prefills the date, saves through onResolve and closes the editor', 
   expect(screen.queryByLabelText('新日期：背完这一课的单词')).not.toBeInTheDocument();
 });
 
-test('改期 prefills today for an overdue promise and refuses a past date', async () => {
-  const onResolve = vi.fn(async () => entry());
+test('改期 prefills today for an overdue promise and defers the past-date rule to the service', async () => {
+  // The lower bound lives in commitments/service.ts, not here, so the section
+  // must not keep a second copy: it submits and shows whatever the service
+  // says. The one-year cap is a UX bound and stays local, next to the picker.
+  const onResolve = vi
+    .fn()
+    .mockRejectedValueOnce(new Error('改期日期不能早于今天。'))
+    .mockResolvedValue(entry());
   renderSection([entry({ text: '整理错题', due: '2026-11-19' })], { onResolve });
 
   await userEvent.click(screen.getByRole('button', { name: '改期：整理错题' }));
@@ -108,14 +114,24 @@ test('改期 prefills today for an overdue promise and refuses a past date', asy
   fireEvent.change(input, { target: { value: '2026-11-20' } });
   await userEvent.click(screen.getByRole('button', { name: '保存' }));
 
-  expect(screen.getByText('新日期不能早于今天。')).toBeInTheDocument();
-  expect(onResolve).not.toHaveBeenCalled();
+  // Delegated: the call goes out, and the service's own sentence is shown.
+  await waitFor(() =>
+    expect(onResolve).toHaveBeenCalledWith({
+      id: 'cm-1',
+      action: 'reschedule',
+      due: '2026-11-20'
+    })
+  );
+  expect(await screen.findByText('改期日期不能早于今天。')).toBeInTheDocument();
+  // The editor stays open so the user can correct the date.
+  expect(screen.getByLabelText('新日期：整理错题')).toBeInTheDocument();
 
-  // Past the one-year bound is refused with its own sentence.
+  // Past the one-year bound is refused locally with its own sentence.
+  const callsBeforeCap = onResolve.mock.calls.length;
   fireEvent.change(input, { target: { value: '2028-01-01' } });
   await userEvent.click(screen.getByRole('button', { name: '保存' }));
   expect(screen.getByText('新日期不能超过 365 天以后。')).toBeInTheDocument();
-  expect(onResolve).not.toHaveBeenCalled();
+  expect(onResolve).toHaveBeenCalledTimes(callsBeforeCap);
 });
 
 test('放下 and 完成 resolve the entry through onResolve', async () => {

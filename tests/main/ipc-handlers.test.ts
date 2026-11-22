@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ButlerService, WorkspaceService } from '../../src/shared/workspace';
@@ -343,6 +343,55 @@ test('acts on commitments and week availability over IPC', async () => {
     '清除一周安排参数无效。'
   );
   expect(resolveCommitmentEntry).toHaveBeenCalledTimes(2);
+});
+
+test('a past reschedule is refused through the real IPC channel, not just the UI', async () => {
+  // Bypasses the renderer entirely: a caller that never touches the reminders
+  // page still goes through the handler -> service path, so the lower bound
+  // cannot be skipped. The context clock is 2026-10-31.
+  const { context, dir } = await makeContext();
+  const vault = join(dir, 'vault');
+  await mkdir(vault, { recursive: true });
+  await writeFile(
+    join(vault, 'commitments.md'),
+    [
+      '---',
+      'type: log',
+      'source: user',
+      'kind: commitments',
+      'items:',
+      '  - id: cm-past',
+      '    text: 整理错题',
+      "    due: '2026-10-30'",
+      '    status: open',
+      "    createdAt: '2026-10-30T08:00:00.000Z'",
+      '---',
+      '# 承诺',
+      '',
+      ''
+    ].join('\n'),
+    'utf8'
+  );
+  const handlers = createIpcHandlers(context.api);
+
+  await expect(
+    handlers.resolveCommitmentEntry({ id: 'cm-past', action: 'reschedule', due: '2026-10-30' })
+  ).rejects.toThrow('改期日期不能早于今天。');
+  await expect(
+    handlers.resolveCommitmentEntry({ id: 'cm-past', action: 'reschedule', due: '2026-01-05' })
+  ).rejects.toThrow('改期日期不能早于今天。');
+  // The file was not rewritten by a rejected call.
+  expect(
+    await readFile(join(vault, 'commitments.md'), 'utf8')
+  ).toContain("due: '2026-10-30'");
+
+  // Today is allowed, and the same channel then updates the entry.
+  const moved = await handlers.resolveCommitmentEntry({
+    id: 'cm-past',
+    action: 'reschedule',
+    due: '2026-10-31'
+  });
+  expect(moved).toMatchObject({ id: 'cm-past', due: '2026-10-31', status: 'open' });
 });
 
 test('rejects an invalid task time or due date in Chinese before the service', async () => {

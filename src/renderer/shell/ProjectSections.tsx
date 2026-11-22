@@ -1707,10 +1707,10 @@ export function CommitmentsSection({
       setError('请选择一个新的日期。');
       return;
     }
-    if (due < today) {
-      setError('新日期不能早于今天。');
-      return;
-    }
+    // "Not before today" is the service's rule, not the UI's: it holds for
+    // every caller (IPC, the butler tool, a script), so the UI does not keep a
+    // second copy. Only the one-year UX cap stays here, next to the date
+    // picker's own max.
     if (due > maxDate) {
       setError('新日期不能超过 365 天以后。');
       return;

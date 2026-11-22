@@ -280,6 +280,37 @@ test('listSummaries omits resolved by default and appends them when asked', asyn
   });
 });
 
+test('resolve refuses to move a promise into the past, change or not', async () => {
+  // The service is the one authority for "not before today": the reminders
+  // page, the IPC channel and the butler tool all reach the vault through it,
+  // so nothing can put a promise back in the past behind the UI's back.
+  await withVault(async (root) => {
+    const service = createCommitmentService({ root, now: () => NOW });
+    const overdue = await service.create({ text: '整理错题', due: '2026-11-19' });
+
+    // Yesterday and even further back are refused with one sentence.
+    await expect(
+      service.resolve({ id: overdue.id, newDue: '2026-11-21' })
+    ).rejects.toThrow('改期日期不能早于今天。');
+    await expect(
+      service.resolve({ id: overdue.id, newDue: '2026-01-01' })
+    ).rejects.toThrow('改期日期不能早于今天。');
+    // Keeping the stale `due` unchanged is still a move into the past.
+    await expect(
+      service.resolve({ id: overdue.id, newDue: overdue.due })
+    ).rejects.toThrow('改期日期不能早于今天。');
+    // Nothing was written: the entry keeps its original day and stays open.
+    expect(await service.list()).toEqual([overdue]);
+
+    // Today itself is allowed — the bound is inclusive.
+    const todayMoved = await service.resolve({ id: overdue.id, newDue: '2026-11-22' });
+    expect(todayMoved).toMatchObject({ due: '2026-11-22', status: 'open' });
+    // Closing a promise is not a reschedule, so it is unaffected.
+    const closed = await service.resolve({ id: overdue.id, outcome: 'dropped' });
+    expect(closed.status).toBe('dropped');
+  });
+});
+
 test('resolveCommitmentDue maps the phrasings the user actually says', () => {
   // 2026-11-22 is a Sunday; 2026-11-23 a Monday.
   const sunday = new Date('2026-11-22T09:00:00');
