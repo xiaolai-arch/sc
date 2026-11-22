@@ -170,7 +170,14 @@ export function createCommitmentService(
     async create(input: CreateCommitmentInput): Promise<Commitment> {
       const text = requireText(input?.text);
       const workspaceId = normalizeWorkspace(input?.workspaceId);
-      const due = resolveCommitmentDue(input?.due, now()) ?? addLocalDays(now(), 1);
+      // An omitted due means tomorrow. An explicit due that is neither a real
+      // local day nor a phrase we understand is refused, never defaulted:
+      // silently moving `2026-02-30` to tomorrow would hide the bad input.
+      const resolved = resolveCommitmentDue(input?.due, now());
+      if (resolved === undefined && input?.due !== undefined) {
+        throw new Error('承诺日期必须是 YYYY-MM-DD 或「明天」这类说法。');
+      }
+      const due = resolved ?? addLocalDays(now(), 1);
       return runExclusively(async () => {
         const commitments = await readAll();
         const created: Commitment = {

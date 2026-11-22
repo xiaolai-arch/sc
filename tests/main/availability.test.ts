@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { createAvailabilityService } from '../../src/main/availability/service';
 import {
   isInsideWeek,
+  isIsoDate,
   isMonday,
   parseWeekAvailabilityFile,
   serializeWeekAvailabilityFile,
@@ -157,6 +158,100 @@ test('isMonday, isInsideWeek and weekdayWord use pure date facts', () => {
   expect(weekdayWord('soon')).toBeUndefined();
 });
 
+test('isIsoDate refuses days the calendar rolls over', () => {
+  for (const fake of ['2026-02-30', '2026-04-31', '2026-06-31', '2026-11-31']) {
+    expect(isIsoDate(fake)).toBe(false);
+  }
+  // 2026 is not a leap year; 2024 is.
+  expect(isIsoDate('2026-02-29')).toBe(false);
+  expect(isIsoDate('2024-02-29')).toBe(true);
+  expect(isIsoDate('2026-12-31')).toBe(true);
+  expect(isIsoDate('2026-01-01')).toBe(true);
+  // Malformed shapes are still refused.
+  expect(isIsoDate('2026-1-01')).toBe(false);
+  expect(isIsoDate('12-01')).toBe(false);
+  expect(isIsoDate('下周')).toBe(false);
+  expect(isIsoDate(undefined)).toBe(false);
+  // isMonday inherits the strict check, so a fake Monday is refused.
+  expect(isMonday('2026-02-30')).toBe(false);
+});
+
+test('a stored fake weekStart is repaired on read and survives the next write', async () => {
+  // `2026-02-30` used to be read as Monday 2026-03-02, so the week is kept as
+  // the week of 03-02 rather than dropped, and its busy day is repaired too.
+  await withVault(async (root) => {
+    const raw = [
+      '---',
+      'type: log',
+      'source: user',
+      'kind: week-availability',
+      'items:',
+      '  - id: wa-fake',
+      "    weekStart: '2026-02-30'",
+      "    busyDates: ['2026-02-30', '2026-03-03']",
+      "    createdAt: '2026-02-01T20:30:00.000Z'",
+      '---',
+      '# 下周安排',
+      '',
+      ''
+    ].join('\n');
+    await writeFile(weekAvailabilityFile(root), raw, 'utf8');
+
+    const service = createAvailabilityService({ root, now: () => NOW });
+    // Repaired to the real Monday and real days, not dropped.
+    expect(await service.list()).toEqual([
+      {
+        id: 'wa-fake',
+        weekStart: '2026-03-02',
+        busyDates: ['2026-03-02', '2026-03-03'],
+        createdAt: '2026-02-01T20:30:00.000Z'
+      }
+    ]);
+    // A pure read does not rewrite the file.
+    expect(await readFile(weekAvailabilityFile(root), 'utf8')).toBe(raw);
+
+    // The first write persists the repaired week; the promise is not lost.
+    await service.set({ weekStart: '2026-03-09', busyDates: ['2026-03-10'] });
+    const reread = parseWeekAvailabilityFile(
+      await readFile(weekAvailabilityFile(root), 'utf8')
+    );
+    expect(reread.find((entry) => entry.id === 'wa-fake')).toMatchObject({
+      weekStart: '2026-03-02',
+      busyDates: ['2026-03-02', '2026-03-03']
+    });
+  });
+});
+
+test('a stored busy day that rolls out of its week is repaired or dropped', () => {
+  // `2026-11-31` reads as 2026-12-01, which is not in the 11-30 week, so it is
+  // dropped — but the week itself still parses because 2026-11-31 as a
+  // `weekStart` is not a Monday under the old rule either.
+  const raw = [
+    '---',
+    'type: log',
+    'source: user',
+    'kind: week-availability',
+    'items:',
+    '  - id: wa-busy',
+    "    weekStart: '2026-11-30'",
+    "    busyDates: ['2026-11-31', '2026-12-01']",
+    "    createdAt: '2026-11-29T20:30:00.000Z'",
+    '---',
+    '# 下周安排',
+    '',
+    ''
+  ].join('\n');
+  // Both entries repair to 2026-12-01, which is that week's Tuesday, deduped.
+  expect(parseWeekAvailabilityFile(raw)).toEqual([
+    {
+      id: 'wa-busy',
+      weekStart: '2026-11-30',
+      busyDates: ['2026-12-01'],
+      createdAt: '2026-11-29T20:30:00.000Z'
+    }
+  ]);
+});
+
 test('set stores sorted deduplicated dates with an optional trimmed note', async () => {
   await withVault(async (root) => {
     const service = createAvailabilityService({ root, now: () => NOW });
@@ -183,6 +278,10 @@ test('set rejects a non-Monday, a fake date, empty days, out-of-week days and lo
     ).rejects.toThrow('weekStart 必须是某一周的周一');
     await expect(
       service.set({ weekStart: '2026-13-40', busyDates: ['2026-11-24'] })
+    ).rejects.toThrow('weekStart 必须是某一周的周一');
+    // A fake Monday the old Date parser rolled over is refused, not stored.
+    await expect(
+      service.set({ weekStart: '2026-02-30', busyDates: ['2026-03-02'] })
     ).rejects.toThrow('weekStart 必须是某一周的周一');
     await expect(
       service.set({ weekStart: '2026-11-23', busyDates: [] })

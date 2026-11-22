@@ -1,5 +1,5 @@
 import type { NoteMeta } from '../../shared/types';
-import { formatLocalDate } from '../../shared/date';
+import { formatLocalDate, isLocalDate, repairRolloverDate } from '../../shared/date';
 import { parseNote, serializeNote } from '../vault/note';import { asRecord, asString } from '../workspace/records/coerce';
 
 /**
@@ -27,19 +27,29 @@ export interface Commitment {
 export const MAX_COMMITMENT_TEXT = 200;
 
 const COMMITMENT_STATUSES: readonly CommitmentStatus[] = ['open', 'done', 'dropped'];
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function isCommitmentStatus(value: unknown): value is CommitmentStatus {
   return typeof value === 'string' && (COMMITMENT_STATUSES as readonly string[]).includes(value);
 }
 
-/** True for a real calendar date written as YYYY-MM-DD. */
+/**
+ * True for a real calendar date written as YYYY-MM-DD. Delegates to the shared
+ * exact-shape + rollover check, so impossible days the Date constructor would
+ * roll over (`2026-02-30`) are refused instead of being silently accepted.
+ */
 export function isCommitmentDate(value: string | undefined): value is string {
-  return (
-    typeof value === 'string' &&
-    ISO_DATE.test(value) &&
-    !Number.isNaN(new Date(`${value}T00:00:00Z`).getTime())
-  );
+  return typeof value === 'string' && isLocalDate(value);
+}
+
+/**
+ * The stored `due`, repaired if it was written by the old lenient validator.
+ * A real date is returned untouched; an impossible day is clamped to the last
+ * real day of its month, so a strict read never deletes the promise.
+ */
+function coerceDue(value: unknown): string | undefined {
+  const text = asString(value);
+  if (isCommitmentDate(text)) return text;
+  return repairRolloverDate(value);
 }
 
 /** Local calendar arithmetic; crossing month and year boundaries stays exact. */
@@ -89,8 +99,8 @@ function coerceCommitment(value: unknown): Commitment | null {
   if (record === null) return null;
   const id = asString(record.id)?.trim();
   const text = asString(record.text)?.trim();
-  const due = asString(record.due);
-  if (!id || !text || !isCommitmentDate(due)) return null;
+  const due = coerceDue(record.due);
+  if (!id || !text || due === undefined) return null;
   if (!isCommitmentStatus(record.status)) return null;
   const createdAt = asString(record.createdAt) ?? '';
   const resolvedAt = asString(record.resolvedAt);
