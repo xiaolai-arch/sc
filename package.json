@@ -1,7 +1,7 @@
 {
   "name": "study-coach",
   "productName": "ASAKI",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "本地优先的个人管家",
   "private": true,
   "type": "commonjs",
