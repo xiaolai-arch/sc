@@ -1,4 +1,14 @@
-import { copyFile, cp, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  copyFile,
+  cp,
+  mkdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile
+} from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { BackupResult, RestoreResult } from '../shared/ipc';
@@ -306,7 +316,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * `vaultPath` becomes this machine's current vault path, never the old
  * machine's.
  */
-async function readAdoptableState(source: string, vaultPath: string): Promise<AdoptableState | null> {
+async function readAdoptableState(
+  source: string,
+  vaultPath: string
+): Promise<AdoptableState | null> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(await readFile(source, 'utf8'));
