@@ -277,6 +277,27 @@ app.whenReady().then(async () => {
     app.quit();
   });
 
+  ipcMain.handle(APP_IPC_CHANNELS.chooseBackupDirectory, async () => {
+    try {
+      const options = {
+        title: '选择自动备份文件夹',
+        properties: ['openDirectory', 'createDirectory'] as const
+      };
+      const selection = mainWindow
+        ? await dialog.showOpenDialog(mainWindow, {
+            ...options,
+            properties: [...options.properties]
+          })
+        : await dialog.showOpenDialog({
+            ...options,
+            properties: [...options.properties]
+          });
+      return selection.canceled ? null : (selection.filePaths[0] ?? null);
+    } catch (error) {
+      throw new Error(serializeError(error).message);
+    }
+  });
+
   ipcMain.handle(APP_IPC_CHANNELS.pickVideoFiles, async () => {
     try {
       const options = {

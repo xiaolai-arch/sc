@@ -1832,3 +1832,217 @@ test('without a commitment provider the morning check-in still works unchanged',
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+// --- the weekly auto backup (P1) ----------------------------------------------
+
+const FAILURE_COPY =
+  '自动备份没有成功（磁盘空间不足）。你的数据没有被动过；可以稍后重试，或在「设置 → 数据与备份」手动导出。';
+
+test('the weekly message returns while the auto backup is still running (验收 8)', async () => {
+  const { dir, value } = await store();
+  try {
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const calls: string[] = [];
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () => settings(),
+      // The controllable-delay stand-in: the backup is "running" until the
+      // gate opens. No real files involved.
+      autoBackup: {
+        runIfDue: async (date) => {
+          calls.push(`run:${date}`);
+          await gate;
+          calls.push('done');
+          return true;
+        }
+      },
+      now: () => NOW
+    });
+
+    // The review message is returned — and durably appended — while the backup
+    // has not finished.
+    const notification = await service.check('weekly', '2026-11-01');
+    expect(notification).not.toBeNull();
+    expect(calls).toEqual(['run:2026-11-01']);
+    const conversation = await value.get((await value.list())[0]!.id);
+    expect(conversation?.messages[0]?.text).toBe(
+      `${WEEKLY_TEMPLATE}\n${AVAILABILITY_QUESTION}`
+    );
+
+    release!();
+    await vi.waitFor(() => expect(calls).toEqual(['run:2026-11-01', 'done']));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('only the weekly check fires the auto backup', async () => {
+  const { dir, value } = await store();
+  try {
+    const runIfDue = vi.fn(async () => false);
+    const client = new FakeModelClient(['早上好。今天先做极限基础。']);
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: client,
+      getSettings: async () => settings(),
+      autoBackup: { runIfDue },
+      now: () => NOW
+    });
+
+    expect(await service.check('morning', '2026-11-01')).not.toBeNull();
+    expect(await service.check('evening', '2026-11-01')).not.toBeNull();
+    expect(runIfDue).not.toHaveBeenCalled();
+
+    // The weekly trigger hands the review's own date to the runner.
+    expect(await service.check('weekly', '2026-11-01')).not.toBeNull();
+    expect(runIfDue).toHaveBeenCalledTimes(1);
+    expect(runIfDue).toHaveBeenCalledWith('2026-11-01');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a pending auto-backup failure is said once on the weekly message, then cleared (验收 10)', async () => {
+  const { dir, value } = await store();
+  try {
+    const backup: AppSettings['backup'] = {
+      lastBackupOutcome: 'failed',
+      lastBackupError: '磁盘空间不足'
+    };
+    let consumed = 0;
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () => settings({ backup }),
+      // Mirrors the real clearBackupError: a no-op when nothing is pending.
+      consumeBackupError: async () => {
+        if (!backup.lastBackupError) return;
+        consumed += 1;
+        delete backup.lastBackupError;
+      },
+      autoBackup: { runIfDue: async () => false },
+      now: () => NOW
+    });
+
+    await service.check('weekly', '2026-11-01');
+    const text = (await value.get((await value.list())[0]!.id))!.messages[0]!.text;
+    // One line, three layers, exactly once, at the tail before the question.
+    expect(text).toBe(`${WEEKLY_TEMPLATE}\n${FAILURE_COPY}\n${AVAILABILITY_QUESTION}`);
+    expect(text.split('自动备份没有成功')).toHaveLength(2);
+    expect(text).not.toContain('数据可能丢失');
+    expect(text).not.toContain('损坏');
+    expect(consumed).toBe(1);
+    expect(backup.lastBackupError).toBeUndefined();
+    // The outcome stays for the settings card.
+    expect(backup.lastBackupOutcome).toBe('failed');
+
+    // 再下一条: nothing pending, so the message is back at its baseline bytes
+    // and the consume is not called again.
+    await service.check('weekly', '2026-11-08');
+    const second = (await value.get(
+      (await value.list()).find((entry) => entry.title.includes('11-08'))!.id
+    ))!.messages[0]!.text;
+    expect(second).toBe(`${WEEKLY_TEMPLATE}\n${AVAILABILITY_QUESTION}`);
+    expect(consumed).toBe(1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a pending failure rides after the age line and before the question', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () =>
+        settings({
+          backup: {
+            ageLineEnabled: true,
+            lastBackupAt: '2026-10-29T14:00:00',
+            lastBackupError: '磁盘空间不足'
+          }
+        }),
+      consumeBackupError: async () => undefined,
+      autoBackup: { runIfDue: async () => false },
+      now: () => NOW
+    });
+
+    await service.check('weekly', '2026-11-01');
+    const text = (await value.get((await value.list())[0]!.id))!.messages[0]!.text;
+    expect(text).toBe(
+      `${WEEKLY_TEMPLATE}\n上次导出备份是 3 天前（10月29日）。\n${FAILURE_COPY}\n${AVAILABILITY_QUESTION}`
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the failure copy also ends a model-written weekly review, exactly once', async () => {
+  const { dir, value } = await store();
+  try {
+    const client = new FakeModelClient(['这一周你完成了 3 个任务，稳中有进。']);
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: client,
+      getSettings: async () =>
+        settings({ backup: { lastBackupOutcome: 'failed', lastBackupError: '磁盘空间不足' } }),
+      consumeBackupError: async () => undefined,
+      autoBackup: { runIfDue: async () => false },
+      now: () => NOW
+    });
+
+    await service.check('weekly', '2026-11-01');
+    const text = (await value.get((await value.list())[0]!.id))!.messages[0]!.text;
+    expect(text).toBe(`这一周你完成了 3 个任务，稳中有进。\n${FAILURE_COPY}\n${AVAILABILITY_QUESTION}`);
+    // The model never saw the copy: no duplicate is possible.
+    expect(client.calls[0]!.messages[0]!.content).not.toContain('自动备份没有成功');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('with the auto backup wired but nothing pending the weekly bytes are unchanged', async () => {
+  const hookedStore = await store();
+  const plainStore = await store();
+  try {
+    const withWiring = new ProactiveCheckInService({
+      conversationStore: hookedStore.value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () => settings(),
+      autoBackup: { runIfDue: async () => false },
+      consumeBackupError: async () => undefined,
+      now: () => NOW
+    });
+    const plain = new ProactiveCheckInService({
+      conversationStore: plainStore.value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    const hookedNotification = await withWiring.check('weekly', '2026-11-01');
+    const plainNotification = await plain.check('weekly', '2026-11-01');
+    expect(hookedNotification).not.toBeNull();
+    expect(plainNotification).not.toBeNull();
+    const hookedText = (await hookedStore.value.get(hookedNotification!.conversationId!))!
+      .messages[0]!.text;
+    const plainText = (await plainStore.value.get(plainNotification!.conversationId!))!
+      .messages[0]!.text;
+    expect(hookedText).toBe(plainText);
+  } finally {
+    await rm(hookedStore.dir, { recursive: true, force: true });
+    await rm(plainStore.dir, { recursive: true, force: true });
+  }
+});

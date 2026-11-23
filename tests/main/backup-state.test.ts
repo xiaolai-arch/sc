@@ -1,7 +1,11 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { recordBackupFailure, recordBackupSuccess } from '../../src/main/backup-state';
+import {
+  clearBackupError,
+  recordBackupFailure,
+  recordBackupSuccess
+} from '../../src/main/backup-state';
 import { createDefaultAppState } from '../../src/main/context';
 import { SettingsService } from '../../src/main/settings/settings-service';
 import { JsonStateStore } from '../../src/main/state-store';
@@ -97,4 +101,53 @@ test('a bad stored date reads as no record and a fresh success replaces it', asy
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+// --- the P1 failure reason (D: persistence boundary) ---------------------------
+
+test('a failure with a reason records the human phrase beside the outcome', async () => {
+  const service = memoryService();
+  await recordBackupSuccess(service, RESULT, NOW);
+  await recordBackupFailure(service, '磁盘空间不足');
+
+  expect((await service.get()).backup).toEqual({
+    lastBackupAt: '2026-11-02T14:30:45',
+    lastBackupPath: RESULT.path,
+    lastBackupOutcome: 'failed',
+    lastBackupError: '磁盘空间不足'
+  });
+});
+
+test('a success never silences an unsaid failure (D: only the weekly read clears)', async () => {
+  const service = memoryService();
+  await recordBackupFailure(service, '磁盘空间不足');
+  await recordBackupSuccess(service, RESULT, NOW);
+
+  const backup = (await service.get()).backup;
+  expect(backup).toMatchObject({
+    lastBackupOutcome: 'ok',
+    lastBackupAt: '2026-11-02T14:30:45',
+    lastBackupError: '磁盘空间不足'
+  });
+});
+
+test('clearBackupError clears a pending reason and keeps the outcome', async () => {
+  const service = memoryService();
+  await recordBackupSuccess(service, RESULT, NOW);
+  await recordBackupFailure(service, '磁盘空间不足');
+
+  await clearBackupError(service);
+  expect((await service.get()).backup).toEqual({
+    lastBackupAt: '2026-11-02T14:30:45',
+    lastBackupPath: RESULT.path,
+    lastBackupOutcome: 'failed'
+  });
+
+  // A second clear with nothing pending is a no-op (no settings write).
+  await clearBackupError(service);
+  expect((await service.get()).backup).toEqual({
+    lastBackupAt: '2026-11-02T14:30:45',
+    lastBackupPath: RESULT.path,
+    lastBackupOutcome: 'failed'
+  });
 });

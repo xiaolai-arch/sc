@@ -23,6 +23,8 @@ import { estimateUsageCost, summarizeUsage } from '../shared/usage';
 import type { ButlerService, SendMessageInput, WorkspaceService } from '../shared/workspace';
 import { scanLocalClis } from './agent/local-cli-discovery';
 import { createModelClient, NoApiKeyError, type ModelClient } from './agent/model-client';
+import { createAutoBackupRunner } from './backup-auto';
+import { clearBackupError } from './backup-state';
 import { createButlerService } from './butler/create-butler-service';
 import {
   createCommitmentService,
@@ -283,6 +285,15 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
   const now = options.now ?? (() => new Date());
   const today = () => formatLocalDate(now());
   const usageStore = new UsageStore(join(options.userDataPath, 'usage.json'), { now });
+
+  // The weekly auto backup: one runner shared across service rebuilds. Every
+  // gate reads live settings, so toggling the switch takes effect on the next
+  // Sunday review without touching the butler/workspace rebuild cycle.
+  const autoBackup = createAutoBackupRunner({
+    settings,
+    userDataPath: options.userDataPath,
+    now
+  });
 
   /** Tokens recorded for today across providers; drives the daily budget. */
   async function dailyTokensUsed(): Promise<number> {
@@ -725,6 +736,10 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       // The one mute-resume sentence: peeked before composing, consumed once.
       getResume: () => peekResume(today()),
       consumeResume,
+      // The weekly auto backup: fired after the review message lands, never
+      // awaited by it; the spoken failure reason is cleared the same way.
+      autoBackup,
+      consumeBackupError: () => clearBackupError(settings),
       now
     });
 

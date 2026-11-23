@@ -23,7 +23,9 @@ test('locks the app IPC channels', () => {
     restartApp: 'study-coach:app:restart',
     pickVideoFiles: 'study-coach:app:pick-video-files',
     pickOutputDirectory: 'study-coach:app:pick-output-directory',
-    openPath: 'study-coach:app:open-path'
+    openPath: 'study-coach:app:open-path',
+    // iter31 P1: appended last so every existing channel keeps its position.
+    chooseBackupDirectory: 'study-coach:app:choose-backup-directory'
   });
 });
 
@@ -63,6 +65,21 @@ test('bridge invokes restore backup and restart', async () => {
     APP_IPC_CHANNELS.restoreBackup,
     APP_IPC_CHANNELS.restartApp
   ]);
+});
+
+test('bridge invokes choose backup directory and passes null through', async () => {
+  const calls: Array<{ channel: string; args: unknown[] }> = [];
+  const bridge = createStudyCoachBridge(async (channel, ...args) => {
+    calls.push({ channel, args });
+    return 'D:\\backups';
+  });
+
+  expect(await bridge.chooseBackupDirectory?.()).toBe('D:\\backups');
+  // The channel is the only argument; the picker takes no renderer input.
+  expect(calls).toEqual([{ channel: APP_IPC_CHANNELS.chooseBackupDirectory, args: [] }]);
+
+  const canceling = createStudyCoachBridge(async () => null);
+  expect(await canceling.chooseBackupDirectory?.()).toBeNull();
 });
 
 test('bridge subscribes to quick capture events and unsubscribes', () => {

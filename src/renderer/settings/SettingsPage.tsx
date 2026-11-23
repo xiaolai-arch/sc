@@ -155,6 +155,16 @@ function backupSuccessLabel(lastBackupAt: string, today: string): string | null 
 }
 
 /**
+ * The parent folder of a backup folder path, for the one-time auto-backup ask
+ * ("每周备份到同一个文件夹"). The renderer has no node:path; both separators
+ * are accepted and a separator-less path is returned unchanged.
+ */
+function parentDirectory(path: string): string {
+  const cut = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  return cut > 0 ? path.slice(0, cut) : path;
+}
+
+/**
  * The export toast's second line, built from what this backup actually carried
  * (`BackupResult.copied`); sources that did not exist are simply left out.
  * vault holds both the projects and the records, so it maps to two nouns.
@@ -231,9 +241,16 @@ export function SettingsPage({
   // The persisted last-backup facts; written by the export flow in the main
   // process, so the page only reads and refreshes them.
   const [backupInfo, setBackupInfo] = useState<BackupSettings | null>(null);
-  // Why this session's export failed. `lastBackupError` (P1) will persist the
-  // reason; until then a failure restored from settings shows the plain line.
+  // Why this session's export failed. A failure from before this session (an
+  // auto backup) falls back to the persisted `lastBackupError` reason.
   const [backupFailureReason, setBackupFailureReason] = useState<string | null>(null);
+  // The weekly auto-backup switch saves immediately (not through 保存设置),
+  // like the export facts it sits beside.
+  const [autoBackupEnabled, setAutoBackupEnabled] = useState(false);
+  const [autoBackupBusy, setAutoBackupBusy] = useState(false);
+  // The one-time ask after the first successful manual export. `destination`
+  // is the parent folder of the export just made, so 「每周备份」 can store it.
+  const [autoBackupAsk, setAutoBackupAsk] = useState<{ destination: string } | null>(null);
   const [notifications, setNotifications] = useState<NotificationSettings>({
     enabled: true,
     morning: '08:00',
@@ -377,6 +394,7 @@ export function SettingsPage({
       setDisplayName(value.displayName?.trim() || 'xiaolai');
       setAccountabilityName(value.accountabilityName ?? '');
       setBackupAgeLine(value.backup?.ageLineEnabled === true);
+      setAutoBackupEnabled(value.backup?.autoEnabled === true);
       setBackupInfo(value.backup ?? null);
       setBackupFailureReason(null);
       setLoaded(true);
@@ -639,15 +657,19 @@ export function SettingsPage({
   /**
    * Re-reads the last-backup facts the main process just recorded. Best-effort:
    * the status line must never turn a finished export into an error, and a
-   * failed read keeps the previous facts.
+   * failed read keeps the previous facts. Returns the fresh facts so callers
+   * can decide the one-time auto-backup ask from what is really stored.
    */
-  async function refreshBackupInfo() {
+  async function refreshBackupInfo(): Promise<BackupSettings | null> {
     const api = window.studyCoach;
-    if (!api || typeof api.getSettings !== 'function') return;
+    if (!api || typeof api.getSettings !== 'function') return null;
     try {
-      setBackupInfo((await api.getSettings()).backup ?? null);
+      const backup = (await api.getSettings()).backup ?? null;
+      setBackupInfo(backup);
+      return backup;
     } catch {
       // Keep the previous status line.
+      return backupInfo;
     }
   }
 
@@ -673,7 +695,13 @@ export function SettingsPage({
         });
         // The main process recorded the success; the status line quotes it.
         setBackupFailureReason(null);
-        await refreshBackupInfo();
+        const backup = await refreshBackupInfo();
+        // The one-time ask (P1): only after a successful manual export, and
+        // only while the ask has never been answered. Both answers persist
+        // `autoBackupAsked`, so a restart never asks again.
+        if (backup?.autoBackupAsked !== true) {
+          setAutoBackupAsk({ destination: parentDirectory(result.path) });
+        }
       }
     } catch (cause) {
       const reason = friendlyErrorMessage(cause, '导出备份失败，请重试。');
@@ -682,6 +710,79 @@ export function SettingsPage({
       await refreshBackupInfo();
     } finally {
       setExportingBackup(false);
+    }
+  }
+
+  /**
+   * Answers the one-time auto-backup ask. Both answers write
+   * `autoBackupAsked: true` (no re-asking after a restart); enabling also
+   * turns the switch on with the export's parent folder as the destination.
+   * 默认关 is never silently overridden — only an explicit 每周备份 enables.
+   */
+  async function answerAutoBackupAsk(enable: boolean, destination?: string) {
+    const api = window.studyCoach;
+    if (!api || typeof api.updateSettings !== 'function') return;
+    setAutoBackupAsk(null);
+    try {
+      await api.updateSettings({
+        backup: {
+          autoBackupAsked: true,
+          ...(enable
+            ? {
+                autoEnabled: true,
+                ...(destination ? { autoDestination: destination } : {})
+              }
+            : {})
+        }
+      });
+      const backup = await refreshBackupInfo();
+      setAutoBackupEnabled(backup?.autoEnabled === true);
+    } catch (cause) {
+      setBackupStatus({
+        kind: 'error',
+        message: friendlyErrorMessage(cause, '保存自动备份设置失败，请重试。')
+      });
+    }
+  }
+
+  /**
+   * Saves the switch immediately: it is a flow switch, not a form field, and
+   * a failed save rolls the toggle back instead of pretending it stuck.
+   */
+  async function toggleAutoBackup(next: boolean) {
+    const api = window.studyCoach;
+    if (!api || typeof api.updateSettings !== 'function' || autoBackupBusy) return;
+    const previous = autoBackupEnabled;
+    setAutoBackupEnabled(next);
+    setAutoBackupBusy(true);
+    try {
+      await api.updateSettings({ backup: { autoEnabled: next } });
+      await refreshBackupInfo();
+    } catch (cause) {
+      setAutoBackupEnabled(previous);
+      setBackupStatus({
+        kind: 'error',
+        message: friendlyErrorMessage(cause, '保存自动备份设置失败，请重试。')
+      });
+    } finally {
+      setAutoBackupBusy(false);
+    }
+  }
+
+  /** Picks the auto-backup destination; the path is stored, not the switch. */
+  async function pickAutoBackupDirectory() {
+    const api = window.studyCoach;
+    if (!api || typeof api.chooseBackupDirectory !== 'function') return;
+    try {
+      const picked = await api.chooseBackupDirectory();
+      if (!picked) return;
+      await api.updateSettings({ backup: { autoDestination: picked } });
+      await refreshBackupInfo();
+    } catch (cause) {
+      setBackupStatus({
+        kind: 'error',
+        message: friendlyErrorMessage(cause, '保存自动备份目录失败，请重试。')
+      });
     }
   }
 
@@ -743,10 +844,15 @@ export function SettingsPage({
   const today = formatLocalDate(new Date());
   // The persistent backup status line, always present (常驻): facts only, no
   // red, no badge, no backup count. A failed outcome names the reason when
-  // this session produced one and keeps the last success's age as a second
-  // line; a failure from before this session shows the plain first line.
+  // this session produced one (manual export) or the last auto backup left a
+  // persisted reason, and keeps the last success's age as a second line.
   const backupFailed =
     backupInfo?.lastBackupOutcome === 'failed' || backupFailureReason !== null;
+  const backupFailureDisplay =
+    backupFailureReason ??
+    (typeof backupInfo?.lastBackupError === 'string' && backupInfo.lastBackupError.trim() !== ''
+      ? backupInfo.lastBackupError
+      : null);
   const backupAge =
     backupInfo?.lastBackupAt !== undefined
       ? backupAgeLabel(backupInfo.lastBackupAt, today)
@@ -757,8 +863,8 @@ export function SettingsPage({
       : null;
   const backupStatusLines: string[] = backupFailed
     ? [
-        backupFailureReason
-          ? `上次备份没有成功（${backupFailureReason}）。`
+        backupFailureDisplay
+          ? `上次备份没有成功（${backupFailureDisplay}）。`
           : '上次备份没有成功。',
         ...(backupSuccessAge ? [`上次成功：${backupSuccessAge}。`] : [])
       ]
@@ -1541,10 +1647,64 @@ export function SettingsPage({
                 </p>
               ) : null}
             </div>
+            {autoBackupAsk ? (
+              <div className="mt-3 space-y-2 text-sm text-gray-700 dark:text-[#d5d5d7]">
+                <p>以后每周自动备份到同一个文件夹吗？可以随时在设置里改。</p>
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    size="sm"
+                    onClick={() => void answerAutoBackupAsk(true, autoBackupAsk.destination)}
+                  >
+                    每周备份
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => void answerAutoBackupAsk(false)}
+                  >
+                    暂不
+                  </Button>
+                </div>
+              </div>
+            ) : null}
             <div className="mt-3 space-y-1 text-sm text-gray-500 dark:text-[#a1a1a6]">
               {backupStatusLines.map((line) => (
                 <p key={line}>{line}</p>
               ))}
+            </div>
+            <label className="mt-4 flex min-h-11 items-center gap-3 text-sm font-medium text-gray-500 dark:text-[#a1a1a6]">
+              <input
+                type="checkbox"
+                checked={autoBackupEnabled}
+                disabled={autoBackupBusy}
+                onChange={(event) => void toggleAutoBackup(event.target.checked)}
+                className="h-5 w-5 rounded-[4px] accent-[#0071e3]"
+              />
+              每周自动备份
+            </label>
+            <p className="text-sm text-gray-500 dark:text-[#a1a1a6]">
+              把项目、记录和对话复制到你选的文件夹。备份是普通文件夹，不含 API
+              Key，用文件管理器就能直接打开。
+            </p>
+            {notifications.weeklyEnabled === false ? (
+              <p className="mt-1 text-sm text-gray-500 dark:text-[#a1a1a6]">
+                周复盘关闭时不会自动备份。
+              </p>
+            ) : null}
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-gray-500 dark:text-[#a1a1a6]">
+              <p>
+                {backupInfo?.autoDestination
+                  ? `自动备份到：${backupInfo.autoDestination}`
+                  : '未选择目录，自动备份不会运行'}
+              </p>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={autoBackupBusy}
+                onClick={() => void pickAutoBackupDirectory()}
+              >
+                选择目录…
+              </Button>
             </div>
             <label className="mt-4 flex min-h-11 items-center gap-3 text-sm font-medium text-gray-500 dark:text-[#a1a1a6]">
               <input

@@ -222,7 +222,10 @@ export const APP_IPC_CHANNELS = {
   restartApp: 'study-coach:app:restart',
   pickVideoFiles: 'study-coach:app:pick-video-files',
   pickOutputDirectory: 'study-coach:app:pick-output-directory',
-  openPath: 'study-coach:app:open-path'
+  openPath: 'study-coach:app:open-path',
+  // iter31 P1: the auto-backup directory picker. Appended last so every
+  // existing channel keeps its position.
+  chooseBackupDirectory: 'study-coach:app:choose-backup-directory'
 } as const;
 
 /** Video-note generation streams progress on its own event channel. */
@@ -2000,6 +2003,8 @@ export function createStudyCoachBridge(
     exportBackup: () => call<BackupResult | null>(APP_IPC_CHANNELS.exportBackup),
     restoreBackup: () => call<RestoreResult | null>(APP_IPC_CHANNELS.restoreBackup),
     restartApp: () => call<void>(APP_IPC_CHANNELS.restartApp),
+    chooseBackupDirectory: () =>
+      call<string | null>(APP_IPC_CHANNELS.chooseBackupDirectory),
     pickVideoFiles: () => call<string[] | null>(APP_IPC_CHANNELS.pickVideoFiles),
     pickVideoFolder: () => call<string | null>(VIDEO_NOTES_CHANNELS.pickVideoFolder),
     pickOutputDirectory: () =>

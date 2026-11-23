@@ -1,5 +1,6 @@
 import {
   backupAgeLine,
+  backupFailureLines,
   buildCheckInPrompt,
   buildCheckInTemplate,
   resumeCheckInLine,
@@ -599,6 +600,69 @@ test('the age line never enters the other triggers or the model prompt', () => {
   expect(prompt).not.toContain('上次导出备份');
   expect(prompt).not.toContain('还没有导出备份');
   expect(prompt).not.toContain('上次备份');
+});
+
+// --- the auto-backup failure copy (weekly only, said once) --------------------
+
+const FAILURE_REASON = '磁盘空间不足';
+
+const FAILURE_COPY =
+  '自动备份没有成功（磁盘空间不足）。你的数据没有被动过；可以稍后重试，或在「设置 → 数据与备份」手动导出。';
+
+test('backupFailureLines builds the three-layer copy from a pending reason', () => {
+  expect(backupFailureLines({ lastBackupError: FAILURE_REASON })).toEqual([FAILURE_COPY]);
+  // A blank or absent reason is nothing pending, not an empty sentence.
+  expect(backupFailureLines({ lastBackupError: '  ' })).toEqual([]);
+  expect(backupFailureLines({})).toEqual([]);
+  expect(backupFailureLines(null)).toEqual([]);
+  expect(backupFailureLines(undefined)).toEqual([]);
+});
+
+test('the weekly template appends the failure copy after the age line, before the question', () => {
+  const both = buildCheckInTemplate(
+    context,
+    'weekly',
+    DATE,
+    null,
+    null,
+    null,
+    { ageLineEnabled: true, lastBackupAt: '2026-11-05T14:32:10', lastBackupError: FAILURE_REASON }
+  );
+  expect(both).toBe(
+    `${WEEKLY_TEMPLATE_BEFORE_STATS}\n${AGE_LINE}\n${FAILURE_COPY}\n${WEEK_AVAILABILITY_QUESTION}`
+  );
+  expect(both.split('自动备份没有成功')).toHaveLength(2);
+
+  // A pending failure without the age switch sits in the same slot.
+  const failureOnly = buildCheckInTemplate(
+    context,
+    'weekly',
+    DATE,
+    null,
+    null,
+    null,
+    { lastBackupError: FAILURE_REASON }
+  );
+  expect(failureOnly).toBe(
+    `${WEEKLY_TEMPLATE_BEFORE_STATS}\n${FAILURE_COPY}\n${WEEK_AVAILABILITY_QUESTION}`
+  );
+
+  // No pending reason keeps the template at its previous bytes.
+  const clean = { ageLineEnabled: false, lastBackupError: '' };
+  expect(buildCheckInTemplate(context, 'weekly', DATE, null, null, null, clean)).toBe(
+    buildCheckInTemplate(context, 'weekly', DATE)
+  );
+});
+
+test('the failure copy never enters the other triggers or the model prompt', () => {
+  const pending = { lastBackupError: FAILURE_REASON };
+  for (const trigger of ['morning', 'evening', 'behind'] as const) {
+    expect(buildCheckInTemplate(context, trigger, DATE, null, null, null, pending)).toBe(
+      buildCheckInTemplate(context, trigger, DATE)
+    );
+  }
+  const prompt = buildCheckInPrompt(context, 'weekly', DATE, stats, honest);
+  expect(prompt).not.toContain('自动备份没有成功');
 });
 
 // --- the weekly availability question ---------------------------------------

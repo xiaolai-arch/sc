@@ -24,6 +24,33 @@ export async function recordBackupSuccess(
   });
 }
 
-export async function recordBackupFailure(settings: SettingsService): Promise<void> {
-  await settings.update({ backup: { lastBackupOutcome: 'failed' } });
+/**
+ * Records a failed attempt. The outcome is display-only; the optional reason
+ * (P1, auto backup only) is the human-readable cause that persists until the
+ * next Sunday review has spoken it once — a later success never clears it,
+ * because an unsaid failure must still be said. A cancelled picker and a
+ * failure without a reason write only the outcome, exactly as P0 did.
+ */
+export async function recordBackupFailure(
+  settings: SettingsService,
+  reason?: string
+): Promise<void> {
+  await settings.update({
+    backup: {
+      lastBackupOutcome: 'failed',
+      ...(typeof reason === 'string' && reason.trim() !== '' ? { lastBackupError: reason } : {})
+    }
+  });
+}
+
+/**
+ * Clears a spoken auto-backup failure reason (P1). The Sunday review calls
+ * this after the three-layer copy has landed, so the sentence is said exactly
+ * once; `lastBackupOutcome` stays for the settings card. Clearing is an empty
+ * patch value, which removes the key like the mute-date keys do.
+ */
+export async function clearBackupError(settings: SettingsService): Promise<void> {
+  const current = await settings.get();
+  if (!current.backup?.lastBackupError) return;
+  await settings.update({ backup: { lastBackupError: '' } });
 }

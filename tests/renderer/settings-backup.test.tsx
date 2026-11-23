@@ -261,3 +261,214 @@ test('the restore confirmation appends the fresh-machine adoption sentence', asy
   );
   confirm.mockRestore();
 });
+
+// --- P1: the one-time auto-backup ask (never silently enabled) ----------------
+
+const ASK_QUESTION = '以后每周自动备份到同一个文件夹吗？可以随时在设置里改。';
+const EXPORTED = {
+  path: '/tmp/exports/study-coach-backup-2026-11-23-1200',
+  copied: { vault: true, conversations: true, state: true, usage: true }
+};
+
+test('the first successful export asks about weekly auto backup (验收 13)', async () => {
+  window.studyCoach = apiStub({ exportBackup: vi.fn().mockResolvedValue(EXPORTED) }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  await userEvent.click(await screen.findByRole('button', { name: '导出备份…' }));
+
+  expect(await screen.findByText(ASK_QUESTION)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '每周备份' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '暂不' })).toBeInTheDocument();
+});
+
+test('每周备份 stores asked + enabled + the export parent folder', async () => {
+  const updateSettings = vi.fn().mockResolvedValue(baseSettings);
+  window.studyCoach = apiStub({
+    exportBackup: vi.fn().mockResolvedValue(EXPORTED),
+    updateSettings
+  }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  await userEvent.click(await screen.findByRole('button', { name: '导出备份…' }));
+  await userEvent.click(await screen.findByRole('button', { name: '每周备份' }));
+
+  // The destination is the parent of the export, not the backup folder itself.
+  await vi.waitFor(() => {
+    expect(updateSettings).toHaveBeenCalledWith({
+      backup: {
+        autoBackupAsked: true,
+        autoEnabled: true,
+        autoDestination: '/tmp/exports'
+      }
+    });
+  });
+  // The ask never comes back in this session either.
+  expect(screen.queryByText(ASK_QUESTION)).not.toBeInTheDocument();
+});
+
+test('暂不 records the ask as answered and never enables anything', async () => {
+  const updateSettings = vi.fn().mockResolvedValue(baseSettings);
+  window.studyCoach = apiStub({
+    exportBackup: vi.fn().mockResolvedValue(EXPORTED),
+    updateSettings
+  }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  await userEvent.click(await screen.findByRole('button', { name: '导出备份…' }));
+  await userEvent.click(await screen.findByRole('button', { name: '暂不' }));
+
+  // Exact payload: no autoEnabled, no autoDestination smuggled in.
+  await vi.waitFor(() => {
+    expect(updateSettings).toHaveBeenCalledWith({ backup: { autoBackupAsked: true } });
+  });
+  expect(
+    screen.getByRole('checkbox', { name: '每周自动备份' })
+  ).not.toBeChecked();
+});
+
+test('an already-answered ask never returns after another export', async () => {
+  window.studyCoach = apiStub({
+    exportBackup: vi.fn().mockResolvedValue(EXPORTED),
+    getSettings: vi.fn().mockResolvedValue({
+      ...baseSettings,
+      backup: { autoBackupAsked: true }
+    })
+  }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  await userEvent.click(await screen.findByRole('button', { name: '导出备份…' }));
+
+  expect(await screen.findByText(`已导出到 ${EXPORTED.path}`)).toBeInTheDocument();
+  expect(screen.queryByText(ASK_QUESTION)).not.toBeInTheDocument();
+});
+
+// --- P1: the settings card switch, directory row and failure line -------------
+
+test('the switch shows the stored state and the card copy matches the spec', async () => {
+  window.studyCoach = apiStub({
+    getSettings: vi.fn().mockResolvedValue({
+      ...baseSettings,
+      backup: { autoEnabled: true, autoDestination: 'D:/backups' }
+    })
+  }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  expect(await screen.findByRole('checkbox', { name: '每周自动备份' })).toBeChecked();
+  expect(
+    screen.getByText(
+      '把项目、记录和对话复制到你选的文件夹。备份是普通文件夹，不含 API Key，用文件管理器就能直接打开。'
+    )
+  ).toBeInTheDocument();
+  expect(screen.getByText('自动备份到：D:/backups')).toBeInTheDocument();
+});
+
+test('without a directory the row says auto backup will not run (验收 11 copy)', async () => {
+  window.studyCoach = apiStub() as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  expect(await screen.findByText('未选择目录，自动备份不会运行')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '选择目录…' })).toBeInTheDocument();
+});
+
+test('picking a directory stores it without touching the switch', async () => {
+  const updateSettings = vi.fn().mockResolvedValue(baseSettings);
+  const getSettings = vi
+    .fn()
+    .mockResolvedValueOnce(baseSettings)
+    .mockResolvedValue({ ...baseSettings, backup: { autoDestination: 'E:/pick/here' } });
+  window.studyCoach = apiStub({
+    updateSettings,
+    getSettings,
+    chooseBackupDirectory: vi.fn().mockResolvedValue('E:/pick/here')
+  }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  await userEvent.click(await screen.findByRole('button', { name: '选择目录…' }));
+
+  await vi.waitFor(() => {
+    expect(updateSettings).toHaveBeenCalledWith({ backup: { autoDestination: 'E:/pick/here' } });
+  });
+  // The row quotes the stored path; the switch was not part of the patch.
+  expect(await screen.findByText('自动备份到：E:/pick/here')).toBeInTheDocument();
+  expect(await screen.findByRole('checkbox', { name: '每周自动备份' })).not.toBeChecked();
+});
+
+test('a canceled directory picker stores nothing', async () => {
+  const updateSettings = vi.fn().mockResolvedValue(baseSettings);
+  window.studyCoach = apiStub({
+    updateSettings,
+    chooseBackupDirectory: vi.fn().mockResolvedValue(null)
+  }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  await userEvent.click(await screen.findByRole('button', { name: '选择目录…' }));
+
+  await vi.waitFor(() => {
+    expect(updateSettings).not.toHaveBeenCalled();
+  });
+});
+
+test('the switch saves immediately, without the form save button', async () => {
+  const updateSettings = vi.fn().mockResolvedValue(baseSettings);
+  window.studyCoach = apiStub({
+    updateSettings,
+    getSettings: vi.fn().mockResolvedValue({
+      ...baseSettings,
+      backup: { autoEnabled: true }
+    })
+  }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  const toggle = await screen.findByRole('checkbox', { name: '每周自动备份' });
+  await userEvent.click(toggle);
+
+  await vi.waitFor(() => {
+    expect(updateSettings).toHaveBeenCalledWith({ backup: { autoEnabled: false } });
+  });
+  expect(updateSettings).toHaveBeenCalledTimes(1);
+});
+
+test('a failed switch save rolls the toggle back instead of pretending it stuck', async () => {
+  const updateSettings = vi.fn().mockRejectedValue(new Error('boom'));
+  window.studyCoach = apiStub({ updateSettings }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  const toggle = await screen.findByRole('checkbox', { name: '每周自动备份' });
+  await userEvent.click(toggle);
+
+  await vi.waitFor(() => {
+    expect(toggle).not.toBeChecked();
+  });
+  expect(screen.getByRole('alert')).toBeInTheDocument();
+});
+
+test('weekly review off says auto backup will not run (验收 12 copy)', async () => {
+  window.studyCoach = apiStub({
+    getSettings: vi.fn().mockResolvedValue({
+      ...baseSettings,
+      notifications: { ...baseSettings.notifications, weeklyEnabled: false }
+    })
+  }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  expect(await screen.findByText('周复盘关闭时不会自动备份。')).toBeInTheDocument();
+});
+
+test('a persisted auto-backup failure names its reason beside the last success', async () => {
+  const stamp = formatLocalDateTimeSeconds(new Date(Date.now() - 3 * 86400000));
+  window.studyCoach = apiStub({
+    getSettings: vi.fn().mockResolvedValue({
+      ...baseSettings,
+      backup: {
+        lastBackupAt: stamp,
+        lastBackupPath: '/tmp/b',
+        lastBackupOutcome: 'failed',
+        lastBackupError: '磁盘空间不足'
+      }
+    })
+  }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  expect(await screen.findByText('上次备份没有成功（磁盘空间不足）。')).toBeInTheDocument();
+  expect(await screen.findByText('上次成功：3 天前。')).toBeInTheDocument();
+});

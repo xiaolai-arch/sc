@@ -168,6 +168,8 @@ export interface ConversationApi {
   restoreBackup?(): Promise<RestoreResult | null>;
   /** Relaunches the app so a restore takes effect. */
   restartApp?(): Promise<void>;
+  /** Opens the native directory picker for the auto-backup destination. */
+  chooseBackupDirectory?(): Promise<string | null>;
 }
 
 /** Partial settings update; nested notifications/budget accept partials. */

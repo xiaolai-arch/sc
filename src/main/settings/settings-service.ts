@@ -17,6 +17,9 @@ const LOCAL_CLI_AGENTS = ['codex', 'claude', 'zcode', 'opencode'] as const;
 const LOCAL_CLI_EFFORTS = ['low', 'medium', 'high'] as const;
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const AUTO_INTERVAL_DAYS = [1, 7, 30] as const;
+/** Caps the stored failure reason so one junk write cannot bloat settings. */
+const MAX_BACKUP_ERROR_LENGTH = 200;
 const DEFAULT_NOTIFICATIONS = createDefaultSettings('').notifications;
 
 /**
@@ -116,6 +119,12 @@ function normalizeAccountabilityName(value: unknown): string | undefined {
  * value is dropped rather than carried (a bad date reads as "never backed
  * up"), and a block with no valid key at all is dropped entirely, so a
  * settings file written before this feature round-trips byte-identically.
+ *
+ * The auto-backup keys follow the same opt-in shape as `ageLineEnabled`:
+ * `autoEnabled` and `autoBackupAsked` carry only literal `true`, an interval
+ * outside 1|7|30 is dropped (absent reads as the 7-day default), and a
+ * relative or non-string destination is dropped so the auto backup simply
+ * never runs. The failure reason carries as a trimmed single-line string.
  */
 function normalizeBackup(value: unknown): BackupSettings | undefined {
   if (!isRecord(value)) return undefined;
@@ -124,6 +133,32 @@ function normalizeBackup(value: unknown): BackupSettings | undefined {
   // The age line is opt-in and only `true` serializes, matching strictMastery.
   if (value.ageLineEnabled === true) {
     backup.ageLineEnabled = true;
+    carried += 1;
+  }
+  // 默认关 is the owner's decision: absent/false/junk all mean off, and off
+  // is never serialized — 「暂不」 on the ask writes only autoBackupAsked.
+  if (value.autoEnabled === true) {
+    backup.autoEnabled = true;
+    carried += 1;
+  }
+  if (value.autoBackupAsked === true) {
+    backup.autoBackupAsked = true;
+    carried += 1;
+  }
+  if (
+    typeof value.autoIntervalDays === 'number' &&
+    (AUTO_INTERVAL_DAYS as readonly number[]).includes(value.autoIntervalDays)
+  ) {
+    backup.autoIntervalDays = value.autoIntervalDays as BackupSettings['autoIntervalDays'];
+    carried += 1;
+  }
+  if (typeof value.autoDestination === 'string' && isAbsolute(value.autoDestination)) {
+    backup.autoDestination = value.autoDestination;
+    carried += 1;
+  }
+  const backupError = normalizeBackupError(value.lastBackupError);
+  if (backupError !== undefined) {
+    backup.lastBackupError = backupError;
     carried += 1;
   }
   if (isLocalDateTimeSeconds(value.lastBackupAt)) {
@@ -142,6 +177,20 @@ function normalizeBackup(value: unknown): BackupSettings | undefined {
 }
 
 /**
+ * The stored auto-backup failure reason: trimmed, single-line and capped. An
+ * empty, blank or non-string value reads as nothing pending; a line break
+ * would break the one-line three-layer copy, so such a value is dropped.
+ */
+function normalizeBackupError(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const reason = value.trim();
+  if (reason === '' || NEWLINE_PATTERN.test(reason)) return undefined;
+  return reason.length > MAX_BACKUP_ERROR_LENGTH
+    ? reason.slice(0, MAX_BACKUP_ERROR_LENGTH)
+    : reason;
+}
+
+/**
  * Merges a validated `backup` patch onto the current block, then re-reads the
  * result through `normalizeBackup`: turning the age line off removes that key
  * again, and a block left empty by the merge disappears so a never-backed-up
@@ -155,9 +204,11 @@ function mergeBackup(
 }
 
 /**
- * Validates a `backup` patch. The settings page only ever toggles the age
- * line; the last-backup facts arrive from the export flow. A bad value fails
- * the whole patch with a Chinese error instead of half-writing.
+ * Validates a `backup` patch. The settings page toggles the age line and the
+ * auto-backup switches; the last-backup facts arrive from the export flow and
+ * the auto-backup flow (success facts, failure reason). A bad value fails the
+ * whole patch with a Chinese error instead of half-writing. `''` clears
+ * `autoDestination` and `lastBackupError`, like the mute-date keys.
  */
 function validateBackupPatch(value: unknown): Partial<BackupSettings> {
   if (!isRecord(value)) throw new Error('备份设置格式无效。');
@@ -167,6 +218,48 @@ function validateBackupPatch(value: unknown): Partial<BackupSettings> {
       throw new Error('备份年龄行开关必须是布尔值。');
     }
     result.ageLineEnabled = value.ageLineEnabled;
+  }
+  if (value.autoEnabled !== undefined) {
+    if (typeof value.autoEnabled !== 'boolean') {
+      throw new Error('自动备份开关必须是布尔值。');
+    }
+    result.autoEnabled = value.autoEnabled;
+  }
+  if (value.autoBackupAsked !== undefined) {
+    if (typeof value.autoBackupAsked !== 'boolean') {
+      throw new Error('自动备份询问状态必须是布尔值。');
+    }
+    result.autoBackupAsked = value.autoBackupAsked;
+  }
+  if (value.autoIntervalDays !== undefined) {
+    if (
+      typeof value.autoIntervalDays !== 'number' ||
+      !(AUTO_INTERVAL_DAYS as readonly number[]).includes(value.autoIntervalDays)
+    ) {
+      throw new Error('自动备份间隔必须是 1、7 或 30 天。');
+    }
+    result.autoIntervalDays = value.autoIntervalDays as BackupSettings['autoIntervalDays'];
+  }
+  if (value.autoDestination !== undefined) {
+    if (typeof value.autoDestination !== 'string') {
+      throw new Error('自动备份目录必须是绝对路径。');
+    }
+    const trimmed = value.autoDestination.trim();
+    // '' is an explicit clear; anything else must be absolute.
+    if (trimmed !== '' && !isAbsolute(trimmed)) {
+      throw new Error('自动备份目录必须是绝对路径。');
+    }
+    result.autoDestination = trimmed;
+  }
+  if (value.lastBackupError !== undefined) {
+    if (typeof value.lastBackupError !== 'string') {
+      throw new Error('备份失败原因必须是文本。');
+    }
+    const trimmed = value.lastBackupError.trim();
+    if (trimmed !== '' && NEWLINE_PATTERN.test(trimmed)) {
+      throw new Error('备份失败原因不能包含换行。');
+    }
+    result.lastBackupError = trimmed;
   }
   if (value.lastBackupAt !== undefined) {
     if (!isLocalDateTimeSeconds(value.lastBackupAt)) {

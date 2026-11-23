@@ -739,3 +739,129 @@ test('a malformed stored backup block is dropped key-by-key on read', async () =
     lastBackupAt: '2026-11-02T14:30:00'
   });
 });
+
+// --- the P1 auto-backup keys ---------------------------------------------------
+
+test('auto-backup keys serialize only when valid, off is never written', async () => {
+  const { service } = memorySettings();
+  // 默认关: enabling is the only serialized state of the switch.
+  const on = await service.update({ backup: { autoEnabled: true, autoBackupAsked: true } });
+  expect(on.backup).toEqual({ autoEnabled: true, autoBackupAsked: true });
+
+  // 「暂不」 leaves autoEnabled absent; the asked flag alone serializes.
+  const declined = await service.update({ backup: { autoEnabled: false } });
+  expect(declined.backup).toEqual({ autoBackupAsked: true });
+
+  // The interval serializes only as 1|7|30; anything else reads as the default.
+  const withInterval = await service.update({ backup: { autoIntervalDays: 30 } });
+  expect(withInterval.backup).toMatchObject({ autoIntervalDays: 30 });
+});
+
+test('autoDestination must be absolute to enter settings; empty string clears it', async () => {
+  const { service } = memorySettings();
+  const saved = await service.update({ backup: { autoDestination: 'D:/backups' } });
+  expect(saved.backup).toEqual({ autoDestination: 'D:/backups' });
+
+  const cleared = await service.update({ backup: { autoDestination: '' } });
+  expect(cleared.backup).toBeUndefined();
+
+  await expect(
+    service.update({ backup: { autoDestination: 'relative/path' } })
+  ).rejects.toThrow('自动备份目录必须是绝对路径。');
+});
+
+test('the auto-backup patch rejects wrong shapes without half-writing', async () => {
+  const { service } = memorySettings();
+  await service.update({ backup: { autoEnabled: true, autoDestination: 'D:/backups' } });
+  await expect(
+    service.update({ backup: { autoEnabled: 'on' } as never })
+  ).rejects.toThrow('自动备份开关必须是布尔值。');
+  await expect(
+    service.update({ backup: { autoBackupAsked: 1 } as never })
+  ).rejects.toThrow('自动备份询问状态必须是布尔值。');
+  await expect(
+    service.update({ backup: { autoIntervalDays: 5 } as never })
+  ).rejects.toThrow('自动备份间隔必须是 1、7 或 30 天。');
+  await expect(
+    service.update({ backup: { autoDestination: 42 } as never })
+  ).rejects.toThrow('自动备份目录必须是绝对路径。');
+  // Nothing was half-written.
+  expect((await service.get()).backup).toEqual({
+    autoEnabled: true,
+    autoDestination: 'D:/backups'
+  });
+});
+
+test('lastBackupError persists, clears on an empty patch, and reads as one trimmed line', async () => {
+  const { service } = memorySettings();
+  const failed = await service.update({
+    backup: { lastBackupOutcome: 'failed', lastBackupError: '  磁盘空间不足  ' }
+  });
+  // Trimmed on the way in: the three-layer copy quotes it verbatim.
+  expect(failed.backup).toEqual({
+    lastBackupOutcome: 'failed',
+    lastBackupError: '磁盘空间不足'
+  });
+
+  // The weekly review's clear is an empty patch value.
+  const cleared = await service.update({ backup: { lastBackupError: '' } });
+  expect(cleared.backup).toEqual({ lastBackupOutcome: 'failed' });
+
+  await expect(
+    service.update({ backup: { lastBackupError: '两行\n原因' } })
+  ).rejects.toThrow('备份失败原因不能包含换行。');
+  await expect(
+    service.update({ backup: { lastBackupError: 7 } as never })
+  ).rejects.toThrow('备份失败原因必须是文本。');
+});
+
+test('a junk stored auto-backup key is dropped on read, key by key', async () => {
+  const defaults = createDefaultSettings('/tmp/old-vault');
+  const state = new JsonStateStore({
+    filePath: null,
+    createDefault: () => ({
+      onboarded: true,
+      settings: {
+        ...defaults,
+        backup: {
+          autoEnabled: 'yes',
+          autoBackupAsked: 'no',
+          autoIntervalDays: 5,
+          autoDestination: 'nope',
+          lastBackupError: '两行\n原因',
+          lastBackupAt: '2026-11-02T14:30:00'
+        } as never
+      }
+    })
+  });
+  const service = new SettingsService(state);
+  // Only the valid keys survive.
+  expect((await service.get()).backup).toEqual({ lastBackupAt: '2026-11-02T14:30:00' });
+});
+
+test('a file written before P1 round-trips byte-identically with the new keys', async () => {
+  const dir = await tempDir();
+  try {
+    const filePath = join(dir, 'state.json');
+    const defaults = createDefaultSettings('/tmp/legacy-vault');
+    const legacy = `${JSON.stringify(
+      { onboarded: true, settings: { ...defaults, backup: { ageLineEnabled: true } } },
+      null,
+      2
+    )}\n`;
+    await writeFile(filePath, legacy, 'utf8');
+    const store = new JsonStateStore({
+      filePath,
+      createDefault: () => createDefaultAppState('/tmp/ignored')
+    });
+    const service = new SettingsService(store);
+
+    // A read and an unrelated save introduce none of the P1 keys.
+    expect((await service.get()).backup).toEqual({ ageLineEnabled: true });
+    await service.update({ notifications: { morning: '07:15' } as never });
+    const after = await readFile(filePath, 'utf8');
+    expect(after).toBe(legacy.replace('"morning": "08:00"', '"morning": "07:15"'));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
