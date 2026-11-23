@@ -15,8 +15,44 @@ for await (const chunk of process.stdin) {
 const jsonMode = process.argv.includes('--json');
 
 let reply;
-if (prompt.includes('TOOL RESULT (create_workspace)')) {
+if (prompt.includes('TOOL RESULT (plan_workspace)')) {
+  // The turn after the planner ran: wrap up with plain text so the butler
+  // does not loop into another tool call.
+  reply = '排好了，今天只安排这一件，做完就休息。';
+} else if (prompt.includes('TOOL RESULT (create_workspace)')) {
   reply = '已创建项目「考研」。今天先做一次摸底，再排 4 周计划。';
+} else if (prompt.includes('这天用户说特别满')) {
+  // Workspace planner path on a day the user said is packed: the prompt's
+  // busy-day clause demands exactly one task of no more than 10 minutes.
+  reply = JSON.stringify({
+    tasks: [
+      {
+        title: '满日小事：整理一张错题卡',
+        subject: '数学',
+        durationMin: 10,
+        acceptance: '整理一张错题卡并写下错因',
+        materialRefs: []
+      }
+    ]
+  });
+} else if (prompt.includes('帮我排一下今天的计划')) {
+  // Butler path: hand over to the plan_workspace tool with no arguments, so
+  // the date and the minute budget are the app's own decision.
+  reply = `\`\`\`json
+${JSON.stringify({
+  text: '好的，我来排今天的计划。',
+  toolCalls: [{ name: 'plan_workspace', arguments: {} }]
+})}
+\`\`\``;
+} else if (prompt.includes('只给我排 45 分钟')) {
+  // Butler path with the caller pinning the budget: the tool must not even
+  // ask the week availability.
+  reply = `\`\`\`json
+${JSON.stringify({
+  text: '好的，按 45 分钟来排。',
+  toolCalls: [{ name: 'plan_workspace', arguments: { availableMinutes: 45 } }]
+})}
+\`\`\``;
 } else if (prompt.includes('我想考研')) {
   reply = `\`\`\`json
 ${JSON.stringify({
