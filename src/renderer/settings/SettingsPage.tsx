@@ -154,6 +154,26 @@ function backupSuccessLabel(lastBackupAt: string, today: string): string | null 
   return `${days} 天前`;
 }
 
+/**
+ * The export toast's second line, built from what this backup actually carried
+ * (`BackupResult.copied`); sources that did not exist are simply left out.
+ * vault holds both the projects and the records, so it maps to two nouns.
+ */
+function backupCopiedLabel(copied: {
+  vault: boolean;
+  conversations: boolean;
+  state: boolean;
+  usage: boolean;
+}): string | null {
+  const parts = [
+    ...(copied.vault ? ['项目', '记录'] : []),
+    ...(copied.conversations ? ['对话'] : []),
+    ...(copied.state ? ['设置'] : []),
+    ...(copied.usage ? ['用量'] : [])
+  ];
+  return parts.length > 0 ? `包含：${parts.join('、')}` : null;
+}
+
 export function SettingsPage({
   onClose,
   embedded = false,
@@ -205,6 +225,8 @@ export function SettingsPage({
   const [backupStatus, setBackupStatus] = useState<{
     kind: 'success' | 'canceled' | 'error';
     message: string;
+    /** Second line of an export success: what the backup actually carried. */
+    detail?: string;
   } | null>(null);
   // The persisted last-backup facts; written by the export flow in the main
   // process, so the page only reads and refreshes them.
@@ -642,7 +664,13 @@ export function SettingsPage({
       if (result === null) {
         setBackupStatus({ kind: 'canceled', message: '已取消' });
       } else {
-        setBackupStatus({ kind: 'success', message: `已导出到 ${result.path}` });
+        // First line stays the destination; the second lists what was copied.
+        const copiedDetail = backupCopiedLabel(result.copied);
+        setBackupStatus({
+          kind: 'success',
+          message: `已导出到 ${result.path}`,
+          ...(copiedDetail ? { detail: copiedDetail } : {})
+        });
         // The main process recorded the success; the status line quotes it.
         setBackupFailureReason(null);
         await refreshBackupInfo();
@@ -1459,7 +1487,7 @@ export function SettingsPage({
               数据与备份
             </h3>
             <p className="mt-2 text-gray-500 dark:text-[#a1a1a6]">
-              备份包含项目、记录、对话、设置和用量，不包含 API Key。恢复会覆盖项目、记录和对话；当前设置与 API Key 保持不变。
+              备份包含项目、记录、对话、设置和用量的副本。恢复会覆盖项目、记录和对话；当前设置与 API Key 保持不变。
             </p>
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <Button
@@ -1500,6 +1528,11 @@ export function SettingsPage({
                   }
                 >
                   {backupStatus.message}
+                </p>
+              ) : null}
+              {backupStatus?.detail ? (
+                <p className="w-full text-sm text-gray-500 dark:text-[#a1a1a6]">
+                  {backupStatus.detail}
                 </p>
               ) : null}
               {restoreSafetyPath ? (

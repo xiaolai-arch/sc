@@ -3,6 +3,7 @@ import {
   cp,
   mkdir,
   readFile,
+  readdir,
   realpath,
   rename,
   rm,
@@ -83,6 +84,39 @@ async function isFile(path: string): Promise<boolean> {
 }
 
 /**
+ * Counts the files under `root` and their total size, so the README's
+ * completeness line can quote what this backup actually carried. Measured
+ * from the freshly copied payload (never from the sources), before the
+ * README itself is written, so the README does not count itself.
+ */
+async function copiedPayloadStats(root: string): Promise<{ count: number; bytes: number }> {
+  let count = 0;
+  let bytes = 0;
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) {
+      const nested = await copiedPayloadStats(path);
+      count += nested.count;
+      bytes += nested.bytes;
+    } else {
+      try {
+        bytes += (await stat(path)).size;
+        count += 1;
+      } catch {
+        // Every copied file exists on disk; skip rather than fail the backup.
+      }
+    }
+  }
+  return { count, bytes };
+}
+
+/** Approximate megabytes: one decimal, whole numbers without a trailing `.0`. */
+function sizeInMb(bytes: number): string {
+  const rounded = Math.round((bytes / (1024 * 1024)) * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+/**
  * Copies the user's local data into a new timestamped folder. Secrets are never
  * read: only the vault, conversations, state.json and usage.json are included.
  */
@@ -147,6 +181,7 @@ export async function createBackup(options: CreateBackupOptions): Promise<Backup
     await copyFile(usageSource, join(target, 'usage.json'));
   }
 
+  const payload = await copiedPayloadStats(target);
   const readme = [
     'ASAKI备份',
     `导出时间：${backupTimestamp(now)}（本地时间）`,
@@ -156,6 +191,8 @@ export async function createBackup(options: CreateBackupOptions): Promise<Backup
     `- conversations/：${conversationsExists ? '已包含' : '源目录不存在，已跳过'}`,
     `- state.json：${stateExists ? '已包含' : '源文件不存在，已跳过'}`,
     `- usage.json：${usageExists ? '已包含' : '源文件不存在，已跳过'}`,
+    '',
+    `本次备份包含 ${payload.count} 个文件，约 ${sizeInMb(payload.bytes)} MB。`,
     '',
     '不包含：API Key、secrets/ 或任何凭据。',
     '',
