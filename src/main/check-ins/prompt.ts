@@ -160,6 +160,11 @@ export interface BackupStatusLike {
   ageLineEnabled?: boolean;
   /** Naive local ISO (`YYYY-MM-DDTHH:mm:ss`) of the last successful export. */
   lastBackupAt?: string;
+  /**
+   * The pending auto-backup failure reason, present only until a review has
+   * spoken it once and cleared it.
+   */
+  lastBackupError?: string;
 }
 
 /**
@@ -184,6 +189,24 @@ export function backupAgeLine(
   // Zero days is not an age; a negative one (clock skew) would be a lie.
   if (days <= 0) return '';
   return `上次导出备份是 ${days} 天前（${formatMonthDay(lastDate)}）。`;
+}
+
+/**
+ * The three-layer auto-backup failure copy, said exactly once on the next
+ * Sunday review after a failed auto backup: what failed, that the data is
+ * untouched, and what to do next. One line, deterministic, never handed to
+ * the model. Empty unless a reason is pending; the caller clears the reason
+ * once the message carrying it has landed.
+ */
+export function backupFailureLines(
+  backup: BackupStatusLike | null | undefined
+): string[] {
+  if (typeof backup?.lastBackupError !== 'string' || backup.lastBackupError.trim() === '') {
+    return [];
+  }
+  return [
+    `自动备份没有成功（${backup.lastBackupError}）。你的数据没有被动过；可以稍后重试，或在「设置 → 数据与备份」手动导出。`
+  ];
 }
 
 /** The one Sunday-review question about which days next week are packed. */
@@ -385,13 +408,17 @@ export function buildCheckInTemplate(
     const withHonest = honest.length === 0 ? base : `${base}\n${honest.join('\n')}`;
     // The opt-in backup age line follows the honest receipt and precedes the
     // availability question; off, unreadable dates and a same-day export all
-    // keep the message at its previous bytes.
+    // keep the message at its previous bytes. A pending auto-backup failure
+    // rides in the same slot, after the age line, when both are present.
     const age = backupAgeLine(backup, date);
+    const failures = backupFailureLines(backup);
     const withAge = age ? `${withHonest}\n${age}` : withHonest;
+    const withFailures =
+      failures.length === 0 ? withAge : `${withAge}\n${failures.join('\n')}`;
     // The availability question is the last line, and only when there is at
     // least one workspace; otherwise the message keeps its previous bytes.
     const availability = weekAvailabilityQuestion(context);
-    return availability ? `${withAge}\n${availability}` : withAge;
+    return availability ? `${withFailures}\n${availability}` : withFailures;
   }
   if (trigger === 'behind') {
     // Byte-identical to the scheduler fallback so both compose one nudge.

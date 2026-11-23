@@ -15,6 +15,7 @@ import {
 } from '../scheduler/behind-schedule';
 import {
   backupAgeLine,
+  backupFailureLines,
   buildCheckInNotificationBody,
   buildCheckInPrompt,
   buildCheckInTemplate,
@@ -29,6 +30,7 @@ import {
   type WeeklyHonestLike,
   type WeeklyOverviewLike
 } from './prompt';
+import type { AutoBackupRunner } from '../backup-auto';
 import type { WeeklyHonest } from './weekly-honest';
 
 export interface ProactiveCheckInOptions {
@@ -72,6 +74,18 @@ export interface ProactiveCheckInOptions {
    * the sentence is appended exactly once across all later checks.
    */
   consumeResume?: () => Promise<void>;
+  /**
+   * The weekly auto backup. Fired in the background after the Sunday review's
+   * message has landed — the message never waits for it, and a failure never
+   * reaches the renderer (the runner records it for the next review instead).
+   * Absent keeps the review byte-identical and runs nothing.
+   */
+  autoBackup?: AutoBackupRunner | null;
+  /**
+   * Clears the pending auto-backup failure reason after the review that spoke
+   * it has landed, so the three-layer copy is said exactly once.
+   */
+  consumeBackupError?: () => Promise<void>;
   now?: () => Date;
 }
 
@@ -150,6 +164,8 @@ export class ProactiveCheckInService {
     | undefined;
   private readonly getResume: (() => Promise<ResumeFacts | null>) | undefined;
   private readonly consumeResume: (() => Promise<void>) | undefined;
+  private readonly autoBackup: AutoBackupRunner | null;
+  private readonly consumeBackupError: (() => Promise<void>) | undefined;
   private readonly now: () => Date;
 
   constructor(options: ProactiveCheckInOptions) {
@@ -164,6 +180,8 @@ export class ProactiveCheckInService {
     this.getDueCommitment = options.getDueCommitment;
     this.getResume = options.getResume;
     this.consumeResume = options.consumeResume;
+    this.autoBackup = options.autoBackup ?? null;
+    this.consumeBackupError = options.consumeBackupError;
     this.now = options.now ?? (() => new Date());
   }
 
@@ -246,6 +264,19 @@ export class ProactiveCheckInService {
     // the honest failure mode for a write that could not be recorded.
     if (resume && this.consumeResume) {
       await this.consumeResume().catch(() => undefined);
+    }
+    if (trigger === 'weekly') {
+      // The failure copy landed: clear the pending reason so the next review
+      // stays quiet (验收 10). Cleared before the auto backup fires, so a fresh
+      // failure written by this week's run can never be cleared by this week's
+      // consume.
+      if (this.consumeBackupError) {
+        await this.consumeBackupError().catch(() => undefined);
+      }
+      // The auto backup rides the Sunday review: fired after the message is
+      // durably appended, deliberately not awaited (验收 8), and it reports
+      // through settings, never by throwing (验收 10).
+      void this.autoBackup?.runIfDue(date).catch(() => undefined);
     }
 
     const behind = trigger === 'behind';
@@ -381,9 +412,14 @@ export class ProactiveCheckInService {
         // A model text that already mentions the backup keeps its own words:
         // one mention by construction, whichever path wrote it.
         const age = backupAgeLine(backup, date);
+        // The failure copy is appended unconditionally when pending: the model
+        // never saw it (it is code-owned), and suppressing it would lose the
+        // one sentence an unsaid failure is owed.
+        const failures = backupFailureLines(backup);
         const tail = [
           ...weeklyHonestLines(weeklyHonest),
           ...(age && !composed.includes('上次备份') ? [age] : []),
+          ...failures,
           ...(availability ? [availability] : [])
         ];
         return tail.length === 0 ? composed : `${composed}\n${tail.join('\n')}`;

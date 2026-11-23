@@ -483,6 +483,83 @@ test('a backup state.json without a settings record is not adopted', async () =>
   }
 });
 
+// --- A (P1 复核备注): the auto backup directory across a machine boundary ------
+
+test('adoption drops an autoDestination that does not exist on this machine, keeping the switch', async () => {
+  const { root, vault, userData, backup } = await backupFixture();
+  await rm(join(userData, 'state.json'));
+  await writeFile(
+    join(backup, 'state.json'),
+    JSON.stringify({
+      onboarded: true,
+      settings: {
+        displayName: '旧机器',
+        vaultPath: 'D:\\old-machine\\StudyCoachVault',
+        provider: { kind: 'anthropic', model: 'claude-sonnet-5-5' },
+        backup: { autoEnabled: true, autoDestination: 'E:\\old-machine\\StudyCoachBackups' }
+      }
+    }),
+    'utf8'
+  );
+  try {
+    const result = await restoreBackup({
+      backupPath: backup,
+      vaultPath: vault,
+      userDataPath: userData,
+      now: NOW
+    });
+
+    expect(result.restored.state).toBe(true);
+    const adopted = JSON.parse(await readFile(join(userData, 'state.json'), 'utf8'));
+    // The old machine's folder can never exist here; carrying it would send
+    // every weekly backup into a path from another computer.
+    expect(adopted.settings.backup).toEqual({ autoEnabled: true });
+    // The switch itself survives: an enabled backup without a directory is the
+    // honest visible state (the settings page says so until one is picked).
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('adoption carries an autoDestination that exists on this machine unchanged', async () => {
+  const { root, vault, userData, backup } = await backupFixture();
+  // A folder that genuinely exists here — e.g. the user restored onto the
+  // machine they exported from.
+  const carriedDestination = join(root, 'backups-here');
+  await mkdir(carriedDestination, { recursive: true });
+  await rm(join(userData, 'state.json'));
+  await writeFile(
+    join(backup, 'state.json'),
+    JSON.stringify({
+      onboarded: true,
+      settings: {
+        displayName: '旧机器',
+        vaultPath: vault,
+        provider: { kind: 'anthropic', model: 'claude-sonnet-5-5' },
+        backup: { autoEnabled: true, autoDestination: carriedDestination }
+      }
+    }),
+    'utf8'
+  );
+  try {
+    const result = await restoreBackup({
+      backupPath: backup,
+      vaultPath: vault,
+      userDataPath: userData,
+      now: NOW
+    });
+
+    expect(result.restored.state).toBe(true);
+    const adopted = JSON.parse(await readFile(join(userData, 'state.json'), 'utf8'));
+    expect(adopted.settings.backup).toEqual({
+      autoEnabled: true,
+      autoDestination: carriedDestination
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('rejects a folder without a vault and leaves current data untouched', async () => {
   const { root, vault, userData } = await fixture();
   const notABackup = join(root, 'not-a-backup');

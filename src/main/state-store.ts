@@ -103,23 +103,44 @@ export class JsonStateStore {
   private hydrate(value: unknown): AppState {
     const defaults = this.createDefault();
     if (!isRecord(value)) return defaults;
+    const rawSettings = value.settings;
     return {
       onboarded: typeof value.onboarded === 'boolean' ? value.onboarded : false,
-      settings: isRecord(value.settings)
+      settings: isRecord(rawSettings)
         ? {
             ...defaults.settings,
-            ...(value.settings as Partial<AppSettings>),
-            provider: (value.settings.provider as AppSettings['provider']) ?? defaults.settings.provider,
+            ...(rawSettings as Partial<AppSettings>),
+            // The provider is a discriminated union, so a partial block merges
+            // over the defaults only when it is the same kind (a partial
+            // local-cli entry still gets its `command` filled); a different or
+            // unknown kind is taken as a whole, the way a full block always
+            // was. Matches the notifications/budget deep merges.
+            provider: hydrateProvider(rawSettings.provider, defaults.settings.provider),
             notifications: {
               ...defaults.settings.notifications,
-              ...((value.settings.notifications as Partial<AppSettings['notifications']>) ?? {})
+              ...((rawSettings.notifications as Partial<AppSettings['notifications']>) ?? {})
             },
             budget: {
               ...defaults.settings.budget,
-              ...((value.settings.budget as Partial<AppSettings['budget']>) ?? {})
+              ...((rawSettings.budget as Partial<AppSettings['budget']>) ?? {})
             }
           }
         : defaults.settings
     };
   }
+}
+
+/**
+ * Fills a stored provider block over the defaults without mixing kinds. A
+ * partial block of the default kind gets the defaults' missing fields (e.g. a
+ * local-cli entry without `command`); anything else — absent, not an object,
+ * or another kind — passes through whole, or falls back to the defaults.
+ */
+function hydrateProvider(
+  stored: unknown,
+  defaults: AppSettings['provider']
+): AppSettings['provider'] {
+  if (!isRecord(stored)) return defaults;
+  if (stored.kind !== defaults.kind) return stored as AppSettings['provider'];
+  return { ...defaults, ...stored } as AppSettings['provider'];
 }

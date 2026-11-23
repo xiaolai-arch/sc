@@ -97,11 +97,11 @@ export interface BudgetSettings {
 
 /**
  * Last-backup facts the settings card's status line and the Sunday review's
- * opt-in age line quote. The block is absent for a fresh install or a legacy
- * settings file and is dropped again when empty, so a file written before this
- * feature round-trips byte-identically. The export flow in the main process
- * writes the `lastBackup*` facts; the settings page only toggles the age line.
- * The auto-backup keys (P1) join this interface when that batch lands.
+ * opt-in age line quote, plus the weekly auto-backup switches (P1). The block
+ * is absent for a fresh install or a legacy settings file and is dropped again
+ * when empty, so a file written before this feature round-trips
+ * byte-identically. The export flow in the main process writes the
+ * `lastBackup*` facts; the settings page toggles the switches.
  */
 export interface BackupSettings {
   /**
@@ -110,6 +110,32 @@ export interface BackupSettings {
    * turning it off removes the key like `strictMastery`.
    */
   ageLineEnabled?: boolean;
+  /**
+   * Opt-in weekly auto backup. Absent means off and only `true` is ever
+   * serialized (the owner's 默认关 decision), so 「暂不」 on the one-time ask
+   * never writes this key.
+   */
+  autoEnabled?: boolean;
+  /**
+   * The one-time ask after the first manual export already happened, whatever
+   * the user answered. Only `true` is ever serialized; while the key is
+   * absent the ask still owes the user an answer after a successful export.
+   */
+  autoBackupAsked?: boolean;
+  /** Days between auto backups; absent means 7. Only 1 | 7 | 30 are valid. */
+  autoIntervalDays?: 1 | 7 | 30;
+  /**
+   * Directory the auto backup copies into (absolute path). Without it the auto
+   * backup never runs and never errors; the settings page says so.
+   */
+  autoDestination?: string;
+  /**
+   * The human-readable reason of the last *auto* backup failure. It persists
+   * until the next Sunday review has spoken it once (the three-layer copy),
+   * and only that read clears it — a later success never silences an unsaid
+   * failure. Manual export failures stay session-scoped in the renderer.
+   */
+  lastBackupError?: string;
   /**
    * Local wall clock of the last successful backup, naive ISO
    * `YYYY-MM-DDTHH:mm:ss` (no timezone offset), so the age math can take the

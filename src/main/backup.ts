@@ -349,9 +349,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * usable: unparsable JSON, not an object, or no `settings` record to adopt.
  * Deep normalization stays where it already lives — the state store's
  * read-time hydrate fills defaults over whatever lands in the file — so this
- * only does the structural checks and the one rewrite restore owes the user:
+ * only does the structural checks and the rewrites restore owes the user:
  * `vaultPath` becomes this machine's current vault path, never the old
- * machine's.
+ * machine's, and an `autoDestination` that does not exist on this machine is
+ * dropped rather than carried (the weekly auto backup would otherwise write
+ * into a path from another computer forever). `autoEnabled` is left alone:
+ * an enabled switch without a directory is the honest, visible state — the
+ * settings page says so and the next review picks the new folder from there.
  */
 async function readAdoptableState(
   source: string,
@@ -364,11 +368,18 @@ async function readAdoptableState(
     return null;
   }
   if (!isRecord(parsed) || !isRecord(parsed.settings)) return null;
+  const settings = { ...parsed.settings };
+  const backup = isRecord(settings.backup) ? { ...settings.backup } : undefined;
+  if (backup && typeof backup.autoDestination === 'string') {
+    const carried = await isDirectory(backup.autoDestination);
+    if (!carried) delete backup.autoDestination;
+    settings.backup = backup;
+  }
   return {
     // Same coercion as the state store's hydrate: a junk `onboarded` reads as
     // false, so the fresh machine still sees the first-run dialog.
     onboarded: typeof parsed.onboarded === 'boolean' ? parsed.onboarded : false,
-    settings: { ...parsed.settings, vaultPath }
+    settings: { ...settings, vaultPath }
   };
 }
 
