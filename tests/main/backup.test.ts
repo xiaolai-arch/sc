@@ -354,6 +354,22 @@ test('leaves an existing state.json byte-identical even when the backup carries 
   const local =
     '{"onboarded":true,"settings":{"vaultPath":"C:\\\\mine","provider":{"kind":"ollama","baseURL":"http://127.0.0.1:11434","model":"qwen"}}}';
   await writeFile(localStatePath, local, 'utf8');
+  // The backup's own state.json must be *adoptable* here (settings record and
+  // onboarded): with the fixture's unusable `{"backup":true}` the adoption
+  // path would bail out on the content check alone, leaving the
+  // "local file exists" guard untested.
+  await writeFile(
+    join(backup, 'state.json'),
+    JSON.stringify({
+      onboarded: true,
+      settings: {
+        displayName: '旧机器',
+        vaultPath: 'D:\\old-machine\\StudyCoachVault',
+        provider: { kind: 'anthropic', model: 'claude-sonnet-5-5' }
+      }
+    }),
+    'utf8'
+  );
   try {
     const result = await restoreBackup({
       backupPath: backup,
