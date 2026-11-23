@@ -49,13 +49,38 @@ test('exports a backup and shows the destination', async () => {
   window.studyCoach = apiStub({ exportBackup }) as never;
   render(<SettingsPage onClose={() => {}} />);
 
+  // G5 文案口径：卡片说明与 spec 原句逐字符一致。
   expect(
-    await screen.findByText(/备份包含项目、记录、对话、设置和用量，不包含 API Key。/)
+    await screen.findByText(
+      '备份包含项目、记录、对话、设置和用量的副本。恢复会覆盖项目、记录和对话；当前设置与 API Key 保持不变。'
+    )
   ).toBeInTheDocument();
   await userEvent.click(screen.getByRole('button', { name: '导出备份…' }));
 
   expect(await screen.findByText('已导出到 /tmp/study-coach-backup')).toBeInTheDocument();
+  // Second line (验收 16): every source existed, so all five nouns appear.
+  expect(
+    await screen.findByText('包含：项目、记录、对话、设置、用量')
+  ).toBeInTheDocument();
   expect(exportBackup).toHaveBeenCalledTimes(1);
+});
+
+test('the export second line omits the sources that were not there', async () => {
+  window.studyCoach = apiStub({
+    exportBackup: vi.fn().mockResolvedValue({
+      path: '/tmp/partial-backup',
+      copied: { vault: true, conversations: false, state: true, usage: false }
+    })
+  }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  await userEvent.click(await screen.findByRole('button', { name: '导出备份…' }));
+
+  expect(await screen.findByText('已导出到 /tmp/partial-backup')).toBeInTheDocument();
+  expect(await screen.findByText('包含：项目、记录、设置')).toBeInTheDocument();
+  // The omitted items are absent from the second line, not silently implied.
+  expect(screen.queryByText(/包含：.*对话/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/包含：.*用量/)).not.toBeInTheDocument();
 });
 
 test('shows a canceled state when the picker is dismissed', async () => {

@@ -86,6 +86,10 @@ test('copies the vault, conversations, state and usage without secrets', async (
     expect(readme).toContain('usage.json');
     expect(readme).toContain('API Key');
     expect(readme).toContain('secrets');
+    // G7: the fixture copies exactly 4 files (workspace.md, c1.json,
+    // state.json, usage.json; 41 bytes), so the completeness line must say
+    // 4 — not 5, i.e. the README does not count itself.
+    expect(readme).toContain('本次备份包含 4 个文件，约 0 MB。');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -112,6 +116,34 @@ test('skips missing sources but still writes the backup and README', async () =>
     });
     expect(await exists(join(result.path, 'README.txt'))).toBe(true);
     expect(await exists(join(result.path, 'vault'))).toBe(false);
+    // Nothing was copied, so the completeness line says so plainly.
+    const readme = await readFile(join(result.path, 'README.txt'), 'utf8');
+    expect(readme).toContain('本次备份包含 0 个文件，约 0 MB。');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('the README count and size line matches the actually copied payload', async () => {
+  const { root, vault, userData, destination } = await fixture();
+  try {
+    // 1.5 MiB of extra vault payload, so the size is not just the 0 MB floor:
+    // 1572864 + 41 bytes = 1.5000 MiB → 约 1.5 MB across 5 files.
+    await writeFile(
+      join(vault, 'workspaces', 'kaoyan', 'bulk.bin'),
+      Buffer.alloc(Math.round(1.5 * 1024 * 1024)),
+      'utf8'
+    );
+
+    const result = await createBackup({
+      vaultPath: vault,
+      userDataPath: userData,
+      destinationRoot: destination,
+      now: NOW
+    });
+
+    const readme = await readFile(join(result.path, 'README.txt'), 'utf8');
+    expect(readme).toContain('本次备份包含 5 个文件，约 1.5 MB。');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
