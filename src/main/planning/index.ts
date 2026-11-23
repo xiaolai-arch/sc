@@ -19,6 +19,7 @@ export {
   type WorkspacePlanPromptInput
 } from './prompt';
 export { buildTemplatePlan, type TemplatePlanInput } from './template';
+export { busyDayMinutes } from './busy-day';
 export type {
   PlanWorkspaceInput,
   WorkspacePlan,
