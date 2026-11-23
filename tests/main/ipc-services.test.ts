@@ -143,7 +143,14 @@ test('routes planning, practice, memory and search channels to the services', as
   expect(await handlers.planWorkspace({ workspaceId: 'ws-1', availableMinutes: 90 })).toMatchObject({
     workspaceId: 'ws-1'
   });
-  expect(planner.plan).toHaveBeenCalledWith({ workspaceId: 'ws-1', availableMinutes: 90 });
+  // The api path resolves the omitted date once (the injected now says
+  // 2026-10-31) and hands the same day to the planner it used for the
+  // busy-day read.
+  expect(planner.plan).toHaveBeenCalledWith({
+    workspaceId: 'ws-1',
+    date: '2026-10-31',
+    availableMinutes: 90
+  });
 
   expect(await handlers.listPracticeSets('ws-1')).toEqual([{ id: 'ps-1' }]);
   expect(await handlers.getPracticeSet('ps-1')).toEqual({ id: 'ps-1' });

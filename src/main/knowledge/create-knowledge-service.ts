@@ -21,7 +21,7 @@ import {
   wikiLinkTargets
 } from '../../shared/knowledge';
 import type { WorkspaceNote, WorkspaceTask } from '../../shared/workspace';
-import { formatLocalDate } from '../../shared/date';
+import { formatLocalDate, isLocalDate } from '../../shared/date';
 import {
   knowledgeNoteRevision,
   parseKnowledgeNoteFile,
@@ -116,13 +116,6 @@ function normalizeWorkspace(value: unknown): string | undefined {
   const workspaceId = value.trim();
   if (!workspaceId) return undefined;
   return assertSafeSegment(workspaceId, 'workspace id');
-}
-
-/** True for a real calendar date written as YYYY-MM-DD. */
-function isLocalDate(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const date = new Date(`${value}T00:00:00`);
-  return !Number.isNaN(date.getTime()) && formatLocalDate(date) === value;
 }
 
 function isSafeTopicId(value: string): boolean {

@@ -2,7 +2,7 @@ import type { ReviewAnswers, TaskStatus } from './types';
 import type { ButlerStreamEvent } from './butler-stream';
 import type { TaskRepeat } from './recurrence';
 import type { AgentPermissions, ChatAttachment } from './attachments';
-import { parseLocalDate } from './date';
+import { isLocalDate, parseLocalDate } from './date';
 
 export type WorkspaceKind = 'exam' | 'study' | 'project' | 'life';
 export type WorkspaceTaskStatus = TaskStatus;
@@ -56,17 +56,13 @@ export interface Workspace {
   updatedAt?: string;
 }
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-/** True for a readable local calendar date such as `2027-12-19`. */
+/**
+ * True for a readable local calendar date such as `2027-12-19`. Delegates to
+ * the shared exact-shape + rollover check, so impossible days the Date
+ * constructor would roll over (`2027-02-31`) are refused.
+ */
 export function isTargetDate(value: unknown): value is string {
-  if (typeof value !== 'string' || !ISO_DATE.test(value)) return false;
-  const date = parseLocalDate(value);
-  if (Number.isNaN(date.getTime())) return false;
-  // Reject dates the calendar rolls over, such as 2027-02-31.
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${date.getFullYear()}-${month}-${day}` === value;
+  return isLocalDate(value);
 }
 
 /**
@@ -232,7 +228,7 @@ export function effectiveReminderState(
   const state = reminderState(reminder);
   if (state !== 'done') return state;
   // No recorded day (legacy) or an unreadable today: keep `done`.
-  if (!isTargetDate(reminder.doneAt) || !ISO_DATE.test(today)) return 'done';
+  if (!isTargetDate(reminder.doneAt) || !isLocalDate(today)) return 'done';
   return reminder.doneAt < today ? 'pending' : 'done';
 }
 

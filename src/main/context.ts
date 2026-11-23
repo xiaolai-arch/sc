@@ -1191,16 +1191,21 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     },
     async planWorkspace(input) {
       const services = await getServices();
+      // The plan's day is resolved once and handed to both the busy-day read
+      // and the planner, so the two can never disagree across a midnight
+      // millisecond boundary when the caller omitted the date.
+      const date = input.date ?? today();
       // A day the user said is especially full gets one small task instead of
       // a normal-sized plan — but only when this call does not pin the minutes
       // itself. The read is shared with the plan_workspace tool (`busyDayMinutes`)
       // and best-effort: a broken record never blocks planning.
       const weekAvailabilityMinutes =
         input.availableMinutes === undefined
-          ? await busyDayMinutes(services.weekAvailability, input.date ?? today())
+          ? await busyDayMinutes(services.weekAvailability, date)
           : undefined;
       return services.planner.plan({
         ...input,
+        date,
         ...(weekAvailabilityMinutes !== undefined ? { weekAvailabilityMinutes } : {})
       });
     },

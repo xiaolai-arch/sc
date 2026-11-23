@@ -5,11 +5,11 @@ import type {
   KnowledgeTopic
 } from '../../shared/knowledge';
 import type { NoteMeta } from '../../shared/types';
+import { isLocalDate } from '../../shared/date';
 import { parseNote, serializeNote } from '../vault/note';
 import { assertSafeSegment } from '../workspace/paths';
 import { asRecord, asString, asStringArray } from '../workspace/records/coerce';
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const STATUSES: readonly KnowledgeStatus[] = ['planned', 'learning', 'mastered', 'paused'];
 const EVIDENCE_KINDS: readonly KnowledgeEvidenceKind[] = [
   'task',
@@ -24,14 +24,6 @@ export function isKnowledgeStatus(value: unknown): value is KnowledgeStatus {
   return typeof value === 'string' && (STATUSES as readonly string[]).includes(value);
 }
 
-function isIsoDate(value: string | undefined): value is string {
-  return (
-    typeof value === 'string' &&
-    ISO_DATE.test(value) &&
-    !Number.isNaN(new Date(`${value}T00:00:00Z`).getTime())
-  );
-}
-
 function coerceEvidence(value: unknown, fallbackId: string): KnowledgeEvidence | null {
   const record = asRecord(value);
   if (record === null) return null;
@@ -39,7 +31,7 @@ function coerceEvidence(value: unknown, fallbackId: string): KnowledgeEvidence |
   if (!kind || !(EVIDENCE_KINDS as readonly string[]).includes(kind)) return null;
   const title = asString(record.title)?.trim();
   const date = asString(record.date);
-  if (!title || !isIsoDate(date)) return null;
+  if (!title || !isLocalDate(date)) return null;
   const refId = asString(record.refId)?.trim();
   const note = asString(record.note)?.trim();
   return {
@@ -88,7 +80,7 @@ export function parseKnowledgeTopicFile(
     .slice(0, 8);
   // Tolerant: a hand-edited or bad revisit date is ignored, never drops the topic.
   const revisitRaw = asString(meta.revisitDue);
-  const revisitDue = isIsoDate(revisitRaw) ? revisitRaw : undefined;
+  const revisitDue = isLocalDate(revisitRaw) ? revisitRaw : undefined;
   const evidence = Array.isArray(meta.evidence)
     ? meta.evidence
         .map((entry, index) => coerceEvidence(entry, `${id}e${index + 1}`))

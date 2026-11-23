@@ -9,13 +9,8 @@ import type {
   PracticeSetSource
 } from '../../shared/practice';
 import { parseNote, serializeNote } from '../vault/note';
+import { isLocalDate } from '../../shared/date';
 import { asBoolean, asFiniteNumber, asRecord, asString, asStringArray } from '../workspace/records/coerce';
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-function isIsoDate(value: string): boolean {
-  return ISO_DATE.test(value) && !Number.isNaN(new Date(`${value}T00:00:00Z`).getTime());
-}
 
 function asInt(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) ? value : undefined;
@@ -268,7 +263,7 @@ function coerceMistake(value: unknown): PracticeMistake | null {
     (!short && answer >= options.length) ||
     (short && (referenceAnswer === undefined || referenceAnswer.trim() === '')) ||
     !due ||
-    !isIsoDate(due) ||
+    !isLocalDate(due) ||
     !createdAt ||
     !updatedAt ||
     !lastAnsweredAt

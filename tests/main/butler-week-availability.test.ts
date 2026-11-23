@@ -382,7 +382,9 @@ test('plan_workspace does not ask availability when the caller pins availableMin
   expect(result.ok).toBe(true);
   // The pinned minutes win and the availability service is not even queried.
   expect(busyDatesBetween).not.toHaveBeenCalled();
-  expect(inputs[0]).toEqual({ workspaceId: 'ws-exam', availableMinutes: 45 });
+  // The tool still hands the planner its own resolved day, so both entry
+  // points pass a date even when the caller omitted one.
+  expect(inputs[0]).toEqual({ workspaceId: 'ws-exam', date: '2026-11-23', availableMinutes: 45 });
   const parsed = JSON.parse(result.content) as {
     result: { availableMinutesSource: AvailableMinutesSource };
   };
@@ -428,4 +430,8 @@ test('plan_workspace checks today when the date is omitted', async () => {
   expect(result.ok).toBe(true);
   expect(queries).toEqual([['2026-11-23', '2026-11-23']]);
   expect(inputs[0]?.weekAvailabilityMinutes).toBe(BUSY_DAY_MINUTES);
+  // The omitted date is resolved exactly once: the planner is handed the same
+  // day the busy-day read asked about, so the two can never disagree across
+  // midnight.
+  expect(inputs[0]?.date).toBe('2026-11-23');
 });
