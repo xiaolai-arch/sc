@@ -3,6 +3,7 @@ import { isLocalDate, isLocalDateTimeSeconds, localDaysBetween } from '../shared
 import type { BackupSettings } from '../shared/types';
 import { createBackup } from './backup';
 import { recordBackupFailure, recordBackupSuccess } from './backup-state';
+import { pruneAutoBackups } from './backup-rotation';
 import type { SettingsService } from './settings/settings-service';
 
 /** Default cadence when `autoIntervalDays` is absent (spec P1). */
@@ -81,6 +82,12 @@ export interface AutoBackupRunnerOptions {
   /** The app data directory, copied into the backup like a manual export. */
   userDataPath: string;
   now?: () => Date;
+  /**
+   * The P4 rotation step, run after a recorded success. Defaults to the real
+   * `pruneAutoBackups`; tests replace it to simulate a stuck folder (验收 24)
+   * while still exercising the real rotation logic underneath.
+   */
+  prune?: (input: { destinationRoot: string; keepPath: string }) => Promise<unknown>;
 }
 
 /**
@@ -100,6 +107,7 @@ export interface AutoBackupRunnerOptions {
 export function createAutoBackupRunner(options: AutoBackupRunnerOptions): AutoBackupRunner {
   let inFlight = false;
   const now = options.now ?? (() => new Date());
+  const prune = options.prune ?? ((input) => pruneAutoBackups(input));
   return {
     async runIfDue(date: string): Promise<boolean> {
       if (inFlight) return false;
@@ -119,6 +127,15 @@ export function createAutoBackupRunner(options: AutoBackupRunnerOptions): AutoBa
           now
         });
         await recordBackupSuccess(options.settings, result, now);
+        // P4 rotation, strictly after the success facts are on disk: trim the
+        // auto destination to the newest 12 copies. Best effort by contract —
+        // pruneAutoBackups never throws and the catch guards the injected
+        // seam too — so a cleanup problem never turns `ok` into `failed`
+        // (验收 24), and the manual export path never runs this at all
+        // (验收 25).
+        await prune({ destinationRoot: destination, keepPath: result.path }).catch(
+          () => undefined
+        );
         return true;
       } catch (error) {
         // The three-layer copy on the next review is the only reporter; this
