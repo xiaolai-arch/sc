@@ -19,6 +19,7 @@ import {
   restoreBackup,
   swapDirectory
 } from '../../src/main/backup';
+import { planAutoBackupDeletions, pruneAutoBackups } from '../../src/main/backup-rotation';
 
 async function exists(path: string): Promise<boolean> {
   try {
@@ -698,6 +699,183 @@ test('dereferences a symlinked vault instead of copying the link', async () => {
     expect(
       await readFile(join(copiedVault, 'workspaces', 'kaoyan', 'workspace.md'), 'utf8')
     ).toBe('vault-data');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// --- P4 rotation: the ranking (pure) ------------------------------------------
+
+const rotationStamp = (day: number, hhmm = '0900'): string =>
+  `2026-01-${String(day).padStart(2, '0')}-${hhmm}`;
+const rotationDirName = (stamp: string): string => `study-coach-backup-${stamp}`;
+
+/** Neighbors a real destination accumulates: user folders and renamed exports. */
+const NON_BACKUP_NAMES = [
+  '我的笔记',
+  '备份 2026',
+  'study-coach-backup',
+  'study-coach-backup-renamed',
+  'study-coach-backup-not-a-date',
+  'study-coach-backup-2026-01-08-0900-改'
+];
+
+test('planAutoBackupDeletions keeps the newest copies and reports the rest oldest-first', () => {
+  const names = Array.from({ length: 15 }, (_, i) => rotationDirName(rotationStamp(i + 1)));
+  expect(planAutoBackupDeletions(names, 12)).toEqual(names.slice(0, 3));
+  expect(planAutoBackupDeletions(names, 15)).toEqual([]);
+  // retain 0 (or a protected copy taking the only slot) removes every ranked copy.
+  expect(planAutoBackupDeletions(names, 0)).toEqual(names);
+});
+
+test('suffix order: a folder ranks after its same-minute base and before the next minute', () => {
+  // Creation order inside 14:30 was base, -2, -3 …; -10 must rank newer than
+  // -2 numerically, and every 14:30 folder must rank older than 14:31.
+  const minute = (tail: string): string => `study-coach-backup-2026-11-02-${tail}`;
+  const names = [minute('1431'), minute('1430-10'), minute('1430-2'), minute('1430')];
+  expect(planAutoBackupDeletions(names, 2)).toEqual([minute('1430'), minute('1430-2')]);
+  expect(planAutoBackupDeletions(names, 3)).toEqual([minute('1430')]);
+});
+
+test('names that are not timestamped backup folders never enter the deletion plan', () => {
+  const names = [
+    ...NON_BACKUP_NAMES,
+    ...Array.from({ length: 15 }, (_, i) => rotationDirName(rotationStamp(i + 1)))
+  ];
+  // Even with retain 0 only the parseable backups are deletable.
+  expect(planAutoBackupDeletions(names, 0)).toEqual(
+    Array.from({ length: 15 }, (_, i) => rotationDirName(rotationStamp(i + 1)))
+  );
+});
+
+// --- P4 rotation: the executor against real directories ------------------------
+
+async function rotationFixture(destination: string, count: number, hhmm = '0900') {
+  const stamps = Array.from({ length: count }, (_, i) => rotationStamp(i + 1, hhmm));
+  for (const stamp of stamps) {
+    const dir = join(destination, rotationDirName(stamp));
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'README.txt'), stamp, 'utf8');
+  }
+  return stamps;
+}
+
+test('rotation deletes only matching backup folders inside the destination (验收 23)', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'study-coach-rotation-scope-'));
+  try {
+    const destination = join(root, 'dest');
+    const elsewhere = join(root, 'elsewhere');
+    await mkdir(destination, { recursive: true });
+    await mkdir(elsewhere, { recursive: true });
+    const stamps = await rotationFixture(destination, 15);
+    // User folders and a manual export renamed after the fact.
+    for (const name of NON_BACKUP_NAMES) {
+      await mkdir(join(destination, name), { recursive: true });
+      await writeFile(join(destination, name, 'keep.txt'), name, 'utf8');
+    }
+    // A file (not a folder) wearing a backup name, oldest stamp of all.
+    await writeFile(join(destination, rotationDirName('2000-01-01-0000')), 'file', 'utf8');
+    // Matching folders outside the destination are never this pruner's scope.
+    const outsideStamps = await rotationFixture(elsewhere, 2, '1000');
+
+    const newest = join(destination, rotationDirName(stamps[stamps.length - 1]!));
+    const outcome = await pruneAutoBackups({ destinationRoot: destination, keepPath: newest });
+
+    expect(outcome).toEqual({
+      deleted: stamps.slice(0, 3).map(rotationDirName),
+      failed: []
+    });
+    const folders = (await readdir(destination)).sort();
+    // Count directories only: the file wearing a backup name must survive,
+    // and must never have been a deletion candidate.
+    const remainingBackups = (await readdir(destination, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .filter((name) => /^study-coach-backup-\d{4}-\d{2}-\d{2}-\d{4}(-\d+)?$/.test(name));
+    expect(remainingBackups).toHaveLength(12);
+    for (const name of [...NON_BACKUP_NAMES, rotationDirName('2000-01-01-0000')]) {
+      expect(folders).toContain(name);
+    }
+    expect((await readdir(elsewhere)).sort()).toEqual(
+      outsideStamps.map(rotationDirName).sort()
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a manual export never triggers rotation, even into the auto destination (验收 25)', async () => {
+  const { root, vault, userData, destination } = await fixture();
+  try {
+    const stamps = Array.from(
+      { length: 14 },
+      (_, i) => `2026-09-${String(i + 1).padStart(2, '0')}-0900`
+    );
+    for (const stamp of stamps) {
+      const dir = join(destination, rotationDirName(stamp));
+      await mkdir(dir, { recursive: true });
+    }
+
+    const result = await handleExportBackup({
+      pickDirectory: async () => destination,
+      getPaths: async () => ({ vaultPath: vault, userDataPath: userData }),
+      now: NOW
+    });
+
+    // 14 old folders plus the fresh export: nothing was rotated.
+    const folders = (await readdir(destination)).sort();
+    expect(folders).toHaveLength(15);
+    for (const stamp of stamps) expect(folders).toContain(rotationDirName(stamp));
+    expect(folders).toContain('study-coach-backup-2026-11-02-1430');
+    expect(result?.path).toBe(join(destination, 'study-coach-backup-2026-11-02-1430'));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('clock rollback: the fresh copy with the smallest stamp survives rotation (验收 26)', async () => {
+  const { root, vault, userData, destination } = await fixture();
+  try {
+    // 13 copies stamped after the rollback moment, so the fresh copy's stamp
+    // sorts oldest of all 14 folders.
+    await rotationFixture(destination, 13, '1000');
+    // A naive oldest-first deletion would remove exactly this folder.
+    const rolledBack = () => new Date(2020, 0, 1, 0, 0, 0);
+    const fresh = await createBackup({
+      vaultPath: vault,
+      userDataPath: userData,
+      destinationRoot: destination,
+      now: rolledBack
+    });
+    expect(fresh.path).toBe(join(destination, 'study-coach-backup-2020-01-01-0000'));
+
+    const outcome = await pruneAutoBackups({ destinationRoot: destination, keepPath: fresh.path });
+
+    // The fresh copy was excluded by path, not saved by its ranking, so the
+    // deletions came from the oldest end of the other copies only.
+    expect(await exists(fresh.path)).toBe(true);
+    expect(outcome.deleted).toEqual([
+      rotationDirName(rotationStamp(1, '1000')),
+      rotationDirName(rotationStamp(2, '1000'))
+    ]);
+    const folders = (await readdir(destination)).sort();
+    expect(folders).toHaveLength(12);
+    expect(folders).toContain('study-coach-backup-2020-01-01-0000');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('pruneAutoBackups resolves empty when the destination cannot be read', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'study-coach-rotation-missing-'));
+  const missing = join(root, 'no-such-destination');
+  try {
+    await expect(
+      pruneAutoBackups({
+        destinationRoot: missing,
+        keepPath: join(missing, 'study-coach-backup-x')
+      })
+    ).resolves.toEqual({ deleted: [], failed: [] });
   } finally {
     await rm(root, { recursive: true, force: true });
   }

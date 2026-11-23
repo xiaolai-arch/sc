@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -8,6 +8,7 @@ import {
   isAutoBackupDue
 } from '../../src/main/backup-auto';
 import { createDefaultAppState } from '../../src/main/context';
+import { pruneAutoBackups } from '../../src/main/backup-rotation';
 import { SettingsService } from '../../src/main/settings/settings-service';
 import { JsonStateStore } from '../../src/main/state-store';
 import { formatLocalDateTimeSeconds } from '../../src/shared/date';
@@ -16,6 +17,15 @@ function memorySettings(vaultPath: string): SettingsService {
   return new SettingsService(
     new JsonStateStore({ filePath: null, createDefault: () => createDefaultAppState(vaultPath) })
   );
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function tempDir(label: string): Promise<string> {
@@ -290,3 +300,99 @@ test('a failure records the outcome and a human reason, never a throw (验收 10
     await paths.dispose();
   }
 });
+
+// --- P4 rotation: the runner trims the destination after each success ----------
+
+const rotationStamp = (day: number): string =>
+  `2026-10-${String(day).padStart(2, '0')}-0900`;
+
+async function seedOldBackups(destination: string, days: number[]): Promise<void> {
+  for (const day of days) {
+    const dir = join(destination, `study-coach-backup-${rotationStamp(day)}`);
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'README.txt'), rotationStamp(day), 'utf8');
+  }
+}
+
+test('after a successful auto backup exactly 12 copies remain (验收 22)', async () => {
+  const paths = await rig();
+  try {
+    const settings = memorySettings(paths.vault);
+    await settings.update({
+      backup: { autoEnabled: true, autoDestination: paths.destination }
+    });
+    // 14 folders older than the copy this run will create.
+    await seedOldBackups(paths.destination, Array.from({ length: 14 }, (_, i) => i + 1));
+    const runner = runnerFor(settings, paths.userData);
+
+    expect(await runner.runIfDue('2026-11-23')).toBe(true);
+
+    const folders = (await readdir(paths.destination)).sort();
+    // Exactly 12, counting the fresh copy; the oldest seeds are gone.
+    expect(folders).toHaveLength(12);
+    expect(folders).not.toContain(`study-coach-backup-${rotationStamp(1)}`);
+    expect(folders).not.toContain(`study-coach-backup-${rotationStamp(2)}`);
+    expect(folders).not.toContain(`study-coach-backup-${rotationStamp(3)}`);
+    // The fresh copy is inside the kept 12, alongside the 11 newest seeds.
+    expect(folders).toContain('study-coach-backup-2026-11-23-2000');
+    expect(folders.filter((name) => name.startsWith('study-coach-backup-2026-10-'))).toHaveLength(
+      11
+    );
+    // The success facts were written before any cleanup ran.
+    expect((await settings.get()).backup?.lastBackupOutcome).toBe('ok');
+  } finally {
+    await paths.dispose();
+  }
+});
+
+test('a stuck folder: the backup still succeeds and the next success retries the deletion (验收 24)', async () => {
+  const paths = await rig();
+  try {
+    const settings = memorySettings(paths.vault);
+    await settings.update({
+      backup: { autoEnabled: true, autoDestination: paths.destination }
+    });
+    await seedOldBackups(paths.destination, Array.from({ length: 14 }, (_, i) => i + 1));
+    const busy = join(paths.destination, `study-coach-backup-${rotationStamp(1)}`);
+    let busyReleased = false;
+    // The real rotation logic runs underneath; only the removal of the busy
+    // folder fails, the way a file opened by another program fails on Windows.
+    const runner = createAutoBackupRunner({
+      settings,
+      userDataPath: paths.userData,
+      now: NOW,
+      prune: (input) =>
+        pruneAutoBackups({
+          ...input,
+          removeDirectory: async (path) => {
+            if (path === busy && !busyReleased) {
+              throw Object.assign(new Error('EBUSY: resource busy'), { code: 'EBUSY' });
+            }
+            await rm(path, { recursive: true, force: true });
+          }
+        })
+    });
+
+    // First success: the busy folder could not be removed, yet the run
+    // resolves true and stays `ok` — cleanup never becomes a backup failure.
+    expect(await runner.runIfDue('2026-11-23')).toBe(true);
+    let backup = (await settings.get()).backup;
+    expect(backup?.lastBackupOutcome).toBe('ok');
+    expect(backup?.lastBackupError).toBeUndefined();
+    expect(await exists(busy)).toBe(true);
+    // The two next-oldest folders were still removed this round.
+    expect(await readdir(paths.destination)).toHaveLength(13);
+
+    // The program closes and the folder is no longer occupied; next week's
+    // success retries the deletion and finishes the job.
+    busyReleased = true;
+    expect(await runner.runIfDue('2026-11-30')).toBe(true);
+    backup = (await settings.get()).backup;
+    expect(backup?.lastBackupOutcome).toBe('ok');
+    expect(await exists(busy)).toBe(false);
+    expect(await readdir(paths.destination)).toHaveLength(12);
+  } finally {
+    await paths.dispose();
+  }
+});
+
