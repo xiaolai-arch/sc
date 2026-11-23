@@ -1,4 +1,4 @@
-import { isLocalDateTime } from '../../../shared/date';
+import { isLocalDate, isLocalDateTime, repairRolloverDate } from '../../../shared/date';
 import { isTaskRepeat, type TaskRepeat } from '../../../shared/recurrence';
 import type { NoteMeta, StudyTask, TaskStatus } from '../../../shared/types';
 import type { WorkspaceTask } from '../../../shared/workspace';
@@ -46,6 +46,15 @@ function coerceTask(value: unknown): TaskRecord | null {
   const status = isTaskStatus(record.status) ? record.status : 'pending';
   const startAt = record.startAt;
   const cue = asString(record.cue)?.trim();
+  // A due written by the old lenient validator is repaired on read: an
+  // impossible day (`2026-02-30`) is clamped to the last real day of its
+  // month, so the renderer's date control shows the intended day instead of
+  // silently clearing the field on the first edit. A due with no determinate
+  // real day (month 13, a non-date string) is dropped while the task itself
+  // stays — unlike a promise, a task does not stop being a task without a
+  // due, and every other bad field here is tolerated the same way.
+  const rawDue = asString(record.due);
+  const due = isLocalDate(rawDue) ? rawDue : repairRolloverDate(rawDue);
   return {
     id,
     title,
@@ -55,7 +64,7 @@ function coerceTask(value: unknown): TaskRecord | null {
     acceptance: asString(record.acceptance) ?? '',
     status,
     actualMin: asFiniteNumber(record.actualMin),
-    due: asString(record.due),
+    ...(due !== undefined ? { due } : {}),
     ...(cue ? { cue } : {}),
     ...(isTaskRepeat(record.repeat) ? { repeat: record.repeat } : {}),
     ...(asString(record.recurredFrom) ? { recurredFrom: asString(record.recurredFrom) } : {}),

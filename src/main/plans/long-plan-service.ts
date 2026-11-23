@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import { resolve } from 'node:path';
-import { formatLocalDate, parseLocalDate } from '../../shared/date';
+import { formatLocalDate, isLocalDate, parseLocalDate } from '../../shared/date';
 import type { KnowledgeService } from '../../shared/knowledge';
 import { isActiveKnowledgeTopic } from '../../shared/knowledge';
 import type { AvailabilityService } from '../availability/service';
@@ -42,7 +42,6 @@ const MAX_PROGRESS_WEEKS = 4;
 const MAX_WEEK_SUMMARY_CHARS = 240;
 const MAX_OUTLINE_WEEKS = 6;
 const MAX_OUTLINE_WEEK_CHARS = 220;
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export interface LongPlanServiceOptions {
   /** Vault root (the directory holding `workspaces/`). */
@@ -111,11 +110,9 @@ function normalizeResearch(value: unknown): boolean {
 
 function requireStartDate(value: unknown, fallback: string): string {
   if (value === undefined) return fallback;
-  if (
-    typeof value !== 'string' ||
-    !ISO_DATE.test(value) ||
-    Number.isNaN(new Date(`${value}T00:00:00Z`).getTime())
-  ) {
+  // The shared strict check: a day the Date constructor would roll over
+  // (`2026-02-30`) is refused like any other malformed date.
+  if (typeof value !== 'string' || !isLocalDate(value)) {
     throw new Error('起始日期无效。');
   }
   return value;

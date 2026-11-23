@@ -1,4 +1,4 @@
-import { formatLocalDate } from '../../shared/date';
+import { formatLocalDate, isLocalDate } from '../../shared/date';
 import type { AgentPermissions } from '../../shared/attachments';
 import type { AvailabilityService } from '../availability/service';
 import { isMonday, weekdayWord, type WeekAvailability } from '../availability/records';
@@ -408,20 +408,21 @@ export function createButlerTools(): ButlerToolDefinition[] {
         }
         const date = optionalString(input, 'date');
         const availableMinutes = optionalNumber(input, 'availableMinutes');
+        // The plan's day is resolved once and handed to both the busy-day read
+        // and the planner, so the two can never disagree across a midnight
+        // millisecond boundary when the caller omitted the date.
+        const planDate = date ?? formatLocalDate(context.now());
         // A day the user said is especially full gets one small task instead of
         // a normal-sized plan — the same shared read as the api path
         // (`busyDayMinutes`), but only when this call does not pin the minutes
         // itself and an availability service is wired at all.
         const weekAvailabilityMinutes =
           availableMinutes === undefined && context.weekAvailability
-            ? await busyDayMinutes(
-                context.weekAvailability,
-                date ?? formatLocalDate(context.now())
-              )
+            ? await busyDayMinutes(context.weekAvailability, planDate)
             : undefined;
         const plan = await context.planner.plan({
           workspaceId,
-          ...(date ? { date } : {}),
+          date: planDate,
           ...(availableMinutes !== undefined ? { availableMinutes } : {}),
           ...(weekAvailabilityMinutes !== undefined ? { weekAvailabilityMinutes } : {}),
           ...(context.signal ? { signal: context.signal } : {})
@@ -491,7 +492,7 @@ export function createButlerTools(): ButlerToolDefinition[] {
             ? rawWeeklyHours
             : undefined;
         const rawStartDate = optionalString(input, 'startDate');
-        if (rawStartDate !== undefined && !isIsoDate(rawStartDate)) {
+        if (rawStartDate !== undefined && !isLocalDate(rawStartDate)) {
           throw new ToolInputError('参数 startDate 必须是 YYYY-MM-DD。');
         }
         const notes = optionalString(input, 'notes');
@@ -1463,13 +1464,6 @@ function optionalNumber(input: Record<string, unknown>, key: string): number | u
     throw new ToolInputError(`参数 ${key} 必须是非负数字。`);
   }
   return value;
-}
-
-/** True for a real calendar date written as YYYY-MM-DD. */
-function isIsoDate(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const date = new Date(`${value}T00:00:00`);
-  return !Number.isNaN(date.getTime()) && formatLocalDate(date) === value;
 }
 
 function requiredWorkspaceKind(input: Record<string, unknown>): WorkspaceKind {

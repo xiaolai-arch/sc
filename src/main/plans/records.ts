@@ -11,19 +11,10 @@ import type {
   LongPlanWeek
 } from '../../shared/plans';
 import { planBasis, planMonthDay, planWeekday } from '../../shared/plans';
+import { isLocalDate } from '../../shared/date';
 import { isKnowledgeStatus } from '../knowledge/records';
 import { parseNote, serializeNote } from '../vault/note';
 import { asBoolean, asFiniteNumber, asRecord, asString, asStringArray } from '../workspace/records/coerce';
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-function isIsoDate(value: string | undefined): value is string {
-  return (
-    typeof value === 'string' &&
-    ISO_DATE.test(value) &&
-    !Number.isNaN(new Date(`${value}T00:00:00Z`).getTime())
-  );
-}
 
 function asInt(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) ? value : undefined;
@@ -121,7 +112,7 @@ function coerceDay(value: unknown, weekId: string, index: number): LongPlanDay |
   const record = asRecord(value);
   if (record === null) return null;
   const date = asString(record.date);
-  if (!isIsoDate(date)) return null;
+  if (!isLocalDate(date)) return null;
   const tasks = asStringArray(record.tasks).filter((task) => task.trim() !== '');
   return {
     id: asString(record.id) ?? `${weekId}d${index + 1}`,
@@ -150,7 +141,7 @@ function coerceWeek(value: unknown, index: number): LongPlanWeek | null {
   if (record === null) return null;
   const startDate = asString(record.startDate);
   const endDate = asString(record.endDate);
-  if (!isIsoDate(startDate) || !isIsoDate(endDate)) return null;
+  if (!isLocalDate(startDate) || !isLocalDate(endDate)) return null;
   const id = asString(record.id) ?? `w${index + 1}`;
   const days = Array.isArray(record.days)
     ? record.days
@@ -200,7 +191,7 @@ export function parseLongPlanFile(raw: string, fallbackId: string): LongPlan | n
   const workspaceId = asString(meta.workspaceId);
   const goal = asString(meta.goal)?.trim();
   const startDate = asString(meta.startDate);
-  if (!workspaceId || !goal || !isIsoDate(startDate)) return null;
+  if (!workspaceId || !goal || !isLocalDate(startDate)) return null;
 
   const phases = Array.isArray(meta.phases)
     ? meta.phases

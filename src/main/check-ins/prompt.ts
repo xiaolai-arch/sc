@@ -1,5 +1,5 @@
 import type { ButlerContext } from '../butler/context';
-import { formatMonthDay } from '../../shared/date';
+import { formatMonthDay, isLocalDate } from '../../shared/date';
 import {
   buildBehindScheduleNotification,
   isTaskForDate
@@ -46,12 +46,6 @@ export interface CommitmentLike {
   due: string;
 }
 
-/** True for a real local calendar date; a malformed value never shifts a day. */
-function isLocalIsoDate(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  return !Number.isNaN(new Date(`${value}T00:00:00`).getTime());
-}
-
 /** `YYYY-MM-DD` shifted by `days` on the local calendar. */
 function shiftLocalDate(date: string, days: number): string {
   const [year, month, day] = date.split('-').map(Number);
@@ -71,7 +65,7 @@ export function commitmentCheckInLine(
   date: string
 ): string {
   if (!commitment) return '';
-  if (!isLocalIsoDate(commitment.due) || !isLocalIsoDate(date)) return '';
+  if (!isLocalDate(commitment.due) || !isLocalDate(date)) return '';
   if (!commitment.text.trim()) return '';
   if (commitment.due > date) return '';
   if (commitment.due === date) {
@@ -191,12 +185,12 @@ export function resumeCheckInLine(
   if (!facts) return '';
   const day = typeof facts === 'string' ? facts : facts.day;
   const muteEnd = typeof facts === 'string' ? undefined : facts.muteEnd;
-  if (!isLocalIsoDate(day) || !isLocalIsoDate(date)) return '';
+  if (!isLocalDate(day) || !isLocalDate(date)) return '';
   // An early manual resume names the original end; the mute is still "原定"
   // because the user ended it before that day arrived. The date is not
   // compared to `date`, so the sentence never claims the mute already ended.
   if (muteEnd !== undefined) {
-    if (!isLocalIsoDate(muteEnd)) return '';
+    if (!isLocalDate(muteEnd)) return '';
     return `你提前恢复了提醒，原定暂停到 ${formatMonthDay(muteEnd)}。`;
   }
   if (day > date) return '';
