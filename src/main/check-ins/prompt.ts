@@ -1,5 +1,10 @@
 import type { ButlerContext } from '../butler/context';
-import { formatMonthDay, isLocalDate } from '../../shared/date';
+import {
+  formatMonthDay,
+  isLocalDate,
+  isLocalDateTimeSeconds,
+  localDaysBetween
+} from '../../shared/date';
 import {
   buildBehindScheduleNotification,
   isTaskForDate
@@ -147,6 +152,38 @@ export function weeklyHonestLines(
     ...(honest.nextStep ? [`下一步：${honest.nextStep}`] : []),
     ...(honest.accountability ? [honest.accountability] : [])
   ];
+}
+
+/** The backup facts a weekly review may quote; a subset of `BackupSettings`. */
+export interface BackupStatusLike {
+  /** Opt-in: absent or false appends nothing to any message. */
+  ageLineEnabled?: boolean;
+  /** Naive local ISO (`YYYY-MM-DDTHH:mm:ss`) of the last successful export. */
+  lastBackupAt?: string;
+}
+
+/**
+ * The one backup-age line for the Sunday review, or '' when there is nothing
+ * to say: the switch is off, the check-in date is unreadable, or the last
+ * export was today (an unreadable or future-dated record counts as none, so
+ * a bad date can never produce a wrong sentence). With no record at all it
+ * says so once; otherwise it names the age in days and the day itself.
+ *
+ * Like the availability question this line is deterministic and appended to
+ * the delivered message, never handed to the model to reword or duplicate.
+ */
+export function backupAgeLine(
+  backup: BackupStatusLike | null | undefined,
+  date: string
+): string {
+  if (!backup?.ageLineEnabled) return '';
+  if (!isLocalDate(date)) return '';
+  if (!isLocalDateTimeSeconds(backup.lastBackupAt)) return '还没有导出备份。';
+  const lastDate = backup.lastBackupAt.slice(0, 10);
+  const days = localDaysBetween(lastDate, date);
+  // Zero days is not an age; a negative one (clock skew) would be a lie.
+  if (days <= 0) return '';
+  return `上次导出备份是 ${days} 天前（${formatMonthDay(lastDate)}）。`;
 }
 
 /** The one Sunday-review question about which days next week are packed. */
@@ -331,7 +368,8 @@ export function buildCheckInTemplate(
   date = '',
   weeklyOverview: WeeklyOverviewLike | null = null,
   weeklyHonest: WeeklyHonestLike | null = null,
-  commitment: CommitmentLike | null = null
+  commitment: CommitmentLike | null = null,
+  backup: BackupStatusLike | null = null
 ): string {
   const tasks = activeTasks(context);
   if (trigger === 'weekly') {
@@ -345,10 +383,15 @@ export function buildCheckInTemplate(
     // fact the template keeps its previous bytes for every existing fixture.
     const honest = weeklyHonestLines(weeklyHonest);
     const withHonest = honest.length === 0 ? base : `${base}\n${honest.join('\n')}`;
+    // The opt-in backup age line follows the honest receipt and precedes the
+    // availability question; off, unreadable dates and a same-day export all
+    // keep the message at its previous bytes.
+    const age = backupAgeLine(backup, date);
+    const withAge = age ? `${withHonest}\n${age}` : withHonest;
     // The availability question is the last line, and only when there is at
     // least one workspace; otherwise the message keeps its previous bytes.
     const availability = weekAvailabilityQuestion(context);
-    return availability ? `${withHonest}\n${availability}` : withHonest;
+    return availability ? `${withAge}\n${availability}` : withAge;
   }
   if (trigger === 'behind') {
     // Byte-identical to the scheduler fallback so both compose one nudge.

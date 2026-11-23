@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { formatLocalDateTimeSeconds } from '../../src/shared/date';
 import { SettingsPage } from '../../src/renderer/settings/SettingsPage';
 
 const baseSettings = {
@@ -93,4 +94,116 @@ test('disables the button while exporting', async () => {
     copied: { vault: true, conversations: true, state: true, usage: true }
   });
   expect(await screen.findByText('已导出到 /tmp/done')).toBeInTheDocument();
+});
+
+// --- the persistent status line ----------------------------------------------
+
+test('a fresh install shows 从未备份过。', async () => {
+  window.studyCoach = apiStub() as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  expect(await screen.findByText('从未备份过。')).toBeInTheDocument();
+});
+
+test('a same-day record shows 上次备份：今天 with the clock time', async () => {
+  const stamp = formatLocalDateTimeSeconds(new Date());
+  window.studyCoach = apiStub({
+    getSettings: vi.fn().mockResolvedValue({
+      ...baseSettings,
+      backup: { lastBackupAt: stamp, lastBackupPath: '/tmp/b', lastBackupOutcome: 'ok' }
+    })
+  }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  expect(
+    await screen.findByText(`上次备份：今天 ${stamp.slice(11, 16)}`)
+  ).toBeInTheDocument();
+});
+
+test('an older record shows the age in days', async () => {
+  const stamp = formatLocalDateTimeSeconds(new Date(Date.now() - 6 * 86400000));
+  window.studyCoach = apiStub({
+    getSettings: vi.fn().mockResolvedValue({
+      ...baseSettings,
+      backup: { lastBackupAt: stamp, lastBackupPath: '/tmp/b', lastBackupOutcome: 'ok' }
+    })
+  }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  expect(await screen.findByText('上次备份：6 天前')).toBeInTheDocument();
+});
+
+test('a persisted failure shows the failed state without a reason or fake date', async () => {
+  // A failure from before this session: outcome failed, no reason stored (the
+  // reason key arrives with P1), and no lastBackupAt ever written.
+  window.studyCoach = apiStub({
+    getSettings: vi.fn().mockResolvedValue({
+      ...baseSettings,
+      backup: { lastBackupOutcome: 'failed' }
+    })
+  }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  expect(await screen.findByText('上次备份没有成功。')).toBeInTheDocument();
+});
+
+test('a failed export names the reason and keeps the last success', async () => {
+  const stamp = formatLocalDateTimeSeconds(new Date(Date.now() - 2 * 86400000));
+  window.studyCoach = apiStub({
+    exportBackup: vi.fn().mockRejectedValue(new Error('备份目录不能位于 vault 内。')),
+    getSettings: vi.fn().mockResolvedValue({
+      ...baseSettings,
+      backup: { lastBackupAt: stamp, lastBackupPath: '/tmp/b', lastBackupOutcome: 'ok' }
+    })
+  }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  await userEvent.click(await screen.findByRole('button', { name: '导出备份…' }));
+
+  expect(
+    await screen.findByText('上次备份没有成功（备份目录不能位于 vault 内。）。')
+  ).toBeInTheDocument();
+  expect(await screen.findByText('上次成功：2 天前。')).toBeInTheDocument();
+  // Never a fake date for the failed try itself.
+  expect(screen.queryByText(/上次备份：今天/)).not.toBeInTheDocument();
+});
+
+test('a successful export refreshes the status line to today', async () => {
+  const stamp = formatLocalDateTimeSeconds(new Date());
+  const getSettings = vi
+    .fn()
+    .mockResolvedValueOnce(baseSettings)
+    .mockResolvedValue({
+      ...baseSettings,
+      backup: {
+        lastBackupAt: stamp,
+        lastBackupPath: '/tmp/study-coach-backup',
+        lastBackupOutcome: 'ok'
+      }
+    });
+  window.studyCoach = apiStub({ getSettings }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  expect(await screen.findByText('从未备份过。')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: '导出备份…' }));
+
+  expect(await screen.findByText('已导出到 /tmp/study-coach-backup')).toBeInTheDocument();
+  expect(await screen.findByText(`上次备份：今天 ${stamp.slice(11, 16)}`)).toBeInTheDocument();
+});
+
+test('the age line toggle saves through the backup patch', async () => {
+  const updateSettings = vi.fn().mockResolvedValue(baseSettings);
+  window.studyCoach = apiStub({ updateSettings }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  await userEvent.click(await screen.findByLabelText('周复盘里提到上次备份'));
+  await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+
+  await vi.waitFor(() => {
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ backup: { ageLineEnabled: true } })
+    );
+  });
+  // Persisted facts are form-external: they never mark the page dirty.
+  expect(updateSettings).toHaveBeenCalledTimes(1);
 });

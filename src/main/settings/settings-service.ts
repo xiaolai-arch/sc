@@ -1,10 +1,13 @@
+import { isAbsolute } from 'node:path';
 import {
   MAX_ACCOUNTABILITY_NAME,
   type AppSettings,
+  type BackupSettings,
   type LocalCliEffort,
   type NotificationSettings,
   type ProviderConfig
 } from '../../shared/types';
+import { isLocalDateTimeSeconds } from '../../shared/date';
 import type { SettingsPatch } from '../../shared/ipc';
 import type { AppState, JsonStateStore } from '../state-store';
 import { createDefaultSettings } from './defaults';
@@ -69,16 +72,22 @@ function normalizeSettings(settings: AppSettings): AppSettings {
       : createDefaultSettings('').displayName;
   // `strictMastery` is opt-in, so it is only carried (and later serialized)
   // when literally true. Absent, false or a junk value all mean the default.
-  const { strictMastery, accountabilityName, ...rest } = settings;
+  const { strictMastery, accountabilityName, backup, ...rest } = settings;
   // The accountability name is local-only and off by default: only a valid,
   // non-empty name is carried, so a settings file written before this feature
   // (or after a clear) round-trips byte-identically.
   const carriedName = normalizeAccountabilityName(accountabilityName);
+  // The backup block is absent until the first export records a fact (or the
+  // user opts into the weekly-review age line); junk keys are dropped one by
+  // one and an empty result drops the whole block, keeping legacy files'
+  // bytes unchanged.
+  const carriedBackup = normalizeBackup(backup);
   return {
     ...rest,
     displayName,
     ...(strictMastery === true ? { strictMastery: true } : {}),
     ...(carriedName ? { accountabilityName: carriedName } : {}),
+    ...(carriedBackup ? { backup: carriedBackup } : {}),
     notifications: normalizeNotifications(settings.notifications)
   };
 }
@@ -100,6 +109,84 @@ function normalizeAccountabilityName(value: unknown): string | undefined {
   if (name === '' || NEWLINE_PATTERN.test(name)) return undefined;
   if ([...name].length > MAX_ACCOUNTABILITY_NAME) return undefined;
   return name;
+}
+
+/**
+ * Tolerant read of the stored backup block. Every key stands alone: a junk
+ * value is dropped rather than carried (a bad date reads as "never backed
+ * up"), and a block with no valid key at all is dropped entirely, so a
+ * settings file written before this feature round-trips byte-identically.
+ */
+function normalizeBackup(value: unknown): BackupSettings | undefined {
+  if (!isRecord(value)) return undefined;
+  const backup: BackupSettings = {};
+  let carried = 0;
+  // The age line is opt-in and only `true` serializes, matching strictMastery.
+  if (value.ageLineEnabled === true) {
+    backup.ageLineEnabled = true;
+    carried += 1;
+  }
+  if (isLocalDateTimeSeconds(value.lastBackupAt)) {
+    backup.lastBackupAt = value.lastBackupAt;
+    carried += 1;
+  }
+  if (typeof value.lastBackupPath === 'string' && isAbsolute(value.lastBackupPath)) {
+    backup.lastBackupPath = value.lastBackupPath;
+    carried += 1;
+  }
+  if (value.lastBackupOutcome === 'ok' || value.lastBackupOutcome === 'failed') {
+    backup.lastBackupOutcome = value.lastBackupOutcome;
+    carried += 1;
+  }
+  return carried > 0 ? backup : undefined;
+}
+
+/**
+ * Merges a validated `backup` patch onto the current block, then re-reads the
+ * result through `normalizeBackup`: turning the age line off removes that key
+ * again, and a block left empty by the merge disappears so a never-backed-up
+ * file keeps its bytes.
+ */
+function mergeBackup(
+  current: BackupSettings | undefined,
+  patch: Partial<BackupSettings>
+): BackupSettings | undefined {
+  return normalizeBackup({ ...(current ?? {}), ...patch });
+}
+
+/**
+ * Validates a `backup` patch. The settings page only ever toggles the age
+ * line; the last-backup facts arrive from the export flow. A bad value fails
+ * the whole patch with a Chinese error instead of half-writing.
+ */
+function validateBackupPatch(value: unknown): Partial<BackupSettings> {
+  if (!isRecord(value)) throw new Error('备份设置格式无效。');
+  const result: Partial<BackupSettings> = {};
+  if (value.ageLineEnabled !== undefined) {
+    if (typeof value.ageLineEnabled !== 'boolean') {
+      throw new Error('备份年龄行开关必须是布尔值。');
+    }
+    result.ageLineEnabled = value.ageLineEnabled;
+  }
+  if (value.lastBackupAt !== undefined) {
+    if (!isLocalDateTimeSeconds(value.lastBackupAt)) {
+      throw new Error('备份时间格式无效。');
+    }
+    result.lastBackupAt = value.lastBackupAt;
+  }
+  if (value.lastBackupPath !== undefined) {
+    if (typeof value.lastBackupPath !== 'string' || !isAbsolute(value.lastBackupPath)) {
+      throw new Error('备份路径必须是绝对路径。');
+    }
+    result.lastBackupPath = value.lastBackupPath;
+  }
+  if (value.lastBackupOutcome !== undefined) {
+    if (value.lastBackupOutcome !== 'ok' && value.lastBackupOutcome !== 'failed') {
+      throw new Error('备份结果无效。');
+    }
+    result.lastBackupOutcome = value.lastBackupOutcome;
+  }
+  return result;
 }
 
 /**
@@ -300,9 +387,19 @@ function mergeSettings(current: AppSettings, patch: unknown): AppSettings {
     patch.accountabilityName === undefined
       ? current.accountabilityName
       : validateAccountabilityName(patch.accountabilityName);
-  return accountabilityName === undefined
-    ? withStrictMastery
-    : { ...withStrictMastery, accountabilityName };
+  const withAccountability =
+    accountabilityName === undefined
+      ? withStrictMastery
+      : { ...withStrictMastery, accountabilityName };
+  // The backup block merges field-by-field: a patch toggling the age line
+  // must not erase the recorded last-backup facts, and a state write from the
+  // export flow must not erase the toggle. An empty patch keeps whatever is
+  // stored (still normalized), so an absent block stays absent.
+  const backup = mergeBackup(
+    current.backup,
+    patch.backup === undefined ? {} : validateBackupPatch(patch.backup)
+  );
+  return backup === undefined ? withAccountability : { ...withAccountability, backup };
 }
 
 function validateBoolean(value: unknown): boolean {

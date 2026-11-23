@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, screen, shell } from 'electron';
 import { join } from 'node:path';
 import { handleExportBackup, handleRestoreBackup } from './backup';
+import { recordBackupFailure, recordBackupSuccess } from './backup-state';
 import { createAppContext } from './context';
 import { ConversationRunStore } from './butler/conversation-runs';
 import {
@@ -205,7 +206,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(APP_IPC_CHANNELS.exportBackup, async () => {
     try {
-      return await handleExportBackup({
+      const result = await handleExportBackup({
         pickDirectory: async () => {
           const options = {
             title: '选择备份保存位置',
@@ -227,7 +228,16 @@ app.whenReady().then(async () => {
           return { vaultPath: current.vaultPath, userDataPath: app.getPath('userData') };
         }
       });
+      // The backup folder exists on disk, so the export itself succeeded even
+      // if this status write fails; the user still sees the real destination.
+      if (result !== null) {
+        await recordBackupSuccess(context.settings, result).catch(() => undefined);
+      }
+      return result;
     } catch (error) {
+      // Best-effort: the user-facing failure below matters more than the
+      // flag, and a failed status write must not mask the export's error.
+      await recordBackupFailure(context.settings).catch(() => undefined);
       // Same sanitized envelope as the regular IPC handlers.
       throw new Error(serializeError(error).message);
     }

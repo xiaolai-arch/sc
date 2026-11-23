@@ -182,6 +182,12 @@ export interface SettingsPatch {
   strictMastery?: boolean;
   /** Local-only accountability name; '' clears it from the stored document. */
   accountabilityName?: string;
+  /**
+   * Backup block, merged field-by-field: the page toggles `ageLineEnabled`,
+   * the export flow writes the `lastBackup*` facts, and each side preserves
+   * the other's keys.
+   */
+  backup?: Partial<AppSettings['backup']>;
 }
 
 /**

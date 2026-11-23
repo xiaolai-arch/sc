@@ -580,3 +580,162 @@ test('a malformed stored accountability name reads as off', async () => {
   const service = new SettingsService(state);
   expect((await service.get()).accountabilityName).toBeUndefined();
 });
+
+// --- the backup block --------------------------------------------------------
+
+test('backup is absent by default and legacy files round-trip byte-identically', async () => {
+  const { service } = memorySettings();
+  // A fresh install has no backup block at all.
+  expect((await service.get()).backup).toBeUndefined();
+
+  const dir = await tempDir();
+  try {
+    const filePath = join(dir, 'state.json');
+    const defaults = createDefaultSettings('/tmp/legacy-vault');
+    const legacy = `${JSON.stringify({ onboarded: true, settings: defaults }, null, 2)}\n`;
+    await writeFile(filePath, legacy, 'utf8');
+
+    const store = new JsonStateStore({
+      filePath,
+      createDefault: () => createDefaultAppState('/tmp/ignored')
+    });
+    const service = new SettingsService(store);
+    expect((await service.get()).backup).toBeUndefined();
+    // A read must not introduce the block.
+    expect(await readFile(filePath, 'utf8')).toBe(legacy);
+
+    // A save of an unrelated setting still does not introduce it.
+    await service.update({ notifications: { morning: '07:15' } as never });
+    const after = await readFile(filePath, 'utf8');
+    expect(after).not.toContain('backup');
+    expect(after).not.toBe(legacy); // morning changed
+    expect(after).toBe(
+      legacy.replace('"morning": "08:00"', '"morning": "07:15"')
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('serializes the age line toggle only when it is on', async () => {
+  const dir = await tempDir();
+  try {
+    const filePath = join(dir, 'state.json');
+    const store = new JsonStateStore({
+      filePath,
+      createDefault: () => createDefaultAppState('/tmp/toggle-vault')
+    });
+    const service = new SettingsService(store);
+
+    const on = await service.update({ backup: { ageLineEnabled: true } });
+    expect(on.backup).toEqual({ ageLineEnabled: true });
+    expect(await readFile(filePath, 'utf8')).toContain('"ageLineEnabled": true');
+
+    // Turning it off removes the key, and with nothing else in the block the
+    // whole block disappears instead of serializing `false`.
+    const off = await service.update({ backup: { ageLineEnabled: false } });
+    expect(off.backup).toBeUndefined();
+    expect(await readFile(filePath, 'utf8')).not.toContain('backup');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('rejects invalid backup patches without mutating stored values', async () => {
+  const { service } = memorySettings();
+  await expect(
+    service.update({ backup: { ageLineEnabled: 'yes' } as never })
+  ).rejects.toThrow('备份年龄行开关必须是布尔值。');
+  await expect(
+    service.update({ backup: { lastBackupAt: '2026-11-02 14:30:00' } as never })
+  ).rejects.toThrow('备份时间格式无效。');
+  await expect(
+    service.update({ backup: { lastBackupAt: '2026-02-30T14:30:00' } as never })
+  ).rejects.toThrow('备份时间格式无效。');
+  await expect(
+    service.update({ backup: { lastBackupPath: 'relative/path' } as never })
+  ).rejects.toThrow('备份路径必须是绝对路径。');
+  await expect(
+    service.update({ backup: { lastBackupOutcome: 'cancelled' } as never })
+  ).rejects.toThrow('备份结果无效。');
+  await expect(service.update({ backup: 'junk' } as never)).rejects.toThrow(
+    '备份设置格式无效。'
+  );
+  expect((await service.get()).backup).toBeUndefined();
+});
+
+test('merges backup patches field-by-field', async () => {
+  const { service } = memorySettings();
+  // The export flow's write.
+  const recorded = await service.update({
+    backup: {
+      lastBackupAt: '2026-11-02T14:30:00',
+      lastBackupPath: 'D:/backups/study-coach-backup-2026-11-02-1430',
+      lastBackupOutcome: 'ok'
+    }
+  });
+  expect(recorded.backup).toEqual({
+    lastBackupAt: '2026-11-02T14:30:00',
+    lastBackupPath: 'D:/backups/study-coach-backup-2026-11-02-1430',
+    lastBackupOutcome: 'ok'
+  });
+
+  // The page's toggle must not erase the recorded facts.
+  const toggled = await service.update({ backup: { ageLineEnabled: true } });
+  expect(toggled.backup).toEqual({
+    ageLineEnabled: true,
+    lastBackupAt: '2026-11-02T14:30:00',
+    lastBackupPath: 'D:/backups/study-coach-backup-2026-11-02-1430',
+    lastBackupOutcome: 'ok'
+  });
+
+  // And a later export write must not erase the toggle. A failure writes only
+  // the outcome, so the previous success's time and path survive.
+  const failed = await service.update({ backup: { lastBackupOutcome: 'failed' } });
+  expect(failed.backup).toEqual({
+    ageLineEnabled: true,
+    lastBackupAt: '2026-11-02T14:30:00',
+    lastBackupPath: 'D:/backups/study-coach-backup-2026-11-02-1430',
+    lastBackupOutcome: 'failed'
+  });
+  // Round-trips through the state document.
+  expect(await service.get()).toEqual(failed);
+});
+
+test('a malformed stored backup block is dropped key-by-key on read', async () => {
+  const defaults = createDefaultSettings('/tmp/old-vault');
+  const state = new JsonStateStore({
+    filePath: null,
+    createDefault: () => ({
+      onboarded: true,
+      settings: {
+        ...defaults,
+        backup: {
+          ageLineEnabled: 'yes',
+          lastBackupAt: '2026-02-30T14:30:00',
+          lastBackupPath: 'nope',
+          lastBackupOutcome: 'cancelled'
+        } as never
+      }
+    })
+  });
+  const service = new SettingsService(state);
+  // Nothing valid survives, so the whole block reads as absent.
+  expect((await service.get()).backup).toBeUndefined();
+
+  // A partly valid block keeps only its valid keys.
+  const mixed = new JsonStateStore({
+    filePath: null,
+    createDefault: () => ({
+      onboarded: true,
+      settings: {
+        ...defaults,
+        backup: { lastBackupAt: '2026-11-02T14:30:00', lastBackupPath: 7 } as never
+      }
+    })
+  });
+  const mixedService = new SettingsService(mixed);
+  expect((await mixedService.get()).backup).toEqual({
+    lastBackupAt: '2026-11-02T14:30:00'
+  });
+});
