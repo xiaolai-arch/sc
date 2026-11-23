@@ -87,11 +87,13 @@ export interface BackupSettings {
   ageLineEnabled?: boolean;
   /** 缺省 false，只有 true 序列化（P1）。 */
   autoEnabled?: boolean;
+  /** 首次询问已经出现过（无论用户选了哪边）；只有 true 序列化（P1）。 */
+  autoBackupAsked?: boolean;
   /** 1 | 7 | 30，缺省 7（P1）。 */
   autoIntervalDays?: 1 | 7 | 30;
   /** 备份目标目录（绝对路径）。自动备份必须有它，否则不跑（P1）。 */
   autoDestination?: string;
-  /** 最后一次成功备份的 ISO 本地时间；手动与自动共用（P0）。 */
+  /** 最后一次成功备份的本地时间，格式 YYYY-MM-DDTHH:mm:ss（naive local ISO，不带时区）；手动与自动共用（P0）。 */
   lastBackupAt?: string;
   /** 最后一次成功备份的文件夹绝对路径（P0）。 */
   lastBackupPath?: string;
@@ -102,8 +104,9 @@ export interface BackupSettings {
 }
 ```
 
-- 报告 §4.1 给了五个键（`autoEnabled/autoIntervalDays/lastBackupAt/lastBackupPath/lastBackupOutcome`），本稿补两个：`autoDestination`——「以后每周自动备份到**同一个文件夹**吗」这个问句必须有目标目录可存，首次询问确认时写入本次导出的父目录，之后可在设置里改；`lastBackupError`——「失败只说一次」需要它记住还没说过的那句话。
-- 分批边界：**先做 P0/P2 时只落地 P0 那四个键**（`ageLineEnabled/lastBackupAt/lastBackupPath/lastBackupOutcome`）；`autoEnabled/autoIntervalDays/autoDestination/lastBackupError` 等 P1 实现时再加，避免半套字段。
+- 报告 §4.1 给了五个键（`autoEnabled/autoIntervalDays/lastBackupAt/lastBackupPath/lastBackupOutcome`），本稿补三个：`autoDestination`——「以后每周自动备份到**同一个文件夹**吗」这个问句必须有目标目录可存，首次询问确认时写入本次导出的父目录，之后可在设置里改；`lastBackupError`——「失败只说一次」需要它记住还没说过的那句话；`autoBackupAsked`——「已询问且用户拒绝」这个事实必须有键承载（评审阻断 1）：`autoEnabled` 缺省不序列化，无法表达「问过且暂不」，没有这个键，builder 只能要么每次重启重复弹询问、要么被迫序列化 `autoEnabled=false` 破坏逐字节基线。
+- `lastBackupAt` 一律存 naive local ISO（`YYYY-MM-DDTHH:mm:ss`），到期判定取它的本地日期直接配套；禁止混用 UTC 或带 offset 的写法（评审建议）。
+- 分批边界：**先做 P0/P2 时只落地 P0 那四个键**（`ageLineEnabled/lastBackupAt/lastBackupPath/lastBackupOutcome`）；`autoEnabled/autoBackupAsked/autoIntervalDays/autoDestination/lastBackupError` 等 P1 实现时再加，避免半套字段。
 - 挂在 `AppSettings`（`src/shared/types.ts:98`），沿 `strictMastery`（`:112`）与 `accountabilityName`（`:120`）的先例：**缺省不序列化**，旧 settings 写回逐字节不变。
 - `normalizeBackup` 对齐 `normalizeSettings`（`src/main/settings/settings-service.ts:65-77`）：非法间隔回落 7、非法日期丢弃、非布尔丢弃、非绝对路径丢弃。
 - `updateSettings` 校验：`autoEnabled` 必须是布尔；`autoIntervalDays` 必须是 1/7/30；`autoDestination` 必须是绝对路径；不合规给中文错误，不半写。
@@ -130,7 +133,7 @@ export interface BackupSettings {
 
 - 触发时机：一次**自动备份成功后**，且仅对 `autoDestination` 目录。
 - 只删同时满足三条的目录：名字匹配 `study-coach-backup-*`、位于 `autoDestination` 内、排在最新 12 份之外（按备份时间戳排序，含目录名后缀顺延的）。
-- 三条硬约束：刚创建的这份永远保留；删失败不使备份失败（清理是尽力而为，删不掉下次再试）；`autoDestination` 之外的任何目录（包括手动导出的）永不清理。
+- 三条硬约束：**刚创建的这份直接从删除集合排除、不参与排名**（时钟回拨时新份的 stamp 字典序可能最小，纯按排名排它排第一也保不住，必须显式排除）；删失败不使备份失败（清理是尽力而为，删不掉下次再试）；`autoDestination` 之外的任何目录（包括手动导出的）永不清理。
 - 手动导出不触发轮换，即使它写进了 `autoDestination`——轮换只发生在自动备份完成之后。
 
 ## 界面
@@ -139,6 +142,7 @@ export interface BackupSettings {
 
 - 现有两个按钮不动；按钮下方新增常驻状态行（报告 §4.2 原句）：
   - `上次备份：今天 14:32` / `上次备份：6 天前` / `从未备份过。`
+  - 失败态（手动或自动，`lastBackupOutcome='failed'`）：第一行 `上次备份没有成功（<人话原因>）。`；有上次成功时第二行 `上次成功：N 天前。`，没有则只有第一行。
   - 不显示目标目录里已有几份备份（主人 2026-11-22 已定），不用红色、不用 badge。
 - 开关 `每周自动备份`，描述：`把项目、记录和对话复制到你选的文件夹。备份是普通文件夹，不含 API Key，用文件管理器就能直接打开。`
 - 目录行：当前 `autoDestination`，未选时 `未选择目录，自动备份不会运行` + 「选择目录…」。
@@ -146,12 +150,14 @@ export interface BackupSettings {
 - 「换机」三行固定展示，不折叠：
   1. `在新电脑安装 ASAKI。`
   2. `把整个备份文件夹复制过去，在「数据与备份 → 从备份恢复…」选择它。`
-  3. `恢复会带回项目、记录、对话和用量；新机器上没有设置时，备份里的设置会一起还原，API Key 需要重新填写（它从未进入备份）。`
+  3. 分两版，以 P3 是否合入为准（评审阻断 3：P2 单独交付时不得承诺还不存在的行为）：
+     - **P2 版（P3 未合入前）**：`恢复会带回项目、记录、对话和用量；恢复不改动设置，换机后设置和 API Key 需要重新填写（API Key 从未进入备份）。`
+     - **P3 版（P3 合入后替换）**：`恢复会带回项目、记录、对话和用量；新机器上没有设置时，备份里的设置会一起还原，API Key 需要重新填写（它从未进入备份）。`
 
 ### 首次成功导出后的一次询问（P1）
 
-- 首次手动导出成功、`backup.autoEnabled` 从未设置过时，显示一次性询问：`以后每周自动备份到同一个文件夹吗？可以随时在设置里改。`［每周备份］［暂不］。
-- 选「每周备份」→ `autoEnabled=true`、`autoDestination` = 本次导出父目录；选「暂不」→ 记下「问过了」，之后不再问（**不静默开启**——默认关是主人已定的原则，询问不能把它绕过去；报告 §3-1 建议预选「开」，不采纳）。
+- 首次手动导出成功、`backup.autoBackupAsked` 未设置过时，显示一次性询问：`以后每周自动备份到同一个文件夹吗？可以随时在设置里改。`［每周备份］［暂不］。
+- 选「每周备份」→ `autoEnabled=true`、`autoDestination` = 本次导出父目录；选「暂不」→ `autoEnabled` 保持缺省、不序列化。**两边都写 `autoBackupAsked=true`**，跨重启不再问（**不静默开启**——默认关是主人已定的原则，询问不能把它绕过去；报告 §3-1 建议预选「开」，不采纳）。
 - 询问不出现在自动备份流程里，只在手动导出成功后。
 
 ### 周复盘消息（P0 年龄行 / P1 失败行）
@@ -181,34 +187,34 @@ export interface BackupSettings {
 
 1. 新装/旧 settings 文件：`backup` 块不出现，写回后与 `3142baf` 逐字节相同；设置卡显示 `从未备份过。`。
 2. 手动导出成功：`backup.lastBackupAt`（ISO 本地时间）、`lastBackupPath`、`lastBackupOutcome='ok'` 落盘；设置卡立刻显示 `上次备份：今天 HH:mm`；重启应用后仍显示。
-3. 导出失败：`lastBackupOutcome='failed'` 且不写 `lastBackupAt`；设置卡状态行仍显示上一次成功的时间（若有），不把失败当成「从没备份」。
+3. 导出失败：`lastBackupOutcome='failed'` 且不写 `lastBackupAt`；设置卡状态行显示失败态 `上次备份没有成功（<人话原因>）。`（有上次成功时附第二行 `上次成功：N 天前。`），不把失败当成「从没备份」，不出「损坏」「可能丢失」字样。
 4. 周复盘年龄行开关打开、`lastBackupAt` 为 3 天前：消息里出现 `上次导出备份是 3 天前（M 月 D 日）。`，位置在诚实回执之后、可用时间问题之前，只一行。
 5. 开关打开但 `lastBackupAt` 是今天：不追加任何备份年龄行。
 6. 开关关闭 / `notifications.weeklyEnabled=false`：周复盘与 `3142baf` 逐字节相同。
 
 **P1 自动备份**
 
-7. `autoEnabled=true`、`autoDestination` 有效、距上次 ≥ 7 天：周复盘那条 `check('weekly')` 触发一次 `createBackup`，目标目录出现 `study-coach-backup-*`；`lastBackupOutcome='ok'`，`lastBackupAt` 更新。`autoIntervalDays=1` 时次日启动，30 时 30 天后启动。
+7. `autoEnabled=true`、`autoDestination` 有效、距上次 ≥ 7 天：周复盘那条 `check('weekly')` 触发一次 `createBackup`，目标目录出现 `study-coach-backup-*`；`lastBackupOutcome='ok'`，`lastBackupAt` 更新。到期公式边界（注入 `now` 即可测，不需要也不存在每日触发点，评审阻断 2）：`autoIntervalDays=1` 且 `lastBackupAt` 为昨天 → 到期；`autoIntervalDays=30` 且为 29 天前 → 未到期、30 天前 → 到期。
 8. **不阻塞消息**：自动备份执行期间周复盘消息照常返回（用可控延迟的替身证明先后，不用真实大文件）。
 9. 距上次成功 < 7 天：不启动第二次。
 10. 自动备份失败（目标在 vault 内 / 无权限 / 磁盘满）：不向渲染层抛异常；`lastBackupOutcome='failed'`、`lastBackupError` 是人话（无堆栈、无「数据可能丢失」）；**下一条**周复盘末尾出现三层文案且只有一次；再下一条不再出现，`lastBackupError` 已清空；设置卡状态行显示失败态与上一次成功时间。
 11. `autoEnabled=true` 但无 `autoDestination`：不尝试导出、不报错；设置页显示 `未选择目录，自动备份不会运行`。
 12. `weeklyEnabled=false`：自动备份不运行，设置页给出依赖说明。
-13. 首次手动导出成功后出现一次性询问；选「暂不」后不再出现且 `autoEnabled` 保持缺省（不序列化）；选「每周备份」后 `autoEnabled=true` 且 `autoDestination` 等于本次导出父目录。询问只在手动导出后出现，自动备份流程里永不出现。
+13. 首次手动导出成功后出现一次性询问；选「暂不」后写 `autoBackupAsked=true`、`autoEnabled` 保持缺省（不序列化），**重启后仍不再出现**；选「每周备份」后同样写 `autoBackupAsked=true`，且 `autoEnabled=true`、`autoDestination` 等于本次导出父目录。询问只在手动导出后出现，自动备份流程里永不出现。
 14. **P1 不做任何删除**：连续多次自动备份在目标目录累积，P1 实现不删除任何已有备份。
 
 **P2 内容与迁移**
 
 15. README.txt 追加一行 `本次备份包含 <N> 个文件，约 <X> MB。`，N/X 与本次实际复制一致；现有断言（`tests/main/backup.test.ts:81-89` 的 `toContain`）仍通过。
 16. 导出成功提示第一行仍是 `已导出到 <path>`；第二行按 `BackupResult.copied` 实际布尔生成，缺项自动省略。
-17. 备份卡只出现三行换机步骤；第三行必须区分「设置会还原（新机器）」与「API Key 从不进备份」，**不得**出现「设置不在备份里」这类与 `state.json` 事实相反的话。
+17. 备份卡只出现三行换机步骤；第三行版本与交付对齐（评审阻断 3）：只做 P0–P2 时必须是 P2 版（**不得**出现「设置会一起还原」这类 P3 才有的承诺）；P3 合入后切换为 P3 版。两版都**不得**出现「设置不在备份里」这类与 `state.json` 事实相反的话。
 18. 设置卡说明、README 恢复提示、恢复确认框三处对新读者不矛盾：同一问题（备份里有没有设置）在三处答案一致。
 
 **P3 换机恢复设置（G4，独立小项）**
 
 19. 目标机器**没有** `state.json`：恢复后采用备份内 `state.json` 的设置（provider、notifications 等），且 `vaultPath` 改写为本机当前 vault 路径（不能指向旧机器的路径）。
 20. 目标机器**已有** `state.json`：恢复不动它，与 `3142baf` 行为逐字节一致。
-21. P3 与 P0–P2 可以分开交付：只做 P0–P2 时，验收 1–18 全过、19–20 不适用。
+21. P3 与 P0–P2 可以分开交付：只做 P0–P2 时，验收 1–18 全过（换机第三行用 P2 版）、19–20 不适用。
 
 **P4 保留 12 份**
 
@@ -216,6 +222,7 @@ export interface BackupSettings {
 23. 只删匹配 `study-coach-backup-*` 的目录：同目录下的用户自建文件夹、手动导出后改名的目录一个都不动；`autoDestination` 之外的任何目录不清理。
 24. 轮换失败（某目录被占用删不掉）：本次备份仍算成功，`lastBackupOutcome='ok'`；下次自动备份成功后再试。
 25. 手动导出永不触发轮换，即使导出目标就是 `autoDestination`。
+26. 时钟回拨反证：新份目录名的 stamp 字典序最小（如系统时间回拨）时，自动备份成功后新份仍在，删除只发生在其余目录中最老的部分——「本次创建的 target 不参与排名」这条由测试直接锁住。
 
 ## 测试点
 
@@ -224,7 +231,7 @@ export interface BackupSettings {
 | main | `tests/main/settings-service.test.ts`（扩展；对齐 `fills behind-schedule defaults for settings written before the feature`（:183）） | `backup` 默认不序列化、旧文件往返不变、非法间隔/非绝对路径/非布尔被拒、`lastBackupError` 读后即清 |
 | main | `tests/main/backup.test.ts`（扩展；现有 `copies the vault…without secrets`（:53）、`skips missing sources…`（:94）、README 断言（:81-89）保持通过） | README 文件数与体积行、`copied` 布尔仍准确 |
 | main | `tests/main/backup-state.test.ts`（新；或并入 `settings-service.test.ts`，以 builder 判断为准） | `lastBackupAt/Path/Outcome/Error` 的写入时机（成功 vs 失败）、坏日期视为无记录 |
-| main | `tests/main/backup.test.ts`（P4） | 轮换四条验收：留 12、只删匹配命名、删失败不失败、手动导出不触发 |
+| main | `tests/main/backup.test.ts`（P4） | 轮换五条验收：留 12、只删匹配命名、删失败不失败、手动导出不触发、回拨时新份（字典序最小）仍保留 |
 | main | `tests/main/check-in-prompt.test.ts`（扩展；现有「no stats leaves the weekly prompt byte-identical」必须仍通过） | 无记录/N 天/0 天/关闭 四种周复盘字节；年龄行与失败行的位置与唯一性 |
 | main | `tests/main/proactive-check-in.test.ts`（扩展，**P1**） | 7 天到期才跑、不阻塞消息、失败三层文案只出现一次并清空、`weeklyEnabled=false` 不跑 |
 | main | `tests/main/ipc-preload.test.ts`（扩展） | `chooseBackupDirectory` 新通道在尾部、参数透传 |
@@ -259,7 +266,7 @@ tests/…                                  + 见测试点
 
 ## 给 builder 的默认决定
 
-- 字段命名一律用报告 §4.1 的五个键 + `autoDestination` + `ageLineEnabled` + `lastBackupError`，不另起第二套。
+- 字段命名一律用报告 §4.1 的五个键 + `autoDestination` + `ageLineEnabled` + `lastBackupError` + `autoBackupAsked`，不另起第二套。
 - 到期判定只用 `lastBackupAt + autoIntervalDays`（P1），不写 marker 文件、不加 tick 定时器；自动备份挂在周复盘链路上，不新增独立调度点（主人 2026-11-22 已定）。
 - 自动备份在后台跑、消息不等它；失败只说一次、不重试。
 - 失败文案严格三层（没成功 / 数据没动 / 怎么办），errno 映射人话，不透出堆栈，不用「损坏」「可能丢失」；默认通道是下一条周复盘 + 设置卡状态行。
