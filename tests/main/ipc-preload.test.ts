@@ -51,7 +51,7 @@ test('bridge invokes restore backup and restart', async () => {
       return {
         path: '/tmp/backup',
         safetyPath: '/tmp/safety',
-        restored: { vault: true, conversations: true, usage: true }
+        restored: { vault: true, conversations: true, usage: true, state: false }
       };
     }
     return undefined;

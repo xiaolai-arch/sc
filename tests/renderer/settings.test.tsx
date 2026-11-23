@@ -85,7 +85,7 @@ test('restores a backup after confirmation and offers a restart', async () => {
   const restoreBackup = vi.fn().mockResolvedValue({
     path: '/tmp/backup',
     safetyPath: '/tmp/safety',
-    restored: { vault: true, conversations: true, usage: true }
+    restored: { vault: true, conversations: true, usage: true, state: false }
   });
   const restartApp = vi.fn().mockResolvedValue(undefined);
   window.studyCoach = {

@@ -664,7 +664,7 @@ export function SettingsPage({
       return;
     }
     const confirmed = window.confirm(
-      '从备份恢复会覆盖当前项目、记录和对话。恢复前会自动保存一份当前数据的快照；当前设置和 API Key 保持不变。继续？'
+      '从备份恢复会覆盖当前项目、记录和对话。恢复前会自动保存一份当前数据的快照；当前设置和 API Key 保持不变。新机器上没有设置时，备份里的设置会一起还原。继续？'
     );
     if (!confirmed) {
       setBackupStatus({ kind: 'canceled', message: '已取消恢复' });
@@ -1522,6 +1522,11 @@ export function SettingsPage({
               />
               周复盘里提到上次备份
             </label>
+            <div className="mt-4 space-y-1 text-sm text-gray-500 dark:text-[#a1a1a6]">
+              <p>在新电脑安装 ASAKI。</p>
+              <p>把整个备份文件夹复制过去，在「数据与备份 → 从备份恢复…」选择它。</p>
+              <p>恢复会带回项目、记录、对话和用量；新机器上没有设置时，备份里的设置会一起还原，API Key 需要重新填写（它从未进入备份）。</p>
+            </div>
           </Card>
 
           <Card id="settings-notifications">
