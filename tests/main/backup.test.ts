@@ -261,7 +261,12 @@ test('restores vault, conversations and usage after snapshotting current data', 
       now: NOW
     });
 
-    expect(result.restored).toEqual({ vault: true, conversations: true, usage: true });
+    expect(result.restored).toEqual({
+      vault: true,
+      conversations: true,
+      usage: true,
+      state: false
+    });
     expect(
       await readFile(join(vault, 'workspaces', 'kaoyan', 'workspace.md'), 'utf8')
     ).toBe('restored-vault');
@@ -284,6 +289,147 @@ test('restores vault, conversations and usage after snapshotting current data', 
       '{"id":"c1"}'
     );
     expect(await readFile(join(safety, 'state.json'), 'utf8')).toBe('{"onboarded":true}');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// --- P3: state.json adoption (fresh machine only) -----------------------------
+
+test('adopts the backup state.json on a machine without one, with the local vault path', async () => {
+  const { root, vault, userData, backup } = await backupFixture();
+  // A fresh machine: no state.json of its own yet.
+  await rm(join(userData, 'state.json'));
+  await writeFile(
+    join(backup, 'state.json'),
+    JSON.stringify({
+      onboarded: true,
+      settings: {
+        displayName: '小林',
+        vaultPath: 'D:\\old-machine\\StudyCoachVault',
+        provider: { kind: 'anthropic', model: 'claude-sonnet-5-5' },
+        notifications: { enabled: true, morning: '07:30', weeklyEnabled: false },
+        budget: { dailyTokens: 150000 },
+        launchAtLogin: true,
+        strictMastery: true
+      }
+    }),
+    'utf8'
+  );
+  try {
+    const result = await restoreBackup({
+      backupPath: backup,
+      vaultPath: vault,
+      userDataPath: userData,
+      now: NOW
+    });
+
+    expect(result.restored.state).toBe(true);
+    const adopted = JSON.parse(await readFile(join(userData, 'state.json'), 'utf8'));
+    expect(adopted).toEqual({
+      onboarded: true,
+      settings: {
+        displayName: '小林',
+        // The old machine's path must never survive the adoption.
+        vaultPath: vault,
+        provider: { kind: 'anthropic', model: 'claude-sonnet-5-5' },
+        notifications: { enabled: true, morning: '07:30', weeklyEnabled: false },
+        budget: { dailyTokens: 150000 },
+        launchAtLogin: true,
+        strictMastery: true
+      }
+    });
+    // The staged copy is cleaned up with the restore.
+    expect(
+      (await readdir(userData)).filter((name) => name.includes('asaki-restore-state'))
+    ).toEqual([]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('leaves an existing state.json byte-identical even when the backup carries one', async () => {
+  const { root, vault, userData, backup } = await backupFixture();
+  const localStatePath = join(userData, 'state.json');
+  const local =
+    '{"onboarded":true,"settings":{"vaultPath":"C:\\\\mine","provider":{"kind":"ollama","baseURL":"http://127.0.0.1:11434","model":"qwen"}}}';
+  await writeFile(localStatePath, local, 'utf8');
+  try {
+    const result = await restoreBackup({
+      backupPath: backup,
+      vaultPath: vault,
+      userDataPath: userData,
+      now: NOW
+    });
+
+    expect(await readFile(localStatePath, 'utf8')).toBe(local);
+    expect(result.restored.state).toBe(false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a backup without state.json restores without creating one', async () => {
+  const { root, vault, userData, backup } = await backupFixture();
+  await rm(join(userData, 'state.json'));
+  await rm(join(backup, 'state.json'));
+  try {
+    const result = await restoreBackup({
+      backupPath: backup,
+      vaultPath: vault,
+      userDataPath: userData,
+      now: NOW
+    });
+
+    expect(result.restored).toEqual({
+      vault: true,
+      conversations: true,
+      usage: true,
+      state: false
+    });
+    expect(await exists(join(userData, 'state.json'))).toBe(false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a corrupt backup state.json is treated as absent and the restore still succeeds', async () => {
+  const { root, vault, userData, backup } = await backupFixture();
+  await rm(join(userData, 'state.json'));
+  await writeFile(join(backup, 'state.json'), '{not-json', 'utf8');
+  try {
+    const result = await restoreBackup({
+      backupPath: backup,
+      vaultPath: vault,
+      userDataPath: userData,
+      now: NOW
+    });
+
+    expect(result.restored.state).toBe(false);
+    expect(await exists(join(userData, 'state.json'))).toBe(false);
+    // The data restore itself is unaffected by the unusable settings file.
+    expect(await readFile(join(vault, 'workspaces', 'kaoyan', 'workspace.md'), 'utf8')).toBe(
+      'restored-vault'
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a backup state.json without a settings record is not adopted', async () => {
+  const { root, vault, userData, backup } = await backupFixture();
+  await rm(join(userData, 'state.json'));
+  await writeFile(join(backup, 'state.json'), '{"onboarded":true}', 'utf8');
+  try {
+    const result = await restoreBackup({
+      backupPath: backup,
+      vaultPath: vault,
+      userDataPath: userData,
+      now: NOW
+    });
+
+    expect(result.restored.state).toBe(false);
+    expect(await exists(join(userData, 'state.json'))).toBe(false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -207,3 +207,32 @@ test('the age line toggle saves through the backup patch', async () => {
   // Persisted facts are form-external: they never mark the page dirty.
   expect(updateSettings).toHaveBeenCalledTimes(1);
 });
+
+// --- P3: the restore copy matches the fresh-machine adoption ------------------
+
+test('the migration steps promise settings restoration on a machine without settings', async () => {
+  window.studyCoach = apiStub() as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  expect(
+    await screen.findByText(
+      '恢复会带回项目、记录、对话和用量；新机器上没有设置时，备份里的设置会一起还原，API Key 需要重新填写（它从未进入备份）。'
+    )
+  ).toBeInTheDocument();
+  // The pre-P3 wording promised the opposite; it must be gone (评审阻断 3).
+  expect(screen.queryByText(/恢复不改动设置/)).not.toBeInTheDocument();
+});
+
+test('the restore confirmation appends the fresh-machine adoption sentence', async () => {
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  window.studyCoach = apiStub({ restoreBackup: vi.fn().mockResolvedValue(null) }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  await userEvent.click(await screen.findByRole('button', { name: '从备份恢复…' }));
+
+  // The original sentences stay, the adoption sentence joins them before 继续？.
+  expect(confirm).toHaveBeenCalledWith(
+    '从备份恢复会覆盖当前项目、记录和对话。恢复前会自动保存一份当前数据的快照；当前设置和 API Key 保持不变。新机器上没有设置时，备份里的设置会一起还原。继续？'
+  );
+  confirm.mockRestore();
+});

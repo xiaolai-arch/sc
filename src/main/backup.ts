@@ -1,4 +1,4 @@
-import { copyFile, cp, mkdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, cp, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { BackupResult, RestoreResult } from '../shared/ipc';
@@ -288,13 +288,53 @@ export async function copyFileAtomic(source: string, target: string): Promise<vo
   }
 }
 
+interface AdoptableState {
+  onboarded: boolean;
+  settings: Record<string, unknown>;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Reads the backup's `state.json` for adoption, returning null when it is not
+ * usable: unparsable JSON, not an object, or no `settings` record to adopt.
+ * Deep normalization stays where it already lives — the state store's
+ * read-time hydrate fills defaults over whatever lands in the file — so this
+ * only does the structural checks and the one rewrite restore owes the user:
+ * `vaultPath` becomes this machine's current vault path, never the old
+ * machine's.
+ */
+async function readAdoptableState(source: string, vaultPath: string): Promise<AdoptableState | null> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(source, 'utf8'));
+  } catch {
+    return null;
+  }
+  if (!isRecord(parsed) || !isRecord(parsed.settings)) return null;
+  return {
+    // Same coercion as the state store's hydrate: a junk `onboarded` reads as
+    // false, so the fresh machine still sees the first-run dialog.
+    onboarded: typeof parsed.onboarded === 'boolean' ? parsed.onboarded : false,
+    settings: { ...parsed.settings, vaultPath }
+  };
+}
+
 /**
  * Restores a backup in place. The current vault, conversations, settings and
  * usage are snapshotted under `<userData>/restore-safety/<stamp>` first, so a
- * failed or regretted restore can be recovered by hand. `state.json` is
- * deliberately not restored: it carries the vault path and provider settings,
- * and overwriting them could point the app at a stale location. Secrets are
- * untouched.
+ * failed or regretted restore can be recovered by hand.
+ *
+ * `state.json` is adopted only for the migration case: when this machine has
+ * no `state.json` yet and the backup carries a usable one, its settings and
+ * `onboarded` come across with `vaultPath` rewritten to this machine's current
+ * vault path — a restored file must never point at the old machine. An
+ * existing local `state.json` is never touched, and a missing or unusable copy
+ * in the backup is treated as absent: the restore still succeeds. The adopted
+ * file is written through the same atomic replace as usage.json and takes
+ * effect at the restart the renderer already offers. Secrets are untouched.
  */
 export async function restoreBackup(options: RestoreBackupOptions): Promise<RestoreBackupResult> {
   const now = (options.now ?? (() => new Date()))();
@@ -324,6 +364,10 @@ export async function restoreBackup(options: RestoreBackupOptions): Promise<Rest
   const conversationsExists = await isDirectory(conversationsSource);
   const usageSource = join(realBackup, 'usage.json');
   const usageExists = await isFile(usageSource);
+  const backupStateSource = join(realBackup, 'state.json');
+  const backupStateExists = await isFile(backupStateSource);
+  const localStatePath = join(userDataPath, 'state.json');
+  const localStateExists = await isFile(localStatePath);
 
   const safetyPath = join(userDataPath, 'restore-safety', restoreStamp(now));
   await mkdir(safetyPath, { recursive: true });
@@ -382,13 +426,36 @@ export async function restoreBackup(options: RestoreBackupOptions): Promise<Rest
     await copyFileAtomic(usageSource, join(userDataPath, 'usage.json'));
   }
 
+  // The state.json adoption is the migration case only: a fresh machine gets
+  // the backup's settings (with this machine's vault path); a machine with
+  // its own state.json keeps every byte of it. Like usage.json, the write is
+  // an atomic replace and takes effect at the next restart.
+  let stateRestored = false;
+  if (backupStateExists && !localStateExists) {
+    const adopted = await readAdoptableState(backupStateSource, vaultPath);
+    if (adopted) {
+      const stagedState = join(userDataPath, `.asaki-restore-state-${restoreId}`);
+      try {
+        await writeFile(stagedState, `${JSON.stringify(adopted, null, 2)}\n`, {
+          encoding: 'utf8',
+          mode: 0o600
+        });
+        await copyFileAtomic(stagedState, localStatePath);
+        stateRestored = true;
+      } finally {
+        await rm(stagedState, { force: true }).catch(() => undefined);
+      }
+    }
+  }
+
   return {
     path: realBackup,
     safetyPath,
     restored: {
       vault: true,
       conversations: conversationsExists,
-      usage: usageExists
+      usage: usageExists,
+      state: stateRestored
     }
   };
 }

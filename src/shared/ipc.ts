@@ -260,7 +260,12 @@ export interface BackupResult {
   copied: BackupCopied;
 }
 
-/** Result of restoring a backup; settings and secrets are not overwritten. */
+/**
+ * Result of restoring a backup. Secrets are never touched. Settings come
+ * across only onto a machine that has no `state.json` of its own (and only
+ * when the backup carries a usable one); an existing local `state.json` is
+ * never modified.
+ */
 export interface RestoreResult {
   path: string;
   /** Snapshot of the data that was replaced. */
@@ -269,6 +274,8 @@ export interface RestoreResult {
     vault: boolean;
     conversations: boolean;
     usage: boolean;
+    /** True when the backup's `state.json` was adopted (fresh machine only). */
+    state: boolean;
   };
 }
 
