@@ -30,7 +30,9 @@ import {
   type CommitmentService
 } from './commitments/service';
 import { ProactiveCheckInService } from './check-ins/proactive-check-in-service';
+import type { ResumeFacts } from './check-ins/prompt';
 import {
+  projectResolvedCommitment,
   weeklyAccuracyBySubject,
   weeklyHonest,
   type WeeklyHonest,
@@ -617,13 +619,16 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
                     (entry.status === 'done' || entry.status === 'dropped') &&
                     entry.resolvedAt !== undefined
                 )
-                .map((entry) => ({
-                  id: entry.id,
-                  text: entry.text,
-                  due: entry.due,
-                  status: entry.status as 'done' | 'dropped',
-                  resolvedAt: entry.resolvedAt as string
-                }));
+                .map((entry) =>
+                  projectResolvedCommitment({
+                    id: entry.id,
+                    text: entry.text,
+                    due: entry.due,
+                    status: entry.status as 'done' | 'dropped',
+                    resolvedAt: entry.resolvedAt as string,
+                    ...(entry.workspaceId ? { workspaceId: entry.workspaceId } : {})
+                  })
+                );
         return weeklyHonest({
           attempts,
           mistakes,
@@ -638,21 +643,18 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     }
 
     /**
-     * The oldest promise due by `today`, for the morning line. Projects with
-     * check-in off are skipped, matching the rest of the check-in. Any read
-     * failure means null and the morning message keeps its previous shape.
+     * The oldest promise due by `today`, for the morning line.
+     *
+     * A promise follows the person, not the project: it is returned even when
+     * it was recorded inside a project whose check-in is off, because the user
+     * made that promise out loud and the morning check still owes them the
+     * question. Only tasks, memory and topics stay scoped to check-in projects.
+     * Any read failure means null and the morning message keeps its shape.
      */
     async function readDueCommitment(today: Date): Promise<{ text: string; due: string } | null> {
       try {
-        const off = new Set(
-          (await workspace.listWorkspaces())
-            .filter((entry) => entry.checkIn === 'off')
-            .map((entry) => entry.id)
-        );
         const pending = await commitments.pending(formatLocalDate(today));
-        const match = pending.find(
-          (entry) => entry.workspaceId === undefined || !off.has(entry.workspaceId)
-        );
+        const match = pending[0];
         return match === undefined ? null : { text: match.text, due: match.due };
       } catch {
         return null;
@@ -662,22 +664,30 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
         /**
      * The mute-resume facts for the first allowed check after a mute ended.
      *
-     * Two write paths exist: a manual 恢复提醒 click stores `resumedFrom` (and
-     * clears `snoozedUntil`); a natural expiry leaves the past `snoozedUntil`
-     * in place. Peek reads whichever is pending (resume first), consume clears
-     * exactly that key and nothing else, so an untouched settings file keeps
-     * its bytes.
+     * Two write paths exist: a manual 恢复提醒 click stores today's date as
+     * `resumedFrom` (plus the cut-short mute's last day as `resumedFromMuteEnd`)
+     * and clears `snoozedUntil`; a natural expiry leaves the past
+     * `snoozedUntil` in place. Peek reads whichever is pending (resume first),
+     * consume clears exactly those keys and nothing else, so an untouched
+     * settings file keeps its bytes.
      */
-    async function peekResume(date: string): Promise<string | null> {
+    async function peekResume(date: string): Promise<ResumeFacts | null> {
       const notifications = (await settings.get()).notifications;
       if (
         isLocalDate(notifications.resumedFrom) &&
         notifications.resumedFrom! <= date
       ) {
-        return notifications.resumedFrom!;
+        const muteEnd = notifications.resumedFromMuteEnd;
+        // A manual resume that cut the mute short names the real end. The
+        // mute ended later than today, so this is the 「原定」 case; otherwise
+        // the mute had reached today and the natural sentence is truthful.
+        if (isLocalDate(muteEnd) && muteEnd! > notifications.resumedFrom!) {
+          return { day: notifications.resumedFrom!, muteEnd };
+        }
+        return { day: notifications.resumedFrom! };
       }
       if (isLocalDate(notifications.snoozedUntil) && notifications.snoozedUntil < date) {
-        return notifications.snoozedUntil;
+        return { day: notifications.snoozedUntil };
       }
       return null;
     }
@@ -685,7 +695,11 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     async function consumeResume(): Promise<void> {
       const notifications = (await settings.get()).notifications;
       if (isLocalDate(notifications.resumedFrom)) {
-        await settings.update({ notifications: { resumedFrom: '' } });
+        // Clear both keys together: `resumedFromMuteEnd` is only ever the
+        // material for one sentence and must not outlive its resume.
+        await settings.update({
+          notifications: { resumedFrom: '', resumedFromMuteEnd: '' }
+        });
         return;
       }
       if (isLocalDate(notifications.snoozedUntil) && notifications.snoozedUntil < today()) {

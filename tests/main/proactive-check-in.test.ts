@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FakeModelClient } from '../../src/main/agent/model-client';
 import { ProactiveCheckInService } from '../../src/main/check-ins/proactive-check-in-service';
+import type { ResumeFacts } from '../../src/main/check-ins/prompt';
 import { ConversationStore } from '../../src/main/conversations/conversation-store';
 import { Scheduler, type SchedulerNotification } from '../../src/main/scheduler/scheduler';
 import { createDefaultSettings } from '../../src/main/settings/defaults';
@@ -547,20 +548,26 @@ test('skips check-ins when notifications are disabled', async () => {
 
 /**
  * The same peek/consume pair `createAppContext` wires up: peek reports the
- * pending resume day (a manual `resumedFrom` first, then an expired
- * `snoozedUntil`), consume spends it in the settings object.
+ * pending resume (a manual `resumedFrom` first, then an expired
+ * `snoozedUntil`), consume spends it in the settings object. An early manual
+ * resume carries the cut-short mute's last day as `muteEnd`, exactly as the
+ * real peek does when `resumedFromMuteEnd` is present.
  */
 function resumePair(notifications: AppSettings['notifications'], today: () => string) {
   let consumed = 0;
   return {
     consumed: () => consumed,
-    getResume: async (): Promise<string | null> => {
+    getResume: async (): Promise<ResumeFacts | null> => {
       const day = today();
       if (notifications.resumedFrom && notifications.resumedFrom <= day) {
-        return notifications.resumedFrom;
+        const muteEnd = notifications.resumedFromMuteEnd;
+        if (muteEnd && muteEnd > notifications.resumedFrom) {
+          return { day: notifications.resumedFrom, muteEnd };
+        }
+        return { day: notifications.resumedFrom };
       }
       if (notifications.snoozedUntil && notifications.snoozedUntil < day) {
-        return notifications.snoozedUntil;
+        return { day: notifications.snoozedUntil };
       }
       return null;
     },
@@ -568,6 +575,7 @@ function resumePair(notifications: AppSettings['notifications'], today: () => st
       consumed += 1;
       if (notifications.resumedFrom) delete notifications.resumedFrom;
       else if (notifications.snoozedUntil) notifications.snoozedUntil = '';
+      if (notifications.resumedFromMuteEnd) delete notifications.resumedFromMuteEnd;
     }
   };
 }
@@ -640,7 +648,7 @@ test('a manual resume spends resumedFrom and keeps it off later messages', async
     const morning = await service.check('morning', '2026-11-06');
     expect(morning).not.toBeNull();
     const text = (await value.get((await value.list())[0]!.id))!.messages[0]!.text;
-    // The sentence names the day the user picked, not the resume day.
+    // A resume whose mute had already ended speaks the natural-expiry sentence.
     expect(text.endsWith('你之前暂停到 11月5日，今天是恢复的第一天。')).toBe(true);
     expect(notifications.resumedFrom).toBeUndefined();
     // The stored mute was never touched by a manual resume.
@@ -655,6 +663,87 @@ test('a manual resume spends resumedFrom and keeps it off later messages', async
       (await value.get((await value.list()).find((entry) => entry.title.includes('11-07'))!.id))!
         .messages[0]!.text
     ).not.toContain('恢复的第一天');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('resuming early into a 7-day mute speaks its sentence on the first allowed check', async () => {
+  // The renderer, mid-mute, writes today's date as `resumedFrom` and the cut
+  // short mute's last day as `resumedFromMuteEnd`. The very next check runs
+  // today (the mute is cleared) and must say the 「原定」 sentence once.
+  const { dir, value } = await store();
+  try {
+    const today = '2026-11-02';
+    // 7-day mute set on 11-02 would have ended 11-09; the user resumes on the
+    // second day, so `resumedFrom` is today and the original end is 11-09.
+    const notifications = {
+      ...settings().notifications,
+      resumedFrom: today,
+      resumedFromMuteEnd: '2026-11-09'
+    };
+    const pair = resumePair(notifications, () => today);
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () => settings({ notifications }),
+      ...pair,
+      now: () => NOW
+    });
+
+    const morning = await service.check('morning', today);
+    expect(morning).not.toBeNull();
+    const text = (await value.get((await value.list())[0]!.id))!.messages[0]!.text;
+    // The sentence appears on the very first allowed check and says exactly
+    // once that the pause was cut short, naming the day it would have ended.
+    expect(text.endsWith('你提前恢复了提醒，原定暂停到 11月9日。')).toBe(true);
+    expect(text.split('原定暂停到')).toHaveLength(2);
+    // Both the resume day and its mute-end carrier are cleared together.
+    expect(notifications.resumedFrom).toBeUndefined();
+    expect(notifications.resumedFromMuteEnd).toBeUndefined();
+    expect(pair.consumed()).toBe(1);
+
+    // A later check carries no resume sentence at all.
+    const next = await service.check('evening', today);
+    expect(next).not.toBeNull();
+    const evening = (await value.get((await value.list())[0]!.id))!.messages.find(
+      (message) => message.trigger === 'evening'
+    )!;
+    expect(evening.text).not.toContain('原定暂停到');
+    expect(evening.text).not.toContain('恢复');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a still-muted day says nothing and never spends an early resume', async () => {
+  // Defense in depth: even if a `resumedFromMuteEnd` somehow rode along while
+  // the mute is still in force (snoozedUntil covers today), the check is
+  // skipped before peeking, so nothing is spoken or consumed.
+  const { dir, value } = await store();
+  try {
+    const notifications = {
+      ...settings().notifications,
+      snoozedUntil: '2026-11-09',
+      resumedFrom: '2026-11-02',
+      resumedFromMuteEnd: '2026-11-09'
+    };
+    const pair = resumePair(notifications, () => '2026-11-02');
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () => settings({ notifications }),
+      ...pair,
+      now: () => NOW
+    });
+
+    expect(await service.check('morning', '2026-11-02')).toBeNull();
+    expect(await value.list()).toEqual([]);
+    expect(pair.consumed()).toBe(0);
+    expect(notifications.resumedFrom).toBe('2026-11-02');
+    expect(notifications.resumedFromMuteEnd).toBe('2026-11-09');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

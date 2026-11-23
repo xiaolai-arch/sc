@@ -32,6 +32,36 @@ export interface WeeklyHonestCommitment {
   status: 'done' | 'dropped';
   /** ISO timestamp of when it was resolved. */
   resolvedAt: string;
+  /**
+   * The project the promise was recorded in, when it had one. Absent for a
+   * promise that is not tied to a project, so the caller's mapping must not
+   * invent an `undefined`-valued key: the projection keeps the record's shape.
+   */
+  workspaceId?: string;
+}
+
+/**
+ * Maps a stored commitment onto the projection `weeklyHonest` reads, carrying
+ * `workspaceId` through only when the record has one. The key must be absent —
+ * not present-and-undefined — when the promise has no project, so serializing
+ * or deep-equality comparing the projection stays stable.
+ */
+export function projectResolvedCommitment(entry: {
+  id: string;
+  text: string;
+  due: string;
+  status: 'done' | 'dropped';
+  resolvedAt: string;
+  workspaceId?: string;
+}): WeeklyHonestCommitment {
+  return {
+    id: entry.id,
+    text: entry.text,
+    due: entry.due,
+    status: entry.status,
+    resolvedAt: entry.resolvedAt,
+    ...(entry.workspaceId ? { workspaceId: entry.workspaceId } : {})
+  };
 }
 
 /**

@@ -27,6 +27,52 @@ export function isLocalDate(value: unknown): value is string {
 }
 
 /**
+ * Repairs a stored `YYYY-MM-DD` that only the old lenient parser accepted,
+ * because the Date constructor rolls an impossible day over into the next
+ * month (`2026-02-30` was read as March 2). The day is clamped to the last real
+ * day of the month it was written for, so `2026-02-30` becomes `2026-02-28`.
+ *
+ * Returns undefined for a real date, for an unreadable shape, and for a bad
+ * month, so callers can treat that as "nothing to repair". A four-digit year
+ * below 100 is refused because `new Date(year, ...)` would shift it to 1900s.
+ */
+export function repairRolloverDate(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const match = LOCAL_DATE.exec(value);
+  if (!match) return undefined;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12) return undefined;
+  // Day 0 of the next month is the last day of this one, leap years included.
+  const lastDay = new Date(year, month, 0).getDate();
+  if (day < 1 || day <= lastDay) return undefined;
+  const repaired = new Date(year, month - 1, lastDay);
+  if (repaired.getFullYear() !== year || repaired.getMonth() !== month - 1) {
+    return undefined;
+  }
+  return formatLocalDate(repaired);
+}
+
+/**
+ * The day the old lenient `Date` parser read `value` as, e.g. `2026-02-30` →
+ * `2026-03-02`, or undefined when the value is already a real date or cannot
+ * be read at all. Used to repair availability records, where the weekday and
+ * the Monday..Sunday week the old code scheduled against must be preserved;
+ * the same-month clamp would move the day out of that week.
+ */
+export function rolloverIsoDate(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !LOCAL_DATE.test(value)) return undefined;
+  if (isLocalDate(value)) return undefined;
+  const date = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return undefined;
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
  * True when `date` is on or before the stored mute-until day. An empty,
  * malformed or already past `until` leaves check-ins unmuted, so a stored date
  * equal to today behaves exactly like the old single-day snooze.

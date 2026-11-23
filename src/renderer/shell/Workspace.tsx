@@ -1101,12 +1101,16 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
       setActionError('应用桥接不可用，请刷新页面重试。');
       return;
     }
-    // Record the mute's last day so the first check after the resume can say
-    // one factual sentence about it. `resumedFrom` is cleared again by the
-    // check that consumes it; an empty value never serializes.
+    // `resumedFrom` records the day the user resumed (today), which is what
+    // that field means; the last muted day rides along as `resumedFromMuteEnd`
+    // so the first check can truthfully say 「原定暂停到 X」 without the mute
+    // still being in force. Both are cleared together by the check that
+    // consumes them; an empty value never serializes.
     const prior = snoozedUntil ?? '';
     const resumePatch =
-      prior !== '' ? { snoozedUntil: '', resumedFrom: prior } : { snoozedUntil: '' };
+      prior !== ''
+        ? { snoozedUntil: '', resumedFrom: today, resumedFromMuteEnd: prior }
+        : { snoozedUntil: '' };
     try {
       const settings = await api.updateSettings({ notifications: resumePatch });
       setSnoozedUntil(settings.notifications.snoozedUntil ?? '');

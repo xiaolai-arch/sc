@@ -100,6 +100,26 @@ test('resumes check-ins and brings the buttons back', async () => {
   expect((await api.getSettings()).notifications.snoozedUntil).toBe('');
 });
 
+test('an early resume writes today plus the original mute end', async () => {
+  // A 7-day mute resumed the same day: `resumedFrom` is today (the resume day)
+  // and `resumedFromMuteEnd` keeps the day the mute would have ended, so the
+  // first check can say 「原定暂停到 …」.
+  const api = setup();
+  await screen.findByText(homeGreeting('xiaolai', new Date()));
+  await userEvent.click(screen.getByRole('button', { name: '提醒' }));
+
+  const today = formatLocalDate(new Date());
+  const originalEnd = addLocalDays(today, 7);
+  await userEvent.click(screen.getByRole('button', { name: '暂停 7 天' }));
+  await screen.findByText(/已静音至/);
+  await userEvent.click(screen.getByRole('button', { name: '恢复提醒' }));
+
+  const settings = await api.getSettings();
+  expect(settings.notifications.snoozedUntil).toBe('');
+  expect(settings.notifications.resumedFrom).toBe(today);
+  expect(settings.notifications.resumedFromMuteEnd).toBe(originalEnd);
+});
+
 test('shows the muted state when today is already snoozed', async () => {
   localStorage.clear();
   const api = createMockApi(localStorage, { streamPace: 0.05 });

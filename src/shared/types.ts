@@ -68,12 +68,20 @@ export interface NotificationSettings {
   /** Local date (YYYY-MM-DD) that pauses proactive check-ins; '' clears it. */
   snoozedUntil?: string;
   /**
-   * The last muted day of a mute that just ended (`YYYY-MM-DD`). The first
-   * proactive check-in after the mute appends one factual sentence built from
-   * it, then the field is cleared — so the key is only ever serialized while a
-   * resume is pending, and a settings file without it round-trips unchanged.
+   * The local day the mute was resumed (`YYYY-MM-DD`). The first proactive
+   * check-in after the mute appends one factual sentence built from it, then
+   * the field is cleared — so the key is only ever serialized while a resume is
+   * pending, and a settings file without it round-trips unchanged.
    */
   resumedFrom?: string;
+  /**
+   * The last muted day the manual resume cut short (`YYYY-MM-DD`), when the
+   * user resumed before the mute would have ended. Stored beside
+   * `resumedFrom` and cleared with it, so the "原定暂停到 X" sentence can name
+   * the real end without the mute still being in force. Absent for a natural
+   * expiry, which reads `snoozedUntil` instead.
+   */
+  resumedFromMuteEnd?: string;
   dndStart: string;
   dndEnd: string;
 }

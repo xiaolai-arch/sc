@@ -188,6 +188,9 @@ test.each([
   ['a past Monday', { weekStart: '2026-11-16', busyDays: [2] }],
   ['beyond two weeks', { weekStart: '2026-12-07', busyDays: [2] }],
   ['not a date', { weekStart: '下周', busyDays: [2] }],
+  // A fake Monday the old Date parser rolled over (2026-02-30 → 03-02) must
+  // be refused by the tool's `isMonday`, never reach the service.
+  ['a rolled-over fake Monday', { weekStart: '2026-02-30', busyDays: [2] }],
   ['empty busyDays', { weekStart: '2026-11-23', busyDays: [] }],
   ['weekday out of range', { weekStart: '2026-11-23', busyDays: [8] }],
   ['weekday zero', { weekStart: '2026-11-23', busyDays: [0] }],

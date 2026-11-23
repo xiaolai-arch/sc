@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { createCommitmentService } from '../../src/main/commitments/service';
 import {
   MAX_COMMITMENT_TEXT,
+  isCommitmentDate,
   parseCommitmentsFile,
   resolveCommitmentDue,
   serializeCommitmentsFile,
@@ -328,4 +329,81 @@ test('resolveCommitmentDue maps the phrasings the user actually says', () => {
   // Anything unreadable is refused rather than guessed.
   expect(resolveCommitmentDue('尽快', sunday)).toBeUndefined();
   expect(resolveCommitmentDue('2026-13-40', sunday)).toBeUndefined();
+});
+
+test('isCommitmentDate refuses days the calendar rolls over', () => {
+  // The Date constructor turns each of these into a day in the next month; the
+  // strict check must still refuse the literal string.
+  for (const fake of ['2026-02-30', '2026-04-31', '2026-06-31', '2026-11-31']) {
+    expect(isCommitmentDate(fake)).toBe(false);
+  }
+  // 2026 is not a leap year, so its 29 February is not a real day.
+  expect(isCommitmentDate('2026-02-29')).toBe(false);
+  expect(isCommitmentDate('2024-02-29')).toBe(true);
+  // Ordinary real days stay accepted, boundaries included.
+  expect(isCommitmentDate('2026-12-31')).toBe(true);
+  expect(isCommitmentDate('2026-01-01')).toBe(true);
+  // Malformed shapes are still refused.
+  expect(isCommitmentDate('2026-1-01')).toBe(false);
+  expect(isCommitmentDate('12-01')).toBe(false);
+  expect(isCommitmentDate('明天')).toBe(false);
+  expect(isCommitmentDate(undefined)).toBe(false);
+});
+
+test('create refuses a fake due instead of writing it to the vault', async () => {
+  await withVault(async (root) => {
+    const service = createCommitmentService({ root, now: () => NOW });
+    // A fake date is neither a real day nor a relative phrase, so it is refused
+    // rather than silently defaulted to tomorrow or written as-is.
+    await expect(service.create({ text: '不该写进去', due: '2026-02-30' })).rejects.toThrow(
+      '承诺日期必须是 YYYY-MM-DD'
+    );
+    // Nothing was written.
+    expect(await service.list()).toEqual([]);
+  });
+});
+
+test('a stored fake due is repaired on read and the promise survives the next write', async () => {
+  // A file written by the old lenient validator holds `2026-02-30`. A strict
+  // read must not drop it: the day is clamped to the last real day of February
+  // and kept, so the next write never deletes the user's promise.
+  await withVault(async (root) => {
+    const raw = [
+      '---',
+      'type: log',
+      'source: user',
+      'kind: commitments',
+      'items:',
+      '  - id: cm-fake',
+      '    text: 早先写的一条',
+      "    due: '2026-02-30'",
+      '    status: open',
+      "    createdAt: '2026-02-01T08:00:00.000Z'",
+      '---',
+      '# 承诺',
+      '',
+      ''
+    ].join('\n');
+    await writeFile(commitmentsFile(root), raw, 'utf8');
+
+    const service = createCommitmentService({ root, now: () => NOW });
+    // Listed with a real date, not dropped.
+    expect(await service.list()).toEqual([
+      {
+        id: 'cm-fake',
+        text: '早先写的一条',
+        due: '2026-02-28',
+        status: 'open',
+        createdAt: '2026-02-01T08:00:00.000Z'
+      }
+    ]);
+    // A pure read does not rewrite the file.
+    expect(await readFile(commitmentsFile(root), 'utf8')).toBe(raw);
+
+    // The first write persists the repaired day; nothing is lost.
+    await service.create({ text: '新的一条', due: '2026-11-24' });
+    const reread = parseCommitmentsFile(await readFile(commitmentsFile(root), 'utf8'));
+    expect(reread[0]).toMatchObject({ id: 'cm-fake', due: '2026-02-28' });
+    expect(reread).toHaveLength(2);
+  });
 });

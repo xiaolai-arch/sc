@@ -92,7 +92,7 @@ export interface SchedulerOptions {
   onError?: (error: unknown) => void;
 }
 
-interface Trigger {
+interface TriggerBase {
   kind: SchedulerTriggerKind;
   id: string;
   time: string;
@@ -109,15 +109,35 @@ interface Trigger {
   postponed?: boolean;
   /** Due immediately regardless of the clock (a stale postponement caught up). */
   catchUp?: boolean;
-  /**
-   * The state that governs *today*, as computed by `effectiveReminderState`.
-   * Carrying the effective state (not the raw `reminder.state`) keeps the
-   * next-day rule in one place: the DND branch below writes `pending` only
-   * when this says the reminder is neither pending nor postponed, so a
-   * reminder finished yesterday is never rewritten back to pending at night.
-   */
-  effectiveState?: ReminderState;
 }
+
+/**
+ * A reminder trigger always names its reminder and always carries the state
+ * that governs *today*, as computed by `effectiveReminderState`. Carrying the
+ * effective state (not the raw `reminder.state`) keeps the next-day rule in one
+ * place: the DND branch below writes `pending` only when this says the reminder
+ * is neither pending nor postponed, so a reminder finished yesterday is never
+ * rewritten back to pending at night.
+ *
+ * `effectiveState` is required here (and forbidden on every other kind) so a
+ * future `triggers.push` of a reminder cannot omit it: an omitted value would
+ * read as `undefined`, pass the DND guard, and write `pending` over a finished
+ * reminder — the exact bug iter30 fixed. The union makes that a type error.
+ */
+interface ReminderTrigger extends TriggerBase {
+  kind: 'reminder';
+  reminderId: string;
+  effectiveState: ReminderState;
+}
+
+/** Every non-reminder push: it has no reminder lifecycle and no effective state. */
+interface OtherTrigger extends TriggerBase {
+  kind: Exclude<SchedulerTriggerKind, 'reminder'>;
+  reminderId?: undefined;
+  effectiveState?: undefined;
+}
+
+type Trigger = ReminderTrigger | OtherTrigger;
 
 const SNOOZE_INTERVAL_MS = 30_000;
 
@@ -351,7 +371,7 @@ export class Scheduler {
 
   /** Delivery succeeded: record `fired` and drop the postponement. */
   private async markFired(trigger: Trigger, at: Date): Promise<void> {
-    if (trigger.kind !== 'reminder' || trigger.reminderId === undefined) return;
+    if (trigger.kind !== 'reminder') return;
     if (trigger.postponed) {
       // The postponed occurrence replaces that day's normal one: pretend the
       // regular trigger already fired so it cannot deliver twice.
@@ -370,7 +390,7 @@ export class Scheduler {
 
   /** The notification sink failed: record `failed` with a readable cause. */
   private async markFailed(trigger: Trigger, cause: unknown): Promise<void> {
-    if (trigger.kind !== 'reminder' || trigger.reminderId === undefined) return;
+    if (trigger.kind !== 'reminder') return;
     const message = cause instanceof Error ? cause.message : String(cause);
     await this.writeReminderState(trigger.reminderId, {
       state: 'failed',
@@ -445,13 +465,16 @@ export class Scheduler {
         // A postponement keeps its own `postponed` state so the page still
         // shows the new time. Only write on a real change, so a long DND
         // window does not rewrite reminders.md every 30 seconds.
-        if (
-          trigger.kind === 'reminder' &&
-          trigger.reminderId !== undefined &&
-          trigger.effectiveState !== 'pending' &&
-          trigger.effectiveState !== 'postponed'
-        ) {
-          await this.writeReminderState(trigger.reminderId, { state: 'pending' });
+        if (trigger.kind === 'reminder') {
+          // `effectiveState` is required on reminder triggers by the type, so
+          // this branch can never read an accidental `undefined` and rewrite a
+          // finished reminder back to pending.
+          if (
+            trigger.effectiveState !== 'pending' &&
+            trigger.effectiveState !== 'postponed'
+          ) {
+            await this.writeReminderState(trigger.reminderId, { state: 'pending' });
+          }
         }
         continue;
       }

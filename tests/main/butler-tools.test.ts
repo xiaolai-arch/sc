@@ -1,8 +1,12 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   createButlerTools,
   executeButlerTool,
   ToolInputError
 } from '../../src/main/butler/tools';
+import { createWorkspaceService } from '../../src/main/workspace/create-workspace-service';
 import type { KnowledgeService, KnowledgeTopic } from '../../src/shared/knowledge';
 import type { ProfileService } from '../../src/shared/profile';
 import type {
@@ -403,6 +407,41 @@ test('create_task passes an optional cue to the service', async () => {
   expect(createTask).toHaveBeenCalledWith(
     expect.objectContaining({ title: '真题', cue: '到自习室' })
   );
+});
+
+test('create_task refuses a fake due before it reaches the vault', async () => {
+  // The model can put any string in `due`; here the tool is wired to the real
+  // workspace service, so this is the model-reachable path end to end. The
+  // fake day the Date parser rolls over must be refused and nothing written.
+  const dir = await mkdtemp(join(tmpdir(), 'asaki-butler-create-task-'));
+  try {
+    const service = createWorkspaceService(dir, { seed: false });
+    const workspace = await service.createWorkspace({
+      name: '考研',
+      kind: 'exam',
+      goal: '上岸',
+      description: ''
+    });
+    const result = await executeButlerTool(
+      {
+        id: 'c2e',
+        name: 'create_task',
+        arguments: { title: '真题', subject: '数学', durationMin: 45, due: '2026-02-30' }
+      },
+      tools,
+      {
+        workspace: service,
+        workspaceId: workspace.id,
+        now: () => new Date('2026-11-22T20:30:00')
+      }
+    );
+
+    expect(result.ok).toBe(false);
+    expect(JSON.parse(result.content).error).toContain('task due date');
+    expect((await service.getWorkspaceSnapshot(workspace.id)).tasks).toHaveLength(0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('update_task sets and clears the cue', async () => {

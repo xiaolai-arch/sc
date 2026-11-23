@@ -389,6 +389,15 @@ function requireCreateTask(value: unknown): CreateTaskInput {
   if (input.startAt !== undefined && !isLocalDateTime(input.startAt)) {
     throw new Error('任务开始时间无效。');
   }
+  // A fake date the Date parser would roll over must never reach the service.
+  // Same guard and wording as the update path just below.
+  if (
+    input.due !== undefined &&
+    input.due !== null &&
+    !isTargetDate(input.due)
+  ) {
+    throw new Error('任务截止日期无效。');
+  }
   if (input.repeat !== undefined && !isTaskRepeat(input.repeat)) {
     throw new Error('任务重复规则无效。');
   }
@@ -398,8 +407,6 @@ function requireCreateTask(value: unknown): CreateTaskInput {
   const cue = requireTaskCue(input.cue, false);
   return { ...input, ...(cue !== undefined ? { cue } : {}) } as unknown as CreateTaskInput;
 }
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 function requireUpdateWorkspaceTask(value: unknown): UpdateWorkspaceTaskInput {
   const input = requireObject(value, '更新任务');
@@ -447,7 +454,7 @@ function requireUpdateWorkspaceTask(value: unknown): UpdateWorkspaceTaskInput {
   if (
     input.due !== undefined &&
     input.due !== null &&
-    (typeof input.due !== 'string' || !ISO_DATE.test(input.due) || Number.isNaN(Date.parse(input.due)))
+    !isTargetDate(input.due)
   ) {
     throw new Error('任务截止日期无效。');
   }
