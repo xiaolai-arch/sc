@@ -43,7 +43,7 @@ import { createKnowledgeService } from './knowledge/create-knowledge-service';
 import { createMemoryService } from './memory/create-memory-service';
 import { createLongPlanService } from './plans/long-plan-service';
 import { createPracticeService } from './practice';
-import { BUSY_DAY_MINUTES, createWorkspacePlanner } from './planning';
+import { busyDayMinutes, createWorkspacePlanner } from './planning';
 import { createSearchService } from './search';
 import { createDefaultSettings } from './settings/defaults';
 import { InMemorySecretStore, SafeStorageSecretStore, type SecretStore } from './settings/secret-store';
@@ -1193,17 +1193,12 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       const services = await getServices();
       // A day the user said is especially full gets one small task instead of
       // a normal-sized plan — but only when this call does not pin the minutes
-      // itself. A broken availability record must never block planning.
-      let weekAvailabilityMinutes: number | undefined;
-      if (input.availableMinutes === undefined) {
-        try {
-          const date = input.date ?? today();
-          const busy = await services.weekAvailability.busyDatesBetween(date, date);
-          if (busy.includes(date)) weekAvailabilityMinutes = BUSY_DAY_MINUTES;
-        } catch {
-          // Stay without the week override.
-        }
-      }
+      // itself. The read is shared with the plan_workspace tool (`busyDayMinutes`)
+      // and best-effort: a broken record never blocks planning.
+      const weekAvailabilityMinutes =
+        input.availableMinutes === undefined
+          ? await busyDayMinutes(services.weekAvailability, input.date ?? today())
+          : undefined;
       return services.planner.plan({
         ...input,
         ...(weekAvailabilityMinutes !== undefined ? { weekAvailabilityMinutes } : {})
