@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { formatLocalDate } from '../../shared/date';
+import {
+  formatLocalDate,
+  isLocalDateTimeSeconds,
+  localDaysBetween
+} from '../../shared/date';
 import { friendlyErrorMessage } from '../../shared/errors';
 import {
   MAX_ACCOUNTABILITY_NAME,
+  type BackupSettings,
   type LocalCliAgent,
   type LocalCliEffort,
   type NotificationSettings,
@@ -128,6 +133,27 @@ function cliAuthClass(entry: LocalCliEntry): string {
   return 'text-gray-500 dark:text-[#a1a1a6]';
 }
 
+/**
+ * The 「上次备份：…」 label for a stored timestamp: `今天 HH:mm` for a same-day
+ * export, otherwise `N 天前`. Null when the record is unreadable, so the
+ * status line can say 「从未备份过。」 instead of a wrong fact.
+ */
+function backupAgeLabel(lastBackupAt: string, today: string): string | null {
+  if (!isLocalDateTimeSeconds(lastBackupAt)) return null;
+  const days = localDaysBetween(lastBackupAt.slice(0, 10), today);
+  // Same-day shows the clock time; a skewed-future stamp still reads as today.
+  if (days <= 0) return `今天 ${lastBackupAt.slice(11, 16)}`;
+  return `${days} 天前`;
+}
+
+/** The 「上次成功：…」 label; days only, so today is just 「今天」。 */
+function backupSuccessLabel(lastBackupAt: string, today: string): string | null {
+  if (!isLocalDateTimeSeconds(lastBackupAt)) return null;
+  const days = localDaysBetween(lastBackupAt.slice(0, 10), today);
+  if (days <= 0) return '今天';
+  return `${days} 天前`;
+}
+
 export function SettingsPage({
   onClose,
   embedded = false,
@@ -180,6 +206,12 @@ export function SettingsPage({
     kind: 'success' | 'canceled' | 'error';
     message: string;
   } | null>(null);
+  // The persisted last-backup facts; written by the export flow in the main
+  // process, so the page only reads and refreshes them.
+  const [backupInfo, setBackupInfo] = useState<BackupSettings | null>(null);
+  // Why this session's export failed. `lastBackupError` (P1) will persist the
+  // reason; until then a failure restored from settings shows the plain line.
+  const [backupFailureReason, setBackupFailureReason] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<NotificationSettings>({
     enabled: true,
     morning: '08:00',
@@ -197,6 +229,9 @@ export function SettingsPage({
   // The local accountability name: '' means off, and clearing the input turns
   // the feature off everywhere (nothing else persists the name).
   const [accountabilityName, setAccountabilityName] = useState('');
+  // Opt-in: the Sunday review appends one line about the last export. Off
+  // (absent) by default; saved through the normal 保存 flow.
+  const [backupAgeLine, setBackupAgeLine] = useState(false);
   const baselineRef = useRef<string | null>(null);
   const [dirty, setDirty] = useState(false);
 
@@ -219,6 +254,7 @@ export function SettingsPage({
       strictMastery,
       displayName,
       accountabilityName,
+      backupAgeLine,
       apiKeyValue
     ]);
   }
@@ -251,6 +287,7 @@ export function SettingsPage({
     strictMastery,
     displayName,
     accountabilityName,
+    backupAgeLine,
     apiKey
   ]);
 
@@ -317,6 +354,9 @@ export function SettingsPage({
       setStrictMastery(value.strictMastery === true);
       setDisplayName(value.displayName?.trim() || 'xiaolai');
       setAccountabilityName(value.accountabilityName ?? '');
+      setBackupAgeLine(value.backup?.ageLineEnabled === true);
+      setBackupInfo(value.backup ?? null);
+      setBackupFailureReason(null);
       setLoaded(true);
     } catch (cause) {
       setLoadError(friendlyErrorMessage(cause, '加载设置失败。'));
@@ -498,7 +538,9 @@ export function SettingsPage({
         launchAtLogin,
         strictMastery,
         // '' reaches the service as an explicit clear, removing the key.
-        accountabilityName: trimmedAccountabilityName
+        accountabilityName: trimmedAccountabilityName,
+        // Merged field-by-field: the recorded last-backup facts survive.
+        backup: { ageLineEnabled: backupAgeLine }
       });
       if (apiKey.trim()) {
         await api.setApiKey(apiKey.trim());
@@ -572,6 +614,21 @@ export function SettingsPage({
     setThemePreference(preference);
   }
 
+  /**
+   * Re-reads the last-backup facts the main process just recorded. Best-effort:
+   * the status line must never turn a finished export into an error, and a
+   * failed read keeps the previous facts.
+   */
+  async function refreshBackupInfo() {
+    const api = window.studyCoach;
+    if (!api || typeof api.getSettings !== 'function') return;
+    try {
+      setBackupInfo((await api.getSettings()).backup ?? null);
+    } catch {
+      // Keep the previous status line.
+    }
+  }
+
   async function exportBackup() {
     const api = window.studyCoach;
     if (!api || typeof api.exportBackup !== 'function') {
@@ -586,12 +643,15 @@ export function SettingsPage({
         setBackupStatus({ kind: 'canceled', message: '已取消' });
       } else {
         setBackupStatus({ kind: 'success', message: `已导出到 ${result.path}` });
+        // The main process recorded the success; the status line quotes it.
+        setBackupFailureReason(null);
+        await refreshBackupInfo();
       }
     } catch (cause) {
-      setBackupStatus({
-        kind: 'error',
-        message: friendlyErrorMessage(cause, '导出备份失败，请重试。')
-      });
+      const reason = friendlyErrorMessage(cause, '导出备份失败，请重试。');
+      setBackupStatus({ kind: 'error', message: reason });
+      setBackupFailureReason(reason);
+      await refreshBackupInfo();
     } finally {
       setExportingBackup(false);
     }
@@ -653,6 +713,30 @@ export function SettingsPage({
     : cliModelTrimmed;
   const cliInheritLabel = inheritModelLabel(cliCatalog);
   const today = formatLocalDate(new Date());
+  // The persistent backup status line, always present (常驻): facts only, no
+  // red, no badge, no backup count. A failed outcome names the reason when
+  // this session produced one and keeps the last success's age as a second
+  // line; a failure from before this session shows the plain first line.
+  const backupFailed =
+    backupInfo?.lastBackupOutcome === 'failed' || backupFailureReason !== null;
+  const backupAge =
+    backupInfo?.lastBackupAt !== undefined
+      ? backupAgeLabel(backupInfo.lastBackupAt, today)
+      : null;
+  const backupSuccessAge =
+    backupInfo?.lastBackupAt !== undefined
+      ? backupSuccessLabel(backupInfo.lastBackupAt, today)
+      : null;
+  const backupStatusLines: string[] = backupFailed
+    ? [
+        backupFailureReason
+          ? `上次备份没有成功（${backupFailureReason}）。`
+          : '上次备份没有成功。',
+        ...(backupSuccessAge ? [`上次成功：${backupSuccessAge}。`] : [])
+      ]
+    : backupAge
+      ? [`上次备份：${backupAge}`]
+      : ['从未备份过。'];
   const todayUsage: UsageDay = usage?.days.find((day) => day.date === today) ?? {
     date: today,
     inputTokens: 0,
@@ -1424,6 +1508,20 @@ export function SettingsPage({
                 </p>
               ) : null}
             </div>
+            <div className="mt-3 space-y-1 text-sm text-gray-500 dark:text-[#a1a1a6]">
+              {backupStatusLines.map((line) => (
+                <p key={line}>{line}</p>
+              ))}
+            </div>
+            <label className="mt-4 flex min-h-11 items-center gap-3 text-sm font-medium text-gray-500 dark:text-[#a1a1a6]">
+              <input
+                type="checkbox"
+                checked={backupAgeLine}
+                onChange={(event) => setBackupAgeLine(event.target.checked)}
+                className="h-5 w-5 rounded-[4px] accent-[#0071e3]"
+              />
+              周复盘里提到上次备份
+            </label>
           </Card>
 
           <Card id="settings-notifications">

@@ -1545,6 +1545,111 @@ test('the weekly message carries the accountability clause once, and the prompt 
   }
 });
 
+// --- the backup age line (weekly, opt-in) ------------------------------------
+
+const BACKUP_AGE_LINE = '上次导出备份是 3 天前（10月29日）。';
+
+test('the weekly message carries the opt-in backup age line once', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () =>
+        settings({
+          backup: { ageLineEnabled: true, lastBackupAt: '2026-10-29T14:00:00' }
+        }),
+      now: () => NOW
+    });
+
+    await service.check('weekly', '2026-11-01');
+
+    const summaries = await value.list();
+    const conversation = await value.get(summaries[0]!.id);
+    const text = conversation?.messages[0]?.text ?? '';
+    expect(text).toBe(`${WEEKLY_TEMPLATE}\n${BACKUP_AGE_LINE}\n${AVAILABILITY_QUESTION}`);
+    expect(text.split('上次导出备份')).toHaveLength(2);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the age line switch off keeps the weekly message byte-identical', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () =>
+        settings({ backup: { ageLineEnabled: false, lastBackupAt: '2026-10-29T14:00:00' } }),
+      now: () => NOW
+    });
+    const baseline = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    await service.check('weekly', '2026-11-01');
+    await baseline.check('weekly', '2026-11-02');
+
+    const [withFlag, without] = await value.list();
+    const withFlagText = (await value.get(withFlag!.id))!.messages[0]!.text;
+    const baselineText = (await value.get(without!.id))!.messages[0]!.text;
+    // Only the date suffix in the titles differs; the bodies are identical.
+    expect(withFlagText).toBe(baselineText);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a model text that already mentions the backup is not given the age line', async () => {
+  const { dir, value } = await store();
+  try {
+    const backupSettings = settings({
+      backup: { ageLineEnabled: true, lastBackupAt: '2026-10-29T14:00:00' }
+    });
+    const mentioning = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: new FakeModelClient(['这周很稳，上次备份也在。']),
+      getSettings: async () => backupSettings,
+      now: () => NOW
+    });
+    await mentioning.check('weekly', '2026-11-01');
+
+    const quiet = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: new FakeModelClient(['这一周你完成了 3 个任务，稳中有进。']),
+      getSettings: async () => backupSettings,
+      now: () => NOW
+    });
+    await quiet.check('weekly', '2026-11-02');
+
+    const mentioningText = (
+      await value.get(
+        (await value.list()).find((entry) => entry.title.includes('11-01'))!.id
+      )
+    )!.messages[0]!.text;
+    const quietText = (
+      await value.get(
+        (await value.list()).find((entry) => entry.title.includes('11-02'))!.id
+      )
+    )!.messages[0]!.text;
+    expect(mentioningText).toBe(`这周很稳，上次备份也在。\n${AVAILABILITY_QUESTION}`);
+    expect(quietText).toBe(
+      `这一周你完成了 3 个任务，稳中有进。\n上次导出备份是 4 天前（10月29日）。\n${AVAILABILITY_QUESTION}`
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 // --- the promise revisit (morning only) ------------------------------------
 function dueCommitment(text: string, due: string) {
   return async () => ({ text, due });

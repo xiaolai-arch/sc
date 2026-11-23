@@ -104,6 +104,38 @@ export function splitLocalDateTime(
   return { date: value.slice(0, 10), time: value.slice(11, 16) };
 }
 
+const LOCAL_DATE_TIME_SECONDS = /^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/;
+
+/**
+ * True for a wall-clock local timestamp with seconds, `YYYY-MM-DDTHH:mm:ss`,
+ * whose calendar day is real (the regex alone would accept `2026-02-30`).
+ * The last-backup timestamp uses this shape so the age math can take its
+ * local date directly; anything else reads as no record.
+ */
+export function isLocalDateTimeSeconds(value: unknown): value is string {
+  if (typeof value !== 'string' || !LOCAL_DATE_TIME_SECONDS.test(value)) return false;
+  return isLocalDate(value.slice(0, 10));
+}
+
+/** Formats a Date as the local wall clock `YYYY-MM-DDTHH:mm:ss`. */
+export function formatLocalDateTimeSeconds(date: Date): string {
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  return `${formatLocalDate(date)}T${hours}:${minutes}:${seconds}`;
+}
+
+/**
+ * Whole local days from `from` to `to` (both `YYYY-MM-DD`); negative when `to`
+ * is earlier than `from`. Rounding keeps the count exact across DST shifts,
+ * which move local midnights by an hour but never a whole day.
+ */
+export function localDaysBetween(from: string, to: string): number {
+  const start = parseLocalDate(from).getTime();
+  const end = parseLocalDate(to).getTime();
+  return Math.round((end - start) / 86400000);
+}
+
 /** A local calendar date N days after `value`, still as `YYYY-MM-DD`. */
 export function addLocalDays(value: string, days: number): string {
   const date = parseLocalDate(value);

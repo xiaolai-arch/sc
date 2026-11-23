@@ -14,6 +14,7 @@ import {
   isTaskForDate
 } from '../scheduler/behind-schedule';
 import {
+  backupAgeLine,
   buildCheckInNotificationBody,
   buildCheckInPrompt,
   buildCheckInTemplate,
@@ -21,6 +22,7 @@ import {
   resumeCheckInLine,
   weekAvailabilityQuestion,
   weeklyHonestLines,
+  type BackupStatusLike,
   type CheckInTrigger,
   type CommitmentLike,
   type ResumeFacts,
@@ -224,7 +226,8 @@ export class ProactiveCheckInService {
       weeklyStats,
       weeklyHonest,
       commitment,
-      resume
+      resume,
+      settings.backup ?? null
     );
     // The due-mistake digest is a deterministic line on the morning message
     // only; it is computed once here so text and the surfaced body agree.
@@ -318,7 +321,8 @@ export class ProactiveCheckInService {
     weeklyStats: WeeklyOverviewLike | null = null,
     weeklyHonest: WeeklyHonest | null = null,
     commitment: CommitmentLike | null = null,
-    resume: ResumeFacts | null = null
+    resume: ResumeFacts | null = null,
+    backup: BackupStatusLike | null = null
   ): Promise<string> {
     const composed = await this.composeBase(
       trigger,
@@ -326,7 +330,8 @@ export class ProactiveCheckInService {
       context,
       weeklyStats,
       weeklyHonest,
-      commitment
+      commitment,
+      backup
     );
     // The mute-resume sentence is deterministic and never handed to the model,
     // so it appears exactly once by construction: appended here, to whichever
@@ -342,7 +347,8 @@ export class ProactiveCheckInService {
     context: Awaited<ReturnType<typeof gatherContext>>,
     weeklyStats: WeeklyOverviewLike | null = null,
     weeklyHonest: WeeklyHonest | null = null,
-    commitment: CommitmentLike | null = null
+    commitment: CommitmentLike | null = null,
+    backup: BackupStatusLike | null = null
   ): Promise<string> {
     const template = buildCheckInTemplate(
       context,
@@ -350,7 +356,8 @@ export class ProactiveCheckInService {
       date,
       weeklyStats,
       weeklyHonest,
-      commitment
+      commitment,
+      backup
     );
     if (!this.modelClient) return template;
     try {
@@ -364,14 +371,19 @@ export class ProactiveCheckInService {
         commitment
       );
       // A model-written weekly review still ends with the deterministic honest
-      // lines, then the availability question; the template path already
-      // carries both, so only append when the model actually replaced it. This
-      // keeps the facts out of the model's hands while avoiding a duplicate
-      // paragraph on the fallback path.
+      // lines, then the opt-in backup age line, then the availability
+      // question; the template path already carries all of them, so only
+      // append when the model actually replaced it. This keeps the facts out
+      // of the model's hands while avoiding a duplicate paragraph on the
+      // fallback path.
       if (trigger === 'weekly' && composed !== template) {
         const availability = weekAvailabilityQuestion(context);
+        // A model text that already mentions the backup keeps its own words:
+        // one mention by construction, whichever path wrote it.
+        const age = backupAgeLine(backup, date);
         const tail = [
           ...weeklyHonestLines(weeklyHonest),
+          ...(age && !composed.includes('上次备份') ? [age] : []),
           ...(availability ? [availability] : [])
         ];
         return tail.length === 0 ? composed : `${composed}\n${tail.join('\n')}`;

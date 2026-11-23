@@ -1,9 +1,11 @@
 import {
+  backupAgeLine,
   buildCheckInPrompt,
   buildCheckInTemplate,
   resumeCheckInLine,
   WEEK_AVAILABILITY_QUESTION,
   weekAvailabilityQuestion,
+  type BackupStatusLike,
   type WeeklyOverviewLike
 } from '../../src/main/check-ins/prompt';
 import type { ButlerContext } from '../../src/main/butler/context';
@@ -463,6 +465,140 @@ test('the empty-plan morning template also carries the promise line', () => {
   expect(buildCheckInTemplate(empty, 'morning', DATE, null, null, null)).toBe(
     '早上好。今天还没有安排任务，想先做点什么？'
   );
+});
+
+// --- the backup age line (weekly only, opt-in) -------------------------------
+
+const BACKUP_ON: BackupStatusLike = { ageLineEnabled: true };
+
+test('backupAgeLine produces exactly one factual sentence', () => {
+  // 2026-11-05 is three days before the 2026-11-08 check-in.
+  expect(
+    backupAgeLine({ ageLineEnabled: true, lastBackupAt: '2026-11-05T14:32:10' }, DATE)
+  ).toBe('上次导出备份是 3 天前（11月5日）。');
+  // The clock time never leaks into the age sentence.
+  expect(
+    backupAgeLine({ ageLineEnabled: true, lastBackupAt: '2026-10-09T08:00:59' }, DATE)
+  ).toBe('上次导出备份是 30 天前（10月9日）。');
+});
+
+test('backupAgeLine says nothing for today, the future or a bad date', () => {
+  expect(
+    backupAgeLine({ ageLineEnabled: true, lastBackupAt: `${DATE}T09:00:00` }, DATE)
+  ).toBe('');
+  // Clock skew: a future record never becomes a negative age.
+  expect(
+    backupAgeLine({ ageLineEnabled: true, lastBackupAt: '2026-11-09T09:00:00' }, DATE)
+  ).toBe('');
+  // Junk and impossible dates read as "no record", never as a wrong fact.
+  expect(
+    backupAgeLine({ ageLineEnabled: true, lastBackupAt: '上周' }, DATE)
+  ).toBe('还没有导出备份。');
+  expect(
+    backupAgeLine({ ageLineEnabled: true, lastBackupAt: '2026-02-30T10:00:00' }, DATE)
+  ).toBe('还没有导出备份。');
+  expect(
+    backupAgeLine({ ageLineEnabled: true, lastBackupAt: '2026-11-05T14:32' }, DATE)
+  ).toBe('还没有导出备份。');
+});
+
+test('backupAgeLine is off by default and needs a real check-in date', () => {
+  expect(backupAgeLine(undefined, DATE)).toBe('');
+  expect(backupAgeLine(null, DATE)).toBe('');
+  expect(backupAgeLine({}, DATE)).toBe('');
+  expect(backupAgeLine({ ageLineEnabled: false, lastBackupAt: '2026-11-05T14:32:10' }, DATE)).toBe('');
+  expect(backupAgeLine(BACKUP_ON, '')).toBe('');
+  expect(backupAgeLine(BACKUP_ON, '下周')).toBe('');
+});
+
+const AGE_LINE = '上次导出备份是 3 天前（11月5日）。';
+
+test('the weekly template appends the age line after the honest receipt', () => {
+  const withHonest = buildCheckInTemplate(
+    context,
+    'weekly',
+    DATE,
+    stats,
+    honest,
+    null,
+    { ageLineEnabled: true, lastBackupAt: '2026-11-05T14:32:10' }
+  );
+  expect(withHonest).toBe(
+    [
+      '本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%',
+      WEEKLY_TEMPLATE_BEFORE_STATS,
+      '有把握但错 2 道 · 没把握但对 1 道',
+      '下一步：下周先练「三角函数」的到期错题（3 道）',
+      AGE_LINE,
+      WEEK_AVAILABILITY_QUESTION
+    ].join('\n')
+  );
+  expect(withHonest.split(AGE_LINE)).toHaveLength(2);
+
+  // Without honest facts the age line still sits before the question.
+  const withoutHonest = buildCheckInTemplate(
+    context,
+    'weekly',
+    DATE,
+    null,
+    null,
+    null,
+    { ageLineEnabled: true, lastBackupAt: '2026-11-05T14:32:10' }
+  );
+  expect(withoutHonest).toBe(
+    `${WEEKLY_TEMPLATE_BEFORE_STATS}\n${AGE_LINE}\n${WEEK_AVAILABILITY_QUESTION}`
+  );
+});
+
+test('the weekly template names a missing record once, before the question', () => {
+  expect(
+    buildCheckInTemplate(context, 'weekly', DATE, null, null, null, BACKUP_ON)
+  ).toBe(`${WEEKLY_TEMPLATE_BEFORE_STATS}\n还没有导出备份。\n${WEEK_AVAILABILITY_QUESTION}`);
+});
+
+test('a same-day export leaves the weekly template byte-identical', () => {
+  const enabled = { ageLineEnabled: true, lastBackupAt: `${DATE}T09:15:00` };
+  expect(buildCheckInTemplate(context, 'weekly', DATE, null, null, null, enabled)).toBe(
+    `${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`
+  );
+  expect(buildCheckInTemplate(context, 'weekly', DATE, null, null, null, enabled)).toBe(
+    buildCheckInTemplate(context, 'weekly', DATE)
+  );
+});
+
+test('the switch off keeps the weekly template byte-identical', () => {
+  const withRecord = { ageLineEnabled: false, lastBackupAt: '2026-11-05T14:32:10' };
+  expect(
+    buildCheckInTemplate(context, 'weekly', DATE, null, null, null, withRecord)
+  ).toBe(buildCheckInTemplate(context, 'weekly', DATE));
+});
+
+test('an enabled switch with no record names the gap even with honest facts', () => {
+  expect(
+    buildCheckInTemplate(context, 'weekly', DATE, stats, honest, null, BACKUP_ON)
+  ).toBe(
+    [
+      '本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%',
+      WEEKLY_TEMPLATE_BEFORE_STATS,
+      '有把握但错 2 道 · 没把握但对 1 道',
+      '下一步：下周先练「三角函数」的到期错题（3 道）',
+      '还没有导出备份。',
+      WEEK_AVAILABILITY_QUESTION
+    ].join('\n')
+  );
+});
+
+test('the age line never enters the other triggers or the model prompt', () => {
+  const enabled = { ageLineEnabled: true, lastBackupAt: '2026-11-05T14:32:10' };
+  for (const trigger of ['morning', 'evening', 'behind'] as const) {
+    expect(buildCheckInTemplate(context, trigger, DATE, null, null, null, enabled)).toBe(
+      buildCheckInTemplate(context, trigger, DATE)
+    );
+  }
+  const prompt = buildCheckInPrompt(context, 'weekly', DATE, stats, honest);
+  expect(prompt).not.toContain('上次导出备份');
+  expect(prompt).not.toContain('还没有导出备份');
+  expect(prompt).not.toContain('上次备份');
 });
 
 // --- the weekly availability question ---------------------------------------

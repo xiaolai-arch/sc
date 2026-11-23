@@ -95,6 +95,33 @@ export interface BudgetSettings {
   outputPricePerMillion?: number;
 }
 
+/**
+ * Last-backup facts the settings card's status line and the Sunday review's
+ * opt-in age line quote. The block is absent for a fresh install or a legacy
+ * settings file and is dropped again when empty, so a file written before this
+ * feature round-trips byte-identically. The export flow in the main process
+ * writes the `lastBackup*` facts; the settings page only toggles the age line.
+ * The auto-backup keys (P1) join this interface when that batch lands.
+ */
+export interface BackupSettings {
+  /**
+   * Opt-in: the Sunday review appends one factual line about the last export.
+   * Absent/false appends nothing, and only `true` is ever serialized, so
+   * turning it off removes the key like `strictMastery`.
+   */
+  ageLineEnabled?: boolean;
+  /**
+   * Local wall clock of the last successful backup, naive ISO
+   * `YYYY-MM-DDTHH:mm:ss` (no timezone offset), so the age math can take the
+   * local date directly. A failure never touches this key.
+   */
+  lastBackupAt?: string;
+  /** Absolute path of the last successful backup folder. */
+  lastBackupPath?: string;
+  /** Last export result; `failed` is display-only and never blocks a retry. */
+  lastBackupOutcome?: 'ok' | 'failed';
+}
+
 export interface AppSettings {
   /** How the butler addresses the user in greetings and the sidebar. */
   displayName?: string;
@@ -118,6 +145,12 @@ export interface AppSettings {
    * serialized, so legacy settings files round-trip byte-identically.
    */
   accountabilityName?: string;
+  /**
+   * Last-backup state (time, path, outcome) plus the opt-in weekly-review age
+   * line. Absent by default and dropped again when empty, so legacy settings
+   * files round-trip byte-identically.
+   */
+  backup?: BackupSettings;
 }
 
 export interface ReviewAnswers { completed: string; stuck: string; tomorrow: string; skipped?: boolean; }
