@@ -20,6 +20,7 @@ import type {
   PracticeService
 } from '../../shared/practice';
 import type { WorkspacePlanner } from '../../shared/planning';
+import { busyDayMinutes } from '../planning';
 import type { LongPlanService } from '../../shared/plans';
 import type {
   WorkspaceKind,
@@ -407,10 +408,22 @@ export function createButlerTools(): ButlerToolDefinition[] {
         }
         const date = optionalString(input, 'date');
         const availableMinutes = optionalNumber(input, 'availableMinutes');
+        // A day the user said is especially full gets one small task instead of
+        // a normal-sized plan — the same shared read as the api path
+        // (`busyDayMinutes`), but only when this call does not pin the minutes
+        // itself and an availability service is wired at all.
+        const weekAvailabilityMinutes =
+          availableMinutes === undefined && context.weekAvailability
+            ? await busyDayMinutes(
+                context.weekAvailability,
+                date ?? formatLocalDate(context.now())
+              )
+            : undefined;
         const plan = await context.planner.plan({
           workspaceId,
           ...(date ? { date } : {}),
           ...(availableMinutes !== undefined ? { availableMinutes } : {}),
+          ...(weekAvailabilityMinutes !== undefined ? { weekAvailabilityMinutes } : {}),
           ...(context.signal ? { signal: context.signal } : {})
         });
         throwIfAborted(context.signal);

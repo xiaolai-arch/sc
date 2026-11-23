@@ -3,8 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createButlerTools, executeButlerTool } from '../../src/main/butler/tools';
 import { createAvailabilityService } from '../../src/main/availability/service';
+import { BUSY_DAY_MINUTES } from '../../src/main/planning';
 import type { AvailabilityService, SetWeekAvailabilityInput } from '../../src/main/availability/service';
 import type { WeekAvailability } from '../../src/main/availability/records';
+import type {
+  AvailableMinutesSource,
+  PlanWorkspaceInput,
+  WorkspacePlan
+} from '../../src/shared/planning';
 import type { WorkspaceService } from '../../src/shared/workspace';
 
 /** 2026-11-22 is a Sunday; the coming Monday is 2026-11-23. */
@@ -252,3 +258,171 @@ async function withVault(runInner: (root: string) => Promise<void>): Promise<voi
     await rm(root, { recursive: true, force: true });
   }
 }
+
+/**
+ * A planner stub that records the exact input it receives and answers with
+ * the same budget precedence the real planner applies, so tests can pin what
+ * `plan_workspace` hands over and what it reports back.
+ */
+function plannerCapture(): {
+  planner: { plan(input: PlanWorkspaceInput): Promise<WorkspacePlan> };
+  inputs: PlanWorkspaceInput[];
+} {
+  const inputs: PlanWorkspaceInput[] = [];
+  const planner = {
+    plan: async (input: PlanWorkspaceInput): Promise<WorkspacePlan> => {
+      inputs.push(input);
+      const availableMinutesSource: AvailableMinutesSource =
+        input.availableMinutes !== undefined
+          ? 'input'
+          : input.weekAvailabilityMinutes !== undefined
+            ? 'week'
+            : 'default';
+      return {
+        workspaceId: input.workspaceId,
+        date: input.date ?? '2026-11-23',
+        generatedBy: 'template',
+        tasks: [{ title: '极简复盘', subject: '数学', durationMin: 10, acceptance: '完成' }],
+        availableMinutes: input.availableMinutes ?? input.weekAvailabilityMinutes ?? 120,
+        availableMinutesSource
+      };
+    }
+  };
+  return { planner, inputs };
+}
+
+async function runPlanWorkspace(
+  arguments_: Record<string, unknown>,
+  availability: AvailabilityService,
+  planner: { plan(input: PlanWorkspaceInput): Promise<WorkspacePlan> }
+) {
+  return executeButlerTool(
+    { id: 'p1', name: 'plan_workspace', arguments: arguments_ },
+    createButlerTools(),
+    {
+      workspace: {
+        ...workspaceService,
+        createTask: async (input: { workspaceId: string }) => ({ id: 'task-1', ...input })
+      } as unknown as WorkspaceService,
+      workspaceId: 'ws-exam',
+      planner,
+      weekAvailability: availability,
+      now: NOW_MONDAY
+    }
+  );
+}
+
+test('plan_workspace budgets a stored busy day through the shared override', async () => {
+  const availability = availabilityStub({
+    busyDatesBetween: async (from, to) => {
+      expect([from, to]).toEqual(['2026-11-24', '2026-11-24']);
+      return ['2026-11-24'];
+    }
+  });
+  const { planner, inputs } = plannerCapture();
+
+  const result = await runPlanWorkspace(
+    { workspaceId: 'ws-exam', date: '2026-11-24' },
+    availability,
+    planner
+  );
+
+  expect(result.ok).toBe(true);
+  // The override reaches the planner as the dedicated input, not as pinned
+  // minutes — the planner keeps deciding the source label itself.
+  expect(inputs[0]).toMatchObject({
+    workspaceId: 'ws-exam',
+    date: '2026-11-24',
+    weekAvailabilityMinutes: BUSY_DAY_MINUTES
+  });
+  expect(inputs[0]?.availableMinutes).toBeUndefined();
+  // The tool reports whichever minutes/source the planner produced.
+  const parsed = JSON.parse(result.content) as {
+    result: { availableMinutes: number; availableMinutesSource: AvailableMinutesSource };
+  };
+  expect(parsed.result.availableMinutes).toBe(BUSY_DAY_MINUTES);
+  expect(parsed.result.availableMinutesSource).toBe('week');
+});
+
+test('plan_workspace leaves the budget untouched on a normal day', async () => {
+  const availability = availabilityStub(); // busyDatesBetween answers []
+  const { planner, inputs } = plannerCapture();
+
+  const result = await runPlanWorkspace(
+    { workspaceId: 'ws-exam', date: '2026-11-25' },
+    availability,
+    planner
+  );
+
+  expect(result.ok).toBe(true);
+  // No override field at all: the planner input is exactly what the tool
+  // passed before the busy-day rule existed.
+  expect(inputs[0]).toEqual({ workspaceId: 'ws-exam', date: '2026-11-25' });
+  const parsed = JSON.parse(result.content) as {
+    result: { availableMinutes: number; availableMinutesSource: AvailableMinutesSource };
+  };
+  expect(parsed.result.availableMinutes).toBe(120);
+  expect(parsed.result.availableMinutesSource).toBe('default');
+});
+
+test('plan_workspace does not ask availability when the caller pins availableMinutes', async () => {
+  const busyDatesBetween = vi.fn();
+  const availability = availabilityStub({ busyDatesBetween });
+  const { planner, inputs } = plannerCapture();
+
+  const result = await runPlanWorkspace(
+    { workspaceId: 'ws-exam', availableMinutes: 45 },
+    availability,
+    planner
+  );
+
+  expect(result.ok).toBe(true);
+  // The pinned minutes win and the availability service is not even queried.
+  expect(busyDatesBetween).not.toHaveBeenCalled();
+  expect(inputs[0]).toEqual({ workspaceId: 'ws-exam', availableMinutes: 45 });
+  const parsed = JSON.parse(result.content) as {
+    result: { availableMinutesSource: AvailableMinutesSource };
+  };
+  expect(parsed.result.availableMinutesSource).toBe('input');
+});
+
+test('plan_workspace still plans when the availability record is unreadable', async () => {
+  const availability = availabilityStub({
+    busyDatesBetween: async () => {
+      throw new Error('week-availability.md 损坏');
+    }
+  });
+  const { planner, inputs } = plannerCapture();
+
+  const result = await runPlanWorkspace(
+    { workspaceId: 'ws-exam', date: '2026-11-24' },
+    availability,
+    planner
+  );
+
+  // Best-effort: the broken record plans without the week override.
+  expect(result.ok).toBe(true);
+  expect(inputs[0]).toEqual({ workspaceId: 'ws-exam', date: '2026-11-24' });
+  const parsed = JSON.parse(result.content) as {
+    result: { availableMinutesSource: AvailableMinutesSource };
+  };
+  expect(parsed.result.availableMinutesSource).toBe('default');
+});
+
+test('plan_workspace checks today when the date is omitted', async () => {
+  // NOW_MONDAY is 2026-11-23; the shared read must ask about that same day.
+  const queries: Array<[string, string]> = [];
+  const availability = availabilityStub({
+    busyDatesBetween: async (from: string, to: string) => {
+      queries.push([from, to]);
+      return ['2026-11-23'];
+    }
+  });
+  const { planner, inputs } = plannerCapture();
+
+  const result = await runPlanWorkspace({ workspaceId: 'ws-exam' }, availability, planner);
+
+  expect(result.ok).toBe(true);
+  expect(queries).toEqual([['2026-11-23', '2026-11-23']]);
+  expect(inputs[0]?.weekAvailabilityMinutes).toBe(BUSY_DAY_MINUTES);
+});
