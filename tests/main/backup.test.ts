@@ -484,6 +484,47 @@ test('a backup state.json without a settings record is not adopted', async () =>
   }
 });
 
+test('a conversations swap failure names the snapshot and leaves state.json unwritten (验收 33)', async () => {
+  if (process.platform !== 'win32') return;
+  const { root, vault, userData, backup } = await backupFixture();
+  // A fresh machine: the first-run entry restores before onboarding, and the
+  // backup's state.json is adoptable — if the pipeline reached adoption, a
+  // state.json would appear and the invariant under test would be lost.
+  await rm(join(userData, 'state.json'));
+  await writeFile(
+    join(backup, 'state.json'),
+    JSON.stringify({
+      onboarded: true,
+      settings: {
+        displayName: '旧机器',
+        vaultPath: 'D:\\old-machine\\StudyCoachVault',
+        provider: { kind: 'anthropic', model: 'claude-sonnet-5-5' }
+      }
+    }),
+    'utf8'
+  );
+
+  // Holding the conversations directory as this worker's cwd makes Windows
+  // refuse to rename it (EBUSY) — a deterministic mid-pipeline failure after
+  // the vault was already swapped, with the adoption step still ahead.
+  const conversations = join(userData, 'conversations');
+  const originalCwd = process.cwd();
+  process.chdir(conversations);
+  const expectedSafety = join(userData, 'restore-safety', 'restore-safety-2026-11-02-143000');
+  try {
+    await expect(
+      restoreBackup({ backupPath: backup, vaultPath: vault, userDataPath: userData, now: NOW })
+    ).rejects.toThrow(`恢复前的数据保存在：${expectedSafety}`);
+
+    // The adoption is the pipeline's last step: any data failure before it
+    // must leave state.json unwritten (设置已采纳而数据没恢复 is impossible).
+    expect(await exists(join(userData, 'state.json'))).toBe(false);
+  } finally {
+    process.chdir(originalCwd);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 // --- A (P1 复核备注): the auto backup directory across a machine boundary ------
 
 test('adoption drops an autoDestination that does not exist on this machine, keeping the switch', async () => {

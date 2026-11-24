@@ -5,6 +5,13 @@ import { join, resolve } from 'node:path';
 
 export const PROJECT_ROOT = resolve(__dirname, '..', '..');
 export const FAKE_CLI_PATH = join(PROJECT_ROOT, 'e2e', 'fixtures', 'fake-codex.mjs');
+/** Wrapper entry that redirects Documents before the real app entry runs. */
+export const FRESH_MACHINE_MAIN_PATH = join(
+  PROJECT_ROOT,
+  'e2e',
+  'fixtures',
+  'fresh-machine-main.cjs'
+);
 
 /**
  * Windows cannot execute a `.mjs` file directly, so the fixture gets a `.cmd`
@@ -31,14 +38,25 @@ export type IsolatedEnvironment = {
  * Creates a throwaway userData directory and vault. The pre-seeded state points
  * the local CLI provider at the fake fixture and skips the first-run dialog so
  * existing e2e flows start in the workspace; onboarding has its own renderer
- * test.
+ * test. A `freshMachine` environment writes no state.json at all, so the app
+ * opens on the first-run dialog — the first-run restore path launches this way.
  */
-export async function createIsolatedEnvironment(): Promise<IsolatedEnvironment> {
+export async function createIsolatedEnvironment(
+  options: { freshMachine?: boolean } = {}
+): Promise<IsolatedEnvironment> {
   const root = await mkdtemp(join(tmpdir(), 'study-coach-e2e-'));
   const userData = join(root, 'user-data');
   const vault = join(root, 'vault');
   await mkdir(userData, { recursive: true });
   const command = await fakeCliCommand(root);
+  if (options.freshMachine) {
+    return {
+      root,
+      userData,
+      vault,
+      cleanup: () => rm(root, { recursive: true, force: true })
+    };
+  }
   await writeFile(
     join(userData, 'state.json'),
     `${JSON.stringify(
@@ -87,16 +105,18 @@ export type LaunchedStudyCoach = {
 };
 
 export async function launchStudyCoach(
-  precreated?: IsolatedEnvironment
+  precreated?: IsolatedEnvironment,
+  options: { entryPath?: string; extraEnv?: Record<string, string> } = {}
 ): Promise<LaunchedStudyCoach> {
   // A spec that seeds vault files before launch passes its environment in;
   // everyone else gets a fresh one created here.
   const environment = precreated ?? (await createIsolatedEnvironment());
   const linuxFlags = process.platform === 'linux' ? ['--no-sandbox', '--disable-gpu'] : [];
+  const entry = options.entryPath ?? PROJECT_ROOT;
   const app = await electron.launch({
-    args: [...linuxFlags, PROJECT_ROOT],
+    args: [...linuxFlags, entry],
     cwd: PROJECT_ROOT,
-    env: childEnvironment(environment.userData),
+    env: { ...childEnvironment(environment.userData), ...(options.extraEnv ?? {}) },
     timeout: 60_000
   });
   const page = await app.firstWindow({ timeout: 60_000 });

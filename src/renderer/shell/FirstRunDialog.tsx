@@ -1,5 +1,11 @@
 import { useState } from 'react';
+import {
+  backupCopiedParts,
+  MIGRATION_STEP_LINE_SETTINGS_ADOPTED,
+  MIGRATION_STEP_LINE_SETTINGS_UNCHANGED
+} from '../../shared/backup-copy';
 import { friendlyErrorMessage } from '../../shared/errors';
+import type { RestoreResult } from '../../shared/ipc';
 import type { WorkspaceKind } from '../../shared/workspace';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
@@ -14,10 +20,23 @@ const KIND_OPTIONS: Array<{ value: WorkspaceKind; label: string }> = [
   { value: 'life', label: '生活' }
 ];
 
+/**
+ * 首启恢复确认语，与设置页那句「会覆盖当前项目、记录和对话」分开写：首启没有
+ * 可覆盖的东西，确认语只陈述事实，不吓唬换机用户（spec 增补节原文）。
+ */
+const FIRST_RUN_RESTORE_CONFIRM =
+  '选择备份文件夹后，阿咲会把里面的项目、记录和对话恢复到这台电脑；备份里带设置时会一起还原（API Key 不会）。';
+
 type FirstRunDialogProps = {
   open: boolean;
   /** Marks onboarding as handled (with the created project's name) and reloads. */
   onComplete: (workspaceName: string) => void;
+  /**
+   * A restore finished and the dialog is closed without creating a project:
+   * refreshes and reloads so the restored workspaces show (and the dialog
+   * stays gone when the adoption carried `onboarded: true`).
+   */
+  onRestoreComplete?: () => void;
   /** Dismisses for this session without changing the saved onboarding state. */
   onSkip: () => void;
 };
@@ -27,14 +46,26 @@ type FirstRunDialogProps = {
  * onboarding needs a working model, so the dialog creates a real workspace
  * without one.
  */
-export function FirstRunDialog({ open, onComplete, onSkip }: FirstRunDialogProps) {
+export function FirstRunDialog({
+  open,
+  onComplete,
+  onRestoreComplete,
+  onSkip
+}: FirstRunDialogProps) {
   const [name, setName] = useState('我的学习');
   const [kind, setKind] = useState<WorkspaceKind>('study');
   const [goal, setGoal] = useState('先完成今天最重要的一件事');
   const [busy, setBusy] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [restoreResult, setRestoreResult] = useState<RestoreResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Creating and restoring are mutually exclusive; while either runs, the
+  // dialog cannot be closed and the other action cannot start (busy 模式).
+  const locked = busy || restoring;
+
   async function createWorkspace() {
+    if (locked) return;
     const trimmed = name.trim();
     if (!trimmed) {
       setError('先给项目起一个名字。');
@@ -62,17 +93,51 @@ export function FirstRunDialog({ open, onComplete, onSkip }: FirstRunDialogProps
     }
   }
 
+  async function restoreFromBackup() {
+    if (locked) return;
+    const api = window.studyCoach;
+    if (!api?.restoreBackup) {
+      setError('当前版本不支持恢复备份。');
+      return;
+    }
+    if (!window.confirm(FIRST_RUN_RESTORE_CONFIRM)) return;
+    setRestoring(true);
+    setError(null);
+    try {
+      const result = await api.restoreBackup();
+      // null is a dismissed picker: nothing changed, back to the form.
+      if (result !== null) setRestoreResult(result);
+    } catch (cause) {
+      // One plain line; the form stays usable and the restore can be retried.
+      setError(friendlyErrorMessage(cause, '恢复备份失败，请重试。'));
+    } finally {
+      setRestoring(false);
+    }
+  }
+
+  /**
+   * 稍后再说 / close. After a successful restore this takes the refresh path
+   * (no workspace is created; `completeWorkspaceOnboarding` is not called), so
+   * the app reloads into the restored data. Otherwise it is the plain 1.2.0
+   * dismiss-for-this-session.
+   */
+  function dismiss() {
+    if (locked) return;
+    if (restoreResult !== null && onRestoreComplete) onRestoreComplete();
+    else onSkip();
+  }
+
   return (
     <Dialog
       open={open}
-      onClose={busy ? () => undefined : onSkip}
+      onClose={locked ? () => undefined : dismiss}
       title="欢迎使用阿咲"
       footer={
         <div className="flex items-center justify-between gap-2">
-          <Button variant="ghost" size="sm" onClick={onSkip} disabled={busy}>
+          <Button variant="ghost" size="sm" onClick={dismiss} disabled={locked}>
             稍后再说
           </Button>
-          <Button size="sm" disabled={busy} onClick={() => void createWorkspace()}>
+          <Button size="sm" disabled={locked} onClick={() => void createWorkspace()}>
             {busy ? '正在创建…' : '创建项目并开始'}
           </Button>
         </div>
@@ -94,7 +159,7 @@ export function FirstRunDialog({ open, onComplete, onSkip }: FirstRunDialogProps
           value={name}
           onChange={(event) => setName(event.target.value)}
           placeholder="例如：考研、学英语、读完一本书、坚持健身、推进一个项目"
-          disabled={busy}
+          disabled={locked}
         />
       </div>
 
@@ -105,7 +170,7 @@ export function FirstRunDialog({ open, onComplete, onSkip }: FirstRunDialogProps
             id="first-run-kind"
             value={kind}
             onChange={(event) => setKind(event.target.value as WorkspaceKind)}
-            disabled={busy}
+            disabled={locked}
           >
             {KIND_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
@@ -121,7 +186,7 @@ export function FirstRunDialog({ open, onComplete, onSkip }: FirstRunDialogProps
             value={goal}
             onChange={(event) => setGoal(event.target.value)}
             placeholder="先完成今天最重要的一件事"
-            disabled={busy}
+            disabled={locked}
           />
         </div>
       </div>
@@ -129,6 +194,25 @@ export function FirstRunDialog({ open, onComplete, onSkip }: FirstRunDialogProps
       <p className="mt-4 text-[13px] leading-6 text-gray-500 dark:text-[#a1a1a6]">
         不用先搭任何系统——创建项目就能用，所有数据都是本地的 Markdown 文件。
       </p>
+
+      {/* 换机的主路径是装好 → 才想起恢复，所以引导内提供次要入口；ghost 样式
+          不抢「创建项目并开始」的主位。成功后清单留在表单上方，创建仍然可用。 */}
+      <div className="mt-5 border-t border-gray-200/70 pt-4 dark:border-white/10">
+        <Button variant="ghost" size="sm" disabled={locked} onClick={() => void restoreFromBackup()}>
+          {restoring ? '正在恢复…' : '从备份恢复…'}
+        </Button>
+        {restoreResult !== null ? (
+          <div className="mt-3 space-y-1 text-[13px] leading-6 text-gray-500 dark:text-[#a1a1a6]">
+            <p>已恢复：{backupCopiedParts(restoreResult.restored).join('、')}。</p>
+            {/* 第三行引用与设置页相同的常量；采纳与否决定版本，不是复制文案 */}
+            <p>
+              {restoreResult.restored.state
+                ? MIGRATION_STEP_LINE_SETTINGS_ADOPTED
+                : MIGRATION_STEP_LINE_SETTINGS_UNCHANGED}
+            </p>
+          </div>
+        ) : null}
+      </div>
 
       {error ? (
         <p role="alert" className="mt-3 text-[13px] text-[#d70015] dark:text-[#ff7b72]">

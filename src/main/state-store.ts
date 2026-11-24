@@ -65,6 +65,29 @@ export class JsonStateStore {
     return this.update(() => this.createDefault());
   }
 
+  /**
+   * Discards the cached state and re-reads the file. Writers outside this
+   * class — the restore handler adopting a backup's `state.json` with a direct
+   * atomic write — are invisible to read/update, which only trust the cache;
+   * without this entry a later `completeWorkspaceOnboarding` would write
+   * `onboarded: true` over the in-memory defaults and erase the adopted
+   * settings. The re-read queues behind any pending update (never bypassing
+   * one) and future updates queue behind it, so the cache and the file
+   * converge on whatever is finally on disk. A missing or corrupt file reads
+   * as the defaults, like startup hydration.
+   */
+  async reloadFromDisk(): Promise<AppState> {
+    const task = this.queue.then(async () => {
+      if (this.filePath !== null) this.cache = null;
+      return clone(await this.readUnlocked());
+    });
+    this.queue = task.then(
+      () => undefined,
+      () => undefined
+    );
+    return task;
+  }
+
   private async readUnlocked(): Promise<AppState> {
     if (this.cache) return this.cache;
     if (!this.filePath) {

@@ -245,7 +245,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(APP_IPC_CHANNELS.restoreBackup, async () => {
     try {
-      return await handleRestoreBackup({
+      const result = await handleRestoreBackup({
         pickDirectory: async () => {
           const options = {
             title: '选择 ASAKI 备份文件夹',
@@ -267,6 +267,15 @@ app.whenReady().then(async () => {
           return { vaultPath: current.vaultPath, userDataPath: app.getPath('userData') };
         }
       });
+      // The adoption wrote state.json behind the store's back. The running
+      // process must see the adopted settings before the renderer learns the
+      // restore succeeded — a later completeWorkspaceOnboarding would
+      // otherwise write `onboarded: true` over the in-memory defaults and lose
+      // every adopted settings field. Order matters: reload first, return second.
+      if (result !== null && result.restored.state) {
+        await context.state.reloadFromDisk();
+      }
+      return result;
     } catch (error) {
       throw new Error(serializeError(error).message);
     }

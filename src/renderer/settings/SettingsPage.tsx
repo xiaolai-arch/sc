@@ -5,6 +5,7 @@ import {
   localDaysBetween
 } from '../../shared/date';
 import { friendlyErrorMessage } from '../../shared/errors';
+import { backupCopiedLabel, MIGRATION_STEP_LINE_SETTINGS_ADOPTED } from '../../shared/backup-copy';
 import {
   MAX_ACCOUNTABILITY_NAME,
   type BackupSettings,
@@ -162,26 +163,6 @@ function backupSuccessLabel(lastBackupAt: string, today: string): string | null 
 function parentDirectory(path: string): string {
   const cut = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
   return cut > 0 ? path.slice(0, cut) : path;
-}
-
-/**
- * The export toast's second line, built from what this backup actually carried
- * (`BackupResult.copied`); sources that did not exist are simply left out.
- * vault holds both the projects and the records, so it maps to two nouns.
- */
-function backupCopiedLabel(copied: {
-  vault: boolean;
-  conversations: boolean;
-  state: boolean;
-  usage: boolean;
-}): string | null {
-  const parts = [
-    ...(copied.vault ? ['项目', '记录'] : []),
-    ...(copied.conversations ? ['对话'] : []),
-    ...(copied.state ? ['设置'] : []),
-    ...(copied.usage ? ['用量'] : [])
-  ];
-  return parts.length > 0 ? `包含：${parts.join('、')}` : null;
 }
 
 export function SettingsPage({
@@ -1718,7 +1699,8 @@ export function SettingsPage({
             <div className="mt-4 space-y-1 text-sm text-gray-500 dark:text-[#a1a1a6]">
               <p>在新电脑安装 ASAKI。</p>
               <p>把整个备份文件夹复制过去，在「数据与备份 → 从备份恢复…」选择它。</p>
-              <p>恢复会带回项目、记录、对话和用量；新机器上没有设置时，备份里的设置会一起还原，API Key 需要重新填写（它从未进入备份）。</p>
+              {/* 换机第三行与首启恢复入口共用同一常量，不得复制字符串 */}
+              <p>{MIGRATION_STEP_LINE_SETTINGS_ADOPTED}</p>
             </div>
           </Card>
 
