@@ -252,6 +252,23 @@ test.describe('ASAKI feature smoke', () => {
           page.getByText('换机考研', { exact: true }).first()
         ).toBeVisible({ timeout: 15_000 });
 
+        // 验收 29 前半句：同会话即生效——完成引导（此处是采纳带 onboarded:true
+        // 后关闭）不重启，getSettings 返回已采纳值。getSettings 直接读 main
+        // 进程的 settings 缓存；没有 handler 里的 reloadFromDisk 时，这里仍是
+        // 默认缓存的 xiaolai（缓存一次后不再读盘，state.json 的采纳它看不见）。
+        const inSessionSettings = await page.evaluate(async () => {
+          const api = (
+            window as unknown as {
+              studyCoach: {
+                getSettings: () => Promise<{ displayName: string; vaultPath: string }>;
+              };
+            }
+          ).studyCoach;
+          return api.getSettings();
+        });
+        expect(inSessionSettings.displayName).toBe('换机同学');
+        expect(inSessionSettings.vaultPath).toBe(join(documentsDir, 'StudyCoachVault'));
+
         // The adopted settings sit in this machine's state.json with the local
         // vault path — the old machine's path must never survive.
         const { readFile: readState } = await import('node:fs/promises');
