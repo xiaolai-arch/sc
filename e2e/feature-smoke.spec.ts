@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createBackup } from '../src/main/backup';
+import { ConversationStore } from '../src/main/conversations/conversation-store';
 import { DEFAULT_DISPLAY_NAME } from '../src/main/settings/defaults';
 import { createWorkspaceService } from '../src/main/workspace/create-workspace-service';
 import {
@@ -157,6 +158,11 @@ test.describe('ASAKI feature smoke', () => {
    */
   test('a fresh machine restores from a backup inside the first-run dialog', async () => {
     const fixtureRoot = await mkdtemp(join(tmpdir(), 'study-coach-first-run-restore-e2e-'));
+    // Both launches share one environment — the restart must see the same
+    // userData — so no per-launch teardown owns its cleanup. It is released in
+    // this finally, which also runs when an assertion throws; without that a
+    // failed run leaked one study-coach-e2e-* directory every time.
+    let environment: IsolatedEnvironment | null = null;
     try {
       // Build the backup with the real services so the restored vault is a
       // workspace the app actually lists, then add an adoptable state.json.
@@ -170,6 +176,24 @@ test.describe('ASAKI feature smoke', () => {
       });
       const sourceUserData = join(fixtureRoot, 'source-user-data');
       await mkdir(sourceUserData, { recursive: true });
+      // A conversation travels with the backup, so the restored sidebar has
+      // something the dialog's 「已恢复：…对话…」 must be able to mean.
+      const conversationStore = new ConversationStore(
+        join(sourceUserData, 'conversations')
+      );
+      const seededConversation = await conversationStore.create({
+        title: '换机对话标题'
+      });
+      // The store lists only conversations that carry a message — an empty
+      // draft is not a conversation yet — so seed one turn. Without it the
+      // restored sidebar row would never exist and the assertion below would
+      // prove nothing about the refresh.
+      await conversationStore.appendMessage(seededConversation.id, {
+        id: 'seeded-message',
+        role: 'user',
+        text: '旧电脑上聊过的内容',
+        createdAt: '2026-11-24T09:00:00.000Z'
+      });
       const backup = await createBackup({
         vaultPath: sourceVault,
         userDataPath: sourceUserData,
@@ -205,9 +229,7 @@ test.describe('ASAKI feature smoke', () => {
       // A machine without state.json: the app opens on the first-run dialog.
       // Documents is redirected into the env so the fresh-install default
       // vault (which the restore swaps into) never touches the real one.
-      const environment: IsolatedEnvironment = await createIsolatedEnvironment({
-        freshMachine: true
-      });
+      environment = await createIsolatedEnvironment({ freshMachine: true });
       const documentsDir = join(environment.root, 'documents');
       await mkdir(documentsDir, { recursive: true });
       const freshMachineLaunch = {
@@ -234,9 +256,11 @@ test.describe('ASAKI feature smoke', () => {
         });
 
         await page.getByRole('button', { name: '从备份恢复…' }).click();
-        // Adopted: the restored-items line plus the settings-restored version.
+        // Adopted: the restored-items line came from what the backup carried —
+        // the conversation seeded above puts 对话 between 记录 and 设置 — plus
+        // the settings-restored version of the third line.
         await expect(
-          page.getByText('已恢复：项目、记录、设置。')
+          page.getByText('已恢复：项目、记录、对话、设置。')
         ).toBeVisible({ timeout: 15_000 });
         await expect(
           page.getByText(
@@ -248,9 +272,28 @@ test.describe('ASAKI feature smoke', () => {
         // onboarded:true, so the dialog is gone and the restored vault loads.
         await page.getByRole('button', { name: '稍后再说' }).click();
         await expect(page.getByText('欢迎使用阿咲')).toHaveCount(0);
+        // The restore tail reloads asynchronously and then lands on the first
+        // restored project. Waiting for its page frame keeps the 未分组 click
+        // below from racing that setSection('projects').
         await expect(
-          page.getByText('换机考研', { exact: true }).first()
+          page.locator('header').getByText('项目', { exact: true })
         ).toBeVisible({ timeout: 15_000 });
+
+        // 阻塞 1：恢复后同一次会话里「对话」和「称呼」都要刷新。对话列表与
+        // displayName 都只在挂载时读一次；onRestoreComplete 不补 refresh /
+        // loadModelLabel 时，侧栏既看不到恢复出的对话，称呼也仍是 xiaolai。
+        // The conversation is unfiled, and that list renders only inside the
+        // 未分组 folder — collapsed after landing on 项目, so open it first.
+        const sidebar = page.getByRole('complementary', { name: '导航' });
+        await sidebar.getByRole('button', { name: '未分组' }).click();
+        // Soft so a single red run reports both stale readers: the missing
+        // conversations.refresh() and the missing loadModelLabel().
+        await expect
+          .soft(sidebar.getByText('换机对话标题', { exact: true }))
+          .toBeVisible({ timeout: 15_000 });
+        await expect
+          .soft(sidebar.getByText('换机同学', { exact: true }))
+          .toBeVisible({ timeout: 15_000 });
 
         // 验收 29 前半句：同会话即生效——完成引导（此处是采纳带 onboarded:true
         // 后关闭）不重启，getSettings 返回已采纳值。getSettings 直接读 main
@@ -281,6 +324,9 @@ test.describe('ASAKI feature smoke', () => {
           join(documentsDir, 'StudyCoachVault')
         );
       } finally {
+        // Close the process only: `first.close()` would remove the shared
+        // environment, and the restart below needs its userData. The outer
+        // finally releases the directory.
         await first.app.close().catch(() => undefined);
       }
 
@@ -297,6 +343,7 @@ test.describe('ASAKI feature smoke', () => {
         await second.close();
       }
     } finally {
+      if (environment) await environment.cleanup().catch(() => undefined);
       await rm(fixtureRoot, { recursive: true, force: true }).catch(() => undefined);
     }
   });

@@ -2155,6 +2155,12 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
         onRestoreComplete={() => {
           setOnboardingDone(true);
           onRefresh();
+          // The restore replaced conversations and adopted settings behind the
+          // renderer's back. Both are read once at mount, so without these the
+          // dialog's 「已恢复：…对话…」 is contradicted by an empty sidebar and a
+          // stale 称呼 — the restart-shaped gap this entry exists to remove.
+          void conversations.refresh();
+          void loadModelLabel();
           void (async () => {
             await reload();
             // Land inside the restored data instead of the generic 日常 home;
