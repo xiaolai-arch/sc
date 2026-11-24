@@ -14,13 +14,70 @@ for await (const chunk of process.stdin) {
 
 const jsonMode = process.argv.includes('--json');
 
+/**
+ * The JSON object a butler tool result marker is followed by, or null when the
+ * marker is absent or the payload is not a complete object. Used to answer
+ * from the outcome instead of assuming every tool call worked: a fake that
+ * always says "已创建项目" hides a failed create_workspace from the spec.
+ */
+function toolResultPayload(name) {
+  const marker = `TOOL RESULT (${name})`;
+  const at = prompt.lastIndexOf(marker);
+  if (at === -1) return null;
+  const tail = prompt.slice(at + marker.length);
+  const start = tail.indexOf('{');
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < tail.length; index += 1) {
+    const char = tail[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === '{') depth += 1;
+    else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          return JSON.parse(tail.slice(start, index + 1));
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+const createResult = toolResultPayload('create_workspace');
+// The butler wraps a successful tool payload as {"ok":true,"result":{...}} and
+// failures as {"ok":false,...}; both shapes are accepted here.
+const createdWorkspaceId =
+  createResult !== null && typeof createResult === 'object'
+    ? typeof createResult.workspaceId === 'string'
+      ? createResult.workspaceId
+      : typeof createResult.result?.workspaceId === 'string'
+        ? createResult.result.workspaceId
+        : null
+    : null;
+const createSucceeded = createdWorkspaceId !== null;
+
 let reply;
 if (prompt.includes('TOOL RESULT (plan_workspace)')) {
   // The turn after the planner ran: wrap up with plain text so the butler
   // does not loop into another tool call.
   reply = '排好了，今天只安排这一件，做完就休息。';
 } else if (prompt.includes('TOOL RESULT (create_workspace)')) {
-  reply = '已创建项目「考研」。今天先做一次摸底，再排 4 周计划。';
+  // Answer from the tool's actual result: the confirmation line the busy-day
+  // spec waits on must mean the project exists, not merely that the call ran.
+  reply = createSucceeded
+    ? '已创建项目「考研」。今天先做一次摸底，再排 4 周计划。'
+    : '项目没有建成，请再试一次。';
 } else if (prompt.includes('这天用户说特别满')) {
   // Workspace planner path on a day the user said is packed: the prompt's
   // busy-day clause demands exactly one task of no more than 10 minutes.
