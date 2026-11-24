@@ -377,7 +377,7 @@ tests/…                                  + 见测试点
 
 ### 给 builder 的默认决定（增补节）
 
-- 复用 `restoreBackup` 与 `RestoreResult.restored.state`，不新开 IPC 通道、不新写采纳逻辑；`JsonStateStore` 的重读入口是本节唯一的新存储原语。
+- 复用 `restoreBackup` 与 `RestoreResult.restored.state`，不新开 IPC 通道、不新写采纳逻辑；`JsonStateStore` 的重读入口是本节唯一的新存储原语，且与 read/update 走同一写队列（排在 `await this.queue` 之后），不绕过排队中的 update（sc-review 2026-11-24 建议：首启无并发、实际不可达，测试构造并发时才可达）。
 - 主进程在 `handleRestoreBackup` 成功且 `restored.state === true` 时同步内存缓存，**再**返回渲染层——顺序不能反，否则完成引导会覆盖采纳结果（这正是本节要修的坑）。
 - 成功后关闭对话框沿用 `onComplete` 的刷新路径（`Workspace.tsx:2135` 起：reload + 进入恢复出的工作区），但**不**调用 `completeWorkspaceOnboarding`、不创建工作区——除非用户自己在表单里点了创建。
 - 首启第三行文案必须引用与设置页同一来源（常量），不得复制字符串（评审阻断 3 的教训）。
