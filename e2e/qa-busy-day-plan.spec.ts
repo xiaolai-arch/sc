@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { serializeWeekAvailabilityFile } from '../src/main/availability/records';
 import { parseTaskFile } from '../src/main/workspace/records/tasks';
+import { parseWorkspaceFile } from '../src/main/workspace/records/workspace';
 import {
   createIsolatedEnvironment,
   launchStudyCoach,
@@ -28,6 +29,16 @@ import {
  *
  * 一周安排按运行当天的本地日历播种（与 iter30 同一做法），断言在任何
  * 机器、任何运行日期都成立。
+ *
+ * 同步点都绑在真实状态上，不等固定时长：
+ *   - 建项目：轮询 vault 里真的出现了「考研」项目的 workspace.md（工具写盘
+ *     成功），再看模型确认文本；模型文案本身不能证明工具成功。
+ *   - 两轮之间：等「停止生成」按钮消失，说明上一轮 run 已结束、composer
+ *     会接受下一条（不是靠碰运气的点击）。
+ *   - 发计划请求后：等「停止生成」按钮出现，说明发送真的被接受并开了 run；
+ *     被拒/丢失的发送会得到明确的失败，而不是 30 秒后一句对不上的超时。
+ *   - 任务断言：按「这次计划写入的那一天」读盘，并与测试播种的今天比对，
+ *     日期在两个地方各自取一次时钟、跨午夜时会明确失败而不是静默错位。
  */
 
 /** Local YYYY-MM-DD, the same calendar the app formats with. */
@@ -72,51 +83,175 @@ async function writeFileAt(file: string, body: string): Promise<void> {
   await writeFile(file, body, 'utf8');
 }
 
+function isMissing(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | null)?.code === 'ENOENT';
+}
+
+/**
+ * Absent means "not written yet" and is safe to poll past. Any other failure
+ * (Windows answers EPERM/EBUSY while a just-written file is still being
+ * scanned) is rethrown so the polling wrapper retries it and a persistent
+ * problem fails with the real error instead of reading as "no tasks".
+ */
+async function readdirOrMissing(dir: string): Promise<string[]> {
+  try {
+    return await readdir(dir);
+  } catch (error) {
+    if (isMissing(error)) return [];
+    throw error;
+  }
+}
+
+async function readFileOrMissing(file: string): Promise<string | null> {
+  try {
+    return await readFile(file, 'utf8');
+  } catch (error) {
+    if (isMissing(error)) return null;
+    throw error;
+  }
+}
+
+/** Workspace directories in the vault, skipping bookkeeping dirs like .trash. */
+async function workspaceDirs(vault: string): Promise<string[]> {
+  const dirs = await readdirOrMissing(join(vault, 'workspaces'));
+  return dirs.filter((dir) => !dir.startsWith('.'));
+}
+
+async function readWorkspaceName(vault: string, dir: string): Promise<string | null> {
+  const raw = await readFileOrMissing(join(vault, 'workspaces', dir, 'workspace.md'));
+  if (raw === null) return null;
+  return parseWorkspaceFile(raw, dir)?.name ?? null;
+}
+
+/** True once the create_workspace tool has really written the project to disk. */
+async function workspaceNamed(vault: string, name: string): Promise<boolean> {
+  for (const dir of await workspaceDirs(vault)) {
+    if ((await readWorkspaceName(vault, dir)) === name) return true;
+  }
+  return false;
+}
+
+type PlannedDay = {
+  date: string;
+  tasks: Array<{ title: string; durationMin: number }>;
+};
+
+/**
+ * Every day the plan wrote into the workspace named `name`, read from the task
+ * files themselves. A fresh vault has no task files here until the plan runs.
+ */
+async function plannedDays(vault: string, workspaceName: string): Promise<PlannedDay[]> {
+  const days: PlannedDay[] = [];
+  for (const dir of await workspaceDirs(vault)) {
+    if ((await readWorkspaceName(vault, dir)) !== workspaceName) continue;
+    const files = await readdirOrMissing(join(vault, 'workspaces', dir, 'tasks'));
+    for (const file of files) {
+      const match = /^(\d{4}-\d{2}-\d{2})\.md$/.exec(file);
+      if (!match) continue;
+      const raw = await readFileOrMissing(join(vault, 'workspaces', dir, 'tasks', file));
+      if (raw === null) continue;
+      days.push({
+        date: match[1]!,
+        tasks: parseTaskFile(raw).map((task) => ({
+          title: task.title,
+          durationMin: task.durationMin
+        }))
+      });
+    }
+  }
+  return days.sort((left, right) => left.date.localeCompare(right.date));
+}
+
 /**
  * Creates the 考研 project through the conversation (so the conversation is
  * linked to it), then sends the plan request in the same conversation.
  */
-async function createProjectThenAskToPlan(page: LaunchedStudyCoach['page'], request: string): Promise<void> {
-  await page.getByLabel('向阿咲提问').fill('我想考研');
-  await page.getByRole('button', { name: '发送' }).click();
+/**
+ * Types one message and proves it went out: the composer is a controlled
+ * input that unmounts/remounts while a turn settles, so a draft typed exactly
+ * across that commit can be dropped and leave 发送 disabled forever. Retry the
+ * *typing* until the draft sticks and the send is enabled, then wait for the
+ * run itself (the stop button) before returning. This is a state wait, not a
+ * test retry: nothing downstream is retried or weakened.
+ */
+async function sendMessage(page: LaunchedStudyCoach['page'], text: string): Promise<void> {
+  const draft = page.getByLabel('向阿咲提问');
+  const send = page.getByRole('button', { name: '发送' });
+  await expect(async () => {
+    await draft.fill(text);
+    await expect(draft).toHaveValue(text);
+    await expect(send).toBeEnabled({ timeout: 1_000 });
+  }).toPass({ timeout: 30_000 });
+  await send.click();
+  await expect(page.getByRole('button', { name: '停止生成' })).toBeVisible({
+    timeout: 30_000
+  });
+}
+
+async function createProjectThenAskToPlan(
+  page: LaunchedStudyCoach['page'],
+  vault: string,
+  request: string
+): Promise<void> {
+  await sendMessage(page, '我想考研');
+
+  // The tool writes the project before the model's confirmation text exists:
+  // poll the vault so a tool failure that the model still narrates as success
+  // fails here, at its real cause. `toPass` also retries transient read errors
+  // from a file that was just written.
+  await expect(async () => {
+    expect(await workspaceNamed(vault, '考研')).toBe(true);
+  }).toPass({ timeout: 30_000 });
   await expect(page.getByText(/已创建项目「考研」/).last()).toBeVisible({
     timeout: 30_000
   });
 
-  await page.getByLabel('向阿咲提问').fill(request);
-  await page.getByRole('button', { name: '发送' }).click();
+  // Wait for the first run to finish (the stop button is the visible state of
+  // an active run) before typing the next message.
+  await expect(page.getByRole('button', { name: '停止生成' })).toHaveCount(0, {
+    timeout: 30_000
+  });
+
+  // The plan request only goes out once the previous run has settled; typing
+  // while it settles is the window where the draft could be dropped.
+  await sendMessage(page, request);
 }
 
-/** Every task the plan wrote into any workspace's file for `date`. */
-async function tasksWrittenForDate(
+/**
+ * The single day the plan wrote. Polls the vault instead of reading once: the
+ * tool row means the write returned, but a just-renamed file can still be
+ * briefly unreadable on Windows, and a one-shot read that swallowed that error
+ * used to look exactly like "the plan wrote nothing".
+ */
+async function plannedDayOfPlan(
   vault: string,
-  date: string
-): Promise<Array<{ title: string; durationMin: number }>> {
-  const workspaceDirs = await readdir(join(vault, 'workspaces')).catch(() => [] as string[]);
-  const tasks: Array<{ title: string; durationMin: number }> = [];
-  for (const dir of workspaceDirs) {
-    const raw = await readFile(
-      join(vault, 'workspaces', dir, 'tasks', `${date}.md`),
-      'utf8'
-    ).catch(() => null);
-    if (raw === null) continue;
-    for (const task of parseTaskFile(raw)) {
-      tasks.push({ title: task.title, durationMin: task.durationMin });
-    }
-  }
-  return tasks;
+  today: string
+): Promise<PlannedDay> {
+  let planned: PlannedDay | undefined;
+  await expect(async () => {
+    const days = await plannedDays(vault, '考研');
+    expect(days).toHaveLength(1);
+    const [day] = days;
+    // The e2e path omits `date`, so the app resolves today itself. Compare the
+    // app's day to the one the test seeded for: a disagreement means the plan
+    // ran across midnight, which must fail loudly, not as a wrong-file read.
+    expect(day?.date).toBe(today);
+    planned = day;
+  }).toPass({ timeout: 10_000 });
+  if (!planned) throw new Error('计划工具行已出现，但项目里没有任何任务文件。');
+  return planned;
 }
 
 test.describe('busy-day override through the plan_workspace tool path', () => {
   test('满日只排一件 ≤10 分钟的小任务，来源是一周安排', async () => {
-    const today = localDate(new Date());
-    const { launched, environment } = await launchWithBusyDay(new Date());
+    const today = new Date();
+    const { launched, environment } = await launchWithBusyDay(today);
     const { page } = launched;
     const pageErrors: string[] = [];
     page.on('pageerror', (error) => pageErrors.push(error.message));
 
     try {
-      await createProjectThenAskToPlan(page, '帮我排一下今天的计划');
+      await createProjectThenAskToPlan(page, environment.vault, '帮我排一下今天的计划');
 
       // The 生成计划 tool row the user sees: budget 10, source 一周安排.
       await expect(
@@ -126,10 +261,10 @@ test.describe('busy-day override through the plan_workspace tool path', () => {
       ).toBeVisible({ timeout: 30_000 });
 
       // Exactly one task reached the vault for today, and it is small.
-      const tasks = await tasksWrittenForDate(environment.vault, today);
-      expect(tasks).toHaveLength(1);
-      expect(tasks[0]?.durationMin).toBeGreaterThan(0);
-      expect(tasks[0]?.durationMin).toBeLessThanOrEqual(10);
+      const day = await plannedDayOfPlan(environment.vault, localDate(today));
+      expect(day.tasks).toHaveLength(1);
+      expect(day.tasks[0]?.durationMin).toBeGreaterThan(0);
+      expect(day.tasks[0]?.durationMin).toBeLessThanOrEqual(10);
 
       // The same task is visible on the today page.
       await page.getByRole('button', { name: '今日安排' }).click();
@@ -142,14 +277,16 @@ test.describe('busy-day override through the plan_workspace tool path', () => {
   });
 
   test('平常日保持默认预算，任务不被压成 10 分钟', async () => {
-    const today = localDate(new Date());
+    const today = new Date();
     // Only tomorrow is marked busy, so today plans normally with the record
     // present — proving the override is per-day, not per-file.
-    const { launched, environment } = await launchWithBusyDay(shiftDays(new Date(), 1));
+    const { launched, environment } = await launchWithBusyDay(shiftDays(today, 1));
     const { page } = launched;
+    const pageErrors: string[] = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
 
     try {
-      await createProjectThenAskToPlan(page, '帮我排一下今天的计划');
+      await createProjectThenAskToPlan(page, environment.vault, '帮我排一下今天的计划');
 
       await expect(
         page.getByRole('button', {
@@ -157,23 +294,27 @@ test.describe('busy-day override through the plan_workspace tool path', () => {
         })
       ).toBeVisible({ timeout: 30_000 });
 
-      const tasks = await tasksWrittenForDate(environment.vault, today);
-      expect(tasks).toHaveLength(1);
+      const day = await plannedDayOfPlan(environment.vault, localDate(today));
+      expect(day.tasks).toHaveLength(1);
       // The fake model's normal-day task is 30 minutes: no busy-day clamp.
-      expect(tasks[0]?.durationMin).toBe(30);
+      expect(day.tasks[0]?.durationMin).toBe(30);
+
+      expect(pageErrors).toEqual([]);
     } finally {
       await launched.close();
     }
   });
 
   test('钉死 45 分钟时来源是本次指定，不是一周安排', async () => {
-    const today = localDate(new Date());
+    const today = new Date();
     // Today is marked busy, yet the caller's own budget must win.
-    const { launched, environment } = await launchWithBusyDay(new Date());
+    const { launched, environment } = await launchWithBusyDay(today);
     const { page } = launched;
+    const pageErrors: string[] = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
 
     try {
-      await createProjectThenAskToPlan(page, '只给我排 45 分钟');
+      await createProjectThenAskToPlan(page, environment.vault, '只给我排 45 分钟');
 
       await expect(
         page.getByRole('button', {
@@ -183,8 +324,10 @@ test.describe('busy-day override through the plan_workspace tool path', () => {
 
       // Exactly one planned task landed; the zero-read guarantee for this
       // pinned call is pinned in qa-busy-day-tool.spec.ts.
-      const tasks = await tasksWrittenForDate(environment.vault, today);
-      expect(tasks).toHaveLength(1);
+      const day = await plannedDayOfPlan(environment.vault, localDate(today));
+      expect(day.tasks).toHaveLength(1);
+
+      expect(pageErrors).toEqual([]);
     } finally {
       await launched.close();
     }
