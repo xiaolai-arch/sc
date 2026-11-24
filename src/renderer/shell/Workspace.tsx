@@ -2152,6 +2152,32 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
           })();
         }}
         onSkip={() => setOnboardingDone(true)}
+        onRestoreComplete={() => {
+          setOnboardingDone(true);
+          onRefresh();
+          // The restore replaced conversations and adopted settings behind the
+          // renderer's back. Both are read once at mount, so without these the
+          // dialog's 「已恢复：…对话…」 is contradicted by an empty sidebar and a
+          // stale 称呼 — the restart-shaped gap this entry exists to remove.
+          void conversations.refresh();
+          void loadModelLabel();
+          void (async () => {
+            await reload();
+            // Land inside the restored data instead of the generic 日常 home;
+            // the restore created no workspace, so the first listed project is
+            // a restored one (absent when the backup's vault was empty).
+            try {
+              const list = await window.studyCoach?.listWorkspaces();
+              const restored = list?.[0];
+              if (restored) {
+                selectProject(restored.id);
+                setSection('projects');
+              }
+            } catch {
+              // Keep the default view if the lookup fails.
+            }
+          })();
+        }}
       />
 
       <GlobalSearchDialog
