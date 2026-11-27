@@ -1066,11 +1066,12 @@ test('create_practice_set passes short-question checkpoints through and drops st
 test('create_practice_set schema carries the checkpoint instruction and nothing else changes', () => {
   const tool = createButlerTools().find((entry) => entry.name === 'create_practice_set');
   if (!tool) throw new Error('create_practice_set tool is missing');
-  const items = (
-    tool.parameters.properties.questions as {
-      items: { properties: Record<string, unknown>; required: string[] };
-    }
-  ).items;
+  const parameters = tool.parameters as {
+    properties: {
+      questions: { items: { properties: Record<string, unknown>; required: string[] } };
+    };
+  };
+  const items = parameters.properties.questions.items;
   // The checkpoints property is the only addition, appended after the
   // pre-existing properties; required stays untouched.
   expect(Object.keys(items.properties)).toEqual([
