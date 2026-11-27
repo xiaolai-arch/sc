@@ -1,4 +1,4 @@
-import { formatLocalDate } from '../../shared/date';
+import { formatLocalDate, parseLocalDate } from '../../shared/date';
 import type {
   AvailableMinutesSource,
   PlanWorkspaceInput,
@@ -10,6 +10,7 @@ import type { WorkspaceService } from '../../shared/workspace';
 import type { ModelClient } from '../agent/model-client';
 import { parseWorkspacePlanReply } from './parse';
 import { buildWorkspacePlanPrompt } from './prompt';
+import { recent7DayCompletion } from '../../shared/weekly-stats';
 import { buildTemplatePlan } from './template';
 
 /** One small task, not a target: re-exported so callers size a packed day. */
@@ -77,7 +78,11 @@ export class WorkspacePlannerImpl implements WorkspacePlanner {
           memory: snapshot.memory,
           date,
           availableMinutes,
-          availableMinutesSource
+          availableMinutesSource,
+          // Real completion history for the seven days ending on the plan's
+          // own date; null below the sample threshold, which leaves the
+          // prompt byte-identical.
+          recent7DayCompletion: recent7DayCompletion(snapshot.tasks, parseLocalDate(date))
         });
         const response = await this.modelClient.complete({
           messages: [

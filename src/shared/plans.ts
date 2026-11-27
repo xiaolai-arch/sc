@@ -13,6 +13,7 @@
  */
 
 import type { KnowledgeStatus } from './knowledge';
+import { localDaysBetween } from './date';
 
 export type LongPlanGeneratedBy = 'agent' | 'template';
 
@@ -327,4 +328,33 @@ export function currentPlanWeek(plan: LongPlan, today: string): LongPlanWeek | n
   if (containing) return containing;
   const upcoming = weeks.find((week) => week.startDate > today);
   return upcoming ?? weeks[weeks.length - 1] ?? null;
+}
+
+/**
+ * How many plan days have passed by `today`, clamped to the plan's own length:
+ * 0 before the start date, capped at `weeks × 7` after the end.
+ */
+export function planElapsedDays(plan: LongPlan, today: string): number {
+  return Math.min(Math.max(localDaysBetween(plan.startDate, today), 0), plan.weeks * 7);
+}
+
+/**
+ * The hours-per-week the recalibrate dialog suggests as its default.
+ *
+ * The first seven days carry too little history to scale from, and a plan
+ * with no items has no progress at all — both return the plan's own weekly
+ * hours, so the dialog never invents a number. After that the suggestion is
+ * the plan's weekly hours scaled by the actual pace: progress made so far
+ * over progress expected by today, rounded, clamped to the input's 1–80
+ * range. It stays a default — the user reviews and can change it before
+ * confirming; nothing recalibrates automatically.
+ */
+export function suggestedRecalibrateHours(plan: LongPlan, today: string): number {
+  const elapsed = planElapsedDays(plan, today);
+  if (elapsed < 7) return plan.weeklyHours;
+  const progress = planProgress(plan);
+  if (progress.total === 0) return plan.weeklyHours;
+  const expected = elapsed / (plan.weeks * 7);
+  const actual = progress.percent / 100;
+  return Math.min(80, Math.max(1, Math.round((plan.weeklyHours * actual) / expected)));
 }

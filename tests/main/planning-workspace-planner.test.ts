@@ -565,3 +565,235 @@ test('does not fall back to a template plan after abort', async () => {
   ).rejects.toMatchObject({ name: 'AbortError' });
   expect(client.calls).toHaveLength(0);
 });
+
+describe('past-7-day completion lines', () => {
+  const REPLY =
+    '{"tasks":[{"title":"复盘","subject":"数学","durationMin":30,"acceptance":"写下错因"}]}';
+
+  function serviceWithTasks(tasks: WorkspaceTask[]): FakeWorkspaceService {
+    return new FakeWorkspaceService({
+      workspace: WORKSPACE,
+      tasks,
+      notes: NOTES,
+      memory: MEMORY,
+      reminders: []
+    });
+  }
+
+  // Plan date defaults to NOW = 2026-11-01, so the window is
+  // [2026-10-26, 2026-11-01].
+  function dated(offsetDays: number): string {
+    const date = new Date(2026, 10, 1 + offsetDays);
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${date.getFullYear()}-${month}-${day}`;
+  }
+
+  function task(id: string, due: string, status: WorkspaceTask['status']): WorkspaceTask {
+    return {
+      id,
+      workspaceId: 'ws-exam',
+      title: `任务 ${id}`,
+      subject: '数学',
+      durationMin: 30,
+      acceptance: '完成',
+      status,
+      due
+    };
+  }
+
+  test('a low completion rate adds the fact line and the code-computed compression line', async () => {
+    const client = new FakeModelClient([REPLY]);
+    const planner = createWorkspacePlanner({
+      modelClient: client,
+      // Default budget (120 minutes): 2 of 5 done = 40% → 48 → 50 minutes.
+      workspaceService: serviceWithTasks([
+        task('a', dated(-4), 'done'),
+        task('b', dated(-3), 'done'),
+        task('c', dated(-2), 'pending'),
+        task('d', dated(-1), 'pending'),
+        task('f', dated(0), 'pending'),
+        task('e', dated(0), 'skipped')
+      ]),
+      now: () => NOW
+    });
+
+    await planner.plan({ workspaceId: 'ws-exam' });
+
+    const prompt = joinPrompt(client);
+    expect(prompt).toContain('过去 7 天：安排 5 项，完成 2 项（40%）。');
+    expect(prompt).toContain(
+      '完成率偏低：请把今天的任务总量压到约 50 分钟（按过去 7 天完成率 40% × 可用 120 分钟），宁可少排，不要排满。'
+    );
+  });
+
+  test('the compression line carries the 15-minute floor', async () => {
+    const client = new FakeModelClient([REPLY]);
+    const planner = createWorkspacePlanner({
+      modelClient: client,
+      workspaceService: serviceWithTasks([
+        task('a', dated(-2), 'done'),
+        task('b', dated(-1), 'pending'),
+        task('c', dated(-1), 'pending'),
+        task('d', dated(0), 'pending'),
+        task('e', dated(0), 'pending')
+      ]),
+      now: () => NOW
+    });
+
+    // 1 of 5 done = 20%; 30 × 20% = 6 minutes → floored to 15.
+    await planner.plan({ workspaceId: 'ws-exam', availableMinutes: 30 });
+
+    expect(joinPrompt(client)).toContain(
+      '完成率偏低：请把今天的任务总量压到约 15 分钟（按过去 7 天完成率 20% × 可用 30 分钟），宁可少排，不要排满。'
+    );
+  });
+
+  test('the compression line rounds the budget to 5 minutes', async () => {
+    // 13 of 25 done = 52%; 100 × 52% = 52 minutes → rounded to 50.
+    const tasks = Array.from({ length: 25 }, (_value, index) =>
+      task(`t${index}`, dated(-((index % 6) + 1)), index < 13 ? 'done' : 'pending')
+    );
+    const client = new FakeModelClient([REPLY]);
+    const planner = createWorkspacePlanner({
+      modelClient: client,
+      workspaceService: serviceWithTasks(tasks),
+      now: () => NOW
+    });
+
+    await planner.plan({ workspaceId: 'ws-exam', availableMinutes: 100 });
+
+    expect(joinPrompt(client)).toContain('过去 7 天：安排 25 项，完成 13 项（52%）。');
+    expect(joinPrompt(client)).toContain(
+      '完成率偏低：请把今天的任务总量压到约 50 分钟（按过去 7 天完成率 52% × 可用 100 分钟），宁可少排，不要排满。'
+    );
+  });
+
+  test('a rate of 60 or more keeps the fact line and drops the compression line', async () => {
+    const client = new FakeModelClient([REPLY]);
+    const planner = createWorkspacePlanner({
+      modelClient: client,
+      workspaceService: serviceWithTasks([
+        task('a', dated(-4), 'done'),
+        task('b', dated(-3), 'done'),
+        task('c', dated(-2), 'done'),
+        task('d', dated(-1), 'done'),
+        task('e', dated(0), 'pending')
+      ]),
+      now: () => NOW
+    });
+
+    await planner.plan({ workspaceId: 'ws-exam' });
+
+    const prompt = joinPrompt(client);
+    expect(prompt).toContain('过去 7 天：安排 5 项，完成 4 项（80%）。');
+    expect(prompt).not.toContain('完成率偏低');
+  });
+
+  test('below the five-item sample the prompt is byte-identical to the no-sample prompt', async () => {
+    const client = new FakeModelClient([REPLY]);
+    const planner = createWorkspacePlanner({
+      modelClient: client,
+      // Only four dated tasks in the window → no sample.
+      workspaceService: serviceWithTasks([
+        task('a', dated(-4), 'done'),
+        task('b', dated(-3), 'done'),
+        task('c', dated(-2), 'done'),
+        task('d', dated(-1), 'done')
+      ]),
+      now: () => NOW
+    });
+    const baselineClient = new FakeModelClient([REPLY]);
+    const baselinePlanner = createWorkspacePlanner({
+      modelClient: baselineClient,
+      workspaceService: makeWorkspaceService(),
+      now: () => NOW
+    });
+
+    await planner.plan({ workspaceId: 'ws-exam' });
+    await baselinePlanner.plan({ workspaceId: 'ws-exam' });
+
+    expect(joinPrompt(client)).toBe(joinPrompt(baselineClient));
+    expect(joinPrompt(client)).not.toContain('过去 7 天');
+  });
+
+  test('the completion lines sit after the countdown and before the recent notes', async () => {
+    const client = new FakeModelClient([REPLY]);
+    const planner = createWorkspacePlanner({
+      modelClient: client,
+      workspaceService: new FakeWorkspaceService({
+        workspace: { ...WORKSPACE, targetDate: '2027-06-01' },
+        tasks: [
+          task('a', dated(-4), 'done'),
+          task('b', dated(-3), 'done'),
+          task('c', dated(-2), 'pending'),
+          task('d', dated(-1), 'pending'),
+          task('e', dated(0), 'pending')
+        ],
+        notes: [],
+        memory: [],
+        reminders: []
+      }),
+      now: () => NOW
+    });
+
+    await planner.plan({ workspaceId: 'ws-exam' });
+
+    const lines = joinPrompt(client).split('\n');
+    const countdownAt = lines.findIndex((line) => line.startsWith('目标日期：'));
+    const completionAt = lines.findIndex((line) => line.startsWith('过去 7 天：'));
+    expect(countdownAt).toBeGreaterThan(-1);
+    // The fact line lands right after the two countdown lines; the
+    // compression line follows immediately; then the notes section.
+    expect(completionAt).toBe(countdownAt + 2);
+    expect(lines[completionAt + 1]).toContain('完成率偏低');
+    expect(lines[completionAt + 2]).toBe('最近记录：暂无。');
+  });
+
+  test('the window ends on the plan date, matching the prompt frame of today', async () => {
+    const client = new FakeModelClient([REPLY]);
+    const planner = createWorkspacePlanner({
+      modelClient: client,
+      workspaceService: serviceWithTasks([
+        task('a', '2026-11-14', 'done'),
+        task('b', '2026-11-15', 'done'),
+        task('c', '2026-11-17', 'done'),
+        task('d', '2026-11-19', 'pending'),
+        task('e', '2026-11-20', 'pending'),
+        // Due before the window: invisible either way.
+        task('old', '2026-10-20', 'done'),
+        task('old2', '2026-10-25', 'done')
+      ]),
+      now: () => NOW
+    });
+
+    // Planning for 2026-11-20 while "now" is 2026-11-01: the window is
+    // [2026-11-14, 2026-11-20] — 60% keeps the fact line only.
+    await planner.plan({ workspaceId: 'ws-exam', date: '2026-11-20' });
+
+    expect(joinPrompt(client)).toContain('过去 7 天：安排 5 项，完成 3 项（60%）。');
+    expect(joinPrompt(client)).not.toContain('完成率偏低');
+  });
+
+  test('the template path never sees the completion data', async () => {
+    const withTasks = await createWorkspacePlanner({
+      modelClient: null,
+      workspaceService: serviceWithTasks([
+        task('a', dated(-4), 'done'),
+        task('b', dated(-4), 'done'),
+        task('c', dated(-3), 'pending'),
+        task('d', dated(-2), 'pending'),
+        task('e', dated(-1), 'pending')
+      ]),
+      now: () => NOW
+    }).plan({ workspaceId: 'ws-exam', date: '2026-11-01', availableMinutes: 90 });
+    const withoutTasks = await createWorkspacePlanner({
+      modelClient: null,
+      workspaceService: makeWorkspaceService(),
+      now: () => NOW
+    }).plan({ workspaceId: 'ws-exam', date: '2026-11-01', availableMinutes: 90 });
+
+    expect(withTasks.generatedBy).toBe('template');
+    expect(withTasks).toEqual(withoutTasks);
+  });
+});

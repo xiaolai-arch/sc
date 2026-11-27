@@ -26,6 +26,16 @@ export const AVAILABLE_MINUTES_SOURCE_LABELS: Record<AvailableMinutesSource, str
 export const BUSY_DAY_MINUTES = 10;
 
 /**
+ * The compressed total-minute budget suggested when the past week's completion
+ * rate came in low: today's availability scaled by that rate, rounded to the
+ * nearest 5 minutes, never below 15. Computed in code from two facts, so the
+ * planning prompt never asks the model to guess a number.
+ */
+export function compressionTargetMinutes(availableMinutes: number, percent: number): number {
+  return Math.max(15, Math.round((availableMinutes * percent) / 100 / 5) * 5);
+}
+
+/**
  * Deterministic one-line label for a plan's daily budget, e.g.
  * "每天可用 45 分钟 · 来自项目设置". Returns undefined when the plan carries no
  * usable minute budget, so the UI never invents a value or a source.

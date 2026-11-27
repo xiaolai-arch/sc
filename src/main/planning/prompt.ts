@@ -1,5 +1,10 @@
 import { daysUntilTarget } from '../../shared/workspace';
-import { BUSY_DAY_MINUTES, type AvailableMinutesSource } from '../../shared/planning';
+import {
+  BUSY_DAY_MINUTES,
+  compressionTargetMinutes,
+  type AvailableMinutesSource
+} from '../../shared/planning';
+import type { Recent7DayCompletion } from '../../shared/weekly-stats';
 import type {
   MemoryItem,
   Workspace,
@@ -20,6 +25,12 @@ export interface WorkspacePlanPromptInput {
   availableMinutes: number;
   /** Where the number came from, so the model can mention it honestly. */
   availableMinutesSource?: AvailableMinutesSource;
+  /**
+   * Past-7-day completion facts computed from real tasks, or null/absent when
+   * the sample is too small to state. The model only ever receives these
+   * computed facts — never a prediction.
+   */
+  recent7DayCompletion?: Recent7DayCompletion | null;
 }
 
 export interface WorkspacePlanPrompt {
@@ -67,6 +78,26 @@ export function buildWorkspacePlanPrompt(input: WorkspacePlanPromptInput): Works
     input.workspace.kind
   );
   if (countdown !== null) lines.push(...countdown);
+
+  // Past-week completion facts, only once a usable sample exists (≥5 planned
+  // items): a fact line, and when the rate is low one concrete code-computed
+  // budget line right after it. Without a sample both lines stay absent, so
+  // the prompt is byte-identical to before.
+  const completion = input.recent7DayCompletion ?? null;
+  if (completion !== null) {
+    lines.push(
+      `过去 7 天：安排 ${completion.planned} 项，完成 ${completion.done} 项（${completion.percent}%）。`
+    );
+    if (completion.percent < 60) {
+      const targetMinutes = compressionTargetMinutes(
+        input.availableMinutes,
+        completion.percent
+      );
+      lines.push(
+        `完成率偏低：请把今天的任务总量压到约 ${targetMinutes} 分钟（按过去 7 天完成率 ${completion.percent}% × 可用 ${input.availableMinutes} 分钟），宁可少排，不要排满。`
+      );
+    }
+  }
 
   const notes = input.notes.slice(0, MAX_PROMPT_NOTES);
   if (notes.length > 0) {
