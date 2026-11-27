@@ -4,8 +4,7 @@ import type {
   CreateReminderInput,
   DeleteReminderInput,
   Reminder,
-  UpdateReminderInput,
-  Workspace
+  UpdateReminderInput
 } from '../../shared/workspace';
 import { CommitmentsSection, RemindersSection } from './ProjectSections';
 import { PageFrame } from './PageFrame';
@@ -14,7 +13,6 @@ type RemindersPageProps = {
   reminders: Reminder[];
   /** Every promise, closed entries included; the section does the filtering. */
   commitments: CommitmentSummary[];
-  workspaces: Workspace[];
   today: string;
   onCreateReminder: (input: CreateReminderInput) => Promise<Reminder>;
   onUpdateReminder: (input: UpdateReminderInput) => Promise<Reminder>;
@@ -30,7 +28,6 @@ type RemindersPageProps = {
 export function RemindersPage({
   reminders,
   commitments,
-  workspaces,
   today,
   onCreateReminder,
   onUpdateReminder,
@@ -59,7 +56,6 @@ export function RemindersPage({
         {/* 承诺 lives on the reminders page, after the reminders themselves. */}
         <CommitmentsSection
           commitments={commitments}
-          workspaces={workspaces}
           today={today}
           onResolve={onResolveCommitment}
           onPrompt={onPrompt}
