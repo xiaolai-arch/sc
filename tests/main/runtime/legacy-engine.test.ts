@@ -332,7 +332,7 @@ test('查询级工具成功只发 tool.committed，不发服务回执', async ()
   }
 });
 
-test('取消：工具执行中 cancel → cancelled，取消后不再执行工具（第二轮模型调用不发生）', async () => {
+test('取消语义（sc-lead 2026-11-28 裁定）：create_task 在途时 cancel → pending-verification，事件与 journal 暴露待核实名单', async () => {
   let releaseTask!: () => void;
   const gate = new Promise<void>((resolve) => {
     releaseTask = resolve;
@@ -368,21 +368,122 @@ test('取消：工具执行中 cancel → cancelled，取消后不再执行工�
   try {
     const collector = collect(controller, 'run-1');
     const handle = controller.start(makeRequest(), { butler: butlerContext() });
-    // 等到任务A停在 gate 上（tool-start 已发、createTask 已进入）。
+    // 等到任务A停在 gate 上（tool-start 已发、createTask 已进入执行窗口）。
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(await controller.cancel('run-1')).toBe(true);
     releaseTask();
-    expect(await handle.done).toBe('cancelled');
-    expect(controller.getRun('run-1')?.state).toBe('cancelled');
+    // 取消 ≠ 什么都没发生：任务A在取消后落盘（stub.created 有它），终态必须
+    // 说「结果待核实」而不是「取消=什么都没做」——这正是 sc-qa 实测的状态说谎。
+    expect(await handle.done).toBe('pending-verification');
+    expect(controller.getRun('run-1')?.state).toBe('pending-verification');
+    expect(controller.getRun('run-1')?.pendingWrites).toEqual(['create_task']);
     // 取消后不得再执行工具：第二轮模型调用从未发生，任务B从未创建。
     expect(scripted.calls).toHaveLength(1);
     expect(stub.created.map((task) => task['title'])).toEqual(['任务A']);
-    // 无任何提交（落盘数据与终态一致）。
+    // 无提交回执（post-cancel 事件被丢弃），但 run.finished 暴露待核实工具。
     expect(collector.events.some((event) => event.type === 'tool.committed')).toBe(false);
     expect(collector.events.some((event) => event.type === 'service.receipt')).toBe(false);
-    expect(collector.events.at(-1)).toMatchObject({ type: 'run.finished', state: 'cancelled' });
+    expect(collector.events.at(-1)).toMatchObject({
+      type: 'run.finished',
+      state: 'pending-verification',
+      pendingWrites: ['create_task']
+    });
     const journaled = await journal.readRun('run-1');
-    expect(journaled.at(-1)).toMatchObject({ type: 'run.finished', state: 'cancelled' });
+    expect(journaled.at(-1)).toMatchObject({
+      type: 'run.finished',
+      state: 'pending-verification',
+      pendingWrites: ['create_task']
+    });
+  } finally {
+    await dispose();
+  }
+});
+
+test('取消语义：取消落在模型流式轮（无在途写入）→ 仍是 cancelled', async () => {
+  let releaseRound!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    releaseRound = resolve;
+  });
+  // 模型流停在 gate 上：没有工具开始过，不可能有写入落盘。
+  class ParkedStreamingClient implements StreamingModelClient {
+    async complete(): Promise<ModelResponse> {
+      throw new Error('complete should not be called');
+    }
+    async stream(): Promise<ModelResponse> {
+      await gate;
+      throw new Error('取消后的轮次不应返回');
+    }
+  }
+  const butler = new ButlerServiceImpl({
+    workspaceService: stubWorkspace().service,
+    modelClient: new ParkedStreamingClient(),
+    now,
+    maxToolSteps: 4
+  });
+  const engine = new LegacyEngine({ butler });
+  const { controller, dispose } = await makeHarness([engine]);
+  try {
+    const collector = collect(controller, 'run-1');
+    const handle = controller.start(makeRequest(), { butler: butlerContext() });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(await controller.cancel('run-1')).toBe(true);
+    expect(await handle.done).toBe('cancelled');
+    expect(controller.getRun('run-1')?.state).toBe('cancelled');
+    expect(controller.getRun('run-1')?.pendingWrites).toBeUndefined();
+    expect(collector.events.at(-1)).toMatchObject({ type: 'run.finished', state: 'cancelled' });
+    releaseRound();
+  } finally {
+    await dispose();
+  }
+});
+
+test('取消语义：查询级工具在途时 cancel → 仍是 cancelled（在途写入才触发待核实）', async () => {
+  let releaseTool!: () => void;
+  const toolGate = new Promise<void>((resolve) => {
+    releaseTool = resolve;
+  });
+  const scripted = new ScriptedStreamingClient([
+    {
+      events: [],
+      response: {
+        text: '',
+        usage: ZERO_USAGE,
+        toolCalls: [{ id: 'q1', name: 'get_today_plan', arguments: { date: '2026-11-27' } }]
+      }
+    }
+  ]);
+  // 查询级工具（get_today_plan → planner.plan）停在 gate 上：只读，不落盘。
+  const planner: WorkspacePlanner = {
+    plan: async (input) => {
+      await toolGate;
+      return {
+        workspaceId: input.workspaceId,
+        date: input.date ?? '2026-11-27',
+        generatedBy: 'template',
+        tasks: [],
+        availableMinutes: 120,
+        availableMinutesSource: 'default'
+      };
+    }
+  };
+  const butler = new ButlerServiceImpl({
+    workspaceService: stubWorkspace().service,
+    planner,
+    modelClient: scripted,
+    now,
+    maxToolSteps: 4
+  });
+  const engine = new LegacyEngine({ butler });
+  const { controller, dispose } = await makeHarness([engine]);
+  try {
+    const collector = collect(controller, 'run-1');
+    const handle = controller.start(makeRequest(), { butler: butlerContext() });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(await controller.cancel('run-1')).toBe(true);
+    expect(await handle.done).toBe('cancelled');
+    expect(controller.getRun('run-1')?.pendingWrites).toBeUndefined();
+    expect(collector.events.at(-1)).toMatchObject({ type: 'run.finished', state: 'cancelled' });
+    releaseTool();
   } finally {
     await dispose();
   }
@@ -571,7 +672,8 @@ test('Legacy 无审批概念：approve 在 Legacy 运行上没有可决策的 pe
     expect(await controller.approve('run-1', 'rejected')).toBe(false);
     expect(await controller.cancel('run-1')).toBe(true);
     releaseTask();
-    expect(await handle.done).toBe('cancelled');
+    // create_task 在途 → 取消后它仍会落盘 → 终态「结果待核实」（取消语义裁定）。
+    expect(await handle.done).toBe('pending-verification');
   } finally {
     await dispose();
   }

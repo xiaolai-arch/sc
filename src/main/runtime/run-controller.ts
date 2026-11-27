@@ -48,6 +48,11 @@ export interface RunSnapshot {
   error?: string;
   /** 最近一次 journal.append 失败文案（e531：不吞落盘错误）；undefined=无失败。 */
   journalError?: string;
+  /**
+   * 取消语义（sc-lead 2026-11-28 裁定）：终态 pending-verification 时非空——
+   * 这些确认级工具在取消时在途，可能在取消后才落盘，请核实。
+   */
+  pendingWrites?: string[];
 }
 
 const RUN_ORIGINS: readonly RunOrigin[] = ['chat', 'morning-check', 'user-action'];
@@ -73,6 +78,18 @@ interface RunRecord {
   lastConfirmCommitSeq: number;
   /** seq of the last service receipt. */
   lastReceiptSeq: number;
+  /**
+   * 取消语义（sc-lead 2026-11-28 裁定）：invocationId → 在途确认级工具名。
+   * 网关（批准后执行窗口）与引擎直执行路径（Legacy tool-start→tool-result）
+   * 经 `reportWriteInFlight`/`onWriteInFlight` 维护；cancel() 据此区分
+   * 「确定什么都没做」（cancelled）与「可能已落盘」（pending-verification）。
+   */
+  pendingWrites: Map<string, string>;
+  /**
+   * cancel() 时刻的待核实名单快照（终态 pending-verification 时非空）。执行体
+   * 收尾后网关会从 `pendingWrites` 清掉在途项，快照必须冻结在取消时刻。
+   */
+  pendingWritesAtCancel: string[] | null;
   listeners: Set<RunEventListener>;
   chain: Promise<void>;
   done: Promise<TerminalRunState>;
@@ -128,11 +145,17 @@ export class RunController {
     const done = new Promise<TerminalRunState>((resolve) => {
       resolveDone = resolve;
     });
+    const pendingWrites = new Map<string, string>();
     const session = this.gateway.createSession({
       runId: request.runId,
       butler: options.butler,
       budget: request.budget,
       readOnly: request.readOnly === true,
+      onWriteInFlight: (invocationId, tool) => {
+        // 取消语义：网关在确认级执行窗口两端上报（null=收尾）。
+        if (tool === null) pendingWrites.delete(invocationId);
+        else pendingWrites.set(invocationId, tool);
+      },
       emit: (event: EngineEvent) => this.emit(record, event)
     });
     const record: RunRecord = {
@@ -146,6 +169,8 @@ export class RunController {
       finished: false,
       lastConfirmCommitSeq: 0,
       lastReceiptSeq: 0,
+      pendingWrites,
+      pendingWritesAtCancel: null,
       listeners: new Set<RunEventListener>(),
       chain: Promise.resolve(),
       done,
@@ -187,7 +212,13 @@ export class RunController {
         signal: controller.signal,
         butler: options.butler,
         emit: (event: EngineEvent) => this.emit(record, event),
-        tools: session
+        tools: session,
+        // 取消语义（sc-lead 2026-11-28 裁定）：引擎直执行路径（Legacy）经它
+        // 上报写入在途；经网关执行的路径由 onWriteInFlight 覆盖。
+        reportWriteInFlight: (invocationId, tool) => {
+          if (tool === null) record.pendingWrites.delete(invocationId);
+          else record.pendingWrites.set(invocationId, tool);
+        }
       })
       .then(() => {
         // 完成必须由服务回执驱动（spec）：有已提交的写入而其后没有回执
@@ -273,7 +304,16 @@ export class RunController {
     if (!record || record.finished) return false;
     record.controller.abort();
     record.session.abortPending();
-    this.finalize(record, 'cancelled');
+    // 取消 ≠ 什么都没发生（sc-lead 2026-11-28 裁定，sc-qa 实测缺陷）：取消落
+    // 在写入工具的执行窗口内时，它可能在取消后才落盘——终态「结果待核实」并
+    // 在 run.finished 暴露待核实工具名单；无在途写入 → 仍是「取消」。
+    const pendingWrites = [...new Set(record.pendingWrites.values())];
+    if (pendingWrites.length > 0) {
+      record.pendingWritesAtCancel = pendingWrites;
+      this.finalize(record, 'pending-verification', undefined, pendingWrites);
+    } else {
+      this.finalize(record, 'cancelled');
+    }
     return true;
   }
 
@@ -288,7 +328,8 @@ export class RunController {
       startedAt: record.startedAt,
       ...(record.finishedAt !== undefined ? { finishedAt: record.finishedAt } : {}),
       ...(record.error !== undefined ? { error: record.error } : {}),
-      ...(record.journalError !== undefined ? { journalError: record.journalError } : {})
+      ...(record.journalError !== undefined ? { journalError: record.journalError } : {}),
+      ...(record.pendingWritesAtCancel !== null ? { pendingWrites: record.pendingWritesAtCancel } : {})
     };
   }
 
@@ -370,7 +411,12 @@ export class RunController {
       .catch(() => undefined);
   }
 
-  private finalize(record: RunRecord, state: TerminalRunState, error?: string): void {
+  private finalize(
+    record: RunRecord,
+    state: TerminalRunState,
+    error?: string,
+    pendingWrites?: string[]
+  ): void {
     if (record.finished) return;
     record.finished = true;
     record.state = state;
@@ -385,7 +431,8 @@ export class RunController {
       at: record.finishedAt,
       type: 'run.finished',
       state,
-      ...(error !== undefined ? { error } : {})
+      ...(error !== undefined ? { error } : {}),
+      ...(pendingWrites !== undefined && pendingWrites.length > 0 ? { pendingWrites } : {})
     };
     const runId = record.request.runId;
     record.chain = record.chain

@@ -44,10 +44,11 @@ import { BUTLER_TOOL_LEVELS } from './butler-bridge';
  * | `references` | `references`（缝④：本次回答参考的记录，原样透传 `items`） |
  * | `tool-result`（ok=true） | `tool.committed`；确认级工具再补 `service.receipt` |
  * | `tool-result`（ok=false） | `tool.failed`（reason=`failed`） |
+ * | `tool-start` / `tool-result`（确认级） | 不映射为事件；经 `reportWriteInFlight` 上报执行窗口（取消语义：在途写入 → 终态待核实） |
  * | `error` | 不映射为事件；结束时引擎抛错 → 运行「失败」 |
  * | `done`（canceled） | 不映射；取消终态由 `RunController.cancel` 合成 `run.finished` |
  * | `done`（其余） | 缝③：全程零 delta 且 `done.text` 非空 → 先补发一条 `text.delta`（全文一次成段）；`run.finished` 仍由控制器合成 |
- * | `reasoning` / `retry` / `tool-start` | v1 契约无对应类型，不映射（报告写明） |
+ * | `reasoning` / `retry` | v1 契约无对应类型，不映射（报告写明） |
  */
 
 export interface LegacyEngineOptions {
@@ -97,7 +98,18 @@ export class LegacyEngine implements EnginePort {
           // 缝④：本次回答参考的记录原样透传（场景三引用来源）。
           context.emit({ type: 'references', items: event.items });
           return;
+        case 'tool-start':
+          // 取消语义（sc-lead 2026-11-28 裁定）：确认级工具进入执行窗口，
+          // 取消若落在窗口内，它可能在取消后才落盘 → 终态待核实。查询级不上报。
+          if (this.writeTools.has(event.name)) {
+            context.reportWriteInFlight?.(event.id, event.name);
+          }
+          return;
         case 'tool-result': {
+          // 取消语义：执行窗口收尾（成功或失败都收尾——失败不落盘）。
+          if (this.writeTools.has(event.name)) {
+            context.reportWriteInFlight?.(event.id, null);
+          }
           if (event.ok) {
             // 服务调用成功：与网关语义对齐（查询级也发 committed）。
             context.emit({

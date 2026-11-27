@@ -147,7 +147,21 @@ export type RunEventPayload =
       reason: ToolFailureReason;
       error: string;
     }
-  | { type: 'run.finished'; state: TerminalRunState; error?: string }
+  | { type: 'tool.committed'; invocationId: string; tool: string }
+  | {
+      /**
+       * 取消语义（sc-lead 2026-11-28 裁定，sc-qa 实测缺陷）：取消 ≠ 什么都没
+       * 发生——cancel() 时若有确认级（写入类）工具在途，它可能在取消后才落盘，
+       * 终态落 `pending-verification` 并在本事件暴露待核实工具名单（不是新
+       * 事件类型：run.finished 本就是终态的唯一承载，state 已说「待核实」，
+       * 界面据此提示；journal 重放/订阅/补读协议零变化）。取消时无写入在途
+       * → 终态仍 `cancelled`，本字段缺席。
+       */
+      type: 'run.finished';
+      state: TerminalRunState;
+      error?: string;
+      pendingWrites?: string[];
+    }
   | { type: 'run.interrupted'; message: string };
 
 /** `run.started` 与 `run.finished` 由控制器合成；引擎与网关发其余事件。 */
@@ -216,6 +230,13 @@ export interface RunContext {
   /** 发射引擎事件（文本增量、服务回执等）；工具事件经 `tools.invoke` 产生。 */
   emit(event: EngineEvent): void;
   readonly tools: RuntimeToolHandle;
+  /**
+   * 取消语义（sc-lead 2026-11-28 裁定）：引擎报告确认级（写入类）工具的在途
+   * 状态。`tool` 传 null 表示该调用已收尾。不经此通道的工具（查询级、等待
+   * 审批中的调用）不构成在途写入。经网关执行的工具由网关上报（同一回调的
+   * 网关侧接线），引擎直执行路径（Legacy）在此上报。
+   */
+  reportWriteInFlight?(invocationId: string, tool: string | null): void;
 }
 
 /** 可替换执行引擎的结构端口（spec「引擎适配器」）。P0 只有 FakeEngine。 */

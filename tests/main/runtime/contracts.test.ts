@@ -182,7 +182,7 @@ test('验收 2（带工具与审批的完整回放）：序号连续覆盖 appro
   }
 });
 
-test('验收 3：cancel 后运行进「取消」态，不再执行任何后续工具（工具+取消竞态负例）', async () => {
+test('取消语义：写入工具在途时 cancel → pending-verification（sc-lead 2026-11-28 裁定），事件与快照暴露待核实名单', async () => {
   let releaseWrite!: () => void;
   const writeGate = new Promise<void>((resolve) => {
     releaseWrite = resolve;
@@ -204,24 +204,56 @@ test('验收 3：cancel 后运行进「取消」态，不再执行任何后续�
     // 工具正在执行（停在 writeGate 上）时取消 —— 竞态注入点。
     expect(await controller.cancel('run-1')).toBe(true);
     releaseWrite();
+    // 取消 ≠ 什么都没发生：执行体已跑（可能落盘），终态「结果待核实」。
     const state = await handle.done;
-    expect(state).toBe('cancelled');
+    expect(state).toBe('pending-verification');
 
     const snapshot = controller.getRun('run-1');
-    expect(snapshot?.state).toBe('cancelled');
-    // 没有任何 tool.committed；只有 run.started / approval.requested / run.finished。
+    expect(snapshot?.state).toBe('pending-verification');
+    expect(snapshot?.pendingWrites).toEqual(['slow_note']);
+    // 没有 tool.committed（post-cancel 无回执不提交），但 run.finished 暴露待核实名单。
     expect(collector.events.map((event) => event.type)).toEqual([
       'run.started',
       'approval.requested',
       'run.finished'
     ]);
-    expect(collector.events[2]).toMatchObject({ type: 'run.finished', state: 'cancelled' });
-    // 竞态中的第一个工具已执行但不得提交；第二个工具完全未执行。
+    expect(collector.events[2]).toMatchObject({
+      type: 'run.finished',
+      state: 'pending-verification',
+      pendingWrites: ['slow_note']
+    });
+    // 竞态中的第一个工具已执行；第二个工具完全未执行。
     expect(calls).toEqual([{ title: 'a' }]);
     expect(engine.invocations[0]?.outcome).toMatchObject({ ok: false, reason: 'cancelled' });
     expect(engine.invocations[1]?.outcome).toMatchObject({ ok: false, reason: 'cancelled' });
     const journaled = await journal.readRun('run-1');
-    expect(journaled.some((event) => event.type === 'tool.committed')).toBe(false);
+    expect(journaled.at(-1)).toMatchObject({
+      type: 'run.finished',
+      state: 'pending-verification',
+      pendingWrites: ['slow_note']
+    });
+  } finally {
+    await dispose();
+  }
+});
+
+test('取消语义：取消落在审批等待期（无在途写入）→ 仍是 cancelled', async () => {
+  const engine = new FakeEngine({
+    steps: [{ type: 'tool', name: 'slow_note', args: { title: 'a' } }] satisfies FakeStep[]
+  });
+  const { controller, gateway, dispose } = await makeHarness([engine]);
+  try {
+    const calls: unknown[] = [];
+    gateway.register(spyEntry('slow_note', { calls, gate: new Promise(() => {}) }));
+    const collector = collect(controller, 'run-1');
+    const handle = controller.start(makeRequest({ runId: 'run-1' }), { butler: butlerStub() });
+    await collector.waitFor((event) => event.type === 'approval.requested');
+    // 审批还没批：执行体从未进入，不可能落盘 → 终态仍是 cancelled。
+    expect(await controller.cancel('run-1')).toBe(true);
+    expect(await handle.done).toBe('cancelled');
+    expect(controller.getRun('run-1')?.state).toBe('cancelled');
+    expect(calls).toEqual([]);
+    expect(collector.events.at(-1)).toMatchObject({ type: 'run.finished', state: 'cancelled' });
   } finally {
     await dispose();
   }

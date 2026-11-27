@@ -66,6 +66,13 @@ export interface GatewaySessionOptions {
   signal?: AbortSignal;
   /** 只读运行（验收 22）：确认级（写入类）调用一律拒绝，记 tool.failed。 */
   readOnly?: boolean;
+  /**
+   * 取消语义（sc-lead 2026-11-28 裁定）：确认级工具 `execute` 在途上报——批准
+   * 通过后、执行体运行前后各报一次（`tool` 传 null = 收尾）。取消落在执行窗口
+   * 内时，写入可能在取消后才落盘，控制器据此把终态判为 pending-verification
+   * （而不是「取消=什么都没发生」）。查询级与等待审批中的调用不上报。
+   */
+  onWriteInFlight?(invocationId: string, tool: string | null): void;
 }
 
 export interface GatewayRunSession extends RuntimeToolHandle {
@@ -407,29 +414,40 @@ export class ToolGateway {
         }
 
         executedCalls += 1;
+        if (tool.level === 'confirm') {
+          // 取消语义：执行窗口（批准已过、执行体在跑）= 写入可能落盘的窗口。
+          options.onWriteInFlight?.(invocationId, name);
+        }
         try {
-          const result = await tool.execute(args, options.butler);
-          if (options.signal?.aborted || aborted) {
-            // Cancel may land while a slow tool is in flight: the service may
-            // have run, but without a post-cancel receipt there is no commit.
-            return refuse(name, invocationId, 'cancelled', '已取消，未提交。', {
-              emitEvent: false
-            });
+          try {
+            const result = await tool.execute(args, options.butler);
+            if (options.signal?.aborted || aborted) {
+              // Cancel may land while a slow tool is in flight: the service may
+              // have run, but without a post-cancel receipt there is no commit.
+              // 控制器把这种运行终态判为 pending-verification（见 onWriteInFlight）。
+              return refuse(name, invocationId, 'cancelled', '已取消，未提交。', {
+                emitEvent: false
+              });
+            }
+            if (tool.level === 'confirm') {
+              (committed.get(runId) as Set<string>).add(dedupKey(runId, name, args));
+            }
+            options.emit({ type: 'tool.committed', invocationId, tool: name });
+            // 缝④：工具返回值携带合法 references 数组 → 发 references 事件
+            // （两条引擎路径同一缝，引擎侧不再重复映射）。
+            const references = referencesOf(result);
+            if (references) {
+              options.emit({ type: 'references', items: references });
+            }
+            return { ok: true, result, invocationId };
+          } catch (error) {
+            // 验收 5：失败不进去重键——同参重试放行。失败回执进事件流（模型可见）。
+            return refuse(name, invocationId, 'failed', describeError(error));
           }
+        } finally {
           if (tool.level === 'confirm') {
-            (committed.get(runId) as Set<string>).add(dedupKey(runId, name, args));
+            options.onWriteInFlight?.(invocationId, null);
           }
-          options.emit({ type: 'tool.committed', invocationId, tool: name });
-          // 缝④：工具返回值携带合法 references 数组 → 发 references 事件
-          // （两条引擎路径同一缝，引擎侧不再重复映射）。
-          const references = referencesOf(result);
-          if (references) {
-            options.emit({ type: 'references', items: references });
-          }
-          return { ok: true, result, invocationId };
-        } catch (error) {
-          // 验收 5：失败不进去重键——同参重试放行。失败回执进事件流（模型可见）。
-          return refuse(name, invocationId, 'failed', describeError(error));
         }
       }
     };
