@@ -76,7 +76,8 @@
 revisitStep?: number;
 ```
 
-- 挂在既有 `revisitDue`（`knowledge.ts:38`）旁，**缺省不序列化**（`records.ts:97,118` 的既有模式：只有在场才写键）；读取容错——非 1–4 的值丢弃，主题不因坏值消失（`records.ts:81-83` 对 `revisitDue` 的同款规则）。`UpdateKnowledgeTopicInput` 增加同名可选键，仅由 `schedule_revisit` 工具写入，不进任何表单。
+- 挂在既有 `revisitDue`（`knowledge.ts:38`）旁，**缺省不序列化**（`records.ts:97,118` 的既有模式：只有在场才写键）；读取容错——非 1–4 的值丢弃，主题不因坏值消失（`records.ts:81-83` 对 `revisitDue` 的同款规则）。`UpdateKnowledgeTopicInput` 增加同名可选键 `revisitStep?: number | null`，与 `revisitDue` 完全同款：`null` 删除该键、1–4 写入、其他值校验报错（先例 `create-knowledge-service.ts:437-443`）；仅由 `schedule_revisit` 工具写入，不进任何表单。
+- **零值口径（评审建议 2）**：落盘形态只有「键在、值 1–4」与「键不在」两种，**从不写 `revisitStep: 0`**。没接住时 `nextRevisit` 返回 `step 0`，工具据此传 `revisitStep: null` 清键——回到「缺省=没进过阶梯」的语义，读取端与写入端只有一个口径。
 - 阶梯是纯函数（新文件 `src/shared/revisit.ts`），`vault` 文件格式语义不变（仍是 frontmatter 里的可选键）：
 
 ```ts
@@ -119,7 +120,7 @@ export function suggestedRecalibrateHours(plan: LongPlan, today: string): number
 ```
 
 - `elapsed = clamp(dayNumber(today) - dayNumber(plan.startDate), 0, weeks×7)`；`elapsed < 7` 或 `planProgress(plan).total === 0` → 返回 `plan.weeklyHours`（先把「凭空的 10」修成「计划自己的数」）。
-- 否则按实际速度比：`expected = elapsed / totalDays`、`actual = progress.percent / 100`，返回 `clamp(round(plan.weeklyHours × actual / expected), 1, 80)`（80 与重排输入框上限一致，`LongPlanPage.tsx:1321`）。仍是输入框默认值，用户随手可改。
+- 否则按实际速度比：`expected = elapsed / totalDays`、`actual = progress.percent / 100`，返回 `clamp(round(plan.weeklyHours × actual / expected), 1, 80)`（80 与重排输入框上限一致，`LongPlanPage.tsx:1318`）。仍是输入框默认值，用户随手可改。
 
 ### 一次性考前写作标记（P3，renderer 本地）
 
@@ -210,7 +211,7 @@ export function suggestedRecalibrateHours(plan: LongPlan, today: string): number
 
 21. `nextRevisit` 边界：无 step 接住 → 3 天/step 1；step 1/2/3 接住 → 7/14/30 天；step 4 接住 → 仍 30 天（封顶）；任何 step 没接住 → 明天/step 0。
 22. `schedule_revisit` 带 `recalled`：忽略 `days`，`revisitDue` 与 `revisitStep` 按阶梯落库，返回消息文案与现在同形；省略 `recalled`：与 `5dde0e6` 逐字节一致（显式 days、缺省明天、不写 `revisitStep`）。
-23. `revisitStep` 序列化只在定义时写键；frontmatter 坏值（0、5、'x'）读取丢弃、主题不消失；旧文件无该键读取不变。
+23. `revisitStep` 落盘只有两种形态：值 1–4 时写键，归零时键被移除（**从不写 0**，验收用一个「先接住两次、再没接住」的序列断言键消失）；frontmatter 坏值（0、5、'x'）读取丢弃、主题不消失；旧文件无该键读取不变。
 24. butler 指引更新后：回访日自测结束按结果传 `recalled`；指引与一切 UI 文案不出现「间隔重复/FSRS/遗忘曲线/保持率」词汇（`tests/main/butler-prompt.test.ts` 加负断言）。
 25. 到期回访仍进今日页：`dueRevisitTopics` 与回访卡片（`今天是「X」的回访日：让阿咲抽 3 道？`）与基线一致（`tests/renderer/today-revisits.test.tsx` 保持通过）。
 
