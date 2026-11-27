@@ -4,8 +4,10 @@ import { test, expect } from 'vitest';
 /**
  * 验收 1（架构总验收，P0 形态）：对合入 diff 做路径白名单断言。
  *
- * 允许清单（spec 验收 1）：`src/main/runtime/` 新目录、装配点 `src/main/index.ts`
- * 与 `src/main/ipc.ts`、`package.json`、`tests/`、`docs/`。
+ * 允许清单（spec 验收 1；P4 批就地扩面）：`src/main/runtime/` 新目录、装配点
+ * `src/main/index.ts` 与 `src/main/ipc.ts`、`package.json`/`package-lock.json`、
+ * `tests/`、`docs/`，以及 item 61 2026-11-28 sc-lead 裁 A 逐条列出的场景二触面
+ * （见下方 ALLOWED_FILES 的逐条注记）。
  *
  * 运行口径（item 67 2026-11-27 裁定：Runtime 批验收 1 的运行语义——显式基线才
  * 断言；非 Runtime 分支（iter33 等）该断言不适用，避免全系恒红）：
@@ -15,7 +17,24 @@ import { test, expect } from 'vitest';
  */
 const ALLOWED_PREFIXES = ['src/main/runtime/', 'tests/', 'docs/'];
 // item 61 2026-11-27 裁定：精确锁版本的必然产物，随 package.json 入清单。
-const ALLOWED_FILES = ['src/main/index.ts', 'src/main/ipc.ts', 'package.json', 'package-lock.json'];
+// item 61 2026-11-28 sc-lead 裁 A（场景二并入 P4 批的机械后果）：加收场景二
+// 触面——butler 工具表（resolve_commitment 收敛 + reschedule_commitment 新增）、
+// butler 提示词（改期指引指向新工具）、skill 共享契约（references 事件 kind 扩展，
+// 仅逐条裁定要求的最小触面，不整目录放开）：
+//   - src/main/butler/tools.ts（移除 resolve_commitment.newDue + 新工具）
+//   - src/main/butler/prompt.ts（「挪到某天」指引改指向 reschedule_commitment）
+//   - src/shared/butler-stream.ts（ButlerReference.kind 加 'commitment'，周总结引用来源）
+// 扩面外的越界改动照旧红（纪律不变）。
+const ALLOWED_FILES = [
+  'src/main/index.ts',
+  'src/main/ipc.ts',
+  'package.json',
+  'package-lock.json',
+  // item 61 2026-11-28 sc-lead 裁 A / F7：场景二必须改工具表本身。
+  'src/main/butler/tools.ts',
+  'src/main/butler/prompt.ts',
+  'src/shared/butler-stream.ts'
+];
 
 function changedFiles(base: string): string[] {
   const output = execFileSync('git', ['diff', '--name-only', `${base}...HEAD`], {

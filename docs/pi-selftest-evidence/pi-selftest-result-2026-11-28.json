@@ -1,0 +1,24 @@
+{
+  "packagedElectron": true,
+  "node": "24.22.1",
+  "electron": "45.2.1",
+  "piAgentCoreLoaded": "Agent=function",
+  "steps": [
+    {
+      "step": "load",
+      "ok": true,
+      "detail": "engine-pi 动态加载器在打包主进程加载 Pi 包成功（Agent=function）"
+    },
+    {
+      "step": "stream+tool",
+      "ok": true,
+      "detail": "终态=completed；流式 delta 与 plan_preview 提交齐备；事件序列=[run.started → text.delta(\"我来为今天生成计划。\") → tool.committed(plan_preview) → text.delta(\"预览完成（自测不再提交）。\") → run.finished(completed)]"
+    },
+    {
+      "step": "cancel",
+      "ok": true,
+      "detail": "终态=cancelled；取消后无工具提交=true；事件=[run.started → text.delta(\"自测流开始。\") → run.finished(cancelled)]"
+    }
+  ],
+  "ok": true
+}
