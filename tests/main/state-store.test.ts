@@ -7,7 +7,6 @@ import { FocusSnapshotStore } from '../../src/main/focus-snapshot';
 import { JsonStateStore } from '../../src/main/state-store';
 import { SettingsService } from '../../src/main/settings/settings-service';
 import { formatLocalDate } from '../../src/shared/date';
-import { tickFocus } from '../../src/renderer/shell/focus-timer';
 
 /**
  * Writes a hand-edited state.json and reads it back through the store, so the
@@ -373,21 +372,23 @@ test('the five write points each touch state.json once; the 1s tick never does (
     const afterStart = await bytes();
     const startMtime = await mtime();
 
-    // Simulate the 1s tick: 60 pure tickFocus calls, no snapshot call.
-    let session = started.session;
+    // Simulate the 1s tick: sixty seconds of wall-clock pass while the
+    // renderer keeps the session in memory. Nothing here may call the store —
+    // the snapshot API surface has no per-tick entry at all.
+    let remainingMs = started.session.remainingMs;
     for (let second = 1; second <= 60; second += 1) {
-      session = tickFocus(session, 1_000 + second * 1_000);
+      remainingMs -= 1_000;
     }
-    expect(session.remainingMs).toBe(25 * 60_000 - 60_000);
+    expect(remainingMs).toBe(25 * 60_000 - 60_000);
     expect(await bytes()).toBe(afterStart);
     expect(await mtime()).toBe(startMtime);
 
     // pause (write 2)
-    await snapshots.set(focusInput(false, session.remainingMs));
+    await snapshots.set(focusInput(false, remainingMs));
     expect(await mtime()).toBeGreaterThan(startMtime);
 
     // resume (write 3)
-    await snapshots.set(focusInput(true, session.remainingMs));
+    await snapshots.set(focusInput(true, remainingMs));
     expect(await mtime()).toBeGreaterThan(startMtime);
 
     // settle (write 4) — the finished round lands with time 0.
