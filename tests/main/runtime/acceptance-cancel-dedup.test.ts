@@ -328,14 +328,19 @@ test('验收 3（Legacy）：工具执行中取消 → cancelled，后续模型�
         if (probe.tasks.length > 0) break;
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
-      // ── 待补占位（sc-lead 2026-11-28 裁决；等 sc-build 把状态机改出来后由 sc-qa 改断言）──
+      // ── 待补占位（sc-lead 2026-11-28 裁决 + 补充；等 sc-build 状态机合入后由 sc-qa 改断言）──
       // 现状（下面按现状断言）：取消时已在途的 createTask 在取消之后完成落盘
       // （vault 多出「任务A」），而终态/journal 都是 cancelled、事件层零提交——
-      // 状态说谎：取消 ≠ 什么都没发生（spec 第六态「结果待核实」的反向同理）。
-      // 裁决落地后改成两条：
-      //   1) Legacy 在途取消 → 终态 `pending-verification` + 事件含「有一笔写入
-      //      可能在取消后落盘」的待核实提示 + vault 可能多一条；
-      //   2) 反向断言：取消时无在途工具 → 仍是 `cancelled`（别把「取消」废掉）。
+      // 状态说谎：取消 ≠ 什么都没发生。
+      // 依据（sc-build 提示）：contracts.ts:27 已有 pending-verification 态，
+      // run-controller.ts:195 现在只有「确认级写入无回执」一条路落进去——修复是
+      // 在取消分支加**同款判定**，不是新造状态。届时断言的不是「状态名出现了」，
+      // 而是同一条「写入无回执」判定在取消路径上也被触发（更能防退化）。
+      // 三种时序各一条（证明判定按「有没有在途」分流）：
+      //   1) 取消时无在途工具 → 仍 `cancelled`；
+      //   2) 取消时在途未提交（本用例的时序）→ `pending-verification` + 事件含
+      //      「有一笔写入可能在取消后落盘」的待核实提示 + vault 可能多一条；
+      //   3) 工具已提交之后才取消 → 仍 `cancelled`（取消晚了一步，已无在途）。
       // Pi 路径严格零写入，不受影响（上面 Pi 用例已经是零写入断言）。
       expect(controller.getRun('run-cancel-legacy')?.state).toBe('cancelled');
       // 取消后不再执行任何工具：第二轮模型调用从未发生，任务B从未创建。
