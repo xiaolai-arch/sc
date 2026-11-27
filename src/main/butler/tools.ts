@@ -7,6 +7,7 @@ import {
   type KnowledgeService,
   type KnowledgeStatus
 } from '../../shared/knowledge';
+import { nextRevisit } from '../../shared/revisit';
 import type { MemoryService } from '../../shared/memory';
 import { isProfileCategory, type ProfileService } from '../../shared/profile';
 import type { CommitmentService } from '../commitments/service';
@@ -838,7 +839,7 @@ export function createButlerTools(): ButlerToolDefinition[] {
     {
       name: 'schedule_revisit',
       description:
-        '给一个已记录的知识主题安排一次回访自测：把该主题标记为几天后需要回忆练习，到期后会出现在今日页。刚讲完并确认学习者真正学会了一个主题时调用；name 必须是知识库里已有的主题。',
+        '给一个已记录的知识主题安排一次回访自测：把该主题标记为几天后需要回忆练习，到期后会出现在今日页。刚讲完并确认学习者真正学会了一个主题时调用；name 必须是知识库里已有的主题。回访日自测结束后调用时传 recalled：true 表示接住（下次按阶梯顺延）、false 表示没接住（改为明天，重新起步）；recalled 与 days 同时给出时以 recalled 为准。',
       requiresWrite: true,
       parameters: {
         type: 'object',
@@ -848,7 +849,12 @@ export function createButlerTools(): ButlerToolDefinition[] {
             type: 'number',
             minimum: 1,
             maximum: 30,
-            description: '几天后回访（1-30）；省略为明天'
+            description: '几天后回访（1-30）；省略为明天；传了 recalled 时忽略'
+          },
+          recalled: {
+            type: 'boolean',
+            description:
+              '回访日自测结果：接住=true，没接住=false。提供时忽略 days，天数按自测结果自动决定（接住逐次顺延 3/7/14/30 天，没接住改为明天）'
           }
         },
         required: ['name'],
@@ -860,8 +866,10 @@ export function createButlerTools(): ButlerToolDefinition[] {
           throw new ToolInputError('知识库未连接。');
         }
         const knowledge = context.knowledge;
-        const days = clampRevisitDays(optionalNumber(input, 'days'));
-        const dueDate = addLocalDays(context.now(), days);
+        // A self-test result walks the ladder and owns the interval; `days`
+        // only applies when `recalled` is omitted (the old byte-identical path).
+        const recalled = optionalBoolean(input, 'recalled');
+        const days = recalled === undefined ? clampRevisitDays(optionalNumber(input, 'days')) : 0;
         throwIfAborted(context.signal);
         const topics = await knowledge.list();
         throwIfAborted(context.signal);
@@ -871,9 +879,23 @@ export function createButlerTools(): ButlerToolDefinition[] {
             `知识库里没有「${name}」这个主题；先用 record_knowledge 记录，再安排回访。`
           );
         }
-        const updated = await knowledge.update({ id: topic.id, revisitDue: dueDate });
+        const ladder =
+          recalled === undefined ? null : nextRevisit(topic.revisitStep, recalled);
+        const interval = ladder === null ? days : ladder.days;
+        const dueDate = addLocalDays(context.now(), interval);
+        const updated = await knowledge.update(
+          ladder === null
+            ? { id: topic.id, revisitDue: dueDate }
+            : {
+                id: topic.id,
+                revisitDue: dueDate,
+                // Step 0 is never written: null clears the key, restoring
+                // "never entered the ladder" for the next self-test.
+                revisitStep: ladder.step === 0 ? null : ladder.step
+              }
+        );
         throwIfAborted(context.signal);
-        const when = days === 1 ? '明天' : `${days} 天后（${dueDate}）`;
+        const when = interval === 1 ? '明天' : `${interval} 天后（${dueDate}）`;
         return {
           ok: true,
           topicId: updated.id,
@@ -1462,6 +1484,17 @@ function optionalNumber(input: Record<string, unknown>, key: string): number | u
   }
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
     throw new ToolInputError(`参数 ${key} 必须是非负数字。`);
+  }
+  return value;
+}
+
+function optionalBoolean(input: Record<string, unknown>, key: string): boolean | undefined {
+  const value = input[key];
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== 'boolean') {
+    throw new ToolInputError(`参数 ${key} 必须是布尔值。`);
   }
   return value;
 }

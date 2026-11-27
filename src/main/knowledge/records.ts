@@ -6,6 +6,7 @@ import type {
 } from '../../shared/knowledge';
 import type { NoteMeta } from '../../shared/types';
 import { isLocalDate } from '../../shared/date';
+import { isRevisitStep } from '../../shared/revisit';
 import { parseNote, serializeNote } from '../vault/note';
 import { assertSafeSegment } from '../workspace/paths';
 import { asRecord, asString, asStringArray } from '../workspace/records/coerce';
@@ -81,6 +82,9 @@ export function parseKnowledgeTopicFile(
   // Tolerant: a hand-edited or bad revisit date is ignored, never drops the topic.
   const revisitRaw = asString(meta.revisitDue);
   const revisitDue = isLocalDate(revisitRaw) ? revisitRaw : undefined;
+  // Same tolerance for the ladder step: only 1–4 is trusted, a hand-edited
+  // 0 / 5 / 'x' is dropped and the topic survives.
+  const revisitStep = isRevisitStep(meta.revisitStep) ? meta.revisitStep : undefined;
   const evidence = Array.isArray(meta.evidence)
     ? meta.evidence
         .map((entry, index) => coerceEvidence(entry, `${id}e${index + 1}`))
@@ -95,6 +99,8 @@ export function parseKnowledgeTopicFile(
     ...(level !== undefined ? { level } : {}),
     ...(workspaceId ? { workspaceId } : {}),
     ...(revisitDue !== undefined ? { revisitDue } : {}),
+    // Tolerant read: a hand-edited step outside 1-4 was already dropped above.
+    ...(revisitStep !== undefined ? { revisitStep } : {}),
     summary: asString(meta.summary) ?? '',
     evidence,
     createdAt: asString(meta.created) ?? '',
@@ -116,6 +122,9 @@ export function serializeKnowledgeTopicFile(topic: KnowledgeTopic): string {
     // Only present topics gain the key, so files without a revisit serialize
     // byte-identically to before.
     ...(topic.revisitDue !== undefined ? { revisitDue: topic.revisitDue } : {}),
+    // Only an on-ladder step gains the key: files without a step (and a
+    // cleared step, which is never written as 0) serialize byte-identically.
+    ...(isRevisitStep(topic.revisitStep) ? { revisitStep: topic.revisitStep } : {}),
     summary: topic.summary,
     evidence: topic.evidence.map((entry) => ({
       id: entry.id,

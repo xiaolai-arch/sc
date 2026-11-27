@@ -22,6 +22,7 @@ import {
 } from '../../shared/knowledge';
 import type { WorkspaceNote, WorkspaceTask } from '../../shared/workspace';
 import { formatLocalDate, isLocalDate } from '../../shared/date';
+import { isRevisitStep } from '../../shared/revisit';
 import {
   knowledgeNoteRevision,
   parseKnowledgeNoteFile,
@@ -441,6 +442,14 @@ export function createKnowledgeService(options: KnowledgeServiceOptions): Knowle
             throw new Error('回访日期必须是 YYYY-MM-DD。');
           }
           next.revisitDue = input.revisitDue;
+        }
+        if (input.revisitStep === null) {
+          delete next.revisitStep;
+        } else if (input.revisitStep !== undefined) {
+          if (!isRevisitStep(input.revisitStep)) {
+            throw new Error('回访阶梯步数必须是 1 到 4 之间的整数。');
+          }
+          next.revisitStep = input.revisitStep;
         }
         if (input.workspaceId === null) {
           delete next.workspaceId;

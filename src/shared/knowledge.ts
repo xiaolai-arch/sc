@@ -36,6 +36,8 @@ export interface KnowledgeTopic {
    * this topic. Absent when no revisit is scheduled.
    */
   revisitDue?: string;
+  /** 回访阶梯步数 1–4：已连续接住的次数。缺省 = 还没进过阶梯（首次讲完）。 */
+  revisitStep?: number;
   summary: string;
   evidence: KnowledgeEvidence[];
   createdAt: string;
@@ -63,6 +65,8 @@ export interface UpdateKnowledgeTopicInput {
   workspaceId?: string | null;
   /** Local date YYYY-MM-DD; null clears the revisit. */
   revisitDue?: string | null;
+  /** 1–4 writes the step; null clears it back to "never on the ladder". */
+  revisitStep?: number | null;
   summary?: string;
 }
 
