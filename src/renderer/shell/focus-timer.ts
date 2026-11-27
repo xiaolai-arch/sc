@@ -90,6 +90,68 @@ export function nextActualMin(actualMin: number | undefined, minutes = FOCUS_REC
   return (typeof actualMin === 'number' && Number.isFinite(actualMin) ? actualMin : 0) + minutes;
 }
 
+// ---------------------------------------------------------------------------
+// 整卷模拟（whole-paper simulation）clock.
+//
+// The paper's countdown is pure wall clock: remaining time is always
+// `durationMs − (now − startedAt)`, the same settlement idea as tickFocus but
+// derived from one start timestamp instead of accumulated ticks — so a
+// throttled background tab or a system sleep can never inflate what is left.
+// The session itself lives only in component state: leaving the page or
+// restarting voids it, while answers already submitted stay recorded.
+// ---------------------------------------------------------------------------
+
+export const WHOLE_PAPER_MIN_MINUTES = 5;
+export const WHOLE_PAPER_MAX_MINUTES = 600;
+
+export interface WholePaperClock {
+  /** Total allotted time in milliseconds. */
+  durationMs: number;
+  /** Wall-clock timestamp the paper started at. */
+  startedAt: number;
+}
+
+/** 5–600 whole minutes; non-finite input falls back to the minimum. */
+export function clampWholePaperMinutes(minutes: number): number {
+  const rounded = Number.isFinite(minutes)
+    ? Math.round(minutes)
+    : WHOLE_PAPER_MIN_MINUTES;
+  return Math.min(WHOLE_PAPER_MAX_MINUTES, Math.max(WHOLE_PAPER_MIN_MINUTES, rounded));
+}
+
+/** Exam pacing heuristic: two minutes per question, clamped into range. */
+export function defaultWholePaperMinutes(questionCount: number): number {
+  const count =
+    Number.isFinite(questionCount) && questionCount > 0 ? Math.floor(questionCount) : 0;
+  return clampWholePaperMinutes(count * 2);
+}
+
+/** Time left before 自动交卷; never negative, correct across clock jumps. */
+export function wholePaperRemainingMs(
+  clock: WholePaperClock,
+  now: number = Date.now()
+): number {
+  const elapsed = Math.max(0, now - clock.startedAt);
+  return Math.max(0, clock.durationMs - elapsed);
+}
+
+/** Time spent on the paper, clamped to the allotment so a late settle never overruns. */
+export function wholePaperElapsedMs(
+  clock: WholePaperClock,
+  now: number = Date.now()
+): number {
+  return Math.min(clock.durationMs, Math.max(0, now - clock.startedAt));
+}
+
+/** 用时 in the 结卷摘要: seconds under a minute, then 分 with any leftover 秒. */
+export function formatWholePaperSpan(ms: number): string {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) return `${seconds} 秒`;
+  return seconds === 0 ? `${minutes} 分` : `${minutes} 分 ${seconds} 秒`;
+}
+
 export function focusCompletionStatus(status: WorkspaceTaskStatus): WorkspaceTaskStatus {
   return status === 'done' ? 'done' : 'in-progress';
 }
