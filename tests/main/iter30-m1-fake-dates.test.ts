@@ -8,20 +8,19 @@ import {
 } from '../../src/main/commitments/records';
 
 /**
- * iter30 · M1 回归用例（基线 master c73e721）
+ * iter30 · M1 回归用例（基线 master c73e721，当前 master ebfd0fd 已修）
  *
- * 缺陷：`isCommitmentDate` 只做「格式 + Date 可解析」两步校验。
- * `new Date('2026-02-30T00:00:00Z')` 不是 NaN —— JavaScript 会把它滚到
- * 2026-03-02 —— 所以 2 月 30 日这类不存在的日期会被当成合法承诺日期：
- *   - `record_commitment` / 承诺服务原样保存 due='2026-02-30'；
- *   - 次日晨检按 `due <= today` 比较，这条承诺会在 3 月 2 日（而不是用户
- *     以为的日子）冒出来；承诺文件里也留下一个日历上不存在的日期。
- * 同类洞还存在于 src/main/availability/records.ts 的 `isIsoDate`（「下周哪天满」
- * 的 busyDates 校验），症状一致。
+ * 缺陷：`isCommitmentDate` 曾只做「格式 + Date 可解析」两步校验，
+ * `new Date('2026-02-30T00:00:00Z')` 会被 JavaScript 滚到 2026-03-02，
+ * 于是 2 月 30 日这类不存在的日期被当成合法承诺日期原样保存。
  *
- * 处置：本文件只写用例，不改产品代码。两个 `test.fails` 在基线 c73e721 上
- * 失败是预期结果，Vitest 会记为通过；产品修好后它们会变成「意外通过」而
- * 亮红，提醒把 `test.fails` 改回普通 `test`。对照组保证这不是一刀切拒绝。
+ * 处置变更（iter39）：iter39 M1 已修 —— `isCommitmentDate` 改为委托
+ * `src/shared/date.ts` 的 `isLocalDate`（精确形状正则 + 回卷检查），
+ * `src/main/availability/records.ts` 的 `isIsoDate` 同样委托它。
+ * 因此原来的两个 `test.fails` 在 master 上会「意外通过」而亮红：它们标记的
+ * 缺陷已修，守卫应当翻成普通 `test` 并断言**应当拒绝**。
+ *
+ * 依据：`docs/superpowers/reports/2026-11-22-iter39-m1m2.md` §1（M1）。
  */
 
 const NOW = new Date('2026-11-22T09:00:00');
@@ -36,8 +35,7 @@ async function withVault(run: (root: string) => Promise<void>): Promise<void> {
 }
 
 describe('M1 假日期：格式正确但日历上不存在的日期', () => {
-  test('对照：格式错误或月份越界的日期现在就会被拒绝', () => {
-    // 这些在基线上已经是 false，用来证明测试不是「全部拒绝」。
+  test('对照：格式错误或月份越界的日期被拒绝', () => {
     expect(isCommitmentDate('2026-11-22')).toBe(true);
     expect(isCommitmentDate('2026-1-1')).toBe(false);
     expect(isCommitmentDate('2026-13-01')).toBe(false);
@@ -46,23 +44,26 @@ describe('M1 假日期：格式正确但日历上不存在的日期', () => {
     expect(resolveCommitmentDue('2026-13-01', NOW)).toBeUndefined();
   });
 
-  test.fails(
-    'M1-a: 不存在的 2026-02-30 不应被 isCommitmentDate 放行（基线会滚到 3 月 2 日）',
-    () => {
-      expect(isCommitmentDate('2026-02-30')).toBe(false);
-      expect(isCommitmentDate('2026-11-31')).toBe(false);
-    }
-  );
+  test('M1-a: 不存在的 2026-02-30 / 2026-11-31 被 isCommitmentDate 拒绝（iter39 已修）', () => {
+    // 曾放行并滚到 3 月 2 日 / 12 月 1 日；iter39 委托 isLocalDate 后为 false。
+    expect(isCommitmentDate('2026-02-30')).toBe(false);
+    expect(isCommitmentDate('2026-11-31')).toBe(false);
+    // 闰年 2 月 29 日是真实存在的日子，不能被一刀切拒绝。
+    expect(isCommitmentDate('2024-02-29')).toBe(true);
+    expect(isCommitmentDate('2026-02-29')).toBe(false);
+  });
 
-  test.fails(
-    'M1-b: 承诺入口不应原样保存 2026-02-30（record_commitment 走的同一条路）',
-    async () => {
-      await withVault(async (root) => {
-        const service = createCommitmentService({ root, now: () => NOW });
-        // 基线行为：due 被原样写成 '2026-02-30'，pending('2026-03-02') 才会选中它。
-        const created = await service.create({ text: '背 20 个单词', due: '2026-02-30' });
-        expect(created.due).toBe('2026-03-02');
-      });
-    }
-  );
+  test('M1-b: 承诺入口拒绝 2026-02-30，而不是原样保存或悄悄滚日期（iter39 已修）', async () => {
+    await withVault(async (root) => {
+      const service = createCommitmentService({ root, now: () => NOW });
+      // 显式传入日历上不存在的日期：服务层抛错，且不写盘。
+      await expect(
+        service.create({ text: '背 20 个单词', due: '2026-02-30' })
+      ).rejects.toThrow('承诺日期必须是 YYYY-MM-DD');
+      expect(await service.list()).toEqual([]);
+      // 合法日期照常写入。
+      const ok = await service.create({ text: '背 20 个单词', due: '2026-11-23' });
+      expect(ok.due).toBe('2026-11-23');
+    });
+  });
 });
