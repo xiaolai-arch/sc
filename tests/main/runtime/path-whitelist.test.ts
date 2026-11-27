@@ -13,7 +13,8 @@ import { test, expect } from 'vitest';
  * 合并时由协调者显式传基线（如 7eda7ba）实跑并留档。
  */
 const ALLOWED_PREFIXES = ['src/main/runtime/', 'tests/', 'docs/'];
-const ALLOWED_FILES = ['src/main/index.ts', 'src/main/ipc.ts', 'package.json'];
+// item 61 2026-11-27 裁定：精确锁版本的必然产物，随 package.json 入清单。
+const ALLOWED_FILES = ['src/main/index.ts', 'src/main/ipc.ts', 'package.json', 'package-lock.json'];
 
 function changedFiles(base: string): string[] {
   const output = execFileSync('git', ['diff', '--name-only', `${base}...HEAD`], {
