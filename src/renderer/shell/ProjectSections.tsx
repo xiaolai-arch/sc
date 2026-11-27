@@ -10,7 +10,7 @@ import { friendlyErrorMessage } from '../../shared/errors';
 import { cn } from '../ui/cn';
 import { CheckIcon } from '../ui/icons';
 import { Select } from '../ui/Select';
-import { effectiveReminderState, daysUntilTarget, MAX_TASK_CUE_LENGTH } from '../../shared/workspace';
+import { effectiveReminderState, daysUntilTarget, MAX_TASK_CUE_LENGTH, MAX_TASK_NEXT_STEP_LENGTH } from '../../shared/workspace';
 import type { CommitmentSummary } from '../../shared/notifications';
 import type { ResolveCommitmentEntryInput } from '../../shared/ipc';
 import type { ReviewRecord } from '../../shared/ipc';
@@ -272,12 +272,18 @@ type PlanSectionProps = {
   onPrompt: (prompt: string) => void;
   focus: FocusSession | null;
   focusNotice: string | null;
+  /** The one-time restore prompt for an interrupted session (iter33 P2b①). */
+  focusRestore: { label: string } | null;
   canStartFocus: boolean;
   onStartFocus: (taskId: string) => void;
   onStartDefaultFocus: () => void;
   onPauseFocus: () => void;
   onResumeFocus: () => void;
   onResetFocus: () => void;
+  onAcceptFocusRestore: () => void;
+  onDismissFocusRestore: () => void;
+  /** Ends the session; a non-null text writes the task's next step first. */
+  onAbandonFocus: (nextStep: string | null) => void;
 };
 
 type TaskDraft = {
@@ -286,6 +292,8 @@ type TaskDraft = {
   duration: string;
   acceptance: string;
   cue: string;
+  /** One-line first step (iter33 P2b②); empty reads as not set. */
+  nextStep: string;
   due: string;
   startAt: string;
   repeat: TaskRepeat | '';
@@ -298,6 +306,7 @@ function draftFrom(task: WorkspaceTask): TaskDraft {
     duration: String(task.durationMin),
     acceptance: task.acceptance,
     cue: task.cue ?? '',
+    nextStep: task.nextStep ?? '',
     due: task.due ?? '',
     startAt: task.startAt ?? '',
     repeat: task.repeat ?? ''
@@ -314,12 +323,16 @@ export function PlanSection({
   onPrompt,
   focus,
   focusNotice,
+  focusRestore,
   canStartFocus,
   onStartFocus,
   onStartDefaultFocus,
   onPauseFocus,
   onResumeFocus,
-  onResetFocus
+  onResetFocus,
+  onAcceptFocusRestore,
+  onDismissFocusRestore,
+  onAbandonFocus
 }: PlanSectionProps) {
   const [pendingTaskId, setPendingTaskId] = useState<string | null>(null);
   const [taskError, setTaskError] = useState<{ id: string; message: string } | null>(null);
@@ -332,6 +345,7 @@ export function PlanSection({
     duration: '30',
     acceptance: '',
     cue: '',
+    nextStep: '',
     due: '',
     startAt: '',
     repeat: ''
@@ -396,6 +410,7 @@ export function PlanSection({
         durationMin,
         acceptance: newDraft.acceptance.trim(),
         ...(newDraft.cue.trim() ? { cue: newDraft.cue.trim() } : {}),
+        ...(newDraft.nextStep.trim() ? { nextStep: newDraft.nextStep.trim() } : {}),
         ...(due ? { due } : {}),
         ...(startAt ? { startAt } : {}),
         ...(newDraft.repeat ? { repeat: newDraft.repeat } : {})
@@ -406,6 +421,7 @@ export function PlanSection({
         duration: '30',
         acceptance: '',
         cue: '',
+        nextStep: '',
         due: '',
         startAt: '',
         repeat: ''
@@ -450,6 +466,7 @@ export function PlanSection({
         acceptance: editDraft.acceptance,
         cue: editDraft.cue.trim() || null,
         // An emptied field clears the stored value; null is the contract.
+        nextStep: editDraft.nextStep.trim() || null,
         due,
         startAt,
         repeat: editDraft.repeat || null
@@ -560,6 +577,14 @@ export function PlanSection({
           onChange={(event) => onChange({ ...draft, cue: event.target.value })}
           className={`${inputClass} sm:col-span-2`}
         />
+        <input
+          aria-label={`${keyPrefix}下一步`}
+          placeholder="下一步（可选）：一句话、可执行的第一步"
+          maxLength={MAX_TASK_NEXT_STEP_LENGTH}
+          value={draft.nextStep}
+          onChange={(event) => onChange({ ...draft, nextStep: event.target.value })}
+          className={`${inputClass} sm:col-span-2`}
+        />
         <label className="sm:col-span-2 grid gap-2 sm:grid-cols-2">
           <span className="grid gap-1">
             <input
@@ -626,11 +651,15 @@ export function PlanSection({
       <FocusTimer
         session={focus}
         notice={focusNotice}
+        restore={focusRestore}
         canStart={canStartFocus}
         onStartDefault={onStartDefaultFocus}
         onPause={onPauseFocus}
         onResume={onResumeFocus}
         onReset={onResetFocus}
+        onRestoreContinue={onAcceptFocusRestore}
+        onRestoreDismiss={onDismissFocusRestore}
+        onAbandon={onAbandonFocus}
       />
 
       {creating && canCreate ? (
@@ -752,6 +781,17 @@ export function PlanSection({
                       {task.cue ? (
                         <span className="mt-1 inline-block max-w-full truncate rounded-full bg-black/[0.05] px-1.5 py-0.5 text-[11px] text-gray-500 dark:bg-white/[0.08] dark:text-[#8e8e93]">
                           {task.cue}
+                        </span>
+                      ) : null}
+                      {/* The one-line next-step anchor (iter33 P2b②): shown
+                          on the card when recorded, so reopening a task puts
+                          the first move back in front of the user. */}
+                      {task.nextStep ? (
+                        <span
+                          aria-label={`下一步：${task.nextStep}`}
+                          className="mt-1 ml-1 inline-block max-w-full truncate rounded-full bg-[#34c759]/10 px-1.5 py-0.5 text-[11px] text-[#1d7a3e] dark:bg-[#30d158]/15 dark:text-[#4cd964]"
+                        >
+                          下一步：{task.nextStep}
                         </span>
                       ) : null}
                       {/* A plan-derived task names the goal it serves, when the

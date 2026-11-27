@@ -335,3 +335,42 @@ test('concurrent createTask calls all persist and leave no temp files', async ()
   expect(files.filter((file) => file.includes('.tmp'))).toEqual([]);
   expect((await readdir(join(root, 'workspaces', 'kaoyan', 'tasks'))).length).toBeGreaterThanOrEqual(1);
 });
+
+test('submitReview never writes a task nextStep — the two duties stay separate (验收 23)', async () => {
+  const service = createWorkspaceService(root);
+  const task = await service.createTask({
+    workspaceId: 'kaoyan',
+    title: '线代二轮',
+    subject: '数学',
+    durationMin: 60,
+    acceptance: '一章',
+    nextStep: '先翻特征值那节'
+  });
+  const before = await fs.readFile(
+    join(root, 'workspaces', 'kaoyan', 'tasks', `${task.due ?? formatLocalDate(new Date())}.md`),
+    'utf8'
+  );
+
+  // The evening review records its own tomorrow — nothing may flow back into
+  // the task record, not even the fields the task already had.
+  await service.submitReview({
+    date: task.due ?? formatLocalDate(new Date()),
+    workspaceId: 'kaoyan',
+    answers: {
+      completed: '线代一章',
+      stuck: '特征值几何意义',
+      tomorrow: '重做今天的错题'
+    }
+  });
+
+  const after = await fs.readFile(
+    join(root, 'workspaces', 'kaoyan', 'tasks', `${task.due ?? formatLocalDate(new Date())}.md`),
+    'utf8'
+  );
+  expect(after).toBe(before);
+  const stored = (await service.getWorkspaceSnapshot('kaoyan')).tasks.find(
+    (entry) => entry.id === task.id
+  );
+  expect(stored?.nextStep).toBe('先翻特征值那节');
+  expect(stored?.status).toBe('pending');
+});

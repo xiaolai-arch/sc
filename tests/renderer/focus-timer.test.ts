@@ -5,10 +5,12 @@ import {
   WHOLE_PAPER_MAX_MINUTES,
   WHOLE_PAPER_MIN_MINUTES,
   clampWholePaperMinutes,
+  decideFocusRestore,
   defaultWholePaperMinutes,
   firstFocusableTask,
   focusCompletionStatus,
   focusProgress,
+  focusRestoreLabel,
   formatFocusTime,
   formatWholePaperSpan,
   nextActualMin,
@@ -19,6 +21,7 @@ import {
   wholePaperElapsedMs,
   wholePaperRemainingMs
 } from '../../src/renderer/shell/focus-timer';
+import type { FocusSnapshotRecord } from '../../src/shared/ipc';
 import type { WorkspaceTask } from '../../src/shared/workspace';
 
 function task(
@@ -152,6 +155,103 @@ test('picks the first unfinished task for a default focus', () => {
 
   expect(firstFocusableTask(tasks)?.id).toBe('first');
   expect(firstFocusableTask([task('done', 'done')])).toBeUndefined();
+});
+
+// ---------------------------------------------------------------------------
+// 中断现场包（iter33 P2b①）：the restart bridge. 验收 18/19 — every rule is
+// deterministic and restore is always paused.
+// ---------------------------------------------------------------------------
+
+const TODAY = '2026-11-27';
+
+function snapshot(overrides: Partial<FocusSnapshotRecord> = {}): FocusSnapshotRecord {
+  return {
+    workspaceId: 'ws-1',
+    session: {
+      sessionId: 3,
+      taskId: 't1',
+      taskTitle: '极限',
+      remainingMs: 10 * 60_000,
+      running: true,
+      recorded: false,
+      lastTickAt: 1_000
+    },
+    savedAtLocalDate: TODAY,
+    ...overrides
+  };
+}
+
+describe('decideFocusRestore', () => {
+  test('same workspace, same day, time left → restore, word for word (验收 18)', () => {
+    const decision = decideFocusRestore(snapshot(), 'ws-1', TODAY);
+    expect(decision.action).toBe('restore');
+    if (decision.action !== 'restore') return;
+    expect(decision.minutesLeft).toBe(10);
+    expect(decision.label).toBe('上次专注还剩 10 分钟，继续？');
+    expect(focusRestoreLabel(10)).toBe('上次专注还剩 10 分钟，继续？');
+    // The session comes back bound to its task with its snapshot values.
+    expect(decision.session.taskId).toBe('t1');
+    expect(decision.session.remainingMs).toBe(10 * 60_000);
+  });
+
+  test('restore is always paused, even for a running snapshot (验收 19)', () => {
+    const decision = decideFocusRestore(snapshot({ session: { ...snapshot().session, running: true } }), 'ws-1', TODAY);
+    if (decision.action !== 'restore') throw new Error('expected restore');
+    expect(decision.session.running).toBe(false);
+    // And the existing resume path is what starts the clock again.
+    const resumed = resumeFocusSession(decision.session, 5_000);
+    expect(resumed.running).toBe(true);
+    expect(resumed.lastTickAt).toBe(5_000);
+  });
+
+  test('rounds the minutes up so the prompt never understates', () => {
+    const decision = decideFocusRestore(
+      snapshot({ session: { ...snapshot().session, remainingMs: 4 * 60_000 + 59_000 } }),
+      'ws-1',
+      TODAY
+    );
+    if (decision.action !== 'restore') throw new Error('expected restore');
+    expect(decision.minutesLeft).toBe(5);
+  });
+
+  test('a cross-day snapshot is discarded (验收 19 negative)', () => {
+    expect(decideFocusRestore(snapshot(), 'ws-1', '2026-11-28').action).toBe('discard');
+  });
+
+  test('a different workspace is discarded (验收 19 negative)', () => {
+    expect(decideFocusRestore(snapshot(), 'ws-2', TODAY).action).toBe('discard');
+  });
+
+  test('a finished session (no time left) is discarded', () => {
+    const decision = decideFocusRestore(
+      snapshot({ session: { ...snapshot().session, remainingMs: 0 } }),
+      'ws-1',
+      TODAY
+    );
+    expect(decision.action).toBe('discard');
+  });
+
+  test('absent or unreadable snapshots are discarded (坏 JSON 负例)', () => {
+    expect(decideFocusRestore(null, 'ws-1', TODAY).action).toBe('discard');
+    expect(decideFocusRestore(undefined, 'ws-1', TODAY).action).toBe('discard');
+    expect(
+      decideFocusRestore(
+        snapshot({ session: { ...snapshot().session, remainingMs: Number.NaN } }),
+        'ws-1',
+        TODAY
+      ).action
+    ).toBe('discard');
+    expect(
+      decideFocusRestore(
+        snapshot({ session: { ...snapshot().session, taskId: '' } }),
+        'ws-1',
+        TODAY
+      ).action
+    ).toBe('discard');
+    expect(
+      decideFocusRestore(snapshot({ savedAtLocalDate: '上周' }), 'ws-1', TODAY).action
+    ).toBe('discard');
+  });
 });
 
 // ---------------------------------------------------------------------------

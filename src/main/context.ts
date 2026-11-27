@@ -55,6 +55,7 @@ import { createSearchService } from './search';
 import { createDefaultSettings } from './settings/defaults';
 import { InMemorySecretStore, SafeStorageSecretStore, type SecretStore } from './settings/secret-store';
 import { SettingsService } from './settings/settings-service';
+import { FocusSnapshotStore } from './focus-snapshot';
 import { JsonStateStore, type AppState } from './state-store';
 import { createVideoNotesService, type VideoNotesService } from './video-notes';
 import {
@@ -184,6 +185,8 @@ export interface AppContext {
   api: StudyCoachApi;
   state: JsonStateStore;
   settings: SettingsService;
+  /** The single focus-session slot over state.json (iter33 P2b①). */
+  readonly focusSnapshots: FocusSnapshotStore;
   secrets: SecretStore;
   videoNotes: VideoNotesService;
   videoJobs: VideoJobsService;
@@ -289,6 +292,9 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
   });
   const stored = await state.read();
   const settings = new SettingsService(state);
+  // The single focus-session slot (iter33 P2b①) rides on the same state.json
+  // write queue as every other shell key.
+  const focusSnapshots = new FocusSnapshotStore(state);
   const conversationStore = new ConversationStore(join(options.userDataPath, 'conversations'));
   const secrets =
     options.secretStore ??
@@ -1476,6 +1482,12 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     async clearUsage() {
       await usageStore.clear();
     },
+    async getFocusSnapshot() {
+      return focusSnapshots.get();
+    },
+    async setFocusSnapshot(input) {
+      await focusSnapshots.set(input);
+    },
     onConversationOpened() {
       return () => undefined;
     },
@@ -1500,6 +1512,7 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
     api,
     state,
     settings,
+    focusSnapshots,
     secrets,
     videoNotes,
     videoJobs,

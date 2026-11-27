@@ -496,6 +496,11 @@ app.whenReady().then(async () => {
     // Write any debounced run snapshot now; a turn that ended in the last
     // 200ms would otherwise be lost and look completed instead of interrupted.
     void runStore.flush().catch(() => undefined);
+    // The focus snapshot's quit-time write (iter33 P2b①): a running session
+    // settles against the wall clock here, so the next launch restores the
+    // pre-exit remaining time. Same fire-and-forget shape as runStore.flush —
+    // the write is a small queued atomic replace that outlives the teardown.
+    void context.focusSnapshots.flushForQuit().catch(() => undefined);
     // Stops the vault search watcher; the app is already quitting, so this is
     // fire-and-forget (the resources are released with the process anyway).
     void context.dispose().catch(() => undefined);

@@ -1,5 +1,6 @@
 import { isLocalDate, isLocalDateTime, repairRolloverDate } from '../../../shared/date';
 import { isTaskRepeat, type TaskRepeat } from '../../../shared/recurrence';
+import { normalizeTaskNextStep } from '../../../shared/workspace';
 import type { NoteMeta, StudyTask, TaskStatus } from '../../../shared/types';
 import type { WorkspaceTask } from '../../../shared/workspace';
 import { parseNote, serializeNote } from '../../vault/note';
@@ -27,6 +28,8 @@ export type TaskRecord = StudyTask & {
    * plan (the plan's project supplies it), never guessed on read.
    */
   goalId?: string;
+  /** One-line next-step anchor (iter33 P2b); absent means not set. */
+  nextStep?: string;
   created?: string;
   updated?: string;
 };
@@ -55,6 +58,7 @@ function coerceTask(value: unknown): TaskRecord | null {
   // due, and every other bad field here is tolerated the same way.
   const rawDue = asString(record.due);
   const due = isLocalDate(rawDue) ? rawDue : repairRolloverDate(rawDue);
+  const nextStep = normalizeTaskNextStep(asString(record.nextStep) ?? '');
   return {
     id,
     title,
@@ -72,6 +76,10 @@ function coerceTask(value: unknown): TaskRecord | null {
     ...(asString(record.planWeekId) ? { planWeekId: asString(record.planWeekId) } : {}),
     ...(asString(record.planItemId) ? { planItemId: asString(record.planItemId) } : {}),
     ...(asString(record.goalId) ? { goalId: asString(record.goalId) } : {}),
+    // One line, trimmed, ≤80 code points; an empty or blank value reads as
+    // not set (the key is never stored as an empty string). Legacy tasks
+    // without the key read exactly as before — zero migration.
+    ...(nextStep ? { nextStep } : {}),
     ...(isLocalDateTime(startAt) ? { startAt } : {}),
     created: asString(record.created),
     updated: asString(record.updated)
@@ -125,6 +133,7 @@ export function toWorkspaceTask(record: TaskRecord, workspaceId: string): Worksp
     ...(record.planWeekId ? { planWeekId: record.planWeekId } : {}),
     ...(record.planItemId ? { planItemId: record.planItemId } : {}),
     ...(record.goalId ? { goalId: record.goalId } : {}),
+    ...(record.nextStep ? { nextStep: record.nextStep } : {}),
     ...(record.startAt ? { startAt: record.startAt } : {}),
     createdAt: record.created,
     updatedAt: record.updated

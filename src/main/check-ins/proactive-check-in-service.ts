@@ -19,8 +19,10 @@ import {
   buildCheckInNotificationBody,
   buildCheckInPrompt,
   buildCheckInTemplate,
+  activeTasks,
   commitmentCheckInLine,
   freshStartCheckInLine,
+  morningRecoveryLine,
   resumeCheckInLine,
   tomorrowCheckInLine,
   weekAvailabilityQuestion,
@@ -491,8 +493,10 @@ export class ProactiveCheckInService {
       // morning tail, in the template's fixed order: the fresh-start line
       // first (the model never saw it, so it cannot have restated it), then
       // the promise question only when the model did not ask it itself, then
-      // the tomorrow bridge (also code-owned). With none of the three the
-      // reply keeps its previous bytes.
+      // the recovery line — the first unfinished task's next-step line when
+      // one is recorded (iter33 P2b②), otherwise the tomorrow bridge (also
+      // code-owned). At most one line in the slot, either way. With none of
+      // the three the reply keeps its previous bytes.
       const promiseLine = trigger === 'morning' ? commitmentCheckInLine(commitment, date) : '';
       const promisePending =
         promiseLine && commitment && !composed.includes(commitment.text)
@@ -500,9 +504,9 @@ export class ProactiveCheckInService {
           : null;
       const freshStartLine =
         trigger === 'morning' ? freshStartCheckInLine(reviewRecovery) : '';
-      const tomorrowLine =
-        trigger === 'morning' ? tomorrowCheckInLine(tomorrowBridge) : '';
-      const tail = [freshStartLine, promisePending, tomorrowLine].filter(
+      const recoveryLine =
+        trigger === 'morning' ? morningRecoveryLine(activeTasks(context)[0], tomorrowBridge) : '';
+      const tail = [freshStartLine, promisePending, recoveryLine].filter(
         (line) => line !== null && line !== ''
       );
       if (composed !== template && tail.length > 0) {

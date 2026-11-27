@@ -2603,6 +2603,15 @@ export function createMockApi(
       // The browser prototype keeps no usage history.
     },
 
+    async getFocusSnapshot() {
+      // The browser prototype keeps no machine state across reloads.
+      return null;
+    },
+
+    async setFocusSnapshot() {
+      // Same: snapshot writes are accepted and dropped with the page.
+    },
+
     async exportBackup() {
       // The browser prototype has no native directory picker.
       return null;

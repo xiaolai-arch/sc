@@ -1,3 +1,5 @@
+import { isLocalDate } from '../../shared/date';
+import type { FocusSnapshotRecord } from '../../shared/ipc';
 import type { WorkspaceTask, WorkspaceTaskStatus } from '../../shared/workspace';
 
 export const FOCUS_DURATION_MS = 25 * 60 * 1000;
@@ -158,4 +160,81 @@ export function focusCompletionStatus(status: WorkspaceTaskStatus): WorkspaceTas
 
 export function firstFocusableTask(tasks: WorkspaceTask[]): WorkspaceTask | undefined {
   return tasks.find((task) => task.status === 'pending' || task.status === 'in-progress');
+}
+
+// ---------------------------------------------------------------------------
+// 中断现场包（iter33 P2b①）：the restart bridge for an interrupted focus
+// session. The snapshot lives in `state.json` (machine transients, never the
+// vault); every restore rule here is deterministic — same workspace, same
+// local day, time actually left — so the same snapshot always decides the
+// same way.
+// ---------------------------------------------------------------------------
+
+export type FocusRestoreDecision =
+  | {
+      action: 'restore';
+      /** The snapshot's session, forced into the paused state. */
+      session: FocusSession;
+      minutesLeft: number;
+      label: string;
+    }
+  | { action: 'discard' };
+
+/** The one restore prompt, word for word per spec. */
+export function focusRestoreLabel(minutesLeft: number): string {
+  return `上次专注还剩 ${minutesLeft} 分钟，继续？`;
+}
+
+/**
+ * Decides what a restart does with the persisted focus snapshot. Same
+ * workspace and same local day with time actually left → restore, always as
+ * *paused* (even when the snapshot says running: a snapshot recovered after a
+ * hard kill must never auto-restart the clock). A different day, a different
+ * workspace, a finished/empty remainder or an unreadable session → discard.
+ * The caller shows the prompt once, in this workspace's view.
+ */
+export function decideFocusRestore(
+  snapshot: FocusSnapshotRecord | null | undefined,
+  workspaceId: string,
+  today: string
+): FocusRestoreDecision {
+  if (!snapshot) return { action: 'discard' };
+  if (snapshot.workspaceId !== workspaceId) return { action: 'discard' };
+  if (!isLocalDate(snapshot.savedAtLocalDate) || snapshot.savedAtLocalDate !== today) {
+    return { action: 'discard' };
+  }
+  const session = snapshot.session;
+  if (
+    !session ||
+    typeof session !== 'object' ||
+    typeof session.taskId !== 'string' ||
+    session.taskId === '' ||
+    typeof session.taskTitle !== 'string' ||
+    typeof session.remainingMs !== 'number' ||
+    !Number.isFinite(session.remainingMs) ||
+    session.remainingMs <= 0 ||
+    typeof session.sessionId !== 'number' ||
+    !Number.isFinite(session.sessionId) ||
+    typeof session.lastTickAt !== 'number' ||
+    !Number.isFinite(session.lastTickAt)
+  ) {
+    return { action: 'discard' };
+  }
+  // 一律以暂停态恢复：the user clicks 继续 before the clock moves again.
+  const restored: FocusSession = {
+    sessionId: session.sessionId,
+    taskId: session.taskId,
+    taskTitle: session.taskTitle,
+    remainingMs: session.remainingMs,
+    running: false,
+    recorded: Boolean(session.recorded),
+    lastTickAt: session.lastTickAt
+  };
+  const minutesLeft = Math.ceil(restored.remainingMs / 60_000);
+  return {
+    action: 'restore',
+    session: restored,
+    minutesLeft,
+    label: focusRestoreLabel(minutesLeft)
+  };
 }
