@@ -29,6 +29,10 @@ jobs:
       - run: npm run typecheck:e2e
       - run: npm test
       - run: npm run build
+      # Third-party notices must be regenerated whenever dependencies change;
+      # a dirty diff means the committed file is stale.
+      - run: npm run notices
+      - run: git diff --exit-code -- THIRD-PARTY-NOTICES.md
 
   verify-windows:
     name: Typecheck, unit tests, build (Windows)
@@ -47,6 +51,10 @@ jobs:
       - run: npm run typecheck:e2e
       - run: npm test
       - run: npm run build
+      # Third-party notices must be regenerated whenever dependencies change;
+      # a dirty diff means the committed file is stale.
+      - run: npm run notices
+      - run: git diff --exit-code -- THIRD-PARTY-NOTICES.md
       # Unsigned, unpacked packaging smoke test: catches icon/installer config
       # regressions without needing a certificate.
       - run: npx electron-builder --win --dir
