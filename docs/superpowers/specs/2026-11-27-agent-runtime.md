@@ -29,7 +29,7 @@
 | **P0 底座骨架** | 契约三件套（RunRequest / RunEvent / RunState 六态）+ `EnginePort` + `FakeEngine`（测试里稳定制造失败）+ `RunJournal` + `ToolGateway`（工具注册表、三级行为、去重）；现有 19 个管家工具经网关**全部**重新注册（`createButlerTools`，`tools.ts:203`，名单以该函数返回为准）；`plan_workspace`（`tools.ts:389`，现在生成+写入一体）拆成**预览（只读）与提交（写入）两个工具** | 无 |
 | **P1 场景一 + Legacy 对照** | `LegacyEngine` 包装现有 `ButlerService.stream`（映射 `ButlerStreamEvent`（`src/shared/butler-stream.ts:30`）→ RunEvent）；场景一在 Fake/Legacy 上端到端走通：取消、确认、失败不说成功 | P0 |
 | **P2 PiEngine 接入** | `engine-pi` 适配锁定的 `pi-agent-core`（上游 `main` 标 **1.6.1、MIT、Node ≥ 22.19.0**，方案草稿 3/4）；**硬门：打包后的 Windows Electron 里**完成一次流式、一次工具调用、一次取消（开发机 Node 跑通不算）；场景一切到 Pi 与 Legacy 对照；Pi 类型零泄漏 | P0、P1 |
-| **P3 场景二：承诺改期** | 改期语义**已存在**，不新增服务方法：`CommitmentService.resolve({ newDue })`（`service.ts:195`；日期校验 `:203-205`；改期下界唯一权威 `:210-218`，注释自证所有入口都走 `resolve`；写 due+恢复 open+清 resolvedAt `:228-231`），旧 `resolve_commitment` 工具已带 newDue 入口（`tools.ts:938`，描述 `:940`）。v1 做法：新增 `reschedule_commitment` 工具（**确认级**）以后端 `resolve({ newDue })` 为唯一改期路径；旧 `resolve_commitment` 收敛为纯「结掉」语义——工具 schema 移除 `newDue`，网关校验拒绝携带 `newDue` 的旧工具调用（防确认级审批被旁路）；renderer 审批卡（approval.requested → approved/rejected）+ 同名承诺先让用户选。（备选「新增显式 `reschedule` 服务方法并收敛 newDue」——接口重构，触 reminders page/IPC/工具全部入口——记入给 builder 决定 7，留 v2 评估） | P0（网关审批）；不依赖 P2，Legacy/Pi 都能跑 |
+| **P3 场景二：承诺改期** | 改期语义**已存在**，不新增服务方法：`CommitmentService.resolve({ newDue })`（`service.ts:196`；日期校验 `:204-206`；改期下界唯一权威 `:211-219`，注释自证所有入口都走 `resolve`；写 due+恢复 open+清 resolvedAt `:229-232`），旧 `resolve_commitment` 工具已带 newDue 入口（`tools.ts:938`，描述 `:940`）。v1 做法：新增 `reschedule_commitment` 工具（**确认级**）以后端 `resolve({ newDue })` 为唯一改期路径；旧 `resolve_commitment` 收敛为纯「结掉」语义——工具 schema 移除 `newDue`，网关校验拒绝携带 `newDue` 的旧工具调用（防确认级审批被旁路）；renderer 审批卡（approval.requested → approved/rejected）+ 同名承诺先让用户选。（备选「新增显式 `reschedule` 服务方法并收敛 newDue」——接口重构，触 reminders page/IPC/工具全部入口——记入给 builder 决定 7，留 v2 评估） | P0（网关审批）；不依赖 P2，Legacy/Pi 都能跑 |
 | **P4 场景三：周总结** | 只读跨项目周复盘工具（来源引用 + 「没有记录就说明没有」）；对照期结束判据：Legacy 退役评估 | P0；建议在 P2 后 |
 
 **实施排期**：iter32 的 P0–P3 全部收口后，才由 sc-build 派本 spec 的批次（item 61 已定，主人 2026-11-27）。文件交集见「依赖与冲突」。
@@ -155,7 +155,7 @@
 4. 审批卡确认粒度：一次批准 = 一次工具调用 + 一组参数 + 一个项目范围；会话级「始终允许」不做（草稿 4）。
 5. Legacy 的会话摘要（`maybeSummarize`，`butler-service.ts:576`）不迁入 Runtime v1——它是 Legacy 引擎内部实现，Runtime 契约不管对话压缩。
 6. 打包验证门（验收 11）作为 P2 的**手测清单**记录在交付报告，不进 CI（CI 没有打包产物）。
-7. 改期后端选 `resolve({ newDue })` 复用而非新增 `reschedule` 服务方法（P3 行）：服务注释自证 `resolve` 是改期唯一权威入口（`service.ts:210-215`），新增方法会造成第二路径、破坏「一条写入路径」；备选 a（显式 `reschedule` 方法并收敛 newDue，接口重构、迁移全部入口）若 v2 认为「resolve 兼两职」语义不清再评估。
+7. 改期后端选 `resolve({ newDue })` 复用而非新增 `reschedule` 服务方法（P3 行）：服务注释自证 `resolve` 是改期唯一权威入口（`service.ts:211-216`），新增方法会造成第二路径、破坏「一条写入路径」；备选 a（显式 `reschedule` 方法并收敛 newDue，接口重构、迁移全部入口）若 v2 认为「resolve 兼两职」语义不清再评估。
 
 ## 风险
 
