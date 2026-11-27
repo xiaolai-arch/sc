@@ -18,7 +18,8 @@ export interface ButlerReference {
     | 'knowledge-topic'
     | 'practice-set'
     | 'practice-question'
-    | 'practice-mistake';
+    | 'practice-mistake'
+    | 'commitment';
   title: string;
   /** Short excerpt or provenance note (profile category, snippet). */
   detail?: string;
@@ -71,7 +72,8 @@ export const BUTLER_REFERENCE_LABELS: Record<ButlerReference['kind'], string> = 
   'knowledge-topic': '知识主题',
   'practice-set': '练习',
   'practice-question': '练习题',
-  'practice-mistake': '错题'
+  'practice-mistake': '错题',
+  commitment: '承诺'
 };
 
 export const BUTLER_TOOL_LABELS: Record<string, string> = {
