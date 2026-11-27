@@ -682,3 +682,81 @@ test('映射健壮性：ButlerStreamEvent 全类型经 run() 有分支、不抛�
     await dispose();
   }
 });
+
+/** 缝③ scripted ButlerService：只回放给定事件（不碰真实循环）。 */
+function scriptedButler(script: ButlerStreamEvent[]): ButlerService {
+  return {
+    stream: async (
+      _input: unknown,
+      onEvent: (event: ButlerStreamEvent) => void
+    ): Promise<{ text: string }> => {
+      const last = script.at(-1);
+      for (const event of script) onEvent(event);
+      return { text: last?.type === 'done' ? last.text : '' };
+    }
+  } as unknown as ButlerService;
+}
+
+test('缝③：done 独带全文而全程未流式 → 补发一条 text.delta，正文不丢', async () => {
+  // 工具步数兜底（tool-limit / tool-error 模板）等路径只发 done、从不发 text。
+  const butler = scriptedButler([{ type: 'done', text: '今天的计划已经生成好了。' }]);
+  const engine = new LegacyEngine({ butler });
+  const { controller, dispose } = await makeHarness([engine]);
+  try {
+    const collector = collect(controller, 'run-1');
+    const handle = controller.start(makeRequest());
+    expect(await handle.done).toBe('completed');
+    expect(collector.events.map((event) => event.type)).toEqual([
+      'run.started',
+      'text.delta', // 补发的一条全文
+      'run.finished'
+    ]);
+    expect(collector.events[1]).toMatchObject({
+      type: 'text.delta',
+      text: '今天的计划已经生成好了。'
+    });
+    expect(collector.events[1]?.seq).toBe(2); // 补发在 run.finished（seq 3）之前
+  } finally {
+    await dispose();
+  }
+});
+
+test('缝③：已流式发过 delta → done 的全文不补发不重复', async () => {
+  const butler = scriptedButler([
+    { type: 'text', text: '先流式的一段。' },
+    { type: 'done', text: '先流式的一段。（终局全文）' }
+  ]);
+  const engine = new LegacyEngine({ butler });
+  const { controller, dispose } = await makeHarness([engine]);
+  try {
+    const collector = collect(controller, 'run-1');
+    const handle = controller.start(makeRequest());
+    expect(await handle.done).toBe('completed');
+    expect(collector.events.map((event) => event.type)).toEqual([
+      'run.started',
+      'text.delta', // 仅流式的那一条
+      'run.finished'
+    ]);
+    const deltas = collector.events
+      .filter((event) => event.type === 'text.delta')
+      .map((event) => (event as { text: string }).text);
+    expect(deltas).toEqual(['先流式的一段。']); // done 的终局全文没有再补一条
+  } finally {
+    await dispose();
+  }
+});
+
+test('缝③：done（canceled）不补发——取消终态由控制器合成', async () => {
+  const butler = scriptedButler([{ type: 'done', text: '不应出现在事件流', canceled: true }]);
+  const engine = new LegacyEngine({ butler });
+  const { controller, dispose } = await makeHarness([engine]);
+  try {
+    const collector = collect(controller, 'run-1');
+    const handle = controller.start(makeRequest());
+    expect(await handle.done).toBe('completed');
+    expect(collector.events.map((event) => event.type)).toEqual(['run.started', 'run.finished']);
+    expect(collector.events.some((event) => event.type === 'text.delta')).toBe(false);
+  } finally {
+    await dispose();
+  }
+});

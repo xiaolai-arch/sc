@@ -1,7 +1,7 @@
 import type { Api, AssistantMessage, Model, TextContent } from '@earendil-works/pi-ai';
 import type { Agent, AgentEvent, AgentTool, AgentToolResult, StreamFn } from '@earendil-works/pi-agent-core';
 import { butlerToolLabel } from '../../../shared/butler-stream';
-import type { EnginePort, RunContext } from '../contracts';
+import { doneOnlyCatchUp, type EnginePort, type RunContext } from '../contracts';
 import type { ToolGateway } from '../tool-gateway';
 import { BUTLER_TOOL_LEVELS } from '../butler-bridge';
 
@@ -50,7 +50,8 @@ import { BUTLER_TOOL_LEVELS } from '../butler-bridge';
  * | `agent_start` / `turn_start` / `turn_end` | 不映射（run.started / run.finished 由 RunController 合成） |
  * | `message_update`（assistantMessageEvent.type=`text_delta`） | `text.delta`（增量原文） |
  * | `message_update`（其余：thinking_* / toolcall_* / text_start / text_end） | 不映射（thinking 对齐 Legacy 的 reasoning 不映射；toolcall_* 由网关事件承载） |
- * | `message_start` / `message_end`（stopReason=stop/toolUse） | 不映射 |
+ * | `message_start` | 不映射 |
+ * | `message_end`（stopReason=stop/toolUse） | 缝③：全程零 text_delta 且消息正文非空（一次成段返回）→ 补发一条 `text.delta`（全文）；其余不映射（run.finished 由控制器合成） |
  * | `message_end`（stopReason=`error`） | 不映射为即时事件；记下 errorMessage，run() 结束时抛出 → 运行「失败」（对齐 Legacy 的 error 事件映射） |
  * | `message_end`（stopReason=`aborted`） | 不映射；取消终态由 `RunController.cancel` 合成 `run.finished` |
  * | `tool_execution_start` / `tool_execution_update` | 不映射（v1 契约无对应类型；对齐 Legacy 的 tool-start 不映射） |
@@ -158,6 +159,8 @@ export class PiEngine implements EnginePort {
     let lastWriteFailure: string | undefined;
     /** pi 的 stopReason=error 消息文案（Legacy error 事件的对应物）。 */
     let modelError: string | undefined;
+    /** 本会话已发出的 `text.delta` 条数（缝③补发判定：补发本身也计数）。 */
+    let textDeltaCount = 0;
     const writeTools = this.writeTools;
 
     const definitions = this.options.tools.definitions();
@@ -233,6 +236,7 @@ export class PiEngine implements EnginePort {
         case 'message_update': {
           const streamEvent = event.assistantMessageEvent;
           if (streamEvent.type === 'text_delta') {
+            textDeltaCount += 1;
             context.emit({ type: 'text.delta', text: streamEvent.delta });
           }
           return;
@@ -241,6 +245,23 @@ export class PiEngine implements EnginePort {
           const message = event.message as AssistantMessage;
           if (message.stopReason === 'error') {
             modelError = message.errorMessage ?? '模型调用失败';
+            return;
+          }
+          // 缝③：一次成段返回（全程零 text_delta）而终局消息携带正文 → 先补发
+          // 一条全文 delta 再交控制器收尾。error/aborted 终局走既有失败/取消
+          // 路径，不在本缝（补发只对正常终局）。补发本身计入 delta 计数，
+          // 多轮时不会重复。
+          if (message.stopReason === 'stop' || message.stopReason === 'toolUse') {
+            const text = message.content
+              .map((block) =>
+                block && (block as TextContent).type === 'text' ? (block as TextContent).text : ''
+              )
+              .join('');
+            const catchUp = doneOnlyCatchUp(textDeltaCount, text);
+            if (catchUp !== null) {
+              textDeltaCount += 1;
+              context.emit({ type: 'text.delta', text: catchUp });
+            }
           }
           return;
         }

@@ -112,6 +112,27 @@ export type EngineEvent = Extract<
   { type: 'text.delta' | 'service.receipt' | 'approval.requested' | 'tool.committed' | 'tool.failed' }
 >;
 
+/**
+ * 缝③：done-only 文本补发判定（P3 装配批）。
+ *
+ * 某些引擎/路径一次成段返回：正文只在终局事件里携带（pi 的 `message_end`
+ * 消息正文、Legacy 的 `done.text`——工具步数兜底模板等路径从不发 text 事件），
+ * 此前从未发过任何 `text.delta`，不补发则正文丢失/空屏。两个引擎适配器共用
+ * 本判定：全程零 delta 且终局文本非空 → 返回需补发的全文（适配器先补发一条
+ * `text.delta` 再交控制器收尾）；已发过 delta（含此前的补发）→ 返回 null，
+ * 不重复。
+ */
+export function doneOnlyCatchUp(
+  /** 本会话迄今已发出的 `text.delta` 条数。 */
+  deltaCount: number,
+  /** 终局事件携带的全文；缺省/空串不算待补发。 */
+  doneText: string | undefined
+): string | null {
+  if (deltaCount > 0) return null;
+  if (typeof doneText !== 'string' || doneText.length === 0) return null;
+  return doneText;
+}
+
 /** 完整 RunEvent：载荷 + runId + 单次运行内严格递增且连续的序号 + 统一时钟读数。 */
 export type RunEvent = RunEventPayload & { runId: string; seq: number; at: string };
 
