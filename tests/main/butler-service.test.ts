@@ -335,6 +335,8 @@ describe('ButlerServiceImpl replies', () => {
       'schedule_revisit',
       'record_commitment',
       'resolve_commitment',
+      // P4 批（spec P3/P4 收敛）：改期唯一入口成为第 20 个管家工具。
+      'reschedule_commitment',
       'set_week_availability',
       'save_profile',
       'create_practice_set',
