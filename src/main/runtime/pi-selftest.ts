@@ -106,7 +106,11 @@ async function runSelfTest(): Promise<SelfTestReport> {
     };
     const journal = new RunJournal({ dirPath: journalDir, now });
 
-    // 步骤 A：流式响应 + 工具调用（plan_preview → commit_plan，含审批与回执）。
+    // 步骤 A：流式响应 + 只读工具调用（plan_preview，query 级网关直执行）。
+    // 注释对齐实际行为（P3 装配批修正）：本门只验验收 11 的三步口径
+    // 「一次流式、一次工具调用、一次取消」，不跑 commit_plan/审批——确认级
+    // 路径（approval.requested → approve → 回执）由 scenario-plan-pi.test.ts
+    // 在同一套缝上单测覆盖。
     {
       const gateway = new ToolGateway();
       const { controller } = assembleRuntime({
