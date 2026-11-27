@@ -35,12 +35,16 @@ function renderPlan(tasks: WorkspaceTask[]) {
       onPrompt={vi.fn()}
       focus={null}
       focusNotice={null}
+      focusRestore={null}
       canStartFocus={false}
       onStartFocus={vi.fn()}
       onStartDefaultFocus={vi.fn()}
       onPauseFocus={vi.fn()}
       onResumeFocus={vi.fn()}
       onResetFocus={vi.fn()}
+      onAcceptFocusRestore={vi.fn()}
+      onDismissFocusRestore={vi.fn()}
+      onAbandonFocus={vi.fn()}
     />
   );
 }

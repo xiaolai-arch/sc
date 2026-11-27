@@ -442,6 +442,13 @@ export function TodayOverview({
                           如果 {task.cue}，就先做「{task.title}」
                         </p>
                       ) : null}
+                      {/* The one-line next-step anchor (iter33 P2b②), shown
+                          so reopening the list puts the first move back. */}
+                      {task.nextStep ? (
+                        <p className="mt-0.5 truncate text-[11px] text-[#1d7a3e] dark:text-[#4cd964]">
+                          下一步：{task.nextStep}
+                        </p>
+                      ) : null}
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-0.5 pt-0.5 whitespace-nowrap text-[11px]">
                       {oneThingOffered && oneThing.enabled ? (

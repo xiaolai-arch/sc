@@ -1,15 +1,22 @@
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { isLocalDate } from '../shared/date';
+import type { FocusSnapshotRecord } from '../shared/ipc';
 import type { AppSettings } from '../shared/types';
 
 /**
  * Everything the desktop shell persists outside of the vault itself. Learning
- * content (tasks, plans, reviews) lives in the vault; only onboarding status and
- * shell settings stay here.
+ * content (tasks, plans, reviews) lives in the vault; only onboarding status,
+ * shell settings and the focus-session snapshot stay here.
  */
 export interface AppState {
   onboarded: boolean;
   settings: AppSettings;
+  /**
+   * The single focus-session slot (iter33 P2b①). Machine-transient timing
+   * state, deliberately not vault content. Absent means nothing to restore.
+   */
+  focusSession?: FocusSnapshotRecord;
 }
 
 export interface JsonStateStoreOptions {
@@ -127,6 +134,7 @@ export class JsonStateStore {
     const defaults = this.createDefault();
     if (!isRecord(value)) return defaults;
     const rawSettings = value.settings;
+    const focusSession = parseFocusSnapshot(value.focusSession);
     return {
       onboarded: typeof value.onboarded === 'boolean' ? value.onboarded : false,
       settings: isRecord(rawSettings)
@@ -148,9 +156,56 @@ export class JsonStateStore {
               ...((rawSettings.budget as Partial<AppSettings['budget']>) ?? {})
             }
           }
-        : defaults.settings
+        : defaults.settings,
+      // The focus slot rides along on every write (settings updates included),
+      // so a regular settings write can never erase a live snapshot. A
+      // malformed value — the 坏 JSON/坏形态 case — is dropped, not kept.
+      ...(focusSession ? { focusSession } : {})
     };
   }
+}
+
+/**
+ * Reads the persisted focus slot, keeping only a well-formed record. Every
+ * field is checked by type: a hand-edited or half-written file must never
+ * surface a session the restore rules cannot trust. Anything else reads as
+ * "no snapshot", which the restore rules then discard.
+ */
+export function parseFocusSnapshot(value: unknown): FocusSnapshotRecord | undefined {
+  if (!isRecord(value)) return undefined;
+  const workspaceId = value.workspaceId;
+  const session = value.session;
+  if (typeof workspaceId !== 'string' || workspaceId.trim() === '') return undefined;
+  if (!isRecord(session)) return undefined;
+  if (typeof session.sessionId !== 'number' || !Number.isFinite(session.sessionId)) {
+    return undefined;
+  }
+  if (typeof session.taskId !== 'string' || session.taskId === '') return undefined;
+  if (typeof session.taskTitle !== 'string') return undefined;
+  if (typeof session.remainingMs !== 'number' || !Number.isFinite(session.remainingMs)) {
+    return undefined;
+  }
+  if (typeof session.running !== 'boolean' || typeof session.recorded !== 'boolean') {
+    return undefined;
+  }
+  if (typeof session.lastTickAt !== 'number' || !Number.isFinite(session.lastTickAt)) {
+    return undefined;
+  }
+  const savedAtLocalDate = value.savedAtLocalDate;
+  if (!isLocalDate(savedAtLocalDate)) return undefined;
+  return {
+    workspaceId,
+    session: {
+      sessionId: session.sessionId,
+      taskId: session.taskId,
+      taskTitle: session.taskTitle,
+      remainingMs: session.remainingMs,
+      running: session.running,
+      recorded: session.recorded,
+      lastTickAt: session.lastTickAt
+    },
+    savedAtLocalDate
+  };
 }
 
 /**

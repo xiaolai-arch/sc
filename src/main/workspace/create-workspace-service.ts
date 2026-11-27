@@ -30,6 +30,7 @@ import {
   MAX_TASK_CUE_LENGTH,
   MIN_DAILY_AVAILABLE_MINUTES,
   normalizeTaskCue,
+  normalizeTaskNextStep,
   REMINDER_STATES,
   isTargetDate,
   taskCueLength
@@ -140,6 +141,16 @@ function assertTaskCue(value: string): string | undefined {
     throw new Error(`Task cue must be at most ${MAX_TASK_CUE_LENGTH} characters`);
   }
   return cue;
+}
+
+/**
+ * Normalizes a next-step anchor (iter33 P2b): one line, trimmed, truncated
+ * to the shared 80-code-point bound. Unlike the cue it never rejects — an
+ * overlong step is cut, an empty one reads as "not set" (undefined), which
+ * the update path turns into a key deletion.
+ */
+function assertTaskNextStep(value: string): string | undefined {
+  return normalizeTaskNextStep(value);
 }
 
 /**
@@ -441,6 +452,7 @@ export function createWorkspaceService(
       const title = requireString(input?.title, 'Task title');
       const due = input?.due === undefined ? undefined : assertIsoDate(input.due, 'task due date');
       const cue = assertTaskCue(optionalString(input?.cue) ?? '');
+      const nextStep = assertTaskNextStep(optionalString(input?.nextStep) ?? '');
       const startAt =
         input?.startAt === undefined
           ? undefined
@@ -465,6 +477,7 @@ export function createWorkspaceService(
         status: 'pending',
         due,
         ...(cue ? { cue } : {}),
+        ...(nextStep ? { nextStep } : {}),
         ...(startAt ? { startAt } : {}),
         ...(input?.repeat ? { repeat: input.repeat } : {}),
         ...(planId ? { planId } : {}),
@@ -536,6 +549,7 @@ export function createWorkspaceService(
       const hasAcceptance = input?.acceptance !== undefined;
       const hasDue = input?.due !== undefined;
       const hasCue = input?.cue !== undefined;
+      const hasNextStep = input?.nextStep !== undefined;
       const hasRepeat = input?.repeat !== undefined;
       if (
         !hasStatus &&
@@ -546,6 +560,7 @@ export function createWorkspaceService(
         !hasAcceptance &&
         !hasDue &&
         !hasCue &&
+        !hasNextStep &&
         !hasRepeat
       ) {
         throw new Error('No task fields to update');
@@ -588,6 +603,12 @@ export function createWorkspaceService(
         input?.cue === undefined || input.cue === null
           ? input?.cue
           : assertTaskCue(input.cue) ?? null;
+      // Same contract as the cue, but an overlong step truncates instead of
+      // throwing (spec: 超长截断，不拒绝).
+      const nextStep =
+        input?.nextStep === undefined || input.nextStep === null
+          ? input?.nextStep
+          : assertTaskNextStep(input.nextStep) ?? null;
       return runExclusively(async () => {
         const found = await findTaskFile(taskId);
         if (found === null) throw new Error(`Task not found: ${taskId}`);
@@ -605,6 +626,10 @@ export function createWorkspaceService(
         else if (due !== undefined) record.due = due;
         if (cue === null) delete record.cue;
         else if (cue !== undefined) record.cue = cue;
+        // The empty-string case never stores `''`: normalize reads it as
+        // unset, which lands here as null and deletes the key.
+        if (nextStep === null) delete record.nextStep;
+        else if (nextStep !== undefined) record.nextStep = nextStep;
         if (input?.repeat === null) delete record.repeat;
         else if (input?.repeat !== undefined && isTaskRepeat(input.repeat)) {
           record.repeat = input.repeat;

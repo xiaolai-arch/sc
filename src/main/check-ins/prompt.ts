@@ -39,6 +39,16 @@ export interface WeeklyOverviewLike {
   dueMistakes: number;
 }
 
+/**
+ * The task-anchored fact for the morning's recovery line (iter33 P2b②): the
+ * first unfinished task of today's list and the next step recorded on it.
+ * A subset of `WorkspaceTask`, so callers can pass the task itself.
+ */
+export interface TaskNextStepLike {
+  title: string;
+  nextStep?: string;
+}
+
 /** Upper bound for the `本周数据：` block, header line included. */
 const MAX_WEEKLY_STATS_LINES = 6;
 
@@ -153,6 +163,33 @@ export function tomorrowCheckInLine(
   if (tomorrow.trim() === '') return '';
   if (facts.stale) return STALE_TOMORROW_LINE;
   return `你在复盘里写下明天第一步：${truncateTomorrow(tomorrow)}——今天第一件事就是它吗？`;
+}
+
+/**
+ * The one task-anchored recovery line (iter33 P2b②), or '' when the task has
+ * no next step recorded. The morning message may use it in place of the
+ * review's tomorrow line — the two never stack.
+ */
+export function nextStepCheckInLine(task: TaskNextStepLike | null | undefined): string {
+  const title = typeof task?.title === 'string' ? task.title : '';
+  const nextStep = typeof task?.nextStep === 'string' ? task.nextStep : '';
+  if (title.trim() === '' || nextStep.trim() === '') return '';
+  return `${title} 的下一步已经记好：${nextStep}——从它开始？`;
+}
+
+/**
+ * The morning recovery line with the P2b priority rule applied: when the
+ * first unfinished task of today's list carries a next step, the task line
+ * speaks; otherwise the P0 review-tomorrow line (line A or its staleness
+ * variant B) falls through. Always at most one line — the slots are
+ * alternatives by construction, never appended side by side. Neither fact →
+ * '', which keeps the morning message at its previous bytes.
+ */
+export function morningRecoveryLine(
+  firstTask: TaskNextStepLike | null | undefined,
+  tomorrowBridge: TomorrowBridgeLike | null | undefined
+): string {
+  return nextStepCheckInLine(firstTask) || tomorrowCheckInLine(tomorrowBridge);
 }
 
 /** True when the week has at least one number worth telling the user. */
@@ -358,7 +395,7 @@ function honestPromptLines(
   return ['本周诚实数据：', ...lines.map((line) => `- ${line}`)];
 }
 
-function activeTasks(context: ButlerContext) {
+export function activeTasks(context: ButlerContext) {
   return context.tasks.filter(
     (task) => task.status === 'pending' || task.status === 'in-progress'
   );
@@ -505,13 +542,14 @@ export function buildCheckInTemplate(
       : '早上好。今天还没有安排任务，想先做点什么？';
     // The morning's deterministic tail: the fresh-start line precedes the
     // promise revisit when both fire (fixed order); each alone, or neither,
-    // keeps every existing fixture byte-identical. The tomorrow bridge is
-    // the newest member and appends last, so any existing combination stays
-    // at its previous bytes when the bridge has nothing to say.
+    // keeps every existing fixture byte-identical. The recovery line is the
+    // newest member and appends last: it is the task's next-step line when
+    // today's first unfinished task has one recorded, otherwise the P0
+    // tomorrow bridge — at most one line either way.
     const freshStart = freshStartCheckInLine(reviewRecovery);
     const promise = commitmentCheckInLine(commitment, date);
-    const tomorrow = tomorrowCheckInLine(tomorrowBridge);
-    const tail = [freshStart, promise, tomorrow].filter((line) => line !== '');
+    const recovery = morningRecoveryLine(first, tomorrowBridge);
+    const tail = [freshStart, promise, recovery].filter((line) => line !== '');
     return tail.length === 0 ? base : `${base}\n${tail.join('\n')}`;
   }
   return tasks.length > 0

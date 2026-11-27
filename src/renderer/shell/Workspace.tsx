@@ -16,6 +16,7 @@ import {
 import type { ProviderConfig } from '../../shared/types';
 import type { CommitmentSummary } from '../../shared/notifications';
 import { collectNotifications } from '../../shared/notifications';
+import type { FocusSnapshotRecord } from '../../shared/ipc';
 import type { ButlerReference } from '../../shared/butler-stream';
 import type { PracticeMistake, PracticeSet } from '../../shared/practice';
 import type { SearchResult } from '../../shared/search';
@@ -26,6 +27,7 @@ import { ChatPane } from './ChatPane';
 import {
   FOCUS_DURATION_MS,
   FOCUS_TICK_MS,
+  decideFocusRestore,
   firstFocusableTask,
   focusCompletionStatus,
   nextActualMin,
@@ -103,6 +105,14 @@ function isNarrowScreen(): boolean {
 function chatMessageId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
+
+/**
+ * One focus-restore prompt per app run (iter33 P2b①, spec 默认决定 4). The
+ * prompt shows the first time the snapshot's own workspace view is open;
+ * module scope keeps section switches and component remounts from asking
+ * again within the same run. A fresh launch resets it naturally.
+ */
+let focusRestoreConsumed = false;
 
 /** Drops the payload before it is persisted with the user's message. */
 function messageAttachmentsOf(attachments: ChatAttachment[]): MessageAttachment[] {
@@ -324,6 +334,12 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [focus, setFocus] = useState<FocusSession | null>(null);
   const [focusNotice, setFocusNotice] = useState<string | null>(null);
+  /** The pending restore prompt, shown once in the session's own workspace view. */
+  const [focusRestore, setFocusRestore] = useState<{ session: FocusSession; label: string } | null>(
+    null
+  );
+  const focusSnapshotRef = useRef<FocusSnapshotRecord | null>(null);
+  const focusSnapshotLoadedRef = useRef(false);
   const [snoozedUntil, setSnoozedUntil] = useState<string | null>(null);
   const [quickCaptureOpen, setQuickCaptureOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -570,6 +586,51 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     return () => window.clearInterval(id);
   }, [focus?.running]);
 
+  // 中断现场包（iter33 P2b①）: read the single focus-snapshot slot once per
+  // run. The 1s tick never touches this channel — only state transitions do.
+  useEffect(() => {
+    const api = window.studyCoach;
+    if (!api?.getFocusSnapshot) {
+      focusSnapshotLoadedRef.current = true;
+      return undefined;
+    }
+    void api
+      .getFocusSnapshot()
+      .then((snapshot) => {
+        focusSnapshotRef.current = snapshot;
+        focusSnapshotLoadedRef.current = true;
+      })
+      .catch(() => {
+        focusSnapshotRef.current = null;
+        focusSnapshotLoadedRef.current = true;
+      });
+    return undefined;
+  }, []);
+
+  // The restore prompt appears once, only in the workspace view the session
+  // belongs to, and never as a global toast (spec 默认决定 4).
+  useEffect(() => {
+    if (focusRestoreConsumed || !focusSnapshotLoadedRef.current) return;
+    if (section !== 'plan' || !projectId || focus) return;
+    const decision = decideFocusRestore(focusSnapshotRef.current, projectId, today);
+    if (decision.action === 'restore') {
+      focusRestoreConsumed = true;
+      setFocusRestore({ session: decision.session, label: decision.label });
+      return;
+    }
+    // Same workspace but the day (or the record's shape) fails the restore
+    // rule: drop the stale slot so it never lingers in state.json. A
+    // different workspace's snapshot is left alone — its own view may still
+    // restore it later in this run.
+    if (
+      focusSnapshotRef.current &&
+      focusSnapshotRef.current.workspaceId === projectId
+    ) {
+      focusSnapshotRef.current = null;
+      void window.studyCoach?.setFocusSnapshot?.(null).catch(() => undefined);
+    }
+  }, [section, projectId, focus, today]);
+
   useEffect(() => {
     const api = window.studyCoach;
     if (!api?.onQuickCapture) return undefined;
@@ -614,7 +675,11 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     if (!focus || focus.remainingMs > 0 || focus.recorded) return;
     if (recordedFocusSessionsRef.current.has(focus.sessionId)) return;
     recordedFocusSessionsRef.current.add(focus.sessionId);
-    setFocus((current) => (current ? { ...current, recorded: true } : current));
+    const settled: FocusSession = { ...focus, recorded: true };
+    setFocus(settled);
+    // 结算 is one of the snapshot's write points: the finished round (time at
+    // zero) fails the restore rule, so the next launch has nothing to offer.
+    writeFocusSnapshot(settled);
     const task = tasksRef.current.find((entry) => entry.id === focus.taskId);
     if (!task) {
       setFocusNotice('专注完成，但任务已不存在。');
@@ -1000,11 +1065,30 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     setComposerText('');
   }
 
+  /**
+   * The renderer's half of the focus-snapshot contract (iter33 P2b①): one
+   * write per state transition — start / pause / resume / settlement / reset
+   * — plus the quit-time settle done main-side. The 1s tick never calls this.
+   * A null session clears the slot. Failures stay silent: the snapshot is a
+   * convenience, never a correctness dependency.
+   */
+  function writeFocusSnapshot(session: FocusSession | null) {
+    const api = window.studyCoach;
+    if (!api?.setFocusSnapshot) return;
+    const input =
+      session === null || !projectId ? null : { workspaceId: projectId, session };
+    void api.setFocusSnapshot(input).catch(() => undefined);
+  }
+
   function startFocusForTask(taskId: string) {
     const task = tasks.find((entry) => entry.id === taskId);
     if (!task) return;
     focusSessionCounterRef.current += 1;
-    setFocus(startFocusSession(focusSessionCounterRef.current, task));
+    const session = startFocusSession(focusSessionCounterRef.current, task);
+    setFocus(session);
+    // A fresh start replaces any pending restore prompt and its snapshot.
+    setFocusRestore(null);
+    writeFocusSnapshot(session);
     setFocusNotice(null);
   }
 
@@ -1014,25 +1098,73 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
   }
 
   function pauseFocus() {
-    setFocus((current) => (current ? pauseFocusSession(current) : current));
+    if (!focus) return;
+    const paused = pauseFocusSession(focus);
+    setFocus(paused);
+    writeFocusSnapshot(paused);
   }
 
   function resumeFocus() {
-    setFocus((current) => (current ? resumeFocusSession(current) : current));
+    if (!focus) return;
+    const resumed = resumeFocusSession(focus);
+    setFocus(resumed);
+    writeFocusSnapshot(resumed);
   }
 
   function resetFocus() {
     if (!focus) return;
     focusSessionCounterRef.current += 1;
-    setFocus({
+    const restarted: FocusSession = {
       ...focus,
       sessionId: focusSessionCounterRef.current,
       remainingMs: FOCUS_DURATION_MS,
       running: false,
       recorded: false,
       lastTickAt: Date.now()
-    });
+    };
+    setFocus(restarted);
     setFocusNotice(null);
+    // The reset round replaces the stored snapshot: the abandoned remainder
+    // must not come back as a restore prompt on the next launch.
+    writeFocusSnapshot(restarted);
+  }
+
+  /** The user clicked 继续 on the restore prompt: paused in, resume via the
+   * existing path, and the resume write replaces the snapshot in one step. */
+  function acceptFocusRestore() {
+    if (!focusRestore) return;
+    const resumed = resumeFocusSession(focusRestore.session);
+    setFocus(resumed);
+    setFocusRestore(null);
+    writeFocusSnapshot(resumed);
+  }
+
+  /** 不要了: the snapshot is dropped, nothing is restored. */
+  function dismissFocusRestore() {
+    setFocusRestore(null);
+    writeFocusSnapshot(null);
+  }
+
+  /**
+   * The stop/abandon flow (iter33 P2b②): ends the session and, when the user
+   * typed one, writes the one-line next step onto the bound task. Skipping is
+   * always allowed; a failed write ends the session anyway and says so.
+   */
+  async function abandonFocus(nextStep: string | null) {
+    const session = focus;
+    if (!session) return;
+    setFocus(null);
+    setFocusNotice(null);
+    setFocusRestore(null);
+    // The session is gone, so the snapshot slot is cleared: nothing left to
+    // restore on the next launch.
+    writeFocusSnapshot(null);
+    if (nextStep === null) return;
+    try {
+      await updateTask({ taskId: session.taskId, nextStep });
+    } catch (cause) {
+      setFocusNotice(messageOf(cause));
+    }
   }
 
   async function renameConversation(id: string, title: string) {
@@ -1786,12 +1918,16 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
               onDeleteTask={deleteTask}
               focus={focus}
               focusNotice={focusNotice}
+              focusRestore={focusRestore}
+              onAcceptFocusRestore={acceptFocusRestore}
+              onDismissFocusRestore={dismissFocusRestore}
               canStartFocus={firstFocusableTask(tasks) !== undefined}
               onStartFocus={startFocusForTask}
               onStartDefaultFocus={startDefaultFocus}
               onPauseFocus={pauseFocus}
               onResumeFocus={resumeFocus}
               onResetFocus={resetFocus}
+              onAbandonFocus={abandonFocus}
             />
           ) : null}
 

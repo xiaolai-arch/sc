@@ -1,10 +1,12 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDefaultAppState } from '../../src/main/context';
 import { restoreBackup } from '../../src/main/backup';
+import { FocusSnapshotStore } from '../../src/main/focus-snapshot';
 import { JsonStateStore } from '../../src/main/state-store';
 import { SettingsService } from '../../src/main/settings/settings-service';
+import { formatLocalDate } from '../../src/shared/date';
 
 /**
  * Writes a hand-edited state.json and reads it back through the store, so the
@@ -223,6 +225,185 @@ test('first-run restore then complete onboarding keeps every adopted field (验�
     }).read();
     expect(relaunched.onboarded).toBe(true);
     expect(relaunched.settings.displayName).toBe('换机的同学');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// --- iter33 P2b①: the focusSession slot --------------------------------------
+
+const TODAY = formatLocalDate(new Date());
+
+function focusInput(running: boolean, remainingMs = 10 * 60_000) {
+  return {
+    workspaceId: 'ws-1',
+    session: {
+      sessionId: 3,
+      taskId: 't1',
+      taskTitle: '极限',
+      remainingMs,
+      running,
+      recorded: false,
+      lastTickAt: 1_000
+    }
+  };
+}
+
+/** A fresh store + snapshot store over one temp state.json. */
+async function makeStores() {
+  const dir = await mkdtemp(join(tmpdir(), 'study-coach-focus-snapshot-'));
+  const filePath = join(dir, 'state.json');
+  const store = new JsonStateStore({
+    filePath,
+    createDefault: () => createDefaultAppState('/tmp/study-vault')
+  });
+  return { dir, filePath, store, snapshots: new FocusSnapshotStore(store) };
+}
+
+test('a settings update never erases the focus slot (hydrate passthrough)', async () => {
+  const { dir, filePath, store, snapshots } = await makeStores();
+  try {
+    await snapshots.set(focusInput(true));
+    // An unrelated settings write goes through the same hydrate/write path.
+    await store.update((current) => ({ ...current, onboarded: true }));
+    const onDisk = JSON.parse(await readFile(filePath, 'utf8'));
+    expect(onDisk.focusSession.workspaceId).toBe('ws-1');
+    expect(onDisk.focusSession.savedAtLocalDate).toBe(TODAY);
+    expect((await snapshots.get())?.session.remainingMs).toBe(10 * 60_000);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a malformed focus slot is dropped on read, not surfaced (坏形态负例)', async () => {
+  const { dir, filePath, store, snapshots } = await makeStores();
+  try {
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        onboarded: false,
+        settings: {},
+        focusSession: { workspaceId: 'ws-1', session: { remainingMs: '10 分钟' }, savedAtLocalDate: '上周' }
+      }),
+      'utf8'
+    );
+    expect(await snapshots.get()).toBeNull();
+    expect((await store.read()).focusSession).toBeUndefined();
+    // A corrupt file reads as defaults, so the slot is empty there too.
+    await writeFile(filePath, '{not json', 'utf8');
+    const broken = new JsonStateStore({
+      filePath,
+      createDefault: () => createDefaultAppState('/tmp/study-vault')
+    });
+    await expect(new FocusSnapshotStore(broken).get()).resolves.toBeNull();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('set(null) clears the slot; the key is never stored as an empty shell', async () => {
+  const { dir, filePath, store, snapshots } = await makeStores();
+  try {
+    await snapshots.set(focusInput(false));
+    expect(await snapshots.get()).not.toBeNull();
+    await snapshots.set(null);
+    expect(await snapshots.get()).toBeNull();
+    const onDisk = JSON.parse(await readFile(filePath, 'utf8'));
+    expect(onDisk.focusSession).toBeUndefined();
+    expect('focusSession' in onDisk).toBe(false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('flushForQuit settles a running session to the pre-exit remainder (验收 18)', async () => {
+  const { dir, store, snapshots } = await makeStores();
+  try {
+    // start writes remaining 25:00 with lastTickAt = T0.
+    const started = focusInput(true, 25 * 60_000);
+    started.session.lastTickAt = 1_000_000;
+    await snapshots.set(started);
+    // Ten wall-clock minutes pass before the quit.
+    const quitAt = 1_000_000 + 10 * 60_000;
+    await snapshots.flushForQuit(new Date(quitAt));
+    const restored = await snapshots.get();
+    expect(restored?.session.remainingMs).toBe(15 * 60_000);
+    expect(restored?.session.lastTickAt).toBe(quitAt);
+    // The same-day rule reads the quit-time stamp.
+    expect(restored?.savedAtLocalDate).toBe(formatLocalDate(new Date(quitAt)));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('flushForQuit never deducts paused time and keeps the stamp fresh', async () => {
+  const { dir, snapshots } = await makeStores();
+  try {
+    await snapshots.set(focusInput(false, 10 * 60_000));
+    await snapshots.flushForQuit(new Date(1_000_000 + 5 * 60_000));
+    const restored = await snapshots.get();
+    expect(restored?.session.remainingMs).toBe(10 * 60_000);
+    expect(restored?.session.running).toBe(false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('flushForQuit without a snapshot writes nothing', async () => {
+  const { dir, filePath, snapshots } = await makeStores();
+  try {
+    await snapshots.flushForQuit(new Date());
+    await expect(readFile(filePath, 'utf8')).rejects.toThrow();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the five write points each touch state.json once; the 1s tick never does (验收 20)', async () => {
+  const { dir, filePath, store, snapshots } = await makeStores();
+  try {
+    const mtime = async () => (await stat(filePath)).mtimeMs;
+    const bytes = async () => readFile(filePath, 'utf8');
+
+    // start (write 1)
+    const started = focusInput(true, 25 * 60_000);
+    started.session.lastTickAt = 1_000;
+    await snapshots.set(started);
+    const afterStart = await bytes();
+    const startMtime = await mtime();
+
+    // Simulate the 1s tick: sixty seconds of wall-clock pass while the
+    // renderer keeps the session in memory. Nothing here may call the store —
+    // the snapshot API surface has no per-tick entry at all.
+    let remainingMs = started.session.remainingMs;
+    for (let second = 1; second <= 60; second += 1) {
+      remainingMs -= 1_000;
+    }
+    expect(remainingMs).toBe(25 * 60_000 - 60_000);
+    expect(await bytes()).toBe(afterStart);
+    expect(await mtime()).toBe(startMtime);
+
+    // pause (write 2)
+    await snapshots.set(focusInput(false, remainingMs));
+    expect(await mtime()).toBeGreaterThan(startMtime);
+
+    // resume (write 3)
+    await snapshots.set(focusInput(true, remainingMs));
+    expect(await mtime()).toBeGreaterThan(startMtime);
+
+    // settle (write 4) — the finished round lands with time 0.
+    await snapshots.set(focusInput(false, 0));
+    const settledBytes = await bytes();
+    expect(JSON.parse(settledBytes).focusSession.session.remainingMs).toBe(0);
+
+    // quit (write 5) — flushForQuit writes even a settled slot once.
+    await snapshots.flushForQuit(new Date(99_000));
+    const finalBytes = await bytes();
+    expect(finalBytes).not.toBe(settledBytes);
+    expect(JSON.parse(finalBytes).focusSession.session.lastTickAt).toBe(1_000);
+    expect((await store.read()).focusSession?.savedAtLocalDate).toBe(
+      formatLocalDate(new Date(99_000))
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

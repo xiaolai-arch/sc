@@ -30,6 +30,29 @@ export function normalizeTaskCue(value: string): string | undefined {
   return text.length > 0 ? text : undefined;
 }
 
+/** Upper bound for a task's next-step anchor (iter33 P2b): one line, one
+ * actionable first move, at most 80 user-perceived characters. */
+export const MAX_TASK_NEXT_STEP_LENGTH = 80;
+
+/** Counts user-perceived characters, so an emoji step costs one. */
+export function taskNextStepLength(value: string): number {
+  return [...value].length;
+}
+
+/**
+ * One line, ≤80 code points, trimmed; undefined when nothing is left. Line
+ * breaks fold into spaces (单行), whitespace runs collapse, and an overlong
+ * step is cut at exactly 80 code points — a deterministic rule, not a smart
+ * one. The empty string reads as "not set", so callers store `undefined`.
+ */
+export function normalizeTaskNextStep(value: string): string | undefined {
+  const text = value.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
+  if (text.length === 0) return undefined;
+  const codePoints = [...text];
+  if (codePoints.length <= MAX_TASK_NEXT_STEP_LENGTH) return text;
+  return codePoints.slice(0, MAX_TASK_NEXT_STEP_LENGTH).join('');
+}
+
 export interface Workspace {
   id: string;
   name: string;
@@ -146,6 +169,13 @@ export interface WorkspaceTask {
    * Absent means the task serves no recorded goal — never invented on read.
    */
   goalId?: string;
+  /**
+   * One-line, one-actionable first move (iter33 P2b), at most 80 code points.
+   * Displayed on the task card and handed back by the morning check-in.
+   * Written only through the explicit entry points (task card, butler
+   * `update_task`, the focus stop flow) — the evening review never writes it.
+   */
+  nextStep?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -317,6 +347,8 @@ export interface CreateTaskInput {
   due?: string;
   /** Optional implementation-intention trigger, at most 40 characters. */
   cue?: string;
+  /** Optional one-line next-step anchor; truncated to 80 code points. */
+  nextStep?: string;
   /** Local start time (YYYY-MM-DDTHH:mm) to pin on the daily schedule. */
   startAt?: string;
   repeat?: TaskRepeat;
@@ -341,6 +373,11 @@ export interface UpdateWorkspaceTaskInput {
   due?: string | null;
   /** Implementation-intention trigger; null (or an empty string) clears it. */
   cue?: string | null;
+  /**
+   * One-line next-step anchor; null (or an empty string) clears it. Overlong
+   * input is truncated to 80 code points, never rejected.
+   */
+  nextStep?: string | null;
   status?: WorkspaceTaskStatus;
   actualMin?: number;
   /** Local start time to pin; null clears the pin. */

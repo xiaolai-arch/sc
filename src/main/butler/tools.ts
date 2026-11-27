@@ -716,6 +716,11 @@ export function createButlerTools(): ButlerToolDefinition[] {
             description:
               '可选：这件事在什么情境下做，例如「晚饭后」「到自习室」；会作为 if-then 计划显示在今日页。省略保持不变，传 null 清除'
           },
+          nextStep: {
+            type: 'string',
+            description:
+              '可选：这件事的第一步——单行、一句话、可执行（例如「先翻到教材第 42 页把例题抄一遍」）。省略保持不变，传 null 或空串清除；超过 80 字符会被截断'
+          },
           startAt: {
             type: 'string',
             description: '开始时间，YYYY-MM-DDTHH:mm（本地时间）；传 null 清除固定时间'
@@ -729,15 +734,22 @@ export function createButlerTools(): ButlerToolDefinition[] {
         const status = input.status === undefined ? undefined : requiredTaskStatus(input);
         const actualMin = optionalNumber(input, 'actualMin');
         const cue = input.cue === null ? null : optionalString(input, 'cue');
+        // An empty string clears (spec: 空串=未设置), unlike optionalString's
+        // default "absent" reading, so '' must map to null explicitly.
+        const nextStep =
+          input.nextStep === null || input.nextStep === ''
+            ? null
+            : optionalString(input, 'nextStep');
         const startAt =
           input.startAt === null ? null : optionalString(input, 'startAt');
         if (
           status === undefined &&
           startAt === undefined &&
           actualMin === undefined &&
-          cue === undefined
+          cue === undefined &&
+          nextStep === undefined
         ) {
-          throw new ToolInputError('请提供 status、startAt、actualMin 或 cue 中的至少一项。');
+          throw new ToolInputError('请提供 status、startAt、actualMin、cue 或 nextStep 中的至少一项。');
         }
 
         const task = await context.workspace.updateWorkspaceTask({
@@ -745,7 +757,8 @@ export function createButlerTools(): ButlerToolDefinition[] {
           ...(status !== undefined ? { status } : {}),
           ...(startAt !== undefined ? { startAt } : {}),
           ...(actualMin !== undefined ? { actualMin } : {}),
-          ...(cue !== undefined ? { cue } : {})
+          ...(cue !== undefined ? { cue } : {}),
+          ...(nextStep !== undefined ? { nextStep } : {})
         });
         if (task.status === 'done' && context.knowledge) {
           const knowledge = context.knowledge;

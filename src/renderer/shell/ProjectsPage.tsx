@@ -41,12 +41,17 @@ type ProjectsPageProps = {
   onDeleteTask?: (input: DeleteTaskInput) => Promise<void>;
   focus: FocusSession | null;
   focusNotice: string | null;
+  /** The one-time restore prompt for an interrupted session (iter33 P2b①). */
+  focusRestore: { label: string } | null;
   canStartFocus: boolean;
   onStartFocus: (taskId: string) => void;
   onStartDefaultFocus: () => void;
   onPauseFocus: () => void;
   onResumeFocus: () => void;
   onResetFocus: () => void;
+  onAcceptFocusRestore: () => void;
+  onDismissFocusRestore: () => void;
+  onAbandonFocus: (nextStep: string | null) => void;
 };
 
 export function ProjectsPage({
@@ -72,12 +77,16 @@ export function ProjectsPage({
   onDeleteTask,
   focus,
   focusNotice,
+  focusRestore,
   canStartFocus,
   onStartFocus,
   onStartDefaultFocus,
   onPauseFocus,
   onResumeFocus,
-  onResetFocus
+  onResetFocus,
+  onAcceptFocusRestore,
+  onDismissFocusRestore,
+  onAbandonFocus
 }: ProjectsPageProps) {
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   // Which project the open editor belongs to. Comparing it against the
@@ -467,12 +476,16 @@ export function ProjectsPage({
               onPrompt={onPrompt}
               focus={focus}
               focusNotice={focusNotice}
+              focusRestore={focusRestore}
               canStartFocus={canStartFocus}
               onStartFocus={onStartFocus}
               onStartDefaultFocus={onStartDefaultFocus}
               onPauseFocus={onPauseFocus}
               onResumeFocus={onResumeFocus}
               onResetFocus={onResetFocus}
+              onAcceptFocusRestore={onAcceptFocusRestore}
+              onDismissFocusRestore={onDismissFocusRestore}
+              onAbandonFocus={onAbandonFocus}
             />
             <RecordsSection
               workspace={workspace}

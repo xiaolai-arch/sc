@@ -1,13 +1,28 @@
+import { useEffect, useState } from 'react';
+import { MAX_TASK_NEXT_STEP_LENGTH } from '../../shared/workspace';
 import { focusProgress, formatFocusTime, type FocusSession } from './focus-timer';
+
+type FocusRestorePrompt = {
+  label: string;
+};
 
 type FocusTimerProps = {
   session: FocusSession | null;
   notice: string | null;
+  /** The one-time restore prompt for an interrupted session (iter33 P2b①). */
+  restore: FocusRestorePrompt | null;
   canStart: boolean;
   onStartDefault: () => void;
   onPause: () => void;
   onResume: () => void;
   onReset: () => void;
+  onRestoreContinue: () => void;
+  onRestoreDismiss: () => void;
+  /**
+   * The stop/abandon flow (iter33 P2b②): ends the session; a non-null text
+   * is written to the bound task's `nextStep` first, null skips the write.
+   */
+  onAbandon: (nextStep: string | null) => void;
 };
 
 const controlClass =
@@ -16,13 +31,35 @@ const controlClass =
 export function FocusTimer({
   session,
   notice,
+  restore,
   canStart,
   onStartDefault,
   onPause,
   onResume,
-  onReset
+  onReset,
+  onRestoreContinue,
+  onRestoreDismiss,
+  onAbandon
 }: FocusTimerProps) {
   const progress = session ? focusProgress(session.remainingMs) : 0;
+  // The abandon flow's one-line 下一步 ask. Local to the card: it only ever
+  // lives between the 放弃 click and the 保存/跳过 click.
+  const [askingNextStep, setAskingNextStep] = useState(false);
+  const [nextStepDraft, setNextStepDraft] = useState('');
+  useEffect(() => {
+    // A session that ends (settled, reset, restored) closes the ask.
+    if (!session) {
+      setAskingNextStep(false);
+      setNextStepDraft('');
+    }
+  }, [session !== null]);
+
+  function submitNextStep(skip: boolean) {
+    const text = nextStepDraft.trim();
+    onAbandon(skip || text === '' ? null : text);
+    setAskingNextStep(false);
+    setNextStepDraft('');
+  }
 
   return (
     <div className="mb-4 rounded-2xl bg-[#f5f5f7] p-4 dark:bg-white/[0.06]">
@@ -68,7 +105,43 @@ export function FocusTimer({
             <button type="button" onClick={onReset} className={controlClass}>
               重置
             </button>
+            {!askingNextStep ? (
+              <button
+                type="button"
+                onClick={() => setAskingNextStep(true)}
+                className={controlClass}
+              >
+                放弃
+              </button>
+            ) : null}
           </div>
+          {askingNextStep ? (
+            <form
+              aria-label="放弃专注"
+              className="mt-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                submitNextStep(false);
+              }}
+            >
+              <input
+                aria-label="下一步"
+                placeholder="记下下一步（可跳过）：一句话、可执行"
+                maxLength={MAX_TASK_NEXT_STEP_LENGTH}
+                value={nextStepDraft}
+                onChange={(event) => setNextStepDraft(event.target.value)}
+                className="w-full rounded-lg border border-gray-200 bg-white px-2 py-1 text-[12px] text-[#1d1d1f] outline-none focus:border-[#0071e3] dark:border-white/10 dark:bg-white/[0.08] dark:text-[#f5f5f7]"
+              />
+              <div className="mt-1 flex items-center gap-1">
+                <button type="submit" className={controlClass}>
+                  保存并放弃
+                </button>
+                <button type="button" onClick={() => submitNextStep(true)} className={controlClass}>
+                  直接放弃
+                </button>
+              </div>
+            </form>
+          ) : null}
         </>
       ) : (
         <div className="mt-2">
@@ -83,6 +156,20 @@ export function FocusTimer({
           </button>
         </div>
       )}
+
+      {restore && !session ? (
+        <div role="status" className="mt-2 rounded-xl bg-white/70 p-2.5 dark:bg-white/[0.08]">
+          <p className="text-[12px] text-[#1d1d1f] dark:text-[#f5f5f7]">{restore.label}</p>
+          <div className="mt-1.5 flex items-center gap-1">
+            <button type="button" onClick={onRestoreContinue} className={controlClass}>
+              继续
+            </button>
+            <button type="button" onClick={onRestoreDismiss} className={controlClass}>
+              不要了
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {notice ? (
         <p role="status" className="mt-2 text-[12px] text-[#0071e3] dark:text-[#4da3ff]">

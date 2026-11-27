@@ -308,6 +308,39 @@ export interface RestoreResult {
   };
 }
 
+/**
+ * The durable fields of a focus session (iter33 P2b). Structurally identical
+ * to the renderer's `FocusSession` (focus-timer.ts), which stays the source
+ * of the behaviour; this mirror only carries the shape across the IPC bridge
+ * and into `state.json` without shared importing renderer code.
+ */
+export interface FocusSessionState {
+  /** Bumped for every start/reset so one round can only record once. */
+  sessionId: number;
+  taskId: string;
+  taskTitle: string;
+  remainingMs: number;
+  running: boolean;
+  recorded: boolean;
+  /** Wall-clock timestamp of the last settlement; paused time is excluded. */
+  lastTickAt: number;
+}
+
+/** What the renderer writes at each focus state transition. */
+export interface FocusSnapshotInput {
+  workspaceId: string;
+  session: FocusSessionState;
+}
+
+/**
+ * The single focus-snapshot slot in `state.json`: one window, one session.
+ * `savedAtLocalDate` is stamped by the main process at write time and drives
+ * the same-day restore rule (a snapshot from an earlier day is discarded).
+ */
+export interface FocusSnapshotRecord extends FocusSnapshotInput {
+  savedAtLocalDate: string;
+}
+
 export interface StudyCoachApi
   extends WorkspaceService,
     ButlerService,
@@ -332,4 +365,12 @@ export interface StudyCoachApi
   listReviews(input?: ListReviewsInput): Promise<ReviewRecord[]>;
   /** Discovers installed local CLI agents, their login state and capabilities. */
   scanLocalClis(): Promise<LocalCliScanResult>;
+  /** Reads the single focus-snapshot slot; null when no session is on file. */
+  getFocusSnapshot(): Promise<FocusSnapshotRecord | null>;
+  /**
+   * Writes the focus snapshot at a state transition; null clears the slot
+   * (settlement end, dismiss, or a discarded stale snapshot). The main
+   * process stamps `savedAtLocalDate` itself.
+   */
+  setFocusSnapshot(input: FocusSnapshotInput | null): Promise<void>;
 }

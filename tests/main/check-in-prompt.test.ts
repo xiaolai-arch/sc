@@ -3,6 +3,8 @@ import {
   backupFailureLines,
   buildCheckInPrompt,
   buildCheckInTemplate,
+  morningRecoveryLine,
+  nextStepCheckInLine,
   resumeCheckInLine,
   tomorrowCheckInLine,
   WEEK_AVAILABILITY_QUESTION,
@@ -1068,4 +1070,100 @@ test('no other trigger carries the bridge line, and the model never sees it', ()
   expect(buildCheckInPrompt.length).toBeLessThanOrEqual(6);
   expect(buildCheckInPrompt(context, 'morning', DATE)).not.toContain('明天第一步');
   expect(buildCheckInPrompt(context, 'morning', DATE)).not.toContain(STEP);
+});
+
+// --- the task next-step priority (iter33 P2b②) -------------------------------
+
+const TASK_LINE = `极限基础 的下一步已经记好：先把例题抄一遍——从它开始？`;
+
+function taskWithNextStep(
+  overrides: Partial<WorkspaceTask> = {}
+): WorkspaceTask {
+  return { ...task, nextStep: '先把例题抄一遍', ...overrides };
+}
+
+test('nextStepCheckInLine states the task line once, word for word', () => {
+  expect(nextStepCheckInLine(taskWithNextStep())).toBe(TASK_LINE);
+  expect(nextStepCheckInLine(taskWithNextStep())).not.toContain('你在复盘里写下');
+});
+
+test('a task without a next step keeps the empty line', () => {
+  expect(nextStepCheckInLine(null)).toBe('');
+  expect(nextStepCheckInLine(undefined)).toBe('');
+  expect(nextStepCheckInLine(task)).toBe('');
+  expect(nextStepCheckInLine({ title: '', nextStep: '有步骤' })).toBe('');
+  expect(nextStepCheckInLine({ title: '极限基础', nextStep: '   ' })).toBe('');
+});
+
+test('morningRecoveryLine: task line first, review line falls back, never both (验收 22)', () => {
+  const facts: TomorrowBridgeLike = { tomorrow: STEP, stale: false };
+  // Priority 1: the first unfinished task carries a next step → task line.
+  expect(morningRecoveryLine(taskWithNextStep(), facts)).toBe(TASK_LINE);
+  // Priority 2: no next step on the task → the P0 review line A.
+  expect(morningRecoveryLine(task, facts)).toBe(LINE_A);
+  // The staleness variant B still falls through the same slot.
+  expect(morningRecoveryLine(task, { tomorrow: STEP, stale: true })).toBe(LINE_B);
+  // Neither fact → empty (byte-identical baseline).
+  expect(morningRecoveryLine(task, null)).toBe('');
+  expect(morningRecoveryLine(null, null)).toBe('');
+  // At most one line: the task line never sits beside line A/B.
+  const line = morningRecoveryLine(taskWithNextStep(), facts);
+  expect(line.split('\n')).toHaveLength(1);
+  expect(line).toBe(TASK_LINE);
+});
+
+test('the morning template speaks the task line in place of the review line', () => {
+  const withStep: ButlerContext = {
+    ...context,
+    tasks: [taskWithNextStep()]
+  };
+  const template = buildCheckInTemplate(
+    withStep,
+    'morning',
+    DATE,
+    null,
+    null,
+    null,
+    null,
+    null,
+    { tomorrow: STEP, stale: false }
+  );
+  expect(template).toBe([MORNING_BASE, TASK_LINE].join('\n'));
+  expect(template).not.toContain(LINE_A);
+});
+
+test('a first task without a next step keeps the P0 review line', () => {
+  // The review's tomorrow stands in exactly as before (P0 baseline bytes).
+  const template = buildCheckInTemplate(
+    context,
+    'morning',
+    DATE,
+    null,
+    null,
+    null,
+    null,
+    null,
+    { tomorrow: STEP, stale: false }
+  );
+  expect(template).toBe([MORNING_BASE, LINE_A].join('\n'));
+});
+
+test('no next step and no bridge keeps the morning template byte-identical', () => {
+  expect(buildCheckInTemplate(context, 'morning', DATE)).toBe(MORNING_BASE);
+  const withStep = buildCheckInTemplate(
+    { ...context, tasks: [taskWithNextStep()] },
+    'morning',
+    DATE
+  );
+  // A recorded step with no bridge still speaks the task line.
+  expect(withStep).toBe([MORNING_BASE, TASK_LINE].join('\n'));
+});
+
+test('no other trigger carries the task line (验收 22)', () => {
+  const withStep: ButlerContext = { ...context, tasks: [taskWithNextStep()] };
+  for (const trigger of ['weekly', 'evening', 'behind'] as const) {
+    expect(buildCheckInTemplate(withStep, trigger, DATE)).toBe(
+      buildCheckInTemplate(context, trigger, DATE)
+    );
+  }
 });

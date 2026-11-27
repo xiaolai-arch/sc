@@ -6,6 +6,8 @@ import { MAX_TASK_CUE_LENGTH, REMINDER_STATES, isTargetDate, taskCueLength, type
 import type {
   BackupDirectoryStatus,
   BackupResult,
+  FocusSnapshotInput,
+  FocusSnapshotRecord,
   ListCommitmentsInput,
   ResolveCommitmentEntryInput,
   RestoreResult,
@@ -188,7 +190,11 @@ export const IPC_CHANNELS = {
   listCommitments: 'study-coach:commitments:list',
   resolveCommitmentEntry: 'study-coach:commitments:resolve',
   listWeekAvailability: 'study-coach:week-availability:list',
-  clearWeekAvailability: 'study-coach:week-availability:clear'
+  clearWeekAvailability: 'study-coach:week-availability:clear',
+  // iter33 P2b①: the single focus-snapshot slot (get for the restore prompt,
+  // set at state transitions; null clears). Appended last, same reason.
+  getFocusSnapshot: 'study-coach:focus-snapshot:get',
+  setFocusSnapshot: 'study-coach:focus-snapshot:set'
 } as const;
 
 /** Streaming uses a separate request/event pair so the request map stays stable. */
@@ -411,6 +417,15 @@ function requireCreateTask(value: unknown): CreateTaskInput {
     throw new Error('任务目标无效。');
   }
   const cue = requireTaskCue(input.cue, false);
+  // Same shape guard as the update path; trimming/truncation happens in the
+  // service's normalizer, which also drops an empty value.
+  if (
+    input.nextStep !== undefined &&
+    input.nextStep !== null &&
+    typeof input.nextStep !== 'string'
+  ) {
+    throw new Error('任务下一步无效。');
+  }
   return { ...input, ...(cue !== undefined ? { cue } : {}) } as unknown as CreateTaskInput;
 }
 
@@ -426,6 +441,7 @@ function requireUpdateWorkspaceTask(value: unknown): UpdateWorkspaceTaskInput {
     input.acceptance === undefined &&
     input.due === undefined &&
     input.cue === undefined &&
+    input.nextStep === undefined &&
     input.repeat === undefined
   ) {
     throw new Error('没有要更新的任务字段。');
@@ -465,7 +481,61 @@ function requireUpdateWorkspaceTask(value: unknown): UpdateWorkspaceTaskInput {
     throw new Error('任务截止日期无效。');
   }
   const cue = requireTaskCue(input.cue, true);
+  // The next-step anchor truncates instead of rejecting; trimming, the single
+  // line fold and the 80-code-point cut happen in the service's normalizer,
+  // which also turns '' into a key deletion.
+  if (
+    input.nextStep !== undefined &&
+    input.nextStep !== null &&
+    typeof input.nextStep !== 'string'
+  ) {
+    throw new Error('任务下一步无效。');
+  }
   return { ...input, ...(cue !== undefined ? { cue } : {}) } as unknown as UpdateWorkspaceTaskInput;
+}
+
+/**
+ * Validates the focus snapshot the renderer writes at a state transition
+ * (iter33 P2b①). Every session field is type-checked so a buggy caller can
+ * never put a snapshot the restore rules cannot trust into state.json.
+ */
+function requireFocusSnapshotSet(value: unknown): FocusSnapshotInput | null {
+  if (value === null) return null;
+  const input = requireObject(value, '专注快照');
+  const workspaceId = requireString(input.workspaceId, '项目 ID');
+  const rawSession = input.session;
+  if (rawSession === null || typeof rawSession !== 'object' || Array.isArray(rawSession)) {
+    throw new Error('专注会话无效。');
+  }
+  const session = rawSession as Record<string, unknown>;
+  if (typeof session.sessionId !== 'number' || !Number.isFinite(session.sessionId)) {
+    throw new Error('专注会话无效。');
+  }
+  if (typeof session.taskId !== 'string' || session.taskId.trim() === '') {
+    throw new Error('专注会话无效。');
+  }
+  if (typeof session.taskTitle !== 'string') throw new Error('专注会话无效。');
+  if (typeof session.remainingMs !== 'number' || !Number.isFinite(session.remainingMs)) {
+    throw new Error('专注会话无效。');
+  }
+  if (typeof session.running !== 'boolean' || typeof session.recorded !== 'boolean') {
+    throw new Error('专注会话无效。');
+  }
+  if (typeof session.lastTickAt !== 'number' || !Number.isFinite(session.lastTickAt)) {
+    throw new Error('专注会话无效。');
+  }
+  return {
+    workspaceId,
+    session: {
+      sessionId: session.sessionId,
+      taskId: session.taskId,
+      taskTitle: session.taskTitle,
+      remainingMs: session.remainingMs,
+      running: session.running,
+      recorded: session.recorded,
+      lastTickAt: session.lastTickAt
+    }
+  };
 }
 
 function requireDeleteTask(value: unknown): DeleteTaskInput {
@@ -1666,7 +1736,9 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
       const parsed = requireExportMistakeSheet(input);
       if (!api.exportMistakeSheet) throw new Error('当前存储不支持导出复习单。');
       return api.exportMistakeSheet(parsed);
-    }
+    },
+    getFocusSnapshot: async () => api.getFocusSnapshot(),
+    setFocusSnapshot: async (input) => api.setFocusSnapshot(requireFocusSnapshotSet(input))
   };
 
   // Every path through the bridge gets the same sanitized error envelope,
@@ -1985,6 +2057,8 @@ export function createStudyCoachBridge(
       call(IPC_CHANNELS.setConversationPermissions, { conversationId: id, permissions }),
     getUsageSummary: (days) => call(IPC_CHANNELS.getUsageSummary, days),
     clearUsage: () => call(IPC_CHANNELS.clearUsage),
+    getFocusSnapshot: () => call<FocusSnapshotRecord | null>(IPC_CHANNELS.getFocusSnapshot),
+    setFocusSnapshot: (input) => call<void>(IPC_CHANNELS.setFocusSnapshot, input),
     cancelStream: (messageId) => call(BUTLER_STREAM_CHANNELS.cancel, messageId),
     listConversationRuns: () => call(BUTLER_RUN_CHANNELS.list),
     cancelRun: (runId) => call(BUTLER_RUN_CHANNELS.cancel, runId),

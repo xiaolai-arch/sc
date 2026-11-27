@@ -478,6 +478,91 @@ test('update_task sets and clears the cue', async () => {
   expect(updateWorkspaceTask).toHaveBeenLastCalledWith({ taskId: 't-1', cue: null });
 });
 
+test('update_task sets, truncates and clears nextStep through the real vault', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'butler-next-step-'));
+  const service = createWorkspaceService(dir);
+  try {
+    const created = await service.createTask({
+      workspaceId: 'kaoyan',
+      title: '真题一套',
+      subject: '数学',
+      durationMin: 120,
+      acceptance: '一套'
+    });
+
+    const tools = createButlerTools();
+    const toolContext = {
+      ...context,
+      workspace: service
+    } as unknown as Parameters<typeof executeButlerTool>[2];
+
+    // Set: the one-line first step lands in the frontmatter, trimmed.
+    const set = await executeButlerTool(
+      {
+        id: 'ns1',
+        name: 'update_task',
+        arguments: { taskId: created.id, nextStep: ' 先翻到教材第 42 页把例题抄一遍 ' }
+      },
+      tools,
+      toolContext
+    );
+    expect(set.ok).toBe(true);
+    const stored = (await service.getWorkspaceSnapshot('kaoyan')).tasks.find(
+      (entry) => entry.id === created.id
+    );
+    expect(stored?.nextStep).toBe('先翻到教材第 42 页把例题抄一遍');
+
+    // >80 code points truncates to exactly 80, never rejects.
+    const long = '一'.repeat(100);
+    await executeButlerTool(
+      { id: 'ns2', name: 'update_task', arguments: { taskId: created.id, nextStep: long } },
+      tools,
+      toolContext
+    );
+    const truncated = (await service.getWorkspaceSnapshot('kaoyan')).tasks.find(
+      (entry) => entry.id === created.id
+    );
+    expect([...(truncated?.nextStep ?? '')]).toHaveLength(80);
+
+    // An empty string clears the field (key deletion, not an empty value).
+    await executeButlerTool(
+      { id: 'ns3', name: 'update_task', arguments: { taskId: created.id, nextStep: '' } },
+      tools,
+      toolContext
+    );
+    const cleared = (await service.getWorkspaceSnapshot('kaoyan')).tasks.find(
+      (entry) => entry.id === created.id
+    );
+    expect(cleared?.nextStep).toBeUndefined();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('update_task schema carries the one-line next-step instruction', () => {
+  const tool = createButlerTools().find((entry) => entry.name === 'update_task');
+  if (!tool) throw new Error('update_task tool is missing');
+  const properties = (tool.parameters as {
+    properties: Record<string, { type: string; description: string }>;
+  }).properties;
+  expect(properties.nextStep.type).toBe('string');
+  expect(properties.nextStep.description).toContain('单行');
+  expect(properties.nextStep.description).toContain('一句话');
+  expect(properties.nextStep.description).toContain('可执行');
+  // The rest of the schema is untouched.
+  expect(Object.keys(properties)).toEqual([
+    'taskId',
+    'status',
+    'actualMin',
+    'cue',
+    'nextStep',
+    'startAt'
+  ]);
+  expect(tool.description).toBe(
+    '更新任务状态（pending / in-progress / done / skipped）、记录实际用时，或把任务固定到某个开始时间（startAt）。'
+  );
+});
+
 test('does not create planned tasks when Stop arrives during planning', async () => {
   const controller = new AbortController();
   const createTask = vi.fn();
