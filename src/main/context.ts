@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { formatLocalDate, isLocalDate } from '../shared/date';
+import { isReviewFreshStart } from '../shared/review-stats';
 import type {
   ListCommitmentsInput,
   ListReviewsInput,
@@ -32,7 +33,7 @@ import {
   type CommitmentService
 } from './commitments/service';
 import { ProactiveCheckInService } from './check-ins/proactive-check-in-service';
-import type { ResumeFacts } from './check-ins/prompt';
+import type { ResumeFacts, ReviewRecoveryLike } from './check-ins/prompt';
 import {
   projectResolvedCommitment,
   weeklyAccuracyBySubject,
@@ -672,6 +673,25 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       }
     }
 
+    /**
+     * The fresh-start fact for the morning after a missed review day.
+     *
+     * Like the promise, a review streak follows the person, not the project:
+     * reviews recorded in any workspace (check-in off included) count, so the
+     * line can never claim 「昨天没有复盘」 over a review that exists. Read
+     * live on every check — no cache — so backfilling yesterday's review
+     * removes the line that same day. Any read failure means null and the
+     * morning message keeps its shape.
+     */
+    async function readReviewRecovery(today: Date): Promise<ReviewRecoveryLike | null> {
+      try {
+        const reviews = await readReviews({ limit: 200 });
+        return { freshStart: isReviewFreshStart(reviews, formatLocalDate(today)) };
+      } catch {
+        return null;
+      }
+    }
+
         /**
      * The mute-resume facts for the first allowed check after a mute ended.
      *
@@ -733,6 +753,9 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       getWeeklyHonest: readWeeklyHonest,
       // Read-only promise revisit: at most one line, only on the morning.
       getDueCommitment: readDueCommitment,
+      // Read-only fresh-start fact: one line on the morning after a missed
+      // review day, computed live from the vault on every check.
+      getReviewRecovery: readReviewRecovery,
       // The one mute-resume sentence: peeked before composing, consumed once.
       getResume: () => peekResume(today()),
       consumeResume,

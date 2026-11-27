@@ -20,6 +20,7 @@ import {
   buildCheckInPrompt,
   buildCheckInTemplate,
   commitmentCheckInLine,
+  freshStartCheckInLine,
   resumeCheckInLine,
   weekAvailabilityQuestion,
   weeklyHonestLines,
@@ -27,6 +28,7 @@ import {
   type CheckInTrigger,
   type CommitmentLike,
   type ResumeFacts,
+  type ReviewRecoveryLike,
   type WeeklyHonestLike,
   type WeeklyOverviewLike
 } from './prompt';
@@ -64,6 +66,13 @@ export interface ProactiveCheckInOptions {
    * Absent, null or failing leaves the morning message byte-identical.
    */
   getDueCommitment?: (today: Date) => Promise<CommitmentLike | null>;
+  /**
+   * The review fresh-start fact for the morning after a missed review day.
+   * Read fresh on every allowed check (no cache), so backfilling yesterday's
+   * review removes the line on the same day. Absent, null or failing leaves
+   * the morning message byte-identical.
+   */
+  getReviewRecovery?: (today: Date) => Promise<ReviewRecoveryLike | null>;
   /**
    * The pending mute resume, when this is the first check allowed to run after
    * it. Absent or null keeps every message byte-identical.
@@ -162,6 +171,9 @@ export class ProactiveCheckInService {
   private readonly getDueCommitment:
     | ((today: Date) => Promise<CommitmentLike | null>)
     | undefined;
+  private readonly getReviewRecovery:
+    | ((today: Date) => Promise<ReviewRecoveryLike | null>)
+    | undefined;
   private readonly getResume: (() => Promise<ResumeFacts | null>) | undefined;
   private readonly consumeResume: (() => Promise<void>) | undefined;
   private readonly autoBackup: AutoBackupRunner | null;
@@ -178,6 +190,7 @@ export class ProactiveCheckInService {
     this.getWeeklyOverview = options.getWeeklyOverview;
     this.getWeeklyHonest = options.getWeeklyHonest;
     this.getDueCommitment = options.getDueCommitment;
+    this.getReviewRecovery = options.getReviewRecovery;
     this.getResume = options.getResume;
     this.consumeResume = options.consumeResume;
     this.autoBackup = options.autoBackup ?? null;
@@ -237,6 +250,10 @@ export class ProactiveCheckInService {
     // the prompt and template at their previous bytes.
     const commitment =
       trigger === 'morning' ? await this.dueCommitmentFor(date) : null;
+    // The fresh-start fact is the morning's own datum, read live next to the
+    // promise so a backfill that just landed is honored on this very check.
+    const reviewRecovery =
+      trigger === 'morning' ? await this.reviewRecoveryFor(date) : null;
     const text = await this.generate(
       trigger,
       date,
@@ -245,7 +262,8 @@ export class ProactiveCheckInService {
       weeklyHonest,
       commitment,
       resume,
-      settings.backup ?? null
+      settings.backup ?? null,
+      reviewRecovery
     );
     // The due-mistake digest is a deterministic line on the morning message
     // only; it is computed once here so text and the surfaced body agree.
@@ -353,7 +371,8 @@ export class ProactiveCheckInService {
     weeklyHonest: WeeklyHonest | null = null,
     commitment: CommitmentLike | null = null,
     resume: ResumeFacts | null = null,
-    backup: BackupStatusLike | null = null
+    backup: BackupStatusLike | null = null,
+    reviewRecovery: ReviewRecoveryLike | null = null
   ): Promise<string> {
     const composed = await this.composeBase(
       trigger,
@@ -362,7 +381,8 @@ export class ProactiveCheckInService {
       weeklyStats,
       weeklyHonest,
       commitment,
-      backup
+      backup,
+      reviewRecovery
     );
     // The mute-resume sentence is deterministic and never handed to the model,
     // so it appears exactly once by construction: appended here, to whichever
@@ -379,7 +399,8 @@ export class ProactiveCheckInService {
     weeklyStats: WeeklyOverviewLike | null = null,
     weeklyHonest: WeeklyHonest | null = null,
     commitment: CommitmentLike | null = null,
-    backup: BackupStatusLike | null = null
+    backup: BackupStatusLike | null = null,
+    reviewRecovery: ReviewRecoveryLike | null = null
   ): Promise<string> {
     const template = buildCheckInTemplate(
       context,
@@ -388,7 +409,8 @@ export class ProactiveCheckInService {
       weeklyStats,
       weeklyHonest,
       commitment,
-      backup
+      backup,
+      reviewRecovery
     );
     if (!this.modelClient) return template;
     try {
@@ -424,17 +446,21 @@ export class ProactiveCheckInService {
         ];
         return tail.length === 0 ? composed : `${composed}\n${tail.join('\n')}`;
       }
-      // A model-written morning reply must still ask about the promise; when the
-      // model did not mention it, append the deterministic line so the ask is
-      // never lost in a rewrite. A reply that already names it is left alone.
+      // A model-written morning reply must still carry the deterministic
+      // morning tail, in the template's fixed order: the fresh-start line
+      // first (the model never saw it, so it cannot have restated it), then
+      // the promise question only when the model did not ask it itself. With
+      // neither line the reply keeps its previous bytes.
       const promiseLine = trigger === 'morning' ? commitmentCheckInLine(commitment, date) : '';
-      if (
-        promiseLine &&
-        composed !== template &&
-        commitment &&
-        !composed.includes(commitment.text)
-      ) {
-        return `${composed}\n${promiseLine}`;
+      const promisePending =
+        promiseLine && commitment && !composed.includes(commitment.text)
+          ? promiseLine
+          : null;
+      const freshStartLine =
+        trigger === 'morning' ? freshStartCheckInLine(reviewRecovery) : '';
+      const tail = [freshStartLine, promisePending].filter((line) => line !== null && line !== '');
+      if (composed !== template && tail.length > 0) {
+        return `${composed}\n${tail.join('\n')}`;
       }
       return composed;
     } catch {
@@ -507,6 +533,23 @@ export class ProactiveCheckInService {
    */
   private async dueCommitmentFor(date: string): Promise<CommitmentLike | null> {
     const provider = this.getDueCommitment;
+    if (!provider) return null;
+    try {
+      return await provider(parseLocalDate(date));
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The fresh-start fact for the morning after a missed review day, keyed to
+   * the check-in's own date like `dueCommitmentFor`. Read live on every check
+   * with no cache, so a review backfilled for yesterday removes the line on
+   * the same day. Any provider failure yields null and the message is
+   * unchanged.
+   */
+  private async reviewRecoveryFor(date: string): Promise<ReviewRecoveryLike | null> {
+    const provider = this.getReviewRecovery;
     if (!provider) return null;
     try {
       return await provider(parseLocalDate(date));

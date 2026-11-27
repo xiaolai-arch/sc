@@ -83,6 +83,29 @@ export function commitmentCheckInLine(
   return `你之前说要做「${commitment.text}」，后来做了吗？`;
 }
 
+/** The review fact a morning check-in may act on. `freshStart` is true when
+ * yesterday has no review but the history before it does — the morning after
+ * a missed day.
+ */
+export interface ReviewRecoveryLike {
+  freshStart: boolean;
+}
+
+/** The one fresh-start line for the morning after a missed review day. */
+export const FRESH_START_CHECK_IN_LINE =
+  '昨天没有复盘，新的一天从一件小事开始就行。';
+
+/**
+ * The one fresh-start line, or '' when the fact is absent or negative. Like
+ * the resume sentence it is deterministic and appended to the composed
+ * message, never handed to the model to reword or repeat.
+ */
+export function freshStartCheckInLine(
+  facts: ReviewRecoveryLike | null | undefined
+): string {
+  return facts?.freshStart ? FRESH_START_CHECK_IN_LINE : '';
+}
+
 /** True when the week has at least one number worth telling the user. */
 function hasWeeklyNumbers(overview: WeeklyOverviewLike): boolean {
   return (
@@ -392,7 +415,8 @@ export function buildCheckInTemplate(
   weeklyOverview: WeeklyOverviewLike | null = null,
   weeklyHonest: WeeklyHonestLike | null = null,
   commitment: CommitmentLike | null = null,
-  backup: BackupStatusLike | null = null
+  backup: BackupStatusLike | null = null,
+  reviewRecovery: ReviewRecoveryLike | null = null
 ): string {
   const tasks = activeTasks(context);
   if (trigger === 'weekly') {
@@ -429,10 +453,13 @@ export function buildCheckInTemplate(
     const base = first
       ? `早上好。今天有 ${tasks.length} 个任务，先做「${first.title}」怎么样？做完告诉我一声。`
       : '早上好。今天还没有安排任务，想先做点什么？';
-    // The one promise line is appended only when a promise is due; without one
-    // the morning template keeps its previous bytes.
+    // The morning's deterministic tail: the fresh-start line precedes the
+    // promise revisit when both fire (fixed order); each alone, or neither,
+    // keeps every existing fixture byte-identical.
+    const freshStart = freshStartCheckInLine(reviewRecovery);
     const promise = commitmentCheckInLine(commitment, date);
-    return promise ? `${base}\n${promise}` : base;
+    const tail = [freshStart, promise].filter((line) => line !== '');
+    return tail.length === 0 ? base : `${base}\n${tail.join('\n')}`;
   }
   return tasks.length > 0
     ? `晚上好。今天还有 ${tasks.length} 个任务没完成，最卡的是哪一步？`

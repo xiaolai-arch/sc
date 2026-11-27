@@ -764,3 +764,90 @@ test('the resume sentence is never handed to the model', () => {
   // can leak it into a model prompt by accident.
   expect(buildCheckInPrompt.length).toBeLessThanOrEqual(6);
 });
+
+// --- the fresh-start line (morning after a missed review day) -----------------
+
+const FRESH_START_LINE = '昨天没有复盘，新的一天从一件小事开始就行。';
+const MORNING_BASE =
+  '早上好。今天有 1 个任务，先做「极限基础」怎么样？做完告诉我一声。';
+const PROMISE_YESTERDAY = '昨天你说要做「背 20 个单词」，做了吗？没做的话，挪到今天还是先放一放？';
+
+test('the morning template appends the fresh-start line after the greeting', () => {
+  expect(
+    buildCheckInTemplate(context, 'morning', DATE, null, null, null, null, {
+      freshStart: true
+    })
+  ).toBe(`${MORNING_BASE}\n${FRESH_START_LINE}`);
+});
+
+test('the fresh-start line precedes the promise line when both fire, in that order', () => {
+  const template = buildCheckInTemplate(
+    context,
+    'morning',
+    DATE,
+    null,
+    null,
+    { text: '背 20 个单词', due: '2026-11-07' },
+    null,
+    { freshStart: true }
+  );
+  expect(template).toBe([MORNING_BASE, FRESH_START_LINE, PROMISE_YESTERDAY].join('\n'));
+  expect(template.indexOf(FRESH_START_LINE)).toBeLessThan(template.indexOf(PROMISE_YESTERDAY));
+  // Each line appears exactly once.
+  expect(template.split(FRESH_START_LINE)).toHaveLength(2);
+  expect(template.split(PROMISE_YESTERDAY)).toHaveLength(2);
+});
+
+test('the empty-plan morning template keeps the same fixed order', () => {
+  const empty: ButlerContext = { ...context, tasks: [] };
+  expect(
+    buildCheckInTemplate(
+      empty,
+      'morning',
+      DATE,
+      null,
+      null,
+      { text: '背 20 个单词', due: DATE },
+      null,
+      { freshStart: true }
+    )
+  ).toBe(
+    [
+      '早上好。今天还没有安排任务，想先做点什么？',
+      FRESH_START_LINE,
+      '你说今天要做「背 20 个单词」，做了吗？'
+    ].join('\n')
+  );
+});
+
+test('an absent or negative fresh-start fact keeps the morning template byte-identical', () => {
+  expect(buildCheckInTemplate(context, 'morning', DATE, null, null, null, null, null)).toBe(
+    MORNING_BASE
+  );
+  expect(
+    buildCheckInTemplate(context, 'morning', DATE, null, null, null, null, { freshStart: false })
+  ).toBe(MORNING_BASE);
+  expect(buildCheckInTemplate(context, 'morning', DATE)).toBe(MORNING_BASE);
+  // With a promise due, a negative fact changes nothing either.
+  const commitment = { text: '背 20 个单词', due: '2026-11-07' };
+  expect(
+    buildCheckInTemplate(context, 'morning', DATE, null, null, commitment, null, {
+      freshStart: false
+    })
+  ).toBe(`${MORNING_BASE}\n${PROMISE_YESTERDAY}`);
+});
+
+test('the fresh-start line never enters the model prompt', () => {
+  // Like the resume sentence it is code-owned: the prompt builder has no
+  // input for it, so no call site can leak it into a model prompt.
+  expect(buildCheckInPrompt.length).toBeLessThanOrEqual(6);
+  expect(buildCheckInPrompt(context, 'morning', DATE)).not.toContain('昨天没有复盘');
+});
+
+test('no other trigger carries the fresh-start line', () => {
+  for (const trigger of ['weekly', 'evening', 'behind'] as const) {
+    expect(
+      buildCheckInTemplate(context, trigger, DATE, null, null, null, null, { freshStart: true })
+    ).toBe(buildCheckInTemplate(context, trigger, DATE));
+  }
+});
