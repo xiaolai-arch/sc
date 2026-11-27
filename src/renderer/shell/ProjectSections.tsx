@@ -1686,7 +1686,6 @@ function ReminderStateChip({ reminder, today }: { reminder: Reminder; today: str
 type CommitmentsSectionProps = {
   /** Every promise: open first, closed appended, as the service projects them. */
   commitments: CommitmentSummary[];
-  workspaces: Workspace[];
   today: string;
   onResolve: (input: ResolveCommitmentEntryInput) => Promise<CommitmentSummary>;
   onPrompt: (prompt: string) => void;
@@ -1695,12 +1694,12 @@ type CommitmentsSectionProps = {
 /**
  * 「承诺」: the promises the user spoke in chat, with the three corrections the
  * reminders page now owns (改期 / 放下 / 完成). These are not tasks; the copy
- * says so. A project opted out of check-ins still shows its promise, tagged so
- * the user is not left wondering why it was never asked about.
+ * says so. A promise follows the person, not the project: it is listed and
+ * asked about at the morning check-in the same way whether or not the project
+ * it was recorded in has check-ins on.
  */
 export function CommitmentsSection({
   commitments,
-  workspaces,
   today,
   onResolve,
   onPrompt
@@ -1711,9 +1710,6 @@ export function CommitmentsSection({
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const checkInOff = new Set(
-    workspaces.filter((workspace) => workspace.checkIn === 'off').map((workspace) => workspace.id)
-  );
   const open = commitments
     .filter((entry) => entry.status === 'open')
     .sort(
@@ -1813,7 +1809,6 @@ export function CommitmentsSection({
             const overdue = overdueDays(entry);
             const busy = pendingId === entry.id;
             const editing = reschedulingId === entry.id;
-            const off = entry.workspaceId !== undefined && checkInOff.has(entry.workspaceId);
             return (
               <div key={entry.id} className="py-2">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
@@ -1824,11 +1819,6 @@ export function CommitmentsSection({
                     原定 {entry.due.slice(5)}
                     {overdue !== null ? ` · 已过期 ${overdue} 天` : ''}
                   </span>
-                  {off ? (
-                    <span className="shrink-0 rounded-full bg-black/[0.05] px-1.5 py-0.5 text-[11px] text-gray-400 dark:bg-white/[0.08] dark:text-[#8e8e93]">
-                      不会主动问你
-                    </span>
-                  ) : null}
                   <button
                     type="button"
                     aria-label={`改期：${entry.text}`}

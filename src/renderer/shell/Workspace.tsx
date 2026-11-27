@@ -2017,7 +2017,6 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
             <RemindersPage
               reminders={reminders}
               commitments={commitments}
-              workspaces={workspaces}
               today={today}
               onCreateReminder={createReminder}
               onUpdateReminder={updateReminder}

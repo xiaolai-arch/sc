@@ -3,20 +3,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CommitmentsSection } from '../../src/renderer/shell/ProjectSections';
 import type { CommitmentSummary } from '../../src/shared/notifications';
-import type { Workspace } from '../../src/shared/workspace';
 
 const TODAY = '2026-11-22';
-
-const workspaceOn: Workspace = {
-  id: 'ws-1',
-  name: '考研',
-  kind: 'exam',
-  color: '#ef4444',
-  goal: '上岸',
-  description: ''
-};
-
-const workspaceOff: Workspace = { ...workspaceOn, id: 'ws-off', name: '随笔', checkIn: 'off' };
 
 const entry = (overrides: Partial<CommitmentSummary> = {}): CommitmentSummary => ({
   id: 'cm-1',
@@ -28,7 +16,6 @@ const entry = (overrides: Partial<CommitmentSummary> = {}): CommitmentSummary =>
 });
 
 const base = {
-  workspaces: [workspaceOn],
   today: TODAY,
   onResolve: vi.fn(async () => entry()),
   onPrompt: vi.fn()
@@ -157,17 +144,25 @@ test('a failed resolve shows the service message inline and keeps the row', asyn
   expect(screen.getByText('背完这一课的单词')).toBeInTheDocument();
 });
 
-test('a promise of a check-in-off project is tagged 不会主动问你', () => {
-  renderSection([entry({ id: 'cm-off', text: '随笔里写一篇', workspaceId: 'ws-off' })], {
-    workspaces: [workspaceOn, workspaceOff]
-  });
+test('a promise of a check-in-off project carries no special tag', () => {
+  // A promise follows the person, not the project: the morning check asks
+  // about it even when its project's check-ins are off, so the row carries no
+  // tag suggesting otherwise. (The component no longer receives workspaces at
+  // all — it cannot know or imply check-in state.) A promise with no workspace
+  // renders the same way.
+  renderSection([
+    entry({ id: 'cm-off', text: '随笔里写一篇', workspaceId: 'ws-off' }),
+    entry({ id: 'cm-plain', text: '普通的一条' })
+  ]);
 
-  expect(screen.getByText('不会主动问你')).toBeInTheDocument();
-  // A promise with no workspace, or one opted in, carries no tag.
-  renderSection([entry({ text: '普通的一条' })], {
-    workspaces: [workspaceOn, workspaceOff]
-  });
-  expect(screen.getAllByText('不会主动问你')).toHaveLength(1);
+  expect(screen.queryByText('不会主动问你')).not.toBeInTheDocument();
+  // The rest of each row is unchanged: original day and all three actions.
+  expect(screen.getAllByText('原定 11-23')).toHaveLength(2);
+  for (const text of ['随笔里写一篇', '普通的一条']) {
+    expect(screen.getByRole('button', { name: `改期：${text}` })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: `放下：${text}` })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: `完成：${text}` })).toBeInTheDocument();
+  }
 });
 
 test('resolved rows stay hidden until 显示已结束 is on, then read as history', async () => {
