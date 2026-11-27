@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type {
   CreatePracticeSetInput,
@@ -900,5 +900,378 @@ describe('strict mastery surfaces', () => {
     render(<MistakeBook mistakes={[mistake(1)]} workspaceId="kaoyan" onReview={() => undefined} />);
     await user.click(screen.getByRole('button', { name: '复制清单' }));
     expect(String(writeText.mock.calls[1]?.[0])).not.toContain('更严判定');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 整卷模拟（P2a）：练习集的一种作答方式。会话只在内存里，逐题提交照走
+// submitAnswer/submitShortAnswer，整卷中不亮任何单题对错，结卷出摘要。
+// ---------------------------------------------------------------------------
+
+describe('whole-paper simulation (整卷模拟)', () => {
+  const shortPaperQuestion = {
+    id: 'sq2',
+    kind: 'short' as const,
+    prompt: '整卷简答：说明第一个重要极限。',
+    options: [],
+    answer: 0,
+    referenceAnswer: 'x→0 时 sin x / x 的极限是 1。',
+    explanation: '夹逼准则。'
+  };
+  const paperSet: PracticeSet = {
+    id: 'ps-paper',
+    workspaceId: 'kaoyan',
+    title: '整卷练习',
+    subject: '数学',
+    questions: [practiceSet.questions[0], shortPaperQuestion]
+  };
+  const paperAttempts: PracticeAttempt[] = [
+    {
+      id: 'pa-old',
+      workspaceId: 'kaoyan',
+      setId: 'ps-paper',
+      questionId: 'q1',
+      choice: 1,
+      correct: true,
+      answeredAt: '2026-11-01T08:30:00.000Z'
+    }
+  ];
+
+  function paperResult(correct: boolean, questionId = 'q1'): SubmitAnswerResult {
+    return {
+      questionId,
+      setId: 'ps-paper',
+      workspaceId: 'kaoyan',
+      choice: 1,
+      correct,
+      answer: 1,
+      explanation: '第一个重要极限。',
+      attempt: {
+        id: `pa-${questionId}`,
+        workspaceId: 'kaoyan',
+        setId: 'ps-paper',
+        questionId,
+        choice: 1,
+        correct,
+        answeredAt: '2026-11-27T09:00:00.000Z'
+      },
+      mistake: correct
+        ? null
+        : { ...mistake(1), questionId, setId: 'ps-paper', due: '2026-11-28' },
+      due: correct ? undefined : '2026-11-28'
+    };
+  }
+
+  /** Fake timers stall setTimeout, so timed tests click through act directly. */
+  async function clickButton(name: string) {
+    await act(async () => {
+      screen.getByRole('button', { name }).click();
+    });
+  }
+
+  /** Opens the config, optionally overrides the duration, and starts the paper. */
+  async function startPaper(minutes?: string) {
+    await clickButton('整卷模拟');
+    if (minutes !== undefined) {
+      const input = screen.getByLabelText('总时长（分钟）');
+      await act(async () => {
+        fireEvent.change(input, { target: { value: minutes } });
+      });
+    }
+    await clickButton('确认开始');
+  }
+
+  it('offers 整卷模拟 on a set and defaults to clamp(题数×2, 5, 600)', async () => {
+    const user = userEvent.setup();
+    // 题数 1 → 5（下限）。
+    const single = renderPane({ set: practiceSet });
+    await user.click(screen.getByRole('button', { name: '整卷模拟' }));
+    expect(screen.getByLabelText('总时长（分钟）')).toHaveValue(5);
+    await user.click(screen.getByRole('button', { name: '取消' }));
+    expect(screen.queryByLabelText('总时长（分钟）')).not.toBeInTheDocument();
+    single.unmount();
+
+    // 题数 3 → 6。
+    const threeSet: PracticeSet = {
+      ...practiceSet,
+      questions: [
+        practiceSet.questions[0],
+        { ...practiceSet.questions[0], id: 'q2', prompt: '第二题' },
+        { ...practiceSet.questions[0], id: 'q3', prompt: '第三题' }
+      ]
+    };
+    const three = renderPane({ set: threeSet });
+    await user.click(screen.getByRole('button', { name: '整卷模拟' }));
+    expect(screen.getByLabelText('总时长（分钟）')).toHaveValue(6);
+    three.unmount();
+
+    // 题数 400 → 600（上限）。
+    const bigSet: PracticeSet = {
+      ...practiceSet,
+      questions: Array.from({ length: 400 }, (_, index) => ({
+        ...practiceSet.questions[0],
+        id: `q${index + 1}`
+      }))
+    };
+    const big = renderPane({ set: bigSet });
+    await user.click(screen.getByRole('button', { name: '整卷模拟' }));
+    expect(screen.getByLabelText('总时长（分钟）')).toHaveValue(600);
+    big.unmount();
+  });
+
+  it('clamps out-of-range durations into 5–600 when starting', async () => {
+    const user = userEvent.setup();
+    renderPane({ set: practiceSet });
+    await user.click(screen.getByRole('button', { name: '整卷模拟' }));
+    const input = screen.getByLabelText('总时长（分钟）');
+    await user.clear(input);
+    await user.type(input, '0');
+    await user.click(screen.getByRole('button', { name: '确认开始' }));
+    // 0 分钟被钳回 5 分钟下限，整卷开始。
+    expect(screen.getByRole('timer')).toHaveTextContent('05:00');
+
+    await user.click(screen.getByRole('button', { name: '提前交卷' }));
+    expect(screen.getByText(/^整卷完成：正确 0 \/ 1 题，未作答 1 题，用时/)).toBeInTheDocument();
+    expect(screen.getByText('第 1 题 · 未作答')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '再练一次' }));
+    await user.click(screen.getByRole('button', { name: '整卷模拟' }));
+    const again = screen.getByLabelText('总时长（分钟）');
+    await user.clear(again);
+    await user.type(again, '1000');
+    await user.click(screen.getByRole('button', { name: '确认开始' }));
+    // 1000 分钟被钳回 600 分钟上限。
+    expect(screen.getByRole('timer')).toHaveTextContent('600:00');
+  });
+
+  it('runs choice and short questions through the same submit handlers without per-question verdicts', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-11-27T09:00:00.000Z'));
+      const onSubmitAnswer = vi.fn().mockResolvedValue(paperResult(false, 'q1'));
+      const onSubmitShortAnswer = vi.fn().mockResolvedValue({
+        ...paperResult(false, 'sq2'),
+        choice: 0,
+        answer: 0
+      });
+      renderPane({ set: paperSet, onSubmitAnswer, onSubmitShortAnswer });
+      await startPaper();
+
+      // Q1（选择）：提交照走 submitAnswer，对错不出现在任何地方。
+      await clickButton('B. 1');
+      await clickButton('检查答案');
+      await act(async () => {});
+      expect(onSubmitAnswer).toHaveBeenCalledWith({ questionId: 'q1', choice: 1 });
+      expect(screen.queryByText('回答正确')).not.toBeInTheDocument();
+      expect(screen.queryByText('回答错误')).not.toBeInTheDocument();
+      expect(screen.queryByText(/已加入错题本/)).not.toBeInTheDocument();
+      expect(screen.getByRole('status')).toHaveTextContent('已提交。');
+
+      await clickButton('下一题');
+
+      // Q2（简答）：提交/自评照走 submitShortAnswer；整卷只藏对错，不换管线。
+      await act(async () => {
+        fireEvent.change(screen.getByLabelText('用你自己的话回答'), {
+          target: { value: '极限是 1' }
+        });
+      });
+      await clickButton('提交');
+      expect(screen.getByText('参考答案：x→0 时 sin x / x 的极限是 1。')).toBeInTheDocument();
+      expect(onSubmitShortAnswer).not.toHaveBeenCalled();
+      await clickButton('没答对');
+      await act(async () => {});
+
+      // 全部答完自动结卷，摘要与逐题口径不同：分母是全卷题数。
+      expect(onSubmitShortAnswer).toHaveBeenCalledWith({
+        questionId: 'sq2',
+        response: '极限是 1',
+        selfCorrect: false
+      });
+      expect(
+        screen.getByText('整卷完成：正确 0 / 2 题，用时 0 秒。错题已记入错题本。')
+      ).toBeInTheDocument();
+      expect(screen.getByText('第 1 题 · 回答错误')).toBeInTheDocument();
+      expect(screen.getByText('第 2 题 · 回答错误')).toBeInTheDocument();
+      expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '下一题' })).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('auto-submits at the deadline: 未作答 stays unrecorded and is marked in the summary', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-11-27T09:00:00.000Z'));
+      const onSubmitAnswer = vi.fn().mockResolvedValue(paperResult(false, 'q1'));
+      renderPane({
+        set: paperSet,
+        onSubmitAnswer,
+        attempts: paperAttempts,
+        mistakes: [mistake(1)]
+      });
+      // 可改：30 分钟的自定义时长被接受。
+      await startPaper('30');
+      expect(screen.getByRole('timer')).toHaveTextContent('30:00');
+
+      // 错题本与答题历史都藏着——它们会泄露单题对错。
+      expect(screen.queryByText(/错题本 ·/)).not.toBeInTheDocument();
+      expect(screen.queryByText('答题历史')).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      expect(screen.getByRole('timer')).toHaveTextContent('29:59');
+
+      // 答错第 1 题（不出错题本提示），翻到第 2 题后不答。
+      await clickButton('A. 0');
+      await clickButton('检查答案');
+      await act(async () => {});
+      await clickButton('下一题');
+
+      // 到时自动交卷：墙钟越过截止时刻，下一个 tick 结卷。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30 * 60_000);
+      });
+
+      expect(screen.getByText('时间到，自动交卷。')).toBeInTheDocument();
+      expect(
+        screen.getByText('整卷完成：正确 0 / 2 题，未作答 1 题，用时 30 分。错题已记入错题本。')
+      ).toBeInTheDocument();
+      expect(screen.getByText('第 1 题 · 回答错误')).toBeInTheDocument();
+      expect(screen.getByText('第 2 题 · 未作答')).toBeInTheDocument();
+      // 未作答题不记 attempt：只有第 1 题到过提交口。
+      expect(onSubmitAnswer).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+      // 结卷后错题本与答题历史回来。
+      expect(screen.getByText(/错题本 ·/)).toBeInTheDocument();
+      expect(screen.getByText('答题历史')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('settles the countdown from the wall clock across a clock jump', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-11-27T09:00:00.000Z'));
+      renderPane({ set: paperSet });
+      await startPaper();
+      expect(screen.getByRole('timer')).toHaveTextContent('05:00');
+
+      // 模拟后台节流/系统睡眠：系统时间前进 3 分钟而 tick 一声未响，
+      // 醒来后第一个 tick 按墙钟结算剩余时间，而不是按 tick 数递减。
+      vi.setSystemTime(new Date('2026-11-27T09:03:00.000Z'));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      expect(screen.getByRole('timer')).toHaveTextContent('01:59');
+
+      // 一次跳过截止时刻 → 自动交卷，用时被钳到总时长。
+      vi.setSystemTime(new Date('2026-11-27T09:10:00.000Z'));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      expect(screen.getByText('时间到，自动交卷。')).toBeInTheDocument();
+      expect(screen.getByText('整卷完成：正确 0 / 2 题，未作答 2 题，用时 5 分。')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('supports submitting early with the same summary shape', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-11-27T09:00:00.000Z'));
+      const onSubmitAnswer = vi.fn().mockResolvedValue(paperResult(true, 'q1'));
+      renderPane({ set: paperSet, onSubmitAnswer });
+      await startPaper();
+
+      await clickButton('B. 1');
+      await clickButton('检查答案');
+      await act(async () => {});
+      await clickButton('提前交卷');
+
+      expect(
+        screen.getByText('整卷完成：正确 1 / 2 题，未作答 1 题，用时 0 秒。')
+      ).toBeInTheDocument();
+      expect(screen.queryByText('时间到，自动交卷。')).not.toBeInTheDocument();
+      expect(screen.getByText('第 2 题 · 未作答')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('returns to normal per-question mode via 再练一次', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-11-27T09:00:00.000Z'));
+      const onSubmitAnswer = vi.fn().mockResolvedValue(paperResult(true, 'q1'));
+      renderPane({ set: paperSet, onSubmitAnswer });
+      await startPaper();
+      await clickButton('B. 1');
+      await clickButton('检查答案');
+      await act(async () => {});
+      await clickButton('提前交卷');
+      expect(screen.getByText(/^整卷完成：/)).toBeInTheDocument();
+
+      await clickButton('再练一次');
+      expect(screen.getByText('1 / 2')).toBeInTheDocument();
+      expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+      expect(screen.queryByText(/^整卷完成：/)).not.toBeInTheDocument();
+
+      // 普通模式重新亮对错——逐题行为与基线一致。
+      await clickButton('B. 1');
+      await clickButton('检查答案');
+      await act(async () => {});
+      expect(screen.getByText('回答正确')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('voids the paper session when the pane unmounts, keeping submissions recorded', async () => {
+    const user = userEvent.setup({ delay: null });
+    const onSubmitAnswer = vi.fn().mockResolvedValue(paperResult(true, 'q1'));
+    const view = renderPane({ set: paperSet, onSubmitAnswer });
+    await user.click(screen.getByRole('button', { name: '整卷模拟' }));
+    await user.click(screen.getByRole('button', { name: '确认开始' }));
+    await user.click(screen.getByRole('button', { name: 'B. 1' }));
+    await user.click(screen.getByRole('button', { name: '检查答案' }));
+    await act(async () => {});
+    expect(onSubmitAnswer).toHaveBeenCalledTimes(1);
+
+    // 离开页面 = 整卷作废：重挂载回到普通模式，没有倒计时也没有摘要。
+    view.unmount();
+    renderPane({ set: paperSet, onSubmitAnswer });
+    expect(screen.getByText('1 / 2')).toBeInTheDocument();
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^整卷完成：/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '整卷模拟' })).toBeInTheDocument();
+    // 已逐题落库的作答不丢——提交口的调用次数不会回退。
+    expect(onSubmitAnswer).toHaveBeenCalledTimes(1);
+  });
+
+  it('voids the paper session when another set is selected mid-paper', async () => {
+    const user = userEvent.setup();
+    const otherSet: PracticeSet = { ...paperSet, id: 'ps-other', title: '另一套练习' };
+    const baseProps = {
+      workspace,
+      notes: [],
+      mistakes: [] as PracticeMistake[],
+      onSubmitAnswer: vi.fn(async () => paperResult(true, 'q1')),
+      onOpenChat: vi.fn(),
+      onOpenNote: vi.fn()
+    };
+    const view = render(<LearningPane {...baseProps} set={paperSet} />);
+    await user.click(screen.getByRole('button', { name: '整卷模拟' }));
+    await user.click(screen.getByRole('button', { name: '确认开始' }));
+    expect(screen.getByRole('timer')).toBeInTheDocument();
+
+    view.rerender(<LearningPane {...baseProps} set={otherSet} />);
+
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '整卷模拟' })).toBeInTheDocument();
+    expect(screen.getByText('另一套练习')).toBeInTheDocument();
   });
 });

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { friendlyErrorMessage } from '../../shared/errors';
 import { Button } from '../ui/Button';
 import { BookOpenIcon, CheckIcon, TargetIcon } from '../ui/icons';
+import { Input } from '../ui/Input';
+import { Label } from '../ui/Label';
 import { Progress } from '../ui/Progress';
 import { cn } from '../ui/cn';
 import type { Workspace, WorkspaceNote } from '../../shared/workspace';
@@ -18,6 +20,17 @@ import type {
   SubmitShortAnswerInput
 } from '../../shared/practice';
 import { ConfidencePicker } from './CalibrationCard';
+import {
+  FOCUS_TICK_MS,
+  WHOLE_PAPER_MAX_MINUTES,
+  WHOLE_PAPER_MIN_MINUTES,
+  clampWholePaperMinutes,
+  defaultWholePaperMinutes,
+  formatFocusTime,
+  formatWholePaperSpan,
+  wholePaperElapsedMs,
+  wholePaperRemainingMs
+} from './focus-timer';
 import { buildMixedPracticeSet, type MixedPracticeSet } from './interleave';
 import {
   AttemptHistory,
@@ -61,6 +74,28 @@ type LearningPaneProps = {
   onOpenNote: (id: string) => void;
 };
 
+/** One answered paper question, kept only in memory for the 结卷摘要. */
+interface WholePaperVerdict {
+  questionId: string;
+  correct: boolean;
+  /** The submit path recorded an active mistake for this answer. */
+  mistake: boolean;
+}
+
+/**
+ * 整卷模拟 session — a way of answering one set, not a new entity. It lives
+ * only in component state: leaving the page or restarting voids it, while
+ * answers already handed to the submit handlers stay recorded as usual.
+ */
+interface WholePaperSession {
+  set: PracticeSet;
+  durationMs: number;
+  /** Wall-clock start; remaining time derives from it, so throttling can't lie. */
+  startedAt: number;
+  verdicts: WholePaperVerdict[];
+  ended: { reason: 'time' | 'early' | 'complete'; finishedAt: number } | null;
+}
+
 export function LearningPane({
   set,
   sets,
@@ -100,6 +135,14 @@ export function LearningPane({
   const [setNotice, setSetNotice] = useState<string | null>(null);
   /** An in-memory round-robin session; null means the real selected set. */
   const [mix, setMix] = useState<MixedPracticeSet | null>(null);
+  /** In-memory 整卷模拟 session; null means the normal per-question mode. */
+  const [paper, setPaper] = useState<WholePaperSession | null>(null);
+  /** Whether the 整卷 configuration row is open. */
+  const [paperConfigOpen, setPaperConfigOpen] = useState(false);
+  /** 总时长（分钟） input contents; clamped when the paper starts. */
+  const [paperMinutes, setPaperMinutes] = useState('');
+  /** Wall-clock snapshot the countdown renders from; a 1 Hz tick refreshes it. */
+  const [clockNow, setClockNow] = useState(() => Date.now());
 
   function resetAnswerState() {
     setIndex(0);
@@ -118,16 +161,108 @@ export function LearningPane({
     resetAnswerState();
     // Choosing a real set leaves any mixed session behind.
     setMix(null);
+    // A whole-paper session belongs to one set; switching sets voids it.
+    setPaper(null);
+    setPaperConfigOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [set?.id]);
 
+  // 整卷倒计时：a 1 Hz tick refreshes the wall-clock snapshot, and returning
+  // to the tab settles immediately. Background throttling or system sleep only
+  // reduces how often the tick fires — remaining time derives from startedAt
+  // on every render, so the paper never runs slow.
+  useEffect(() => {
+    if (paper === null || paper.ended !== null) return;
+    const timer = window.setInterval(() => setClockNow(Date.now()), FOCUS_TICK_MS);
+    const onVisible = () => setClockNow(Date.now());
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [paper]);
+
+  // 到时自动交卷：the first render that reveals the deadline has passed ends
+  // the paper; questions never submitted stay unrecorded.
+  useEffect(() => {
+    if (paper === null || paper.ended !== null) return;
+    if (wholePaperRemainingMs(paper, clockNow) > 0) return;
+    setPaper((current) =>
+      current && current.ended === null
+        ? { ...current, ended: { reason: 'time', finishedAt: Date.now() } }
+        : current
+    );
+  }, [paper, clockNow]);
+
   // Rebuilt cheaply each render; only an eligible same-subject group yields one.
   const mixable = buildMixedPracticeSet(sets ?? []);
+
+  /** 整卷中不逐题亮对错：verdicts wait for the 结卷摘要. */
+  const showVerdict = paper === null || paper.ended !== null;
 
   function startMixed() {
     if (!mixable) return;
     resetAnswerState();
     setMix(mixable);
+  }
+
+  function openPaperConfig() {
+    if (!set) return;
+    setPaperMinutes(String(defaultWholePaperMinutes(set.questions.length)));
+    setPaperConfigOpen(true);
+  }
+
+  function startWholePaper() {
+    if (!set) return;
+    // 越界提交被钳回：the clamped value is the session's duration, whatever was typed.
+    const minutes = clampWholePaperMinutes(Number(paperMinutes));
+    const startedAt = Date.now();
+    setPaperConfigOpen(false);
+    setMix(null);
+    resetAnswerState();
+    setClockNow(startedAt);
+    setPaper({ set, durationMs: minutes * 60_000, startedAt, verdicts: [], ended: null });
+  }
+
+  /**
+   * 整卷中每题提交照走 submitAnswer/submitShortAnswer；这里只把对错记进会话
+   * 内存供结卷摘要使用，全部答完时自动结卷。已结卷后的迟到结果被丢弃。
+   */
+  function recordPaperVerdict(result: SubmitAnswerResult) {
+    setPaper((current) => {
+      if (!current || current.ended !== null) return current;
+      if (current.verdicts.some((verdict) => verdict.questionId === result.questionId)) {
+        return current;
+      }
+      const verdicts = [
+        ...current.verdicts,
+        {
+          questionId: result.questionId,
+          correct: result.correct,
+          mistake: result.mistake?.status === 'active'
+        }
+      ];
+      const ended =
+        verdicts.length >= current.set.questions.length
+          ? { reason: 'complete' as const, finishedAt: Date.now() }
+          : null;
+      return { ...current, verdicts, ...(ended ? { ended } : {}) };
+    });
+  }
+
+  /** 提前交卷：结卷出摘要；已落库的作答与错题原样保留。 */
+  function submitPaperEarly() {
+    setPaper((current) =>
+      current && current.ended === null
+        ? { ...current, ended: { reason: 'early', finishedAt: Date.now() } }
+        : current
+    );
+  }
+
+  /** 「再练一次」：回普通模式，同一套练习从第 1 题开始。 */
+  function exitWholePaper() {
+    setPaper(null);
+    resetAnswerState();
   }
 
   const createButton = onCreateSet ? (
@@ -262,6 +397,22 @@ export function LearningPane({
   const isShort = question.kind === 'short';
   const awaitingSelfAssessment = isShort && revealed && !answered;
   const responseReady = response.trim() !== '' && !answered && !checking;
+  // 结卷摘要 numbers: the denominator is the whole paper (未作答 included),
+  // deliberately different from attempt history's answered-only denominator.
+  const paperTotal = paper ? paper.set.questions.length : 0;
+  const paperCorrect = paper ? paper.verdicts.filter((verdict) => verdict.correct).length : 0;
+  const paperUnanswered = paperTotal - (paper ? paper.verdicts.length : 0);
+  const paperHasMistake = paper ? paper.verdicts.some((verdict) => verdict.mistake) : false;
+  const paperSummaryLine = paper?.ended
+    ? `整卷完成：正确 ${paperCorrect} / ${paperTotal} 题${
+        paperUnanswered > 0 ? `，未作答 ${paperUnanswered} 题` : ''
+      }，用时 ${formatWholePaperSpan(wholePaperElapsedMs(paper, paper.ended.finishedAt))}。${
+        paperHasMistake ? '错题已记入错题本。' : ''
+      }`
+    : '';
+  const paperVerdictById = paper
+    ? new Map(paper.verdicts.map((verdict) => [verdict.questionId, verdict]))
+    : new Map<string, WholePaperVerdict>();
 
   async function check() {
     if (selected === null || answered || checking) return;
@@ -275,6 +426,7 @@ export function LearningPane({
       });
       setResult(submitted);
       if (submitted.correct) setScore((current) => current + 1);
+      recordPaperVerdict(submitted);
     } catch (cause) {
       setError(friendlyErrorMessage(cause, '提交答案失败，请重试。'));
     } finally {
@@ -312,6 +464,7 @@ export function LearningPane({
       });
       setResult(submitted);
       if (submitted.correct) setScore((current) => current + 1);
+      recordPaperVerdict(submitted);
     } catch (cause) {
       setError(friendlyErrorMessage(cause, '提交答案失败，请重试。'));
     } finally {
@@ -321,6 +474,12 @@ export function LearningPane({
 
   function next() {
     if (last) {
+      // 整卷兜底：the normal path auto-ends the paper on the last submit, so
+      // reaching here means the final verdict never landed — close the paper.
+      if (paper !== null) {
+        submitPaperEarly();
+        return;
+      }
       setFinished(true);
       return;
     }
@@ -372,6 +531,26 @@ export function LearningPane({
         </div>
       </header>
 
+      {paper !== null && paper.ended === null ? (
+        <div className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-gray-200/70 px-4 dark:border-white/10 md:px-6">
+          <span className="text-[12px] font-medium text-gray-500 dark:text-[#8e8e93]">
+            整卷模拟 · {activeSet.title}
+          </span>
+          <div className="flex items-center gap-2">
+            <span
+              role="timer"
+              aria-label="整卷剩余时间"
+              className="text-[14px] font-semibold tabular-nums text-black dark:text-[#f5f5f7]"
+            >
+              {formatFocusTime(wholePaperRemainingMs(paper, clockNow))}
+            </span>
+            <Button size="sm" variant="secondary" onClick={submitPaperEarly}>
+              提前交卷
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-6">
         <div className="mx-auto w-full max-w-[720px]">
           {setNotice ? (
@@ -383,17 +562,109 @@ export function LearningPane({
               {setNotice}
             </p>
           ) : null}
-          {mixable ? (
-            <div className="mb-4 flex items-center justify-between gap-3 rounded-xl bg-[#f5f5f7] px-4 py-2.5 dark:bg-white/[0.06]">
-              <p className="min-w-0 text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
-                把「{mixable.subject}」的多份练习交错着做，比一次做完一套记得更牢。
-              </p>
-              <Button size="sm" variant="secondary" onClick={startMixed}>
-                交错混练
-              </Button>
-            </div>
+          {set && !paper ? (
+            paperConfigOpen ? (
+              <div
+                role="group"
+                aria-label="整卷模拟配置"
+                className="mb-4 flex flex-wrap items-end gap-3 rounded-xl bg-[#f5f5f7] px-4 py-3 dark:bg-white/[0.06]"
+              >
+                <div>
+                  <Label htmlFor="whole-paper-minutes" className="mb-1">
+                    总时长（分钟）
+                  </Label>
+                  <Input
+                    id="whole-paper-minutes"
+                    type="number"
+                    min={WHOLE_PAPER_MIN_MINUTES}
+                    max={WHOLE_PAPER_MAX_MINUTES}
+                    value={paperMinutes}
+                    onChange={(event) => setPaperMinutes(event.target.value)}
+                    className="w-28"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" onClick={startWholePaper}>
+                    确认开始
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={() => setPaperConfigOpen(false)}>
+                    取消
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div
+                className={cn(
+                  'mb-4 flex items-center gap-3 rounded-xl bg-[#f5f5f7] px-4 py-2.5 dark:bg-white/[0.06]',
+                  mixable ? 'justify-between' : 'justify-end'
+                )}
+              >
+                {mixable ? (
+                  <p className="min-w-0 text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
+                    把「{mixable.subject}」的多份练习交错着做，比一次做完一套记得更牢。
+                  </p>
+                ) : null}
+                <div className="flex shrink-0 items-center gap-2">
+                  {mixable ? (
+                    <Button size="sm" variant="secondary" onClick={startMixed}>
+                      交错混练
+                    </Button>
+                  ) : null}
+                  <Button size="sm" variant="secondary" onClick={openPaperConfig}>
+                    整卷模拟
+                  </Button>
+                </div>
+              </div>
+            )
           ) : null}
-          {finished ? (
+          {paper && paper.ended ? (
+            <div className="rounded-2xl bg-[#f5f5f7] p-8 text-center dark:bg-[#1c1c1e]">
+              {paper.ended.reason === 'time' ? (
+                <p
+                  role="status"
+                  className="text-[13px] font-medium text-[#0071e3] dark:text-[#4da3ff]"
+                >
+                  时间到，自动交卷。
+                </p>
+              ) : null}
+              <p className="mt-2 text-[14px] leading-6 text-black dark:text-[#f5f5f7]">
+                {paperSummaryLine}
+              </p>
+              <ul className="mt-4 space-y-1 text-left">
+                {paper.set.questions.map((paperQuestion, paperIndex) => {
+                  const verdict = paperVerdictById.get(paperQuestion.id);
+                  return (
+                    <li
+                      key={paperQuestion.id}
+                      className={
+                        verdict === undefined
+                          ? 'text-[12px] font-medium text-[#8a5a00] dark:text-[#ffb340]'
+                          : verdict.correct
+                            ? 'text-[12px] text-[#1d7f3a]'
+                            : 'text-[12px] text-[#d70015] dark:text-[#ff7b72]'
+                      }
+                    >
+                      {`第 ${paperIndex + 1} 题 · ${
+                        verdict === undefined
+                          ? '未作答'
+                          : verdict.correct
+                            ? '回答正确'
+                            : '回答错误'
+                      }`}
+                    </li>
+                  );
+                })}
+              </ul>
+              <div className="mt-4 flex justify-center gap-2">
+                <Button size="sm" onClick={exitWholePaper}>
+                  再练一次
+                </Button>
+                <Button size="sm" variant="secondary" onClick={onOpenChat}>
+                  问阿咲
+                </Button>
+              </div>
+            </div>
+          ) : finished ? (
             <div className="rounded-2xl bg-[#f5f5f7] p-8 text-center dark:bg-[#1c1c1e]">
               <p className="text-[16px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">练习完成</p>
               <p className="mt-2 text-[28px] font-semibold tracking-tight text-black dark:text-[#f5f5f7]">
@@ -478,21 +749,30 @@ export function LearningPane({
                         </p>
                       ) : null}
                       {answered ? (
-                        <>
-                          <p
-                            className={cn(
-                              'mt-2 text-[13px] font-medium',
-                              correct ? 'text-[#1d7f3a]' : 'text-[#d70015] dark:text-[#ff7b72]'
-                            )}
-                          >
-                            {correct ? '回答正确' : '回答错误'}
-                          </p>
-                          {result?.mistake?.status === 'active' ? (
-                            <p className="mt-2 text-[12px] text-gray-500 dark:text-[#8e8e93]" role="status">
-                              已加入错题本，{result.mistake.due} 复习。
+                        showVerdict ? (
+                          <>
+                            <p
+                              className={cn(
+                                'mt-2 text-[13px] font-medium',
+                                correct ? 'text-[#1d7f3a]' : 'text-[#d70015] dark:text-[#ff7b72]'
+                              )}
+                            >
+                              {correct ? '回答正确' : '回答错误'}
                             </p>
-                          ) : null}
-                        </>
+                            {result?.mistake?.status === 'active' ? (
+                              <p className="mt-2 text-[12px] text-gray-500 dark:text-[#8e8e93]" role="status">
+                                已加入错题本，{result.mistake.due} 复习。
+                              </p>
+                            ) : null}
+                          </>
+                        ) : (
+                          <p
+                            role="status"
+                            className="mt-2 text-[12px] text-gray-500 dark:text-[#8e8e93]"
+                          >
+                            已提交。
+                          </p>
+                        )
                       ) : (
                         <p className="mt-3 text-[12px] text-gray-500 dark:text-[#8e8e93]">
                           对照参考答案自评，这一步会决定下次复习时间。
@@ -504,8 +784,10 @@ export function LearningPane({
               ) : (
                 <div className="mt-4 space-y-2">
                   {question.options.map((option, optionIndex) => {
-                    const isCorrect = answered && optionIndex === result.answer;
-                    const isWrong = answered && optionIndex === selected && !result?.correct;
+                    // 整卷中不亮对错：options stay neutral until the paper closes.
+                    const isCorrect = showVerdict && answered && optionIndex === result.answer;
+                    const isWrong =
+                      showVerdict && answered && optionIndex === selected && !result?.correct;
                     return (
                       <button
                         key={option}
@@ -545,7 +827,7 @@ export function LearningPane({
                 </p>
               ) : null}
 
-              {!isShort && answered ? (
+              {!isShort && answered && showVerdict ? (
                 <div className="mt-4 rounded-xl bg-[#f5f5f7] px-4 py-3 dark:bg-[#1c1c1e]">
                   <p className={cn('text-[13px] font-medium', correct ? 'text-[#1d7f3a]' : 'text-[#d70015] dark:text-[#ff7b72]')}>
                     {correct ? '回答正确' : '回答错误'}
@@ -557,6 +839,11 @@ export function LearningPane({
                     </p>
                   ) : null}
                 </div>
+              ) : null}
+              {!isShort && answered && !showVerdict ? (
+                <p role="status" className="mt-3 text-[12px] text-gray-500 dark:text-[#8e8e93]">
+                  已提交。
+                </p>
               ) : null}
 
               <div className="mt-5 flex gap-2">
@@ -603,8 +890,11 @@ export function LearningPane({
               </div>
             </>
           )}
-          {mistakeBook}
-          <AttemptHistory attempts={attempts} set={set} mistakes={mistakes} />
+          {/* 整卷进行中隐藏错题本与答题历史——两者都会泄露单题对错。 */}
+          {showVerdict ? mistakeBook : null}
+          {showVerdict ? (
+            <AttemptHistory attempts={attempts} set={set} mistakes={mistakes} />
+          ) : null}
         </div>
       </div>
       {createDialog}

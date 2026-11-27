@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createBackup } from '../src/main/backup';
 import { ConversationStore } from '../src/main/conversations/conversation-store';
 import { DEFAULT_DISPLAY_NAME } from '../src/main/settings/defaults';
@@ -345,6 +345,148 @@ test.describe('ASAKI feature smoke', () => {
     } finally {
       if (environment) await environment.cleanup().catch(() => undefined);
       await rm(fixtureRoot, { recursive: true, force: true }).catch(() => undefined);
+    }
+  });
+
+  /**
+   * P2a 整卷模拟（spec 验收 14–19 的真实链路）：入口 → 配置（默认时长）→
+   * 倒计时不亮对错地逐题作答（照走真实 submit IPC）→ 全部答完自动结卷出
+   * 摘要，错题落错题本，再练一次回到普通模式。整卷会话只在内存里——这条
+   * 链路本身不重启应用；会话作废由 renderer 单测锁。
+   */
+  test('a whole-paper simulation runs to the summary and records mistakes', async () => {
+    const environment = await createIsolatedEnvironment();
+    const workspaceId = 'qa-paper';
+    const workspaceBody = `---
+type: profile
+source: user
+id: ${workspaceId}
+name: 整卷演练
+kind: study
+color: '#34c759'
+goal: 端到端验证整卷模拟
+description: 由 e2e/feature-smoke.spec.ts 写入的隔离数据
+checkIn: daily
+createdAt: '2026-01-01T00:00'
+updatedAt: '2026-01-01T00:00'
+---
+
+# 整卷演练
+
+- 类型：学习
+- 目标：端到端验证整卷模拟
+`;
+    const setBody = `---
+type: qa
+source: user
+kind: practice-set
+id: ps-paper
+workspaceId: ${workspaceId}
+title: 整卷三题
+subject: 数学
+created: '2026-01-01T00:00'
+updated: '2026-01-01T00:00'
+questions:
+  - id: q1
+    prompt: '整卷第一题：sin x / x 在 x→0 的极限是？'
+    options:
+      - '0'
+      - '1'
+      - '∞'
+    answer: 1
+    explanation: '第一个重要极限。'
+  - id: q2
+    prompt: '整卷第二题：光速大约是多少？'
+    options:
+      - '每秒 30 万公里'
+      - '每秒 3 千公里'
+    answer: 0
+    explanation: '常识。'
+  - id: q3
+    prompt: '整卷第三题：1 的平方是？'
+    options:
+      - '0'
+      - '1'
+    answer: 1
+    explanation: '基础。'
+---
+
+# 整卷三题
+
+${workspaceId} · 数学 · 3 题
+`;
+    for (const [relative, body] of [
+      [`workspaces/${workspaceId}/workspace.md`, workspaceBody],
+      [`workspaces/${workspaceId}/practice/sets/ps-paper.md`, setBody]
+    ] as const) {
+      const file = join(environment.vault, ...relative.split('/'));
+      await mkdir(dirname(file), { recursive: true });
+      await writeFile(file, body, 'utf8');
+    }
+    const launched = await launchStudyCoach(environment);
+    const { page } = launched;
+    const pageErrors: string[] = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+
+    try {
+      await expect(page.getByText(GREETING_SUFFIX)).toBeVisible();
+
+      await page.getByRole('button', { name: '全部项目' }).click();
+      await expect(page.locator('header').getByText('项目', { exact: true })).toBeVisible();
+      await page.getByRole('button', { name: '练习', exact: true }).click();
+      await expect(page.getByRole('button', { name: '关闭练习' })).toBeVisible();
+
+      // 入口 + 默认时长 = clamp(3×2, 5, 600) = 6。
+      await page.getByRole('button', { name: '整卷模拟' }).click();
+      const minutes = page.getByLabel('总时长（分钟）');
+      await expect(minutes).toHaveValue('6');
+      await page.getByRole('button', { name: '确认开始' }).click();
+      await expect(page.getByRole('timer')).toHaveText('06:00');
+
+      // Q1 答对：整卷不亮对错，只有安静的「已提交。」。
+      await page.getByRole('button', { name: 'B. 1' }).click();
+      await page.getByRole('button', { name: '检查答案' }).click();
+      await expect(page.getByText('已提交。')).toBeVisible();
+      await expect(page.getByText('回答正确')).toHaveCount(0);
+      await expect(page.getByText('回答错误')).toHaveCount(0);
+      await expect(page.getByText(/已加入错题本/)).toHaveCount(0);
+      await page.getByRole('button', { name: '下一题' }).click();
+
+      // Q2 答错（同样不亮），翻到第三题。
+      await page.getByRole('button', { name: 'B. 每秒 3 千公里' }).click();
+      await page.getByRole('button', { name: '检查答案' }).click();
+      await expect(page.getByText('已提交。')).toBeVisible();
+      await page.getByRole('button', { name: '下一题' }).click();
+
+      // Q3 答对 → 全部答完自动结卷，摘要与错题本回来。
+      await page.getByRole('button', { name: 'B. 1' }).click();
+      await page.getByRole('button', { name: '检查答案' }).click();
+      await expect(page.getByText(/^整卷完成：正确 2 \/ 3 题，用时/)).toBeVisible();
+      await expect(page.getByText('第 1 题 · 回答正确')).toBeVisible();
+      await expect(page.getByText('第 2 题 · 回答错误')).toBeVisible();
+      await expect(page.getByText('第 3 题 · 回答正确')).toBeVisible();
+      await expect(page.getByText(/错题本 · 1 道待复习/)).toBeVisible();
+      await expect(page.getByText('答题历史')).toBeVisible();
+
+      // 逐题落库照走真实提交口：错题进了 (隔离) vault 的错题本文件。
+      const mistakes = await readFile(
+        join(environment.vault, 'workspaces', workspaceId, 'practice', 'mistakes.md'),
+        'utf8'
+      );
+      expect(mistakes).toContain('setId: ps-paper');
+      expect(mistakes).toContain('整卷第二题');
+
+      // 「再练一次」回普通模式：逐题反馈恢复。
+      await page.getByRole('button', { name: '再练一次' }).click();
+      await expect(page.getByRole('timer')).toHaveCount(0);
+      await page.getByRole('button', { name: 'B. 1' }).click();
+      await page.getByRole('button', { name: '检查答案' }).click();
+      await expect(page.getByText('回答正确').first()).toBeVisible();
+
+      expect(pageErrors).toEqual([]);
+    } finally {
+      await launched.close();
+      await environment.cleanup().catch(() => undefined);
     }
   });
 });

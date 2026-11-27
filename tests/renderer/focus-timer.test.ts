@@ -1,14 +1,23 @@
 import {
   FOCUS_DURATION_MS,
+  FOCUS_RECORDED_MINUTES,
+  FOCUS_TICK_MS,
+  WHOLE_PAPER_MAX_MINUTES,
+  WHOLE_PAPER_MIN_MINUTES,
+  clampWholePaperMinutes,
+  defaultWholePaperMinutes,
   firstFocusableTask,
   focusCompletionStatus,
   focusProgress,
   formatFocusTime,
+  formatWholePaperSpan,
   nextActualMin,
   pauseFocusSession,
   resumeFocusSession,
   startFocusSession,
-  tickFocus
+  tickFocus,
+  wholePaperElapsedMs,
+  wholePaperRemainingMs
 } from '../../src/renderer/shell/focus-timer';
 import type { WorkspaceTask } from '../../src/shared/workspace';
 
@@ -143,4 +152,66 @@ test('picks the first unfinished task for a default focus', () => {
 
   expect(firstFocusableTask(tasks)?.id).toBe('first');
   expect(firstFocusableTask([task('done', 'done')])).toBeUndefined();
+});
+
+// ---------------------------------------------------------------------------
+// 整卷模拟 clock（P2a）。验收 20 的锚：专注计时器的常量与结算函数一个不动，
+// 上面的既有断言逐条保持通过；整卷计时是旁边新增的墙钟纯函数。
+// ---------------------------------------------------------------------------
+
+describe('whole-paper exam clock', () => {
+  test('keeps the 25-minute focus timer constants untouched', () => {
+    expect(FOCUS_DURATION_MS).toBe(25 * 60 * 1000);
+    expect(FOCUS_TICK_MS).toBe(1000);
+    expect(FOCUS_RECORDED_MINUTES).toBe(25);
+    expect(typeof tickFocus).toBe('function');
+  });
+
+  test('defaults to clamp(题数×2, 5, 600) at the 1 / 3 / 400 boundaries', () => {
+    expect(defaultWholePaperMinutes(1)).toBe(5);
+    expect(defaultWholePaperMinutes(3)).toBe(6);
+    expect(defaultWholePaperMinutes(400)).toBe(600);
+    expect(defaultWholePaperMinutes(0)).toBe(WHOLE_PAPER_MIN_MINUTES);
+  });
+
+  test('clamps out-of-range or non-integer minutes back into 5–600', () => {
+    expect(WHOLE_PAPER_MIN_MINUTES).toBe(5);
+    expect(WHOLE_PAPER_MAX_MINUTES).toBe(600);
+    expect(clampWholePaperMinutes(5)).toBe(5);
+    expect(clampWholePaperMinutes(0)).toBe(5);
+    expect(clampWholePaperMinutes(-3)).toBe(5);
+    expect(clampWholePaperMinutes(600)).toBe(600);
+    expect(clampWholePaperMinutes(1000)).toBe(600);
+    expect(clampWholePaperMinutes(7.4)).toBe(7);
+    expect(clampWholePaperMinutes(NaN)).toBe(5);
+    expect(clampWholePaperMinutes(Number.POSITIVE_INFINITY)).toBe(5);
+  });
+
+  test('settles remaining time against the wall clock, not per tick', () => {
+    const clock = { durationMs: 10 * 60_000, startedAt: 1_000 };
+    expect(wholePaperRemainingMs(clock, 1_000)).toBe(10 * 60_000);
+    // A 90-second jump (background throttling or sleep) subtracts real time.
+    expect(wholePaperRemainingMs(clock, 91_000)).toBe(10 * 60_000 - 90_000);
+    expect(wholePaperRemainingMs(clock, 1_000 + 60_000)).toBe(9 * 60_000);
+    // Past the deadline the remaining time floors at zero.
+    expect(wholePaperRemainingMs(clock, 999_999_999)).toBe(0);
+    // A clock that seems to run backwards cannot add time back.
+    expect(wholePaperRemainingMs(clock, 0)).toBe(10 * 60_000);
+  });
+
+  test('clamps elapsed time to the allotment', () => {
+    const clock = { durationMs: 5 * 60_000, startedAt: 0 };
+    expect(wholePaperElapsedMs(clock, 0)).toBe(0);
+    expect(wholePaperElapsedMs(clock, 30_000)).toBe(30_000);
+    expect(wholePaperElapsedMs(clock, 10 * 60_000)).toBe(5 * 60_000);
+    expect(wholePaperElapsedMs(clock, -1)).toBe(0);
+  });
+
+  test('formats 用时 spans for the 结卷摘要', () => {
+    expect(formatWholePaperSpan(0)).toBe('0 秒');
+    expect(formatWholePaperSpan(45_000)).toBe('45 秒');
+    expect(formatWholePaperSpan(90_000)).toBe('1 分 30 秒');
+    expect(formatWholePaperSpan(5 * 60_000)).toBe('5 分');
+    expect(formatWholePaperSpan(-1_000)).toBe('0 秒');
+  });
 });
