@@ -1,15 +1,16 @@
 import type { NoteMeta } from '../../shared/types';
-import type {
-  PracticeAttempt,
-  PracticeConfidence,
-  PracticeMistake,
-  PracticeMistakeStatus,
-  PracticeQuestion,
-  PracticeSet,
-  PracticeSetSource
-} from '../../shared/practice';
 import { parseNote, serializeNote } from '../vault/note';
 import { isLocalDate } from '../../shared/date';
+import {
+  normalizePracticeDurationMs,
+  type PracticeAttempt,
+  type PracticeConfidence,
+  type PracticeMistake,
+  type PracticeMistakeStatus,
+  type PracticeQuestion,
+  type PracticeSet,
+  type PracticeSetSource
+} from '../../shared/practice';
 import { asBoolean, asFiniteNumber, asRecord, asString, asStringArray } from '../workspace/records/coerce';
 
 function asInt(value: unknown): number | undefined {
@@ -194,6 +195,10 @@ export function parseAttemptFile(raw: string): PracticeAttempt[] {
     }
     const response = asString(record.response);
     const confidence = asConfidence(record.confidence);
+    // Tolerant read with the same normalization the submit path applies, so a
+    // hand-edited or legacy entry can never poison the fluent stats; a record
+    // without the field simply stays without it.
+    const durationMs = normalizePracticeDurationMs(record.durationMs);
     attempts.push({
       id,
       workspaceId,
@@ -202,6 +207,7 @@ export function parseAttemptFile(raw: string): PracticeAttempt[] {
       choice,
       ...(response !== undefined ? { response } : {}),
       ...(confidence !== undefined ? { confidence } : {}),
+      ...(durationMs !== undefined ? { durationMs } : {}),
       correct: asBoolean(record.correct, false),
       answeredAt
     });
@@ -224,11 +230,14 @@ export function serializeAttemptFile(date: string, attempts: readonly PracticeAt
     // predate the feature keep their exact previous text.
     const confidence =
       attempt.confidence === 'sure' ? ' · 有把握' : attempt.confidence === 'unsure' ? ' · 不确定' : '';
+    // 用时 likewise appears only when it was measured (rounded to seconds for
+    // the human-readable line; the exact ms stays in the frontmatter entry).
+    const duration = attempt.durationMs !== undefined ? ` · ${Math.round(attempt.durationMs / 1000)} 秒` : '';
     if (attempt.response !== undefined) {
       // Free recall: show what was typed, not an option index.
-      return `- ${time || '--:--'} · ${attempt.questionId} · 简答「${singleLine(attempt.response)}」${confidence} · ${verdict}`;
+      return `- ${time || '--:--'} · ${attempt.questionId} · 简答「${singleLine(attempt.response)}」${confidence} · ${verdict}${duration}`;
     }
-    return `- ${time || '--:--'} · ${attempt.questionId} · 选择 ${attempt.choice}${confidence} · ${verdict}`;
+    return `- ${time || '--:--'} · ${attempt.questionId} · 选择 ${attempt.choice}${confidence} · ${verdict}${duration}`;
   });
   const body = [`# ${date} 练习记录`, '', ...lines, ''].join('\n');
   return serializeNote(meta, body);

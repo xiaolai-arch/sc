@@ -59,17 +59,53 @@ export interface PracticeSet {
   updatedAt?: string;
 }
 
+/**
+ * Client answer-time ceiling, the Anki `cap_answer_time_to_secs: 60` 口径:
+ * the pane measures 呈现→提交 and clamps at one minute before submitting, and
+ * the service re-applies the same clamp as a fallback so a misbehaving caller
+ * cannot inflate a stored duration. Unrelated to 整卷模拟's whole-paper
+ * `durationMs` (a session budget in LearningPane's `WholePaperSession`), which
+ * shares nothing with this per-attempt field.
+ */
+export const PRACTICE_DURATION_CAP_MS = 60_000;
+
+/**
+ * The 自动召回 threshold: a correct answer inside 10 s counts as automated
+ * recall, one at or beyond it counts as 对了但慢. Spec-filling default
+ * (iter33 P1, item 67), a constant — deliberately not a settings entry.
+ */
+export const AUTO_RECALL_MS = 10_000;
+
+/**
+ * The one normalization for a submitted or stored `durationMs`. Out-of-range
+ * values are clamped to the cap; anything that is not a positive integer
+ * (including NaN) means the field carries no measurement and is omitted —
+ * never an error, so old callers and hand-edited files keep working.
+ */
+export function normalizePracticeDurationMs(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) return undefined;
+  return value > PRACTICE_DURATION_CAP_MS ? PRACTICE_DURATION_CAP_MS : value;
+}
+
 export interface PracticeAttempt {
   id: string;
   workspaceId: string;
   setId: string;
   questionId: string;
-  /** Index into the question's `options`. Unused (0) for short questions. */
+  /** Index into the question's `options`. Unused (0) for short attempts. */
   choice: number;
-  /** Short questions: what the learner typed. Absent for choice attempts. */
+  /** Short attempts: what the learner typed. Absent for choice attempts. */
   response?: string;
   /** Pre-answer confidence; absent when the learner did not pick one. */
   confidence?: PracticeConfidence;
+  /**
+   * 呈现→提交 answer time in milliseconds, measured by the pane and capped at
+   * `PRACTICE_DURATION_CAP_MS` (the service re-clamps as a fallback). Absent
+   * when the caller did not measure (legacy records, mistake reviews), so old
+   * files and callers need no migration. Fluent stats count it; scheduling
+   * ignores it — 用时不影响调度 (Anki 口径).
+   */
+  durationMs?: number;
   correct: boolean;
   answeredAt: string;
 }
@@ -141,6 +177,11 @@ export interface SubmitAnswerInput {
   choice: number;
   /** Optional self-assessment recorded with the attempt. */
   confidence?: PracticeConfidence;
+  /**
+   * Client-measured 呈现→提交 time in ms; the service normalizes it
+   * (`normalizePracticeDurationMs`) before anything is stored.
+   */
+  durationMs?: number;
 }
 
 /**
@@ -156,6 +197,12 @@ export interface SubmitShortAnswerInput {
   selfCorrect: boolean;
   /** Optional pre-answer confidence, recorded with the attempt. */
   confidence?: PracticeConfidence;
+  /**
+   * 呈现→提交 time in ms. 口径 B (item 67, sc-lead 2026-11-27): the clock runs
+   * to the self-assessment click — the same moment the attempt is recorded —
+   * so choice and short answers share one timing path.
+   */
+  durationMs?: number;
 }
 
 export interface SubmitAnswerResult {

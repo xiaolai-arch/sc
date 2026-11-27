@@ -5,7 +5,7 @@ import { weeklyOverview } from '../../shared/weekly-stats';
 import { friendlyErrorMessage } from '../../shared/errors';
 import type { ReviewRecord } from '../../shared/ipc';
 import type { KnowledgeTopic } from '../../shared/knowledge';
-import type { PracticeAttempt, PracticeMistake } from '../../shared/practice';
+import type { PracticeAttempt, PracticeMistake, PracticeSet } from '../../shared/practice';
 import type {
   SubmitReviewInput,
   Workspace,
@@ -19,6 +19,7 @@ import { Select } from '../ui/Select';
 import { Textarea } from '../ui/Textarea';
 import { AccuracyTrend } from './AccuracyTrend';
 import { CalibrationCard } from './CalibrationCard';
+import { FluencyTrend } from './FluencyTrend';
 import { PageFrame } from './PageFrame';
 import { ReviewRecords, type ExamWritingStore } from './ReviewRecords';
 import { StudyHeatmap } from './StudyHeatmap';
@@ -30,6 +31,8 @@ type ReviewPageProps = {
   /** Backing data for the weekly overview; omitted by lightweight callers. */
   tasks?: WorkspaceTask[];
   attempts?: PracticeAttempt[];
+  /** Set titles for the 用时流畅度 rows; omitted renders raw set ids. */
+  sets?: PracticeSet[];
   dueMistakes?: PracticeMistake[];
   knowledgeTopics?: KnowledgeTopic[];
   onOpenSidebar: () => void;
@@ -47,6 +50,7 @@ export function ReviewPage({
   reviews,
   tasks = [],
   attempts = [],
+  sets = [],
   dueMistakes = [],
   knowledgeTopics = [],
   onOpenSidebar,
@@ -211,6 +215,7 @@ export function ReviewPage({
     >
       <StudyHeatmap tasks={filteredTasks} today={todayDate} />
       <AccuracyTrend attempts={filteredAttempts} today={todayDate} />
+      <FluencyTrend attempts={filteredAttempts} sets={sets} today={todayDate} />
       <CalibrationCard attempts={filteredAttempts} today={todayDate} />
       {hasOverviewData ? <WeeklyOverview overview={overview} /> : null}
 

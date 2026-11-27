@@ -50,7 +50,11 @@ export interface AccuracyTrendData {
   hasData: boolean;
 }
 
-function startOfWeek(today: Date): Date {
+/**
+ * Monday 00:00 of the date's local week. Shared with the 用时流畅度 stats so
+ * both trends bucket answers onto identical weeks.
+ */
+export function startOfWeek(today: Date): Date {
   const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   // getDay(): 0 = Sunday; shift so Monday starts the week.
   start.setDate(start.getDate() - ((start.getDay() + 6) % 7));

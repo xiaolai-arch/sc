@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { friendlyErrorMessage } from '../../shared/errors';
+import { PRACTICE_DURATION_CAP_MS } from '../../shared/practice';
 import { Button } from '../ui/Button';
 import { BookOpenIcon, CheckIcon, TargetIcon } from '../ui/icons';
 import { Input } from '../ui/Input';
@@ -143,6 +144,12 @@ export function LearningPane({
   const [paperMinutes, setPaperMinutes] = useState('');
   /** Wall-clock snapshot the countdown renders from; a 1 Hz tick refreshes it. */
   const [clockNow, setClockNow] = useState(() => Date.now());
+  /**
+   * When the current question was presented. Reset at every presentation point
+   * (set switch, restart, next) — never shown to the learner as a timer.
+   * Unrelated to 整卷模拟's paper-level `durationMs`, which is a session budget.
+   */
+  const [questionShownAt, setQuestionShownAt] = useState(() => Date.now());
 
   function resetAnswerState() {
     setIndex(0);
@@ -155,6 +162,18 @@ export function LearningPane({
     setScore(0);
     setFinished(false);
     setError(null);
+    // A fresh question is on screen: its answer clock starts now.
+    setQuestionShownAt(Date.now());
+  }
+
+  /**
+   * 本题用时（口径 B，item 67 sc-lead 2026-11-27）：从题目呈现到提交的墙钟差，
+   * 简答题一路跑到「答对了/没答对」自评点击——与 attempt 落盘同一时刻，与选择
+   * 题共用一条采集路径。客户端按 Anki `cap_answer_time_to_secs` 口径 60 秒封顶
+   * （服务端还有一层归一化兜底）。只记录，不显示——不新增答题中计时器。
+   */
+  function measuredDurationMs(): number {
+    return Math.min(PRACTICE_DURATION_CAP_MS, Math.max(0, Date.now() - questionShownAt));
   }
 
   useEffect(() => {
@@ -422,6 +441,7 @@ export function LearningPane({
       const submitted = await onSubmitAnswer({
         questionId: question.id,
         choice: selected,
+        durationMs: measuredDurationMs(),
         ...(confidence !== undefined ? { confidence } : {})
       });
       setResult(submitted);
@@ -460,6 +480,8 @@ export function LearningPane({
         questionId: question.id,
         response,
         selfCorrect,
+        // 口径 B: the clock stops here, at the recording click (see measuredDurationMs).
+        durationMs: measuredDurationMs(),
         ...(confidence !== undefined ? { confidence } : {})
       });
       setResult(submitted);
@@ -490,19 +512,13 @@ export function LearningPane({
     setRevealed(false);
     setConfidence(undefined);
     setError(null);
+    // Next question on screen: its answer clock starts fresh.
+    setQuestionShownAt(Date.now());
   }
 
+  /** 再练一次：回到第 1 题，与首次呈现完全相同的初始状态（含答题时钟）。 */
   function restart() {
-    setIndex(0);
-    setSelected(null);
-    setResult(null);
-    setChecking(false);
-    setResponse('');
-    setRevealed(false);
-    setConfidence(undefined);
-    setScore(0);
-    setFinished(false);
-    setError(null);
+    resetAnswerState();
   }
 
   return (

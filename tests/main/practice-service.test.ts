@@ -1351,6 +1351,162 @@ test('attempt files without confidence round-trip byte-identically', () => {
   expect(serializeAttemptFile('2026-11-01', parseAttemptFile(serialized))).toBe(serialized);
 });
 
+// --- 用时 durationMs (iter33 P1) -------------------------------------------
+
+test('records the measured duration on choice and short attempts', async () => {
+  const service = at('2026-11-01');
+  const created = await service.createSet({
+    workspaceId: 'kaoyan',
+    title: '用时小测',
+    questions: [{ prompt: '1 + 1 等于几？', options: ['2', '3'], answer: 0 }, shortQuestion]
+  });
+  const choiceId = created.questions[0]!.id;
+  const shortId = created.questions[1]!.id;
+
+  const choice = await service.submitAnswer({ questionId: choiceId, choice: 0, durationMs: 8000 });
+  expect(choice.attempt.durationMs).toBe(8000);
+  const short = await service.submitShortAnswer({
+    questionId: shortId,
+    response: '极限是 1',
+    selfCorrect: true,
+    durationMs: 12000
+  });
+  expect(short.attempt.durationMs).toBe(12000);
+
+  // 明文可读：frontmatter entry 带精确毫秒，正文行带秒级用时。
+  const raw = await fs.readFile(
+    join(root, 'workspaces', 'kaoyan', 'practice', 'attempts', '2026-11-01.md'),
+    'utf8'
+  );
+  expect(raw).toContain('durationMs: 8000');
+  expect(raw).toContain('durationMs: 12000');
+  expect(raw).toContain('· 8 秒');
+  expect(raw).toContain('· 12 秒');
+});
+
+test('normalizes the duration server-side: cap above 60 s, drop invalid values', async () => {
+  const service = at('2026-11-01');
+  const created = await service.createSet({
+    workspaceId: 'kaoyan',
+    title: '用时小测',
+    questions: [{ prompt: '1 + 1 等于几？', options: ['2', '3'], answer: 0 }, shortQuestion]
+  });
+  const choiceId = created.questions[0]!.id;
+  const shortId = created.questions[1]!.id;
+
+  // 注入 90000 → 归一 60000（验收 6）。
+  const capped = await service.submitAnswer({ questionId: choiceId, choice: 0, durationMs: 90000 });
+  expect(capped.attempt.durationMs).toBe(60000);
+
+  // 0 / -5 / 1.5 / NaN → 字段省略、不报错（验收 6）。
+  for (const durationMs of [0, -5, 1.5, Number.NaN]) {
+    const result = await service.submitAnswer({ questionId: choiceId, choice: 1, durationMs });
+    expect(result.attempt.durationMs).toBeUndefined();
+    expect('durationMs' in result.attempt).toBe(false);
+  }
+
+  // 简答路径是同一套归一化。
+  const shortCapped = await service.submitShortAnswer({
+    questionId: shortId,
+    response: '答',
+    selfCorrect: true,
+    durationMs: 90000
+  });
+  expect(shortCapped.attempt.durationMs).toBe(60000);
+  const shortOmitted = await service.submitShortAnswer({
+    questionId: shortId,
+    response: '答',
+    selfCorrect: true,
+    durationMs: -1
+  });
+  expect('durationMs' in shortOmitted.attempt).toBe(false);
+
+  // 未传 → 字段不存在（缺省不序列化，零迁移）。
+  const plain = await service.submitAnswer({ questionId: choiceId, choice: 0 });
+  expect('durationMs' in plain.attempt).toBe(false);
+});
+
+test('attempt duration round-trips; legacy and hand-edited entries stay valid', () => {
+  const timed: PracticeAttempt = {
+    id: 'pa1',
+    workspaceId: 'kaoyan',
+    setId: 'ps1',
+    questionId: 'q1',
+    choice: 1,
+    durationMs: 8000,
+    correct: true,
+    answeredAt: '2026-11-01T09:05:00.000Z'
+  };
+  const legacy: PracticeAttempt = {
+    id: 'pa2',
+    workspaceId: 'kaoyan',
+    setId: 'ps1',
+    questionId: 'q2',
+    choice: 0,
+    correct: false,
+    answeredAt: '2026-11-01T09:10:00.000Z'
+  };
+  const serialized = serializeAttemptFile('2026-11-01', [timed, legacy]);
+  expect(serialized).toContain('durationMs: 8000');
+  expect(serialized).toContain('· 8 秒');
+  // 无用时的旧记录正文行保持原形，不带用时片段。
+  expect(serialized).toContain('选择 0 · ❌\n');
+  expect(parseAttemptFile(serialized)).toEqual([timed, legacy]);
+  expect(serializeAttemptFile('2026-11-01', parseAttemptFile(serialized))).toBe(serialized);
+  // 旧文件负例（验收 7）：无 durationMs 的条目读取后字段缺席、不报错。
+  expect(parseAttemptFile(serialized).find((attempt) => attempt.id === 'pa2')).not.toHaveProperty(
+    'durationMs'
+  );
+
+  // 手改文件里的坏值在读侧同一套归一化：封顶、丢弃，绝不致命。
+  const junk = serializeNote(
+    {
+      type: 'log',
+      source: 'user',
+      kind: 'practice-attempts',
+      date: '2026-11-01',
+      entries: [
+        {
+          id: 'pa1',
+          workspaceId: 'kaoyan',
+          setId: 'ps1',
+          questionId: 'q1',
+          choice: 1,
+          durationMs: 90000,
+          correct: true,
+          answeredAt: '2026-11-01T09:05:00.000Z'
+        },
+        {
+          id: 'pa2',
+          workspaceId: 'kaoyan',
+          setId: 'ps1',
+          questionId: 'q2',
+          choice: 1,
+          durationMs: -5,
+          correct: true,
+          answeredAt: '2026-11-01T09:06:00.000Z'
+        },
+        {
+          id: 'pa3',
+          workspaceId: 'kaoyan',
+          setId: 'ps1',
+          questionId: 'q3',
+          choice: 1,
+          durationMs: 1.5,
+          correct: true,
+          answeredAt: '2026-11-01T09:07:00.000Z'
+        }
+      ]
+    },
+    '# 2026-11-01 练习记录\n'
+  );
+  const parsed = parseAttemptFile(junk);
+  expect(parsed).toHaveLength(3);
+  expect(parsed[0]!.durationMs).toBe(60000);
+  expect(parsed[1]).not.toHaveProperty('durationMs');
+  expect(parsed[2]).not.toHaveProperty('durationMs');
+});
+
 test('a sure wrong answer raises difficulty by the extra step, unsure does not', async () => {
   // Mistakes are keyed by question id, so each question is its own fresh record
   // and all three start from the same migrated difficulty.
