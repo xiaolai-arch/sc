@@ -25,7 +25,8 @@
     "package:win": "npm run build && electron-builder --win --dir",
     "dist": "npm run build && electron-builder --mac",
     "dist:win": "npm run build && electron-builder --win",
-    "typecheck:e2e": "tsc --noEmit -p e2e/tsconfig.json"
+    "typecheck:e2e": "tsc --noEmit -p e2e/tsconfig.json",
+    "notices": "node scripts/gen-third-party-notices.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.94",

@@ -12,6 +12,7 @@ files:
   - out/**/*
   - package.json
   - LICENSE
+  - THIRD-PARTY-NOTICES.md
 
 asar: true
 
