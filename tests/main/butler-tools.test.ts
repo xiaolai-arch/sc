@@ -1939,7 +1939,7 @@ test('commitment tools refuse without a commitment service', async () => {
   expect(resolve.content).toContain('不支持记录承诺');
 });
 
-test('resolve_commitment handles done, dropped and newDue', async () => {
+test('resolve_commitment closes a promise (done / dropped) and refuses the old newDue path', async () => {
   const resolve = vi.fn(commitmentStub().resolve);
   const service = commitmentStub({ resolve: resolve as unknown as CommitmentService['resolve'] });
 
@@ -1959,13 +1959,17 @@ test('resolve_commitment handles done, dropped and newDue', async () => {
   expect(resolve).toHaveBeenLastCalledWith({ text: '背单词', outcome: 'dropped' });
   expect(dropped.content).toContain('已放下');
 
+  // 改期收敛（spec P3/P4）：旧工具不再接受 newDue，改期唯一入口是
+  // reschedule_commitment。携带 newDue 的旧式调用被拒、不触达服务。
+  resolve.mockClear();
   const moved = await executeButlerTool(
     { id: 'r3', name: 'resolve_commitment', arguments: { id: 'cm-1', newDue: '明天' } },
     tools,
     { workspace: workspaceService, commitments: service, now: NOW_22 }
   );
-  expect(resolve).toHaveBeenLastCalledWith({ id: 'cm-1', newDue: '2026-11-23' });
-  expect(moved.content).toContain('已改到明天');
+  expect(moved.ok).toBe(false);
+  expect(moved.content).toContain('改期请用 reschedule_commitment');
+  expect(resolve).not.toHaveBeenCalled();
 });
 
 test('resolve_commitment surfaces an unknown id as a Chinese error', async () => {
@@ -1983,7 +1987,7 @@ test('resolve_commitment surfaces an unknown id as a Chinese error', async () =>
   expect(result.content).toContain('没有找到承诺：「cm-nope」');
 });
 
-test('resolve_commitment needs an id or text and an outcome or newDue', async () => {
+test('resolve_commitment needs an id or text and an outcome (newDue no longer accepted)', async () => {
   const service = commitmentStub();
   const noTarget = await executeButlerTool(
     { id: 'r5', name: 'resolve_commitment', arguments: { outcome: 'done' } },
@@ -1999,7 +2003,73 @@ test('resolve_commitment needs an id or text and an outcome or newDue', async ()
     { workspace: workspaceService, commitments: service, now: NOW_22 }
   );
   expect(noAction.ok).toBe(false);
-  expect(noAction.content).toContain('请提供 outcome（done / dropped）或 newDue');
+  expect(noAction.content).toContain('outcome 只能是 done 或 dropped');
+});
+
+test('reschedule_commitment is the only newDue entry and goes through resolve({ newDue })', async () => {
+  const resolve = vi.fn(commitmentStub().resolve);
+  const service = commitmentStub({ resolve: resolve as unknown as CommitmentService['resolve'] });
+
+  const moved = await executeButlerTool(
+    { id: 's1', name: 'reschedule_commitment', arguments: { id: 'cm-1', newDue: '明天' } },
+    tools,
+    { workspace: workspaceService, commitments: service, now: NOW_22 }
+  );
+  expect(moved.ok).toBe(true);
+  // 唯一改期路径：后端 CommitmentService.resolve({ newDue })。
+  expect(resolve).toHaveBeenLastCalledWith({ id: 'cm-1', newDue: '2026-11-23' });
+  expect(moved.content).toContain('已改到明天');
+
+  const badDate = await executeButlerTool(
+    { id: 's2', name: 'reschedule_commitment', arguments: { id: 'cm-1', newDue: '2026-02-30' } },
+    tools,
+    { workspace: workspaceService, commitments: service, now: NOW_22 }
+  );
+  expect(badDate.ok).toBe(false);
+  expect(badDate.content).toContain('newDue 必须是 YYYY-MM-DD 或「明天」这类日期');
+  expect(resolve).toHaveBeenLastCalledWith({ id: 'cm-1', newDue: '2026-11-23' });
+
+  const missingDue = await executeButlerTool(
+    { id: 's3', name: 'reschedule_commitment', arguments: { id: 'cm-1' } },
+    tools,
+    { workspace: workspaceService, commitments: service, now: NOW_22 }
+  );
+  expect(missingDue.ok).toBe(false);
+  expect(missingDue.content).toContain('缺少参数 newDue');
+});
+
+test('reschedule_commitment candidate probe lists same-name promises only when ambiguous', async () => {
+  const service = commitmentStub({
+    list: async () => [
+      { id: 'cm-a', text: '背单词', due: '2026-11-22', status: 'open' as const, createdAt: '2026-11-20T08:00:00.000Z' },
+      { id: 'cm-b', text: '背单词', due: '2026-11-25', status: 'open' as const, createdAt: '2026-11-21T08:00:00.000Z' },
+      { id: 'cm-c', text: '写完第三章', due: '2026-11-24', status: 'open' as const, createdAt: '2026-11-21T08:00:00.000Z' }
+    ]
+  });
+  const reschedule = tools.find((tool) => tool.name === 'reschedule_commitment');
+  expect(reschedule?.approvalCandidates).toBeDefined();
+
+  const ambiguous = await reschedule!.approvalCandidates!(
+    { text: '背单词', newDue: '明天' },
+    { workspace: workspaceService, commitments: service, now: NOW_22 }
+  );
+  expect(ambiguous).toEqual([
+    { id: 'cm-a', label: '背单词', detail: '到期 2026-11-22' },
+    { id: 'cm-b', label: '背单词', detail: '到期 2026-11-25' }
+  ]);
+
+  const unique = await reschedule!.approvalCandidates!(
+    { text: '写完第三章', newDue: '明天' },
+    { workspace: workspaceService, commitments: service, now: NOW_22 }
+  );
+  expect(unique).toBeNull();
+
+  // id 已精确定位 → 不探测（无歧义）。
+  const pinned = await reschedule!.approvalCandidates!(
+    { id: 'cm-a', newDue: '明天' },
+    { workspace: workspaceService, commitments: service, now: NOW_22 }
+  );
+  expect(pinned).toBeNull();
 });
 
 test('the commitment write tools are gated by write permissions', async () => {

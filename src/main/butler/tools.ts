@@ -30,6 +30,7 @@ import type {
   WorkspaceTaskStatus
 } from '../../shared/workspace';
 import type { ModelToolCall, ModelToolDefinition } from '../agent/model-client';
+import type { ApprovalCandidate } from '../runtime/contracts';
 
 export interface ButlerToolContext {
   workspace: WorkspaceService;
@@ -74,6 +75,16 @@ export interface ButlerToolDefinition {
   requiresWrite?: boolean;
   /** True when the tool may reach the network. */
   requiresWeb?: boolean;
+  /**
+   * 同名歧义探测（验收 17，仅确认级工具声明）：批准前由 Runtime 网关调用；
+   * 返回多于一个候选 → 审批事件附带候选、用户必须选定一条。Legacy 直执行
+   * 路径不经过网关，本钩子在那里不被调用（该路径的审批缺席是 P1 既有裁定，
+   * 对照期结束判据见交付报告）。
+   */
+  approvalCandidates?(
+    input: Record<string, unknown>,
+    context: ButlerToolContext
+  ): Promise<ApprovalCandidate[] | null> | ApprovalCandidate[] | null;
   execute(input: Record<string, unknown>, context: ButlerToolContext): Promise<unknown>;
 }
 
@@ -977,7 +988,7 @@ export function createButlerTools(): ButlerToolDefinition[] {
     {
       name: 'resolve_commitment',
       description:
-        '结掉一条承诺：用户说「做了」用 outcome=done，说「不做了 / 先放一放」用 outcome=dropped；用户说「挪到明天」时用 newDue 改期。用 id 精确匹配，或传用户提到的那句承诺原文。',
+        '结掉一条承诺：用户说「做了」用 outcome=done，说「不做了 / 先放一放」用 outcome=dropped。改期不再走本工具——用户说「挪到某天」时用 reschedule_commitment。用 id 精确匹配，或传用户提到的那句承诺原文。',
       requiresWrite: true,
       parameters: {
         type: 'object',
@@ -988,12 +999,9 @@ export function createButlerTools(): ButlerToolDefinition[] {
             type: 'string',
             enum: ['done', 'dropped'],
             description: 'done 表示做到了；dropped 表示先放下'
-          },
-          newDue: {
-            type: 'string',
-            description: '改期到哪天；可传 YYYY-MM-DD 或「明天」等说法'
           }
         },
+        required: ['outcome'],
         additionalProperties: false
       },
       async execute(input, context) {
@@ -1006,27 +1014,97 @@ export function createButlerTools(): ButlerToolDefinition[] {
         if (id === undefined && text === undefined) {
           throw new ToolInputError('请提供 id 或 text 以定位承诺。');
         }
+        // 改期唯一入口是确认级 reschedule_commitment（spec P3 收敛）：本工具
+        // 拒绝携带 newDue 的旧式调用，防止确认级审批被旧参数旁路（验收 23）。
+        // 网关在 schema 层同样拒绝（additionalProperties:false + 未声明参数即拒）。
+        if (optionalString(input, 'newDue') !== undefined) {
+          throw new ToolInputError('改期请用 reschedule_commitment 工具，本工具只结掉承诺。');
+        }
         const outcome = input.outcome;
-        if (outcome !== undefined && outcome !== 'done' && outcome !== 'dropped') {
+        if (outcome !== 'done' && outcome !== 'dropped') {
           throw new ToolInputError('outcome 只能是 done 或 dropped。');
         }
         const now = context.now();
-        const rawNewDue = optionalString(input, 'newDue');
-        let newDue: string | undefined;
-        if (rawNewDue !== undefined) {
-          newDue = resolveCommitmentDue(rawNewDue, now);
-          if (newDue === undefined) {
-            throw new ToolInputError('newDue 必须是 YYYY-MM-DD 或「明天」这类日期。');
-          }
-        }
-        if (outcome === undefined && newDue === undefined) {
-          throw new ToolInputError('请提供 outcome（done / dropped）或 newDue。');
-        }
         const updated = await commitments.resolve({
           ...(id !== undefined ? { id } : {}),
           ...(text !== undefined ? { text } : {}),
-          ...(outcome !== undefined ? { outcome } : {}),
-          ...(newDue !== undefined ? { newDue } : {})
+          outcome
+        });
+        throwIfAborted(context.signal);
+        return {
+          ok: true,
+          commitment: updated,
+          message: commitmentResolveMessage(updated, now)
+        };
+      }
+    },
+    {
+      name: 'reschedule_commitment',
+      description:
+        '把一条承诺改期到用户指定的日子（确认级：需要用户批准后才执行）。用户说「挪到周五 / 改到明天」时调用；newDue 传 YYYY-MM-DD 或「明天」这类说法。用 id 精确匹配；只有一句承诺原文唯一对应一条承诺时才能只传 text——出现两条同名承诺时必须先让用户选定一条（审批卡会列出候选），拿到所选 id 后再调用。',
+      requiresWrite: true,
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: '承诺 ID；优先使用；同名承诺必须由用户选定后传入' },
+          text: { type: 'string', description: '承诺原文（或其中一小段），用于匹配；仅当唯一匹配时可用' },
+          newDue: {
+            type: 'string',
+            description: '改期到哪天；YYYY-MM-DD 或「明天」这类说法'
+          }
+        },
+        required: ['newDue'],
+        additionalProperties: false
+      },
+      /**
+       * 同名歧义探测（验收 17）：批准前由网关调用；多于一个 open 承诺匹配
+       * 同一句原文 → 返回候选（审批卡列出，让用户选一条）；id 已精确定位或
+       * 匹配唯一 → null（照常审批）。匹配规则与 CommitmentService 的
+       * matchCommitment 一致（精确优先，其次唯一子串），避免两处口径漂移。
+       */
+      approvalCandidates(input, context) {
+        const commitments = context.commitments;
+        if (!commitments) return null;
+        const id = optionalString(input, 'id');
+        if (id !== undefined && id !== '') return null;
+        const text = optionalString(input, 'text');
+        if (text === undefined || text.trim() === '') return null;
+        return commitments.list().then((entries) => {
+          const needle = text.trim().toLowerCase();
+          const open = entries.filter((entry) => entry.status === 'open');
+          const exact = open.filter((entry) => entry.text.toLowerCase() === needle);
+          const partial = open.filter((entry) => entry.text.toLowerCase().includes(needle));
+          const matches = exact.length > 0 ? exact : partial;
+          if (matches.length <= 1) return null;
+          return matches.map((entry) => ({
+            id: entry.id,
+            label: entry.text,
+            detail: `到期 ${entry.due}`
+          }));
+        });
+      },
+      async execute(input, context) {
+        const commitments = context.commitments;
+        if (!commitments) {
+          throw new ToolInputError('当前版本不支持记录承诺。');
+        }
+        const id = optionalString(input, 'id');
+        const text = optionalString(input, 'text');
+        if (id === undefined && text === undefined) {
+          throw new ToolInputError('请提供 id 或 text 以定位承诺。');
+        }
+        const now = context.now();
+        const rawNewDue = requiredString(input, 'newDue');
+        const newDue = resolveCommitmentDue(rawNewDue, now);
+        if (newDue === undefined) {
+          throw new ToolInputError('newDue 必须是 YYYY-MM-DD 或「明天」这类日期。');
+        }
+        // 唯一改期路径：后端 CommitmentService.resolve({ newDue })（spec P3 行
+        // ——服务注释自证它是改期下界与写盘的唯一权威）。这里不直接写盘。
+        const updated = await commitments.resolve({
+          ...(id !== undefined ? { id } : {}),
+          ...(text !== undefined ? { text } : {}),
+          newDue
         });
         throwIfAborted(context.signal);
         return {

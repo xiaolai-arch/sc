@@ -1,4 +1,5 @@
 import type { ButlerToolContext } from '../butler/tools';
+import type { ButlerReference } from '../../shared/butler-stream';
 
 /**
  * Agent Runtime contracts (spec item 61, P0 skeleton).
@@ -35,6 +36,14 @@ export function isTerminalRunState(state: RunState): state is TerminalRunState {
  * 运行预算（spec：模型调用次数上限）。`maxModelCalls` 由引擎自行遵守（P0 的
  * 引擎没有模型调用）；`maxToolCalls` 是 Runtime 侧可直接执行的上限，超限的
  * 工具调用被网关以 `tool.failed` 拒绝。
+ *
+ * F4 记录（P4 批，架构审计裁定：本批不改代码）：`maxModelCalls` 目前**无任何
+ * 消费方**——全仓 grep 仅本文件声明，两个真实引擎（LegacyEngine
+ * `legacy-engine.ts` 包装 ButlerService.stream、PiEngine `engine-pi/pi-engine.ts`
+ * 上游 Agent 循环）都不读预算。接线时明显该消费它的位置：PiEngine 的模型轮次
+ * 入口（`pi-engine.ts` 的 `agent.prompt(...)` 调用处——上游每次 provider 请求
+ * 增计数，超限在工具步之前收尾）、LegacyEngine 的 `butler.stream(...)` 包装处。
+ * 本批按裁定不动。
  */
 export interface RunBudget {
   maxModelCalls?: number;
@@ -61,18 +70,38 @@ export interface RunRequest {
   signal?: AbortSignal;
   /** 本次统一时钟：运行内所有时间读数都来自它（方案 §二第一条设计）。 */
   now: () => Date;
+  /**
+   * 只读运行（场景三，验收 22）：置 true 时网关拒绝一切确认级（写入类）工具
+   * 调用（reason=permission，记 tool.failed），查询级不受影响。缺省=读写。
+   */
+  readOnly?: boolean;
 }
 
 /** Why a tool call was refused or failed; carried on `tool.failed` events. */
 export type ToolFailureReason =
   | 'unknown-tool'
   | 'undeclared-level'
+  | 'unknown-arg'
   | 'permission'
   | 'duplicate'
   | 'cancelled'
   | 'rejected'
   | 'budget'
   | 'failed';
+
+/**
+ * 审批候选（验收 17：同名承诺先让用户选）。`approval.requested` 附带候选时，
+ * 批准必须携带其中一个 `id` 作为选择；未选择前不落盘，选择经网关 pin 进
+ * 本次调用的参数（见 ToolGateway 的候选选择语义）。
+ */
+export interface ApprovalCandidate {
+  /** 候选记录 id（批准时经 `decide` 的 selection pin 回参数 `id`）。 */
+  id: string;
+  /** 面向用户的一行标识（承诺原文）。 */
+  label: string;
+  /** 面向用户的补充区分信息（如各自到期日）。 */
+  detail?: string;
+}
 
 /**
  * RunEvent 载荷（spec：至少 run.started / text.delta / approval.requested /
@@ -94,8 +123,23 @@ export type RunEventPayload =
       tool: string;
       /** 审批展示与审计用：本次调用的完整参数。 */
       params: Record<string, unknown>;
+      /**
+       * 同名歧义候选（验收 17）：在场时批准必须携带其中一个 id 作为选择，
+       * 未选择前不写盘（见 ApprovalCandidate 与 ToolGateway）。
+       */
+      candidates?: ApprovalCandidate[];
     }
   | { type: 'tool.committed'; invocationId: string; tool: string }
+  | {
+      /**
+       * 本次回答参考的记录集合（缝④，P4 批：场景三引用来源用）。Legacy 从
+       * `ButlerStreamEvent` 的 references 事件原样映射；经网关执行的工具在其
+       * 返回值携带合法 `references` 数组时由 ToolGateway 发射（与
+       * committed/failed 同一条工具缝），两条引擎路径都不重复映射。
+       */
+      type: 'references';
+      items: ButlerReference[];
+    }
   | {
       type: 'tool.failed';
       invocationId: string;
@@ -103,13 +147,35 @@ export type RunEventPayload =
       reason: ToolFailureReason;
       error: string;
     }
-  | { type: 'run.finished'; state: TerminalRunState; error?: string }
+  | { type: 'tool.committed'; invocationId: string; tool: string }
+  | {
+      /**
+       * 取消语义（sc-lead 2026-11-28 裁定，sc-qa 实测缺陷）：取消 ≠ 什么都没
+       * 发生——cancel() 时若有确认级（写入类）工具在途，它可能在取消后才落盘，
+       * 终态落 `pending-verification` 并在本事件暴露待核实工具名单（不是新
+       * 事件类型：run.finished 本就是终态的唯一承载，state 已说「待核实」，
+       * 界面据此提示；journal 重放/订阅/补读协议零变化）。取消时无写入在途
+       * → 终态仍 `cancelled`，本字段缺席。
+       */
+      type: 'run.finished';
+      state: TerminalRunState;
+      error?: string;
+      pendingWrites?: string[];
+    }
   | { type: 'run.interrupted'; message: string };
 
 /** `run.started` 与 `run.finished` 由控制器合成；引擎与网关发其余事件。 */
 export type EngineEvent = Extract<
   RunEventPayload,
-  { type: 'text.delta' | 'service.receipt' | 'approval.requested' | 'tool.committed' | 'tool.failed' }
+  {
+    type:
+      | 'text.delta'
+      | 'service.receipt'
+      | 'approval.requested'
+      | 'tool.committed'
+      | 'tool.failed'
+      | 'references';
+  }
 >;
 
 /**
@@ -164,6 +230,13 @@ export interface RunContext {
   /** 发射引擎事件（文本增量、服务回执等）；工具事件经 `tools.invoke` 产生。 */
   emit(event: EngineEvent): void;
   readonly tools: RuntimeToolHandle;
+  /**
+   * 取消语义（sc-lead 2026-11-28 裁定）：引擎报告确认级（写入类）工具的在途
+   * 状态。`tool` 传 null 表示该调用已收尾。不经此通道的工具（查询级、等待
+   * 审批中的调用）不构成在途写入。经网关执行的工具由网关上报（同一回调的
+   * 网关侧接线），引擎直执行路径（Legacy）在此上报。
+   */
+  reportWriteInFlight?(invocationId: string, tool: string | null): void;
 }
 
 /** 可替换执行引擎的结构端口（spec「引擎适配器」）。P0 只有 FakeEngine。 */

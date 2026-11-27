@@ -55,7 +55,7 @@ import { BUTLER_TOOL_LEVELS } from '../butler-bridge';
  * | `message_end`（stopReason=`error`） | 不映射为即时事件；记下 errorMessage，run() 结束时抛出 → 运行「失败」（对齐 Legacy 的 error 事件映射） |
  * | `message_end`（stopReason=`aborted`） | 不映射；取消终态由 `RunController.cancel` 合成 `run.finished` |
  * | `tool_execution_start` / `tool_execution_update` | 不映射（v1 契约无对应类型；对齐 Legacy 的 tool-start 不映射） |
- * | 工具执行本体（AgentTool.execute → gateway.invoke） | `tool.committed` / `tool.failed` 由 ToolGateway 发射（与 Fake 路径同一缝）；确认级成功再补 `service.receipt`（缝①） |
+ * | 工具执行本体（AgentTool.execute → gateway.invoke） | `tool.committed` / `tool.failed` / `references` 由 ToolGateway 发射（与 Fake 路径同一缝）；确认级成功再补 `service.receipt`（缝①）；缝④ references：工具返回值携带合法 references 数组时网关发射——两条引擎路径同一缝，引擎不重复映射 |
  * | `tool_execution_end`（isError=true 且网关从未见过该调用） | `tool.failed`（reason=`unknown-tool`：模型调了未注册工具；reason=`failed`：参数校验失败）——网关拦截不到的 pi 侧前置失败 |
  * | `tool_execution_end`（isError=true 且网关已回执失败） | 不映射（`tool.failed` 已由网关发射，不重复） |
  * | `agent_end` | 不映射（`run.finished` 由控制器合成） |

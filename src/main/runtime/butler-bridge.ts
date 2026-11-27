@@ -2,6 +2,7 @@ import { createButlerTools, type ButlerToolDefinition } from '../butler/tools';
 import type { ToolBehaviorLevel } from './tool-gateway';
 import { ToolGateway } from './tool-gateway';
 import { buildCommitPlanTool, buildPlanPreviewTool } from './plan-tools';
+import { buildWeeklyReviewTool } from './weekly-review';
 
 /**
  * Registers every existing butler tool (the exact set returned by
@@ -12,7 +13,8 @@ import { buildCommitPlanTool, buildPlanPreviewTool } from './plan-tools';
  */
 
 /**
- * 三级行为标级表（19 个工具，名单以 `createButlerTools` 返回为准）：
+ * 三级行为标级表（20 个工具，名单以 `createButlerTools` 返回为准；P4 批加
+ * reschedule_commitment）：
  * - query：只读查询/预览（requiresWrite === false）。
  * - confirm：修改本地数据——批准绑定这一次操作 + 项目 + 参数。
  * - 第三级（删除 / 批量改动 / 对外发送）：v1 无此类工具，注册即违规。
@@ -36,6 +38,8 @@ export const BUTLER_TOOL_LEVELS: Readonly<Record<string, ToolBehaviorLevel>> = {
   schedule_revisit: 'confirm',
   record_commitment: 'confirm',
   resolve_commitment: 'confirm',
+  // 场景二（P4 批）：改期走确认级新工具，旧 resolve_commitment 收敛为纯「结掉」。
+  reschedule_commitment: 'confirm',
   set_week_availability: 'confirm',
   save_profile: 'confirm',
   create_practice_set: 'confirm',
@@ -53,10 +57,12 @@ function assertLevelConsistent(tool: ButlerToolDefinition, level: ToolBehaviorLe
 }
 
 export interface ButlerBridgeOptions {
-  /** Defaults to `createButlerTools()` — the authoritative 19-tool roster. */
+  /** Defaults to `createButlerTools()` — the authoritative 20-tool roster. */
   tools?: ButlerToolDefinition[];
   /** Register the plan-split tools too; tests may opt out. Default true. */
   includePlanSplit?: boolean;
+  /** Register the read-only weekly-review tool too; tests may opt out. Default true. */
+  includeWeeklyReview?: boolean;
 }
 
 export function registerButlerTools(gateway: ToolGateway, options: ButlerBridgeOptions = {}): void {
@@ -72,13 +78,21 @@ export function registerButlerTools(gateway: ToolGateway, options: ButlerBridgeO
       level,
       description: tool.description,
       parameters: tool.parameters,
-      // 薄包装：委托到同一个实现函数。`tools.ts` 一字不动。
-      execute: (input, context) => tool.execute(input, context)
+      // 薄包装：委托到同一个实现函数。`tools.ts` 的实现体保持单一来源。
+      execute: (input, context) => tool.execute(input, context),
+      // 同名歧义探测（验收 17）：仅声明了钩子的工具透传，网关批准前调用。
+      ...(tool.approvalCandidates
+        ? { approvalCandidates: (input, context) => tool.approvalCandidates!(input, context) }
+        : {})
     });
   }
   if (options.includePlanSplit !== false) {
     gateway.register(buildPlanPreviewTool());
     gateway.register(buildCommitPlanTool());
+  }
+  if (options.includeWeeklyReview !== false) {
+    // 场景三（P4 批）：只读跨项目周复盘，查询级（零写盘）。
+    gateway.register(buildWeeklyReviewTool());
   }
 }
 

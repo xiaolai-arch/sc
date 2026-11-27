@@ -14,6 +14,9 @@ import {
   serializeError
 } from './ipc';
 import { applyLaunchAtLogin } from './login-item';
+import { assembleRuntime } from './runtime/assembly';
+import { LegacyEngine } from './runtime/legacy-engine';
+import { RunJournal } from './runtime/run-journal';
 import { registerAppShortcuts } from './shortcuts';
 import { createContextScheduler, planFirstEmptyWorkspace } from './scheduler';
 import { DEFAULT_VAULT_DIRECTORY } from './settings/defaults';
@@ -185,8 +188,13 @@ function openSection(target: 'review' | 'settings'): void {
 }
 
 app.whenReady().then(async () => {
-  // P2 打包自测引导（item 61 批次 3/5，验收 11 手测通道；最小可逆，P3 正式
-  // 装配时连同 src/main/runtime/pi-selftest.ts 一起移除）。正常启动永不进入。
+  // P2 打包自测引导（item 61 批次 3/5，验收 11 手测通道）。原注「P3 正式装配
+  // 时移除」已被两件事推翻：① P4 生产装配（下方 assembleRuntime）与该 env
+  // 钩子互不干扰（正常启动永不进入，仍是最小可逆）；② F6（2026-11-28 架构
+  // 审计裁定）要求 P2 打包证据补档——证据 JSON 必须经本通道实跑产出。钩子
+  // 与 src/main/runtime/pi-selftest.ts 保留，移除与否留给 sc-review 在证据
+  // 归档后裁定。另见 pi-fake-model.ts 的 ESM 惰性加载修（自测通道在打包产物
+  // 里曾因静态导入 pi-ai 直接起不来）。
   if (process.env['ASAKI_RUNTIME_PI_SELFTEST'] === '1') {
     const { runPiSelfTest } = await import('./runtime/pi-selftest');
     await runPiSelfTest();
@@ -215,6 +223,29 @@ app.whenReady().then(async () => {
     filePath: join(app.getPath('userData'), 'conversation-runs.json')
   });
   registerIpcHandlers(context.api, ipcMain, { runs: runStore });
+
+  // Agent Runtime 生产装配（spec P4「对照期」边界，item 61 P4 批）。
+  //
+  // 装配对象只有 Legacy 一个引擎（显式 engineId='legacy'；Fake 不进生产），
+  // 且**聊天路径本批不切换**：`context.api.stream`（ipc.ts → ButlerService.stream）
+  // 继续走 Legacy 直执行，本装配的 RunController 目前不承接受理聊天请求——
+  // 它的引擎集合是对照期的回滚底座，切流是下一个迭代的显式决定。硬边界
+  // （本批不变）：生产服务引擎不切换、Legacy 禁默认引擎、Fake 不进生产。
+  //   - 启动 fail-fast：assembleRuntime 内 registerButlerTools + assertButlerConfirmTools
+  //     已强制（P3 装配批），漏注册/标级漂移直接拒绝启动。
+  //   - Journal：每 run 一文件 JSONL，落 userData/data/runtime-runs（默认决定 2）。
+  //   - 崩溃恢复沿用 ConversationRunStore 先例：启动扫一遍残留活跃运行标记中断。
+  const runtimeJournal = new RunJournal({
+    dirPath: join(app.getPath('userData'), 'data', 'runtime-runs')
+  });
+  assembleRuntime({
+    journal: runtimeJournal,
+    engines: { legacy: new LegacyEngine({ butler: context.butler }) }
+  });
+  void runtimeJournal.recover().catch((error: unknown) => {
+    console.warn('ASAKI runtime journal recovery failed:', serializeError(error).message);
+  });
+
   initialWindowState = await readWindowState(
     windowStateFile(),
     screen.getAllDisplays().map((display) => display.workArea)

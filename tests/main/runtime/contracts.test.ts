@@ -182,7 +182,7 @@ test('验收 2（带工具与审批的完整回放）：序号连续覆盖 appro
   }
 });
 
-test('验收 3：cancel 后运行进「取消」态，不再执行任何后续工具（工具+取消竞态负例）', async () => {
+test('取消语义：写入工具在途时 cancel → pending-verification（sc-lead 2026-11-28 裁定），事件与快照暴露待核实名单', async () => {
   let releaseWrite!: () => void;
   const writeGate = new Promise<void>((resolve) => {
     releaseWrite = resolve;
@@ -204,24 +204,56 @@ test('验收 3：cancel 后运行进「取消」态，不再执行任何后续�
     // 工具正在执行（停在 writeGate 上）时取消 —— 竞态注入点。
     expect(await controller.cancel('run-1')).toBe(true);
     releaseWrite();
+    // 取消 ≠ 什么都没发生：执行体已跑（可能落盘），终态「结果待核实」。
     const state = await handle.done;
-    expect(state).toBe('cancelled');
+    expect(state).toBe('pending-verification');
 
     const snapshot = controller.getRun('run-1');
-    expect(snapshot?.state).toBe('cancelled');
-    // 没有任何 tool.committed；只有 run.started / approval.requested / run.finished。
+    expect(snapshot?.state).toBe('pending-verification');
+    expect(snapshot?.pendingWrites).toEqual(['slow_note']);
+    // 没有 tool.committed（post-cancel 无回执不提交），但 run.finished 暴露待核实名单。
     expect(collector.events.map((event) => event.type)).toEqual([
       'run.started',
       'approval.requested',
       'run.finished'
     ]);
-    expect(collector.events[2]).toMatchObject({ type: 'run.finished', state: 'cancelled' });
-    // 竞态中的第一个工具已执行但不得提交；第二个工具完全未执行。
+    expect(collector.events[2]).toMatchObject({
+      type: 'run.finished',
+      state: 'pending-verification',
+      pendingWrites: ['slow_note']
+    });
+    // 竞态中的第一个工具已执行；第二个工具完全未执行。
     expect(calls).toEqual([{ title: 'a' }]);
     expect(engine.invocations[0]?.outcome).toMatchObject({ ok: false, reason: 'cancelled' });
     expect(engine.invocations[1]?.outcome).toMatchObject({ ok: false, reason: 'cancelled' });
     const journaled = await journal.readRun('run-1');
-    expect(journaled.some((event) => event.type === 'tool.committed')).toBe(false);
+    expect(journaled.at(-1)).toMatchObject({
+      type: 'run.finished',
+      state: 'pending-verification',
+      pendingWrites: ['slow_note']
+    });
+  } finally {
+    await dispose();
+  }
+});
+
+test('取消语义：取消落在审批等待期（无在途写入）→ 仍是 cancelled', async () => {
+  const engine = new FakeEngine({
+    steps: [{ type: 'tool', name: 'slow_note', args: { title: 'a' } }] satisfies FakeStep[]
+  });
+  const { controller, gateway, dispose } = await makeHarness([engine]);
+  try {
+    const calls: unknown[] = [];
+    gateway.register(spyEntry('slow_note', { calls, gate: new Promise(() => {}) }));
+    const collector = collect(controller, 'run-1');
+    const handle = controller.start(makeRequest({ runId: 'run-1' }), { butler: butlerStub() });
+    await collector.waitFor((event) => event.type === 'approval.requested');
+    // 审批还没批：执行体从未进入，不可能落盘 → 终态仍是 cancelled。
+    expect(await controller.cancel('run-1')).toBe(true);
+    expect(await handle.done).toBe('cancelled');
+    expect(controller.getRun('run-1')?.state).toBe('cancelled');
+    expect(calls).toEqual([]);
+    expect(collector.events.at(-1)).toMatchObject({ type: 'run.finished', state: 'cancelled' });
   } finally {
     await dispose();
   }
@@ -475,6 +507,68 @@ test('RunJournal.append 拒绝序号倒退（防控制器缺陷静默损坏日�
     };
     await journal.append('run-1', base);
     await expect(journal.append('run-1', { ...base, seq: 1 })).rejects.toThrow('序号倒退');
+  } finally {
+    await dispose();
+  }
+});
+
+test('e531（P4 批）：journal.append 失败仍扇出订阅者，错误显式暴露在 getRun().journalError', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'asaki-runtime-journalfail-'));
+  try {
+    const journal = new RunJournal({ dirPath: dir, now });
+    // 让第二条 append（text.delta）失败：run.started 正常落盘，用于对照。
+    let calls = 0;
+    const failingAppend = async (runId: string, event: RunEvent): Promise<void> => {
+      calls += 1;
+      if (calls === 2) throw new Error('磁盘满（注入）');
+      await journal.append(runId, event);
+    };
+    const flakyJournal: RunJournal = Object.create(journal) as RunJournal;
+    flakyJournal.append = failingAppend;
+    const engine = new FakeEngine({
+      steps: [
+        { type: 'emit', event: { type: 'text.delta', text: '第一条。' } },
+        { type: 'receipt', detail: '完成' }
+      ]
+    });
+    const gateway = new ToolGateway();
+    const controller = new RunController({ engines: [engine], gateway, journal: flakyJournal });
+    const seen: RunEvent[] = [];
+    controller.subscribe('run-1', (event) => seen.push(event));
+    const handle = controller.start(makeRequest());
+    expect(await handle.done).toBe('completed');
+    // 落盘失败的那条（text.delta）仍扇出给订阅者（扇出不因落盘失败被吞）。
+    expect(seen.map((event) => event.type)).toContain('text.delta');
+    expect(seen.at(-1)?.type).toBe('run.finished');
+    // 错误不吞：快照携带失败文案；其余事件照常落盘（缺的正是失败那条）。
+    const snapshot = controller.getRun('run-1');
+    expect(snapshot?.journalError).toBe('磁盘满（注入）');
+    const journaled = await journal.readRun('run-1');
+    expect(journaled.map((event) => event.type)).toEqual([
+      'run.started',
+      'service.receipt',
+      'run.finished'
+    ]);
+    // seq 缺口即落盘失败那条（补读按 seq 对齐）。
+    expect(journaled.map((event) => event.seq)).toEqual([1, 3, 4]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('F3 双时钟绑定：butler.now 与 request.now 不同日 → start 抛错，不产生运行', async () => {
+  const { controller, dispose } = await makeHarness([new FakeEngine({ steps: [] })]);
+  try {
+    const otherDay = (): Date => new Date(2026, 10, 26, 23, 59, 0); // 前一天
+    expect(() =>
+      controller.start(makeRequest(), { butler: { workspace: {} as ButlerToolContext['workspace'], now: otherDay } })
+    ).toThrow(/双时钟不一致/);
+    // 同日不同毫秒（合法）：照常启动。
+    const sameDay = (): Date => new Date(2026, 10, 27, 9, 30, 0);
+    const handle = controller.start(makeRequest({ runId: 'run-ok' }), {
+      butler: { workspace: {} as ButlerToolContext['workspace'], now: sameDay }
+    });
+    expect(await handle.done).toBe('completed');
   } finally {
     await dispose();
   }

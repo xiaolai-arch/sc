@@ -95,7 +95,7 @@
 ## 验收（编号可测；分批对应；「最终数据为准」贯穿全部场景）
 
 **架构总验收**
-1. 移除 PiEngine 注册（仅留 Fake/Legacy），P0–P4 全部验收用例照常通过；UI 代码、vault 数据、领域服务零改动。可执行形式：对合入 diff 跑 `git diff --name-only <base>...HEAD` 做**路径白名单断言**（允许清单：`src/main/runtime/` 新目录、装配点 `src/main/index.ts` 与 `src/main/ipc.ts`、`package.json` 与 `package-lock.json`（item 61 2026-11-27 裁定：精确锁版本的必然产物，随 package.json 入清单）、`tests/`、`docs/`；断言进 CI）。
+1. 移除 PiEngine 注册（仅留 Fake/Legacy），P0–P4 全部验收用例照常通过；UI 代码、vault 数据、领域服务零改动。可执行形式：对合入 diff 跑 `git diff --name-only <base>...HEAD` 做**路径白名单断言**（允许清单：`src/main/runtime/` 新目录、装配点 `src/main/index.ts` 与 `src/main/ipc.ts`、`package.json` 与 `package-lock.json`（item 61 2026-11-27 裁定：精确锁版本的必然产物，随 package.json 入清单）、`tests/`、`docs/`；**item 61 2026-11-28 sc-lead 裁 A 扩面**（场景二并入 P4 批的机械后果）：`src/main/butler/tools.ts`（`resolve_commitment` 收敛 + `reschedule_commitment` 新增）、`src/main/butler/prompt.ts`（改期指引指向新工具）、`src/shared/butler-stream.ts`（`ButlerReference.kind` 增 `'commitment'`，周总结引用来源）；逐条对应裁定要求的真实触面，不整目录放开；断言进 CI）。
 
 **P0**
 2. 每条 RunEvent 序号在单次运行内严格递增且连续（FakeEngine 回放断言）。
