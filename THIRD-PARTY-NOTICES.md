@@ -18,6 +18,7 @@ this file to catch stale notices.
 - License: Apache-2.0
 - Copyright: https://github.com/vercel/ai
 
+```
 Copyright 2023 Vercel, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -31,6 +32,7 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+```
 
 ---
 
@@ -39,6 +41,7 @@ limitations under the License.
 - License: Apache-2.0
 - Copyright: https://github.com/vercel/ai
 
+```
 Copyright 2023 Vercel, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -52,6 +55,7 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+```
 
 ---
 
@@ -60,6 +64,7 @@ limitations under the License.
 - License: Apache-2.0
 - Copyright: https://github.com/vercel/ai
 
+```
 Copyright 2023 Vercel, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -73,6 +78,7 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+```
 
 ---
 
@@ -81,6 +87,7 @@ limitations under the License.
 - License: Apache-2.0
 - Copyright: https://github.com/vercel/ai
 
+```
 
                                  Apache License
                            Version 2.0, January 2004
@@ -283,6 +290,7 @@ limitations under the License.
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 License text: not shipped in the package tarball; canonical Apache-2.0 text reproduced above.
 Attribution: @ai-sdk/provider-utils@5.0.72, see https://github.com/vercel/ai
@@ -294,6 +302,7 @@ Attribution: @ai-sdk/provider-utils@5.0.72, see https://github.com/vercel/ai
 - License: Apache-2.0
 - Copyright: https://github.com/vercel/ai
 
+```
 Copyright 2023 Vercel, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -307,6 +316,7 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+```
 
 ---
 
@@ -315,6 +325,7 @@ limitations under the License.
 - License: MIT
 - Copyright: Anthropic <support@anthropic.com>
 
+```
 Copyright 2023 Anthropic, PBC.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
@@ -322,6 +333,7 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
 
 ---
 
@@ -330,6 +342,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
                                 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -531,6 +544,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -539,6 +553,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -740,6 +755,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -748,6 +764,7 @@ Apache License
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -949,6 +966,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -957,6 +975,7 @@ Apache License
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
 
                                  Apache License
                            Version 2.0, January 2004
@@ -1159,6 +1178,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 License text: not shipped in the package tarball; canonical Apache-2.0 text reproduced above.
 Attribution: @aws-sdk/credential-provider-http@3.972.88, see https://github.com/aws/aws-sdk-js-v3
@@ -1170,6 +1190,7 @@ Attribution: @aws-sdk/credential-provider-http@3.972.88, see https://github.com/
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -1371,6 +1392,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -1379,6 +1401,7 @@ Apache License
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
 
                                  Apache License
                            Version 2.0, January 2004
@@ -1581,6 +1604,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 License text: not shipped in the package tarball; canonical Apache-2.0 text reproduced above.
 Attribution: @aws-sdk/credential-provider-login@3.972.94, see https://github.com/aws/aws-sdk-js-v3
@@ -1592,6 +1616,7 @@ Attribution: @aws-sdk/credential-provider-login@3.972.94, see https://github.com
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -1793,6 +1818,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -1801,6 +1827,7 @@ Apache License
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -2002,6 +2029,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -2010,6 +2038,7 @@ Apache License
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -2211,6 +2240,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -2219,6 +2249,7 @@ Apache License
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -2420,6 +2451,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -2428,6 +2460,7 @@ Apache License
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
                                 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -2629,6 +2662,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -2637,6 +2671,7 @@ Apache License
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
                                 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -2838,6 +2873,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -2846,6 +2882,7 @@ Apache License
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
                                 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -3047,6 +3084,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -3055,6 +3093,7 @@ Apache License
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
 
                                  Apache License
                            Version 2.0, January 2004
@@ -3257,6 +3296,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 License text: not shipped in the package tarball; canonical Apache-2.0 text reproduced above.
 Attribution: @aws-sdk/nested-clients@3.998.5, see https://github.com/aws/aws-sdk-js-v3
@@ -3268,6 +3308,7 @@ Attribution: @aws-sdk/nested-clients@3.998.5, see https://github.com/aws/aws-sdk
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
                                 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -3469,6 +3510,7 @@ Attribution: @aws-sdk/nested-clients@3.998.5, see https://github.com/aws/aws-sdk
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -3477,6 +3519,7 @@ Attribution: @aws-sdk/nested-clients@3.998.5, see https://github.com/aws/aws-sdk
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -3678,6 +3721,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -3686,6 +3730,7 @@ Apache License
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -3887,6 +3932,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -3895,6 +3941,7 @@ Apache License
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -4096,6 +4143,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -4104,6 +4152,7 @@ Apache License
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -4305,6 +4354,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -4313,6 +4363,7 @@ Apache License
 - License: Apache-2.0
 - Copyright: Amazon Web Services
 
+```
 
                                  Apache License
                            Version 2.0, January 2004
@@ -4488,6 +4539,7 @@ Apache License
       defend, and hold each Contributor harmless for any liability
       incurred by, or claims asserted against, such Contributor by reason
       of your accepting any such warranty or additional liability.
+```
 
 ---
 
@@ -4496,6 +4548,7 @@ Apache License
 - License: MIT
 - Copyright: The Babel Team (https://babel.dev/team)
 
+```
 MIT License
 
 Copyright (c) 2014-present Sebastian McKenzie and other contributors
@@ -4518,6 +4571,7 @@ NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
 LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
 
 ---
 
@@ -4526,6 +4580,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 - License: MIT
 - Copyright: Mario Zechner
 
+```
 MIT License
 
 Copyright (c) Mario Zechner
@@ -4547,6 +4602,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 License text: not shipped in the package tarball; canonical MIT text reproduced above.
 Attribution: @earendil-works/pi-agent-core@1.6.1, see https://github.com/earendil-works/pi
@@ -4558,6 +4614,7 @@ Attribution: @earendil-works/pi-agent-core@1.6.1, see https://github.com/earendi
 - License: MIT
 - Copyright: Mario Zechner
 
+```
 MIT License
 
 Copyright (c) Mario Zechner
@@ -4579,6 +4636,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 License text: not shipped in the package tarball; canonical MIT text reproduced above.
 Attribution: @earendil-works/pi-ai@1.6.1, see https://github.com/earendil-works/pi
@@ -4590,6 +4648,7 @@ Attribution: @earendil-works/pi-ai@1.6.1, see https://github.com/earendil-works/
 - License: MIT
 - Copyright: Earendil Works
 
+```
 MIT License
 
 Copyright (c) Earendil Works
@@ -4611,6 +4670,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 License text: not shipped in the package tarball; canonical MIT text reproduced above.
 Attribution: @earendil-works/pi-schema@1.6.1, see https://github.com/earendil-works/pi
@@ -4622,6 +4682,7 @@ Attribution: @earendil-works/pi-schema@1.6.1, see https://github.com/earendil-wo
 - License: MIT
 - Copyright: Mario Zechner
 
+```
 MIT License
 
 Copyright (c) Mario Zechner
@@ -4643,6 +4704,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 License text: not shipped in the package tarball; canonical MIT text reproduced above.
 Attribution: @earendil-works/pi-telemetry@1.6.1, see https://github.com/earendil-works/pi
@@ -4654,6 +4716,7 @@ Attribution: @earendil-works/pi-telemetry@1.6.1, see https://github.com/earendil
 - License: Apache-2.0
 - Copyright: https://github.com/googleapis/js-genai.git
 
+```
 
                                  Apache License
                            Version 2.0, January 2004
@@ -4856,6 +4919,7 @@ Attribution: @earendil-works/pi-telemetry@1.6.1, see https://github.com/earendil
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -4864,6 +4928,7 @@ Attribution: @earendil-works/pi-telemetry@1.6.1, see https://github.com/earendil
 - License: BSD-3-Clause
 - Copyright: Daniel Wirtz <dcode+protobufjs@dcode.io>
 
+```
 Copyright (c) 2016, Daniel Wirtz  All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -4890,6 +4955,7 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
 ---
 
@@ -4898,6 +4964,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 - License: BSD-3-Clause
 - Copyright: Daniel Wirtz <dcode+protobufjs@dcode.io>
 
+```
 Copyright (c) 2016, Daniel Wirtz  All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -4924,6 +4991,7 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
 ---
 
@@ -4932,6 +5000,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 - License: BSD-3-Clause
 - Copyright: Daniel Wirtz <dcode+protobufjs@dcode.io>
 
+```
 Copyright (c) 2016, Daniel Wirtz  All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -4958,6 +5027,7 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
 ---
 
@@ -4966,6 +5036,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 - License: BSD-3-Clause
 - Copyright: Daniel Wirtz <dcode+protobufjs@dcode.io>
 
+```
 Copyright (c) 2016, Daniel Wirtz  All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -4992,6 +5063,7 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
 ---
 
@@ -5000,6 +5072,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 - License: BSD-3-Clause
 - Copyright: Daniel Wirtz <dcode+protobufjs@dcode.io>
 
+```
 Copyright (c) 2016, Daniel Wirtz  All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -5026,6 +5099,7 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
 ---
 
@@ -5034,6 +5108,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 - License: BSD-3-Clause
 - Copyright: Daniel Wirtz <dcode+protobufjs@dcode.io>
 
+```
 Copyright (c) 2016, Daniel Wirtz  All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -5060,6 +5135,7 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
 ---
 
@@ -5068,6 +5144,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 - License: BSD-3-Clause
 - Copyright: Daniel Wirtz <dcode+protobufjs@dcode.io>
 
+```
 Copyright (c) 2016, Daniel Wirtz  All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -5094,6 +5171,7 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
 ---
 
@@ -5102,6 +5180,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 - License: BSD-3-Clause
 - Copyright: Daniel Wirtz <dcode+protobufjs@dcode.io>
 
+```
 Copyright (c) 2016, Daniel Wirtz  All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -5128,6 +5207,7 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
 ---
 
@@ -5136,6 +5216,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 - License: BSD-3-Clause
 - Copyright: Daniel Wirtz <dcode+protobufjs@dcode.io>
 
+```
 Copyright (c) 2016, Daniel Wirtz  All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -5162,6 +5243,7 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
 ---
 
@@ -5170,6 +5252,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 - License: Apache-2.0
 - Copyright: AWS Smithy Team
 
+```
                                 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -5371,6 +5454,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -5379,6 +5463,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -5580,6 +5665,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -5588,6 +5674,7 @@ Apache License
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -5789,6 +5876,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -5797,6 +5885,7 @@ Apache License
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -5998,6 +6087,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -6006,6 +6096,7 @@ Apache License
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -6207,6 +6298,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -6215,6 +6307,7 @@ Apache License
 - License: Apache-2.0
 - Copyright: AWS SDK for JavaScript Team
 
+```
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -6416,6 +6509,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -6424,6 +6518,7 @@ Apache License
 - License: Apache-2.0
 - Copyright: AWS Smithy Team
 
+```
                                 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -6625,6 +6720,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -6633,6 +6729,7 @@ Apache License
 - License: MIT
 - Copyright: Dmitry Chestnykh
 
+```
 This software is licensed under the MIT license:
 
 Copyright (C) 2016 Dmitry Chestnykh
@@ -6654,6 +6751,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 ---
 
@@ -6662,6 +6760,7 @@ SOFTWARE.
 - License: MIT
 - Copyright: Colin McDonnell
 
+```
 MIT License
 
 Copyright (c) 2024 Colin McDonnell
@@ -6683,6 +6782,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 ---
 
@@ -6691,6 +6791,7 @@ SOFTWARE.
 - License: MIT
 - Copyright: https://github.com/DefinitelyTyped/DefinitelyTyped.git
 
+```
     MIT License
 
     Copyright (c) Microsoft Corporation.
@@ -6712,6 +6813,7 @@ SOFTWARE.
     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE
+```
 
 ---
 
@@ -6720,6 +6822,7 @@ SOFTWARE.
 - License: MIT
 - Copyright: https://github.com/DefinitelyTyped/DefinitelyTyped.git
 
+```
     MIT License
 
     Copyright (c) Microsoft Corporation. All rights reserved.
@@ -6741,6 +6844,7 @@ SOFTWARE.
     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE
+```
 
 ---
 
@@ -6749,6 +6853,7 @@ SOFTWARE.
 - License: Apache-2.0
 - Copyright: git+https://github.com/vercel/vercel.git
 
+```
 
                                  Apache License
                            Version 2.0, January 2004
@@ -6951,6 +7056,7 @@ SOFTWARE.
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -6959,6 +7065,7 @@ SOFTWARE.
 - License: Apache-2.0
 - Copyright: https://github.com/vercel/workflow.git
 
+```
 
                                  Apache License
                            Version 2.0, January 2004
@@ -7161,6 +7268,7 @@ SOFTWARE.
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 License text: the package ships only a stub pointing at its repository; canonical Apache-2.0 text reproduced above.
 Attribution: @workflow/serde@4.1.0, see https://github.com/vercel/workflow
@@ -7172,6 +7280,7 @@ Attribution: @workflow/serde@4.1.0, see https://github.com/vercel/workflow
 - License: MIT
 - Copyright: Nathan Rajlich <nathan@tootallnate.net> (http://n8.io/)
 
+```
 (The MIT License)
 
 Copyright (c) 2013 Nathan Rajlich <nathan@tootallnate.net>
@@ -7194,6 +7303,7 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
 CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
 
 ---
 
@@ -7202,6 +7312,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 - License: MIT
 - Copyright: Nathan Rajlich <nathan@tootallnate.net> (http://n8.io/)
 
+```
 (The MIT License)
 
 Copyright (c) 2013 Nathan Rajlich <nathan@tootallnate.net>
@@ -7224,6 +7335,7 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
 CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
 
 ---
 
@@ -7232,6 +7344,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 - License: Apache-2.0
 - Copyright: https://github.com/vercel/ai
 
+```
 Copyright 2023 Vercel, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -7245,6 +7358,7 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+```
 
 ---
 
@@ -7253,6 +7367,7 @@ limitations under the License.
 - License: MIT
 - Copyright: nodeca/argparse
 
+```
 (The MIT License)
 
 Copyright (C) 2012 by Vitaly Puzrin
@@ -7274,6 +7389,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+```
 
 ---
 
@@ -7282,6 +7398,7 @@ THE SOFTWARE.
 - License: MIT
 - Copyright: T. Jameson Little <t.jameson.little@gmail.com>
 
+```
 The MIT License (MIT)
 
 Copyright (c) 2014 Jameson Little
@@ -7303,6 +7420,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+```
 
 ---
 
@@ -7311,6 +7429,7 @@ THE SOFTWARE.
 - License: MIT
 - Copyright: Michael Mclaughlin
 
+```
 The MIT License (MIT)
 =====================
 
@@ -7336,6 +7455,7 @@ HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
 WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
+```
 
 ---
 
@@ -7344,6 +7464,7 @@ OTHER DEALINGS IN THE SOFTWARE.
 - License: MIT
 - Copyright: Dustin Diaz <dustin@dustindiaz.com> (http://dustindiaz.com)
 
+```
 Copyright 2015, Dustin Diaz (the "Original Author")
 All rights reserved.
 
@@ -7383,6 +7504,7 @@ OTHER DEALINGS IN THE SOFTWARE.
 Except where noted, this license applies to any and all software
 programs and associated documentation files created by the
 Original Author, when distributed with the Software.
+```
 
 ---
 
@@ -7391,6 +7513,7 @@ Original Author, when distributed with the Software.
 - License: BSD-3-Clause
 - Copyright: GoInstant Inc., a salesforce.com company
 
+```
 Copyright (c) 2013, GoInstant Inc., a salesforce.com company
 All rights reserved.
 
@@ -7403,6 +7526,7 @@ Redistribution and use in source and binary forms, with or without modification,
 * Neither the name of salesforce.com, nor GoInstant, nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
 ---
 
@@ -7411,6 +7535,7 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 - License: MIT
 - Copyright: Paul Miller (https://paulmillr.com)
 
+```
 The MIT License (MIT)
 
 Copyright (c) 2012 Paul Miller (https://paulmillr.com), Elan Shanker
@@ -7432,6 +7557,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+```
 
 ---
 
@@ -7440,6 +7566,7 @@ THE SOFTWARE.
 - License: MIT
 - Copyright: Nathan Rajlich <nathan@tootallnate.net> (http://n8.io/)
 
+```
 MIT License
 
 Copyright (c) Nathan Rajlich <nathan@tootallnate.net> (http://n8.io/)
@@ -7461,6 +7588,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 License text: not shipped in the package tarball; canonical MIT text reproduced above.
 Attribution: data-uri-to-buffer@4.0.1, see https://github.com/TooTallNate/node-data-uri-to-buffer
@@ -7472,6 +7600,7 @@ Attribution: data-uri-to-buffer@4.0.1, see https://github.com/TooTallNate/node-d
 - License: MIT
 - Copyright: Josh Junon (https://github.com/qix-)
 
+```
 (The MIT License)
 
 Copyright (c) 2014-2017 TJ Holowaychuk <tj@vision-media.ca>
@@ -7491,6 +7620,7 @@ LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE A
 IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
 WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
 
 ---
 
@@ -7499,6 +7629,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 - License: Apache-2.0
 - Copyright: D2L Corporation
 
+```
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -7700,6 +7831,7 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -7708,6 +7840,7 @@ Apache License
 - License: BSD-2-Clause
 - Copyright: Ariya Hidayat
 
+```
 Copyright JS Foundation and other contributors, https://js.foundation/
 
 Redistribution and use in source and binary forms, with or without
@@ -7729,6 +7862,7 @@ LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
 ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
 ---
 
@@ -7737,6 +7871,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 - License: MIT
 - Copyright: Espen Hovlandsdal <espen@hovlandsdal.com>
 
+```
 MIT License
 
 Copyright (c) 2026 Espen Hovlandsdal <espen@hovlandsdal.com>
@@ -7758,6 +7893,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 ---
 
@@ -7766,6 +7902,7 @@ SOFTWARE.
 - License: MIT
 - Copyright: Jon Schlinkert (https://github.com/jonschlinkert)
 
+```
 The MIT License (MIT)
 
 Copyright (c) 2014-2015, Jon Schlinkert.
@@ -7787,6 +7924,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+```
 
 ---
 
@@ -7795,6 +7933,7 @@ THE SOFTWARE.
 - License: MIT
 - Copyright: Stefan Thomas <justmoon@members.fsf.org> (http://www.justmoon.net)
 
+```
 The MIT License (MIT)
 
 Copyright (c) 2014 Stefan Thomas
@@ -7817,6 +7956,7 @@ NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
 LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
 
 ---
 
@@ -7825,6 +7965,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 - License: Unlicense
 - Copyright: Dmitry Chestnykh
 
+```
 This is free and unencumbered software released into the public domain.
 
 Anyone is free to copy, modify, publish, use, compile, sell, or
@@ -7849,6 +7990,7 @@ ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
 
 For more information, please refer to <http://unlicense.org>
+```
 
 ---
 
@@ -7857,6 +7999,7 @@ For more information, please refer to <http://unlicense.org>
 - License: MIT
 - Copyright: Jimmy Wärting <jimmy@warting.se> (https://jimmy.warting.se)
 
+```
 MIT License
 
 Copyright (c) 2019 David Frank
@@ -7878,6 +8021,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 ---
 
@@ -7886,6 +8030,7 @@ SOFTWARE.
 - License: MIT
 - Copyright: Jimmy Wärting
 
+```
 MIT License
 
 Copyright (c) 2016 Jimmy Karl Roland Wärting
@@ -7907,6 +8052,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 ---
 
@@ -7915,6 +8061,7 @@ SOFTWARE.
 - License: Apache-2.0
 - Copyright: Google, LLC
 
+```
 
                                  Apache License
                            Version 2.0, January 2004
@@ -8117,6 +8264,7 @@ SOFTWARE.
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -8125,6 +8273,7 @@ SOFTWARE.
 - License: Apache-2.0
 - Copyright: Google LLC
 
+```
 
                                  Apache License
                            Version 2.0, January 2004
@@ -8327,6 +8476,7 @@ SOFTWARE.
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -8335,6 +8485,7 @@ SOFTWARE.
 - License: Apache-2.0
 - Copyright: Google Inc.
 
+```
 
                                  Apache License
                            Version 2.0, January 2004
@@ -8537,6 +8688,7 @@ SOFTWARE.
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -8545,6 +8697,7 @@ SOFTWARE.
 - License: Apache-2.0
 - Copyright: Google API Authors
 
+```
 
                                  Apache License
                            Version 2.0, January 2004
@@ -8747,6 +8900,7 @@ SOFTWARE.
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -8755,6 +8909,7 @@ SOFTWARE.
 - License: MIT
 - Copyright: Jon Schlinkert (https://github.com/jonschlinkert)
 
+```
 The MIT License (MIT)
 
 Copyright (c) 2014-2018, Jon Schlinkert.
@@ -8776,6 +8931,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+```
 
 ---
 
@@ -8784,6 +8940,7 @@ THE SOFTWARE.
 - License: MIT
 - Copyright: Nathan Rajlich <nathan@tootallnate.net> (http://n8.io/)
 
+```
 (The MIT License)
 
 Copyright (c) 2013 Nathan Rajlich <nathan@tootallnate.net>
@@ -8806,6 +8963,7 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
 CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
 
 ---
 
@@ -8814,6 +8972,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 - License: MIT
 - Copyright: Nathan Rajlich <nathan@tootallnate.net> (http://n8.io/)
 
+```
 (The MIT License)
 
 Copyright (c) 2013 Nathan Rajlich <nathan@tootallnate.net>
@@ -8836,6 +8995,7 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
 CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
 
 ---
 
@@ -8844,6 +9004,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 - License: MIT
 - Copyright: Nathan Rajlich <nathan@tootallnate.net> (http://n8.io/)
 
+```
 (The MIT License)
 
 Copyright (c) 2013 Nathan Rajlich <nathan@tootallnate.net>
@@ -8866,6 +9027,7 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
 CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
 
 ---
 
@@ -8874,6 +9036,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 - License: MIT
 - Copyright: Jon Schlinkert (https://github.com/jonschlinkert)
 
+```
 The MIT License (MIT)
 
 Copyright (c) 2015, Jon Schlinkert.
@@ -8895,6 +9058,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+```
 
 ---
 
@@ -8903,6 +9067,7 @@ THE SOFTWARE.
 - License: MIT
 - Copyright: Vladimir Zapparov <dervus.grim@gmail.com>
 
+```
 (The MIT License)
 
 Copyright (C) 2011-2015 by Vitaly Puzrin
@@ -8924,6 +9089,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+```
 
 ---
 
@@ -8932,6 +9098,7 @@ THE SOFTWARE.
 - License: MIT
 - Copyright: Andrey Sidorov <sidorares@yandex.ru>
 
+```
 The MIT License (MIT)
 
 Copyright (c) 2013 Andrey Sidorov
@@ -8952,6 +9119,7 @@ FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
 COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
 
 ---
 
@@ -8960,6 +9128,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 - License: MIT
 - Copyright: Thomas Aribart
 
+```
 MIT License
 
 Copyright (c) 2020 Thomas Aribart
@@ -8981,6 +9150,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 ---
 
@@ -8989,6 +9159,7 @@ SOFTWARE.
 - License: (AFL-2.1 OR BSD-3-Clause)
 - Copyright: Kris Zyp
 
+```
 Dojo is available under *either* the terms of the BSD 3-Clause "New" License *or* the
 Academic Free License version 2.1. As a recipient of Dojo, you may choose which
 license to receive this code under (except as noted in per-module LICENSE
@@ -9184,6 +9355,7 @@ This license is Copyright (C) 2003-2004 Lawrence E. Rosen. All rights reserved.
 Permission is hereby granted to copy and distribute this license without
 modification. This license may not be modified without the express written
 permission of its copyright owner.
+```
 
 ---
 
@@ -9192,6 +9364,7 @@ permission of its copyright owner.
 - License: MIT
 - Copyright: Brian J. Brennan <brianloveswords@gmail.com>
 
+```
 Copyright (c) 2013 Brian J. Brennan
 
 Permission is hereby granted, free of charge, to any person obtaining a copy 
@@ -9209,6 +9382,7 @@ INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PA
 PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
 FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
 ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
 
 ---
 
@@ -9217,6 +9391,7 @@ ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEAL
 - License: MIT
 - Copyright: Brian J Brennan
 
+```
 Copyright (c) 2013 Brian J. Brennan
 
 Permission is hereby granted, free of charge, to any person obtaining a copy 
@@ -9234,6 +9409,7 @@ INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PA
 PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
 FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
 ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
 
 ---
 
@@ -9242,6 +9418,7 @@ ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEAL
 - License: MIT
 - Copyright: Jon Schlinkert (https://github.com/jonschlinkert)
 
+```
 The MIT License (MIT)
 
 Copyright (c) 2014-2017, Jon Schlinkert.
@@ -9263,6 +9440,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+```
 
 ---
 
@@ -9271,6 +9449,7 @@ THE SOFTWARE.
 - License: Apache-2.0
 - Copyright: Daniel Wirtz <dcode@dcode.io>
 
+```
 
                                  Apache License
                            Version 2.0, January 2004
@@ -9473,6 +9652,7 @@ THE SOFTWARE.
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -9481,6 +9661,7 @@ THE SOFTWARE.
 - License: MIT
 - Copyright: Christopher Jeffrey
 
+```
 # License information
 
 ## Contribution License Agreement
@@ -9525,6 +9706,7 @@ Redistribution and use in source and binary forms, with or without modification,
 * Neither the name “Markdown” nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
 
 This software is provided by the copyright holders and contributors “as is” and any express or implied warranties, including, but not limited to, the implied warranties of merchantability and fitness for a particular purpose are disclaimed. In no event shall the copyright owner or contributors be liable for any direct, indirect, incidental, special, exemplary, or consequential damages (including, but not limited to, procurement of substitute goods or services; loss of use, data, or profits; or business interruption) however caused and on any theory of liability, whether in contract, strict liability, or tort (including negligence or otherwise) arising in any way out of the use of this software, even if advised of the possibility of such damage.
+```
 
 ---
 
@@ -9533,6 +9715,7 @@ This software is provided by the copyright holders and contributors “as is” 
 - License: MIT
 - Copyright: Luca Ongaro
 
+```
 Copyright 2022 Luca Ongaro
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
@@ -9540,6 +9723,7 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
 
 ---
 
@@ -9548,6 +9732,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 - License: MIT
 - Copyright: vercel/ms
 
+```
 The MIT License (MIT)
 
 Copyright (c) 2020 Vercel, Inc.
@@ -9569,6 +9754,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 ---
 
@@ -9577,6 +9763,7 @@ SOFTWARE.
 - License: MIT
 - Copyright: Jimmy Wärting
 
+```
 MIT License
 
 Copyright (c) 2021 Jimmy Wärting
@@ -9598,6 +9785,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 ---
 
@@ -9606,6 +9794,7 @@ SOFTWARE.
 - License: MIT
 - Copyright: David Frank
 
+```
 The MIT License (MIT)
 
 Copyright (c) 2016 - 2020 Node Fetch Team
@@ -9627,6 +9816,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 ---
 
@@ -9635,6 +9825,7 @@ SOFTWARE.
 - License: Apache-2.0
 - Copyright: OpenAI <support@openai.com>
 
+```
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -9836,6 +10027,7 @@ SOFTWARE.
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
 
 ---
 
@@ -9844,6 +10036,7 @@ SOFTWARE.
 - License: MIT
 - Copyright: Sindre Sorhus
 
+```
 MIT License
 
 Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)
@@ -9853,6 +10046,7 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
 
 ---
 
@@ -9861,6 +10055,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 - License: MIT
 - Copyright: Muspi Merol <me@promplate.dev>
 
+```
 MIT License
 
 Copyright (c) 2023 Promplate Dev Team
@@ -9882,6 +10077,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 ---
 
@@ -9890,6 +10086,7 @@ SOFTWARE.
 - License: BSD-3-Clause
 - Copyright: Daniel Wirtz <dcode+protobufjs@dcode.io>
 
+```
 This license applies to all parts of protobuf.js except those files
 either explicitly including or referencing a different license or
 located in a directory containing a different LICENSE file.
@@ -9929,6 +10126,7 @@ Code generated by the command line utilities is owned by the owner
 of the input file used when generating it. This code is not
 standalone and requires a support library to be linked with it. This
 support library is itself covered by the above license.
+```
 
 ---
 
@@ -9937,6 +10135,7 @@ support library is itself covered by the above license.
 - License: MIT
 - Copyright: Nathan Rajlich <nathan@tootallnate.net> (http://n8.io/)
 
+```
 MIT License
 
 Copyright (c) Nathan Rajlich <nathan@tootallnate.net> (http://n8.io/)
@@ -9958,6 +10157,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 License text: not shipped in the package tarball; canonical MIT text reproduced above.
 Attribution: proxy-agent-negotiate@1.1.0, see https://github.com/TooTallNate/proxy-agents
@@ -9969,6 +10169,7 @@ Attribution: proxy-agent-negotiate@1.1.0, see https://github.com/TooTallNate/pro
 - License: MIT
 - Copyright: https://github.com/react/react.git
 
+```
 MIT License
 
 Copyright (c) Meta Platforms, Inc. and affiliates.
@@ -9990,6 +10191,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 ---
 
@@ -9998,6 +10200,7 @@ SOFTWARE.
 - License: MIT
 - Copyright: https://github.com/react/react.git
 
+```
 MIT License
 
 Copyright (c) Meta Platforms, Inc. and affiliates.
@@ -10019,6 +10222,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 ---
 
@@ -10027,6 +10231,7 @@ SOFTWARE.
 - License: MIT
 - Copyright: Thorsten Lorenz <thlorenz@gmx.de> (thlorenz.com)
 
+```
 MIT License
 
 Copyright (c) 2012-2019 Thorsten Lorenz, Paul Miller (https://paulmillr.com)
@@ -10048,6 +10253,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 ---
 
@@ -10056,6 +10262,7 @@ SOFTWARE.
 - License: MIT
 - Copyright: Tim Koschützki <tim@debuggable.com> (http://debuggable.com/)
 
+```
 Copyright (c) 2011:
 Tim Koschützki (tim@debuggable.com)
 Felix Geisendörfer (felix@debuggable.com)
@@ -10077,6 +10284,7 @@ Felix Geisendörfer (felix@debuggable.com)
  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE.
+```
 
 ---
 
@@ -10085,6 +10293,7 @@ Felix Geisendörfer (felix@debuggable.com)
 - License: MIT
 - Copyright: Feross Aboukhadijeh
 
+```
 The MIT License (MIT)
 
 Copyright (c) Feross Aboukhadijeh
@@ -10106,6 +10315,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+```
 
 ---
 
@@ -10114,6 +10324,7 @@ THE SOFTWARE.
 - License: MIT
 - Copyright: https://github.com/react/react.git
 
+```
 MIT License
 
 Copyright (c) Meta Platforms, Inc. and affiliates.
@@ -10135,6 +10346,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 ---
 
@@ -10143,6 +10355,7 @@ SOFTWARE.
 - License: MIT
 - Copyright: Jon Schlinkert (https://github.com/jonschlinkert)
 
+```
 The MIT License (MIT)
 
 Copyright (c) 2017, Jon Schlinkert.
@@ -10164,6 +10377,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 ---
 
@@ -10172,6 +10386,7 @@ SOFTWARE.
 - License: BSD-3-Clause
 - Copyright: Alexandru Marasteanu <hello@alexei.ro> (http://alexei.ro/)
 
+```
 Copyright (c) 2007-2014, Alexandru Marasteanu <hello [at) alexei (dot] ro>
 All rights reserved.
 
@@ -10196,6 +10411,7 @@ LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
 ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
 ---
 
@@ -10204,6 +10420,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 - License: MIT
 - Copyright: Standard Webhooks
 
+```
 MIT License
 
 Copyright (c) Standard Webhooks
@@ -10225,6 +10442,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 License text: not shipped in the package tarball; canonical MIT text reproduced above.
 Attribution: standardwebhooks@1.3.0, see https://github.com/standard-webhooks/standard-webhooks
@@ -10236,6 +10454,7 @@ Attribution: standardwebhooks@1.3.0, see https://github.com/standard-webhooks/st
 - License: MIT
 - Copyright: Jon Schlinkert (https://github.com/jonschlinkert)
 
+```
 The MIT License (MIT)
 
 Copyright (c) 2015, 2017, Jon Schlinkert
@@ -10257,6 +10476,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+```
 
 ---
 
@@ -10265,6 +10485,7 @@ THE SOFTWARE.
 - License: MIT
 - Copyright: xiaolai
 
+```
 MIT License
 
 Copyright (c) 2026 Study Coach contributors
@@ -10286,6 +10507,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 ---
 
@@ -10294,6 +10516,7 @@ SOFTWARE.
 - License: MIT
 - Copyright: Thomas Aribart
 
+```
 MIT License
 
 Copyright (c) 2020 Thomas Aribart
@@ -10315,6 +10538,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 ---
 
@@ -10323,6 +10547,7 @@ SOFTWARE.
 - License: 0BSD
 - Copyright: Microsoft Corp.
 
+```
 Copyright (c) Microsoft Corporation.
 
 Permission to use, copy, modify, and/or distribute this software for any
@@ -10335,6 +10560,7 @@ INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
 LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
 OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 PERFORMANCE OF THIS SOFTWARE.
+```
 
 ---
 
@@ -10343,6 +10569,7 @@ PERFORMANCE OF THIS SOFTWARE.
 - License: MIT
 - Copyright: git+https://github.com/nodejs/undici.git
 
+```
 MIT License
 
 Copyright (c) Matteo Collina and Undici contributors
@@ -10364,6 +10591,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 ---
 
@@ -10372,6 +10600,7 @@ SOFTWARE.
 - License: MIT
 - Copyright: git+https://github.com/nodejs/undici.git
 
+```
 MIT License
 
 Copyright (c) Matteo Collina and Undici contributors
@@ -10393,6 +10622,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 ---
 
@@ -10401,6 +10631,7 @@ SOFTWARE.
 - License: MIT
 - Copyright: Mattias Buelens <mattias@buelens.com>
 
+```
 The MIT License (MIT)
 
 Copyright (c) 2024 Mattias Buelens
@@ -10423,6 +10654,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
 
 ---
 
@@ -10431,6 +10663,7 @@ SOFTWARE.
 - License: MIT
 - Copyright: Einar Otto Stangvik <einaros@gmail.com> (http://2x.io)
 
+```
 Copyright (c) 2011 Einar Otto Stangvik <einaros@gmail.com>
 Copyright (c) 2013 Arnout Kazemier and contributors
 Copyright (c) 2016 Luigi Pinca and contributors
@@ -10451,6 +10684,7 @@ FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
 COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
 
 ---
 
@@ -10459,6 +10693,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 - License: MIT
 - Copyright: Colin McDonnell <zod@colinhacks.com>
 
+```
 MIT License
 
 Copyright (c) 2025 Colin McDonnell
@@ -10480,3 +10715,4 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```

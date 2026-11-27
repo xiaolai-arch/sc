@@ -19,6 +19,17 @@ const CASE_VARIANT_MD = 'case variant LICENSE.md (must lose to extensionless)\n'
 
 const BETA_STUB_TEXT = 'Apache License 2.0\n\nSee the LICENSE file in the root of this repository.\n';
 
+const MARKDOWN_LICENSE_TEXT = [
+  '## Heading',
+  '',
+  'Some editorial preamble.',
+  '',
+  '---',
+  '',
+  'Permission is hereby granted, free of charge.',
+  ''
+].join('\n');
+
 async function makeFixture(root: string): Promise<void> {
   const lock = {
     name: 'fixture-root',
@@ -31,6 +42,7 @@ async function makeFixture(root: string): Promise<void> {
       'node_modules/beta-pointer': { version: '2.0.0', license: 'Apache-2.0' },
       'node_modules/delta-devonly': { version: '0.9.0', license: 'MIT', dev: true },
       'node_modules/echo-dual': { version: '1.2.3', license: '(AFL-2.1 OR BSD-3-Clause)' },
+      'node_modules/markdown-shipped': { version: '4.4.4', license: 'MIT' },
       'node_modules/zulu-unknown': { version: '3.0.0', license: 'WTFPL' }
     }
   };
@@ -52,6 +64,9 @@ async function makeFixture(root: string): Promise<void> {
     'utf8'
   );
 
+  await mkdir(join(root, 'node_modules', 'markdown-shipped'), { recursive: true });
+  await writeFile(join(root, 'node_modules', 'markdown-shipped', 'LICENSE'), MARKDOWN_LICENSE_TEXT, 'utf8');
+
   // echo-dual and zulu-unknown ship no license file at all.
   await mkdir(join(root, 'node_modules', 'echo-dual'), { recursive: true });
   await mkdir(join(root, 'node_modules', 'zulu-unknown'), { recursive: true });
@@ -64,13 +79,42 @@ function runGenerator(root: string, out: string): { status: number; stdout: stri
   return { status: result.status ?? 1, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
 }
 
+/** Split into "## name@version" sections, ignoring lines that only look like
+ * headers inside a ``` fence (a markdown license ships real "## " lines). */
 function sectionsOf(content: string): Map<string, string> {
+  let inFence = false;
+  let current: { name: string; lines: string[] } | null = null;
   const sections = new Map<string, string>();
-  for (const part of content.split(/^## /m).slice(1)) {
-    const name = part.split('\n', 1)[0];
-    sections.set(name, part);
+  for (const line of content.split('\n')) {
+    if (/^`{3,}$/.test(line)) {
+      inFence = !inFence;
+      if (current) current.lines.push(line);
+      continue;
+    }
+    if (!inFence && line.startsWith('## ')) {
+      if (current) sections.set(current.name, current.lines.join('\n'));
+      current = { name: line.slice(3), lines: [] };
+      continue;
+    }
+    if (current) current.lines.push(line);
   }
+  if (current) sections.set(current.name, current.lines.join('\n'));
   return sections;
+}
+
+/** Lines visible to a markdown reader: not inside a fence. */
+function linesOutsideFences(content: string): string[] {
+  let inFence = false;
+  const out: string[] = [];
+  for (const line of content.split('\n')) {
+    if (/^`{3,}$/.test(line)) {
+      inFence = !inFence;
+      out.push(line);
+      continue;
+    }
+    if (!inFence) out.push(line);
+  }
+  return out;
 }
 
 describe('gen-third-party-notices', () => {
@@ -196,5 +240,43 @@ describe('gen-third-party-notices', () => {
     const zulu = sectionsOf(await readFile(out, 'utf8')).get('zulu-unknown@3.0.0');
     expect(zulu).toContain('- License: UNKNOWN');
     expect(zulu).toContain('License text: declared "undefined" via npm metadata');
+  });
+
+  test('a markdown license with "## " and "---" cannot add sections', async () => {
+    generate();
+    const content = await readFile(out, 'utf8');
+    // Fixture sanity: every package appears exactly once, including the one
+    // whose LICENSE file itself contains "## Heading".
+    const names = [...sectionsOf(content).keys()];
+    expect(names).toHaveLength(7);
+    expect(new Set(names).size).toBe(names.length);
+    expect(names).toContain('markdown-shipped@4.4.4');
+    // Fence-aware: only our seven "## <pkg>@<ver>" headers are sections. A
+    // bare line count would see the license's own "## Heading" too, which is
+    // exactly why the body must be fenced.
+    const visibleHeadingLines = linesOutsideFences(content).filter((l) => l.startsWith('## '));
+    expect(visibleHeadingLines).toHaveLength(names.length);
+    // The audit-grep invariant: counting only lines with the section-header
+    // shape "## <name>@<version>" must equal the package count even on the raw
+    // file, where the fenced license text keeps its own "## Heading" bytes.
+    const shapedHeaders = content.match(/^## \S+@\d/gm) ?? [];
+    expect(shapedHeaders).toHaveLength(names.length);
+  });
+
+  test('fenced license text keeps the markdown headings and rules byte-for-byte', async () => {
+    generate();
+    const section = sectionsOf(await readFile(out, 'utf8')).get('markdown-shipped@4.4.4');
+    expect(section).not.toBeNull();
+    // The original bytes survive, so this is not a tautology: the markdown
+    // headings and the "---" rule are present verbatim inside the fence.
+    expect(section).toContain('## Heading');
+    expect(section).toMatch(/^---$/m);
+    expect(section).toContain('Permission is hereby granted, free of charge.');
+
+    // The fence is exactly ``` here: no backticks occur in the fixture text.
+    const fencedBody = section!.match(/^(`{3,})\n([\s\S]*?)\n\1$/m);
+    expect(fencedBody).not.toBeNull();
+    expect(fencedBody![1]).toBe('```');
+    expect(fencedBody![2]).toContain('## Heading');
   });
 });
