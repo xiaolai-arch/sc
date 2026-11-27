@@ -2,6 +2,7 @@ import type { NoteMeta } from '../../shared/types';
 import { parseNote, serializeNote } from '../vault/note';
 import { isLocalDate } from '../../shared/date';
 import {
+  normalizeCheckpoints,
   normalizePracticeDurationMs,
   type PracticeAttempt,
   type PracticeConfidence,
@@ -50,8 +51,19 @@ export function coerceQuestion(value: unknown): PracticeQuestion | null {
   if (kind === 'short') {
     const referenceAnswer = asString(record.referenceAnswer);
     if (!referenceAnswer || referenceAnswer.trim() === '') return null;
+    // Hand-edited garbage collapses to no checkpoints; 2-3 clean entries stay.
+    const checkpoints = normalizeCheckpoints(record.checkpoints);
     // The shape keeps `options`/`answer` for compatibility; they are unused.
-    return { id, kind, prompt, options: [], answer: 0, referenceAnswer, explanation };
+    return {
+      id,
+      kind,
+      prompt,
+      options: [],
+      answer: 0,
+      referenceAnswer,
+      ...(checkpoints !== undefined ? { checkpoints } : {}),
+      explanation
+    };
   }
   const options = asStringArray(record.options);
   if (options.length < 2) return null;
@@ -148,6 +160,7 @@ export function serializePracticeSetFile(set: PracticeSet): string {
       ...(question.referenceAnswer !== undefined
         ? { referenceAnswer: question.referenceAnswer }
         : {}),
+      ...(question.checkpoints !== undefined ? { checkpoints: [...question.checkpoints] } : {}),
       explanation: question.explanation
     }))
   };
@@ -199,6 +212,14 @@ export function parseAttemptFile(raw: string): PracticeAttempt[] {
     // hand-edited or legacy entry can never poison the fluent stats; a record
     // without the field simply stays without it.
     const durationMs = normalizePracticeDurationMs(record.durationMs);
+    // Per-index `=== true`, the same semantics `alignCheckpointHits` applies:
+    // the raw length is kept (alignment against the question's checkpoints
+    // happens at stats time) and a non-boolean entry reads as unchecked, so a
+    // hand-edited `[true, 'x', true]` never collapses to `[true, true]`.
+    const storedHits = record.checkpointHits;
+    const checkpointHits = Array.isArray(storedHits)
+      ? storedHits.map((entry) => entry === true)
+      : [];
     attempts.push({
       id,
       workspaceId,
@@ -208,6 +229,7 @@ export function parseAttemptFile(raw: string): PracticeAttempt[] {
       ...(response !== undefined ? { response } : {}),
       ...(confidence !== undefined ? { confidence } : {}),
       ...(durationMs !== undefined ? { durationMs } : {}),
+      ...(checkpointHits.length > 0 ? { checkpointHits } : {}),
       correct: asBoolean(record.correct, false),
       answeredAt
     });

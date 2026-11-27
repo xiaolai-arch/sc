@@ -421,6 +421,154 @@ describe('short-answer (free recall) practice UI', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// 对照检查点自查（P2a）：带检查点的简答题在 提交 与 对答案 之间多一步逐条自勾；
+// 自查时不展示参考答案；对答案揭示面板不即时高亮——漏勾项（中性色，不给分）
+// 在自评点击之后才渲染（spec :42 字面顺序，item 67 裁 A）。无检查点的简答题
+// 保持基线两步流，UI 文案与步骤逐字节不变。
+// ---------------------------------------------------------------------------
+
+describe('checkpoint self-check (对照检查点自查)', () => {
+  const checkpointSet: PracticeSet = {
+    id: 'ps-cp',
+    workspaceId: 'kaoyan',
+    title: '检查点练习',
+    subject: '数学',
+    questions: [
+      {
+        id: 'sq-cp',
+        kind: 'short',
+        prompt: '说明第一个重要极限。',
+        options: [],
+        answer: 0,
+        referenceAnswer: 'x→0 时 sin x / x 的极限是 1。',
+        explanation: '',
+        checkpoints: ['极限值是 1', '用到了夹逼准则']
+      }
+    ]
+  };
+
+  const plainShortSet: PracticeSet = {
+    id: 'ps-plain',
+    workspaceId: 'kaoyan',
+    title: '普通简答',
+    subject: '数学',
+    questions: [
+      {
+        id: 'sq-plain',
+        kind: 'short',
+        prompt: '用自己的话说明第一个重要极限。',
+        options: [],
+        answer: 0,
+        referenceAnswer: 'x→0 时 sin x / x 的极限是 1。',
+        explanation: ''
+      }
+    ]
+  };
+
+  function checkpointResult(correct: boolean): SubmitAnswerResult {
+    return {
+      questionId: 'sq-cp',
+      setId: 'ps-cp',
+      workspaceId: 'kaoyan',
+      choice: 0,
+      correct,
+      answer: 0,
+      explanation: '',
+      attempt: {
+        id: 'pa-cp',
+        workspaceId: 'kaoyan',
+        setId: 'ps-cp',
+        questionId: 'sq-cp',
+        choice: 0,
+        response: '极限是 1',
+        checkpointHits: [true, false],
+        correct,
+        answeredAt: '2026-11-01T09:00:00.000Z'
+      },
+      mistake: null
+    };
+  }
+
+  it('puts the self-check between 提交 and the reference answer, then highlights misses', async () => {
+    const user = userEvent.setup();
+    const onSubmitShortAnswer = vi.fn(async () => checkpointResult(true));
+    renderPane({ set: checkpointSet, onSubmitShortAnswer });
+
+    // 验收 14 顺序（item 67 裁 A，按 spec 字面）：提交 → 自查（不展示参考答案）
+    // → 对答案（揭示，无高亮）→ 自评点击之后才高亮漏勾项。
+    await user.type(screen.getByLabelText('用你自己的话回答'), '极限是 1');
+    await user.click(screen.getByRole('button', { name: '提交' }));
+
+    // 自查界面出现（标题「对照检查点自查」），参考答案此刻不出现，什么都没记录。
+    expect(screen.getByText('对照检查点自查')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: '对照检查点自查' })).toBeInTheDocument();
+    expect(screen.queryByText(/参考答案：/)).not.toBeInTheDocument();
+    expect(onSubmitShortAnswer).not.toHaveBeenCalled();
+
+    // 逐条自勾「答到了吗」：只勾第一条。
+    await user.click(screen.getByRole('checkbox', { name: '极限值是 1' }));
+    await user.click(screen.getByRole('checkbox', { name: '极限值是 1' })); // 取消再勾回
+    await user.click(screen.getByRole('checkbox', { name: '极限值是 1' }));
+
+    // 对答案之后参考答案显示，但揭示面板不即时高亮——漏勾回看等自评点击之后。
+    await user.click(screen.getByRole('button', { name: '对答案' }));
+    expect(screen.getByText('参考答案：x→0 时 sin x / x 的极限是 1。')).toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: '检查点对照' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/（没答到）/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '答对了' }));
+    await waitFor(() => expect(onSubmitShortAnswer).toHaveBeenCalledTimes(1));
+    // P1 口径 B 的 durationMs 与 P2a 的 checkpointHits 并存于同一次提交。
+    expect(onSubmitShortAnswer).toHaveBeenCalledWith({
+      questionId: 'sq-cp',
+      response: '极限是 1',
+      selfCorrect: true,
+      durationMs: expect.any(Number),
+      checkpointHits: [true, false]
+    });
+    expect(await screen.findByText('回答正确')).toBeInTheDocument();
+
+    // 自评点击之后：漏勾项带中性高亮与「没答到」标记，勾到的带 ✓。
+    const hit = screen.getByText(/极限值是 1/).closest('li');
+    const missed = screen.getByText(/用到了夹逼准则/).closest('li');
+    expect(hit).toHaveAttribute('data-hit', 'true');
+    expect(missed).toHaveAttribute('data-hit', 'false');
+    expect(missed).toHaveTextContent('（没答到）');
+    // 漏勾是信息不是错误：中性琥珀，不是判错红。
+    expect(missed?.className).toContain('#ffb340');
+    expect(missed?.className).not.toContain('#d70015');
+  });
+
+  it('keeps the baseline two-step flow for a short question without checkpoints', async () => {
+    const user = userEvent.setup();
+    const onSubmitShortAnswer = vi.fn(async () => checkpointResult(true));
+    renderPane({ set: plainShortSet, onSubmitShortAnswer });
+
+    // 基线负例：不出现自查步骤与对答案按钮。
+    expect(screen.queryByText('对照检查点自查')).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('用你自己的话回答'), '极限是 1');
+    await user.click(screen.getByRole('button', { name: '提交' }));
+
+    expect(screen.queryByText('对照检查点自查')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '对答案' })).not.toBeInTheDocument();
+    expect(screen.getByText('参考答案：x→0 时 sin x / x 的极限是 1。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '答对了' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '没答对' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '答对了' }));
+    await waitFor(() => expect(onSubmitShortAnswer).toHaveBeenCalledTimes(1));
+    // 无检查点 → 不带 checkpointHits；P1 的 durationMs 照常随行。
+    expect(onSubmitShortAnswer).toHaveBeenCalledWith({
+      questionId: 'sq-plain',
+      response: '极限是 1',
+      selfCorrect: true,
+      durationMs: expect.any(Number)
+    });
+  });
+});
+
 describe('mistake review sheet', () => {
   function stubClipboard(): ReturnType<typeof vi.fn> {
     const writeText = vi.fn().mockResolvedValue(undefined);

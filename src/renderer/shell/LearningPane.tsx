@@ -20,6 +20,7 @@ import type {
   SubmitAnswerResult,
   SubmitShortAnswerInput
 } from '../../shared/practice';
+import { normalizeCheckpoints } from '../../shared/practice';
 import { ConfidencePicker } from './CalibrationCard';
 import {
   FOCUS_TICK_MS,
@@ -126,6 +127,14 @@ export function LearningPane({
   const [response, setResponse] = useState('');
   /** Short questions: 提交 reveals the reference answer and self-assessment. */
   const [revealed, setRevealed] = useState(false);
+  /**
+   * Short questions with checkpoints: 提交 first opens the 对照检查点自查
+   * step; 对答案 then reveals the reference answer. Questions without
+   * checkpoints skip this state entirely and keep the baseline two-step flow.
+   */
+  const [selfChecked, setSelfChecked] = useState(false);
+  /** Per-checkpoint self-ticks, aligned with the question's checkpoints. */
+  const [checks, setChecks] = useState<boolean[]>([]);
   /** Pre-answer confidence; undefined until the learner marks one. */
   const [confidence, setConfidence] = useState<PracticeConfidence | undefined>(undefined);
   const [score, setScore] = useState(0);
@@ -158,6 +167,8 @@ export function LearningPane({
     setChecking(false);
     setResponse('');
     setRevealed(false);
+    setSelfChecked(false);
+    setChecks([]);
     setConfidence(undefined);
     setScore(0);
     setFinished(false);
@@ -414,7 +425,16 @@ export function LearningPane({
   const last = index === activeSet.questions.length - 1;
   /** Free recall: the learner has answered, the reference answer is visible. */
   const isShort = question.kind === 'short';
+  /**
+   * The 2-3 checkpoint sentences for this question, re-normalized on render so
+   * a stray vault value can never open the self-check step. Choice questions
+   * and checkpoint-less short questions keep the baseline flow exactly.
+   */
+  const questionCheckpoints = isShort ? (normalizeCheckpoints(question.checkpoints) ?? []) : [];
+  const hasCheckpoints = questionCheckpoints.length > 0;
   const awaitingSelfAssessment = isShort && revealed && !answered;
+  /** Checkpoint questions only: the self-check step between 提交 and 对答案. */
+  const awaitingCheckpointCheck = isShort && selfChecked && !revealed && !answered;
   const responseReady = response.trim() !== '' && !answered && !checking;
   // 结卷摘要 numbers: the denominator is the whole paper (未作答 included),
   // deliberately different from attempt history's answered-only denominator.
@@ -454,11 +474,34 @@ export function LearningPane({
     }
   }
 
-  /** 提交: nothing is recorded yet — just reveal the model answer. */
+  /**
+   * 提交: nothing is recorded yet — just open the next look. A checkpoint
+   * question goes to the 对照检查点自查 step (the reference answer stays
+   * hidden), every other question reveals it directly as before.
+   */
   function reveal() {
     if (!responseReady) return;
     setError(null);
+    if (hasCheckpoints) {
+      setChecks(questionCheckpoints.map(() => false));
+      setSelfChecked(true);
+      return;
+    }
     setRevealed(true);
+  }
+
+  /** 对答案: the self-check is done; the reference answer becomes visible. */
+  function revealReference() {
+    if (revealed || checking) return;
+    setError(null);
+    setRevealed(true);
+  }
+
+  /** Ticks one checkpoint in the 对照检查点自查 step; never scored. */
+  function toggleCheckpoint(index: number) {
+    setChecks((current) =>
+      current.map((hit, entryIndex) => (entryIndex === index ? !hit : hit))
+    );
   }
 
   /**
@@ -482,6 +525,11 @@ export function LearningPane({
         selfCorrect,
         // 口径 B: the clock stops here, at the recording click (see measuredDurationMs).
         durationMs: measuredDurationMs(),
+        // The self-check ticks ride along for the attempt record; they never
+        // change `correct` or the schedule. Only aligned ticks are sent.
+        ...(hasCheckpoints && checks.length === questionCheckpoints.length
+          ? { checkpointHits: checks }
+          : {}),
         ...(confidence !== undefined ? { confidence } : {})
       });
       setResult(submitted);
@@ -510,6 +558,8 @@ export function LearningPane({
     setResult(null);
     setResponse('');
     setRevealed(false);
+    setSelfChecked(false);
+    setChecks([]);
     setConfidence(undefined);
     setError(null);
     // Next question on screen: its answer clock starts fresh.
@@ -750,6 +800,42 @@ export function LearningPane({
                     onChange={(event) => setResponse(event.target.value)}
                     className="mt-2 w-full resize-none rounded-xl border border-gray-200/70 bg-white px-4 py-3 text-[14px] leading-6 text-black outline-none transition-colors duration-200 focus:border-[#0071e3]/40 focus:ring-2 focus:ring-[#0071e3]/20 disabled:cursor-default disabled:bg-[#f5f5f7] disabled:text-gray-500 dark:border-white/10 dark:bg-[#242426] dark:text-[#f5f5f7] dark:focus:border-[#0a84ff]/50"
                   />
+                  {awaitingCheckpointCheck ? (
+                    <div
+                      role="group"
+                      aria-label="对照检查点自查"
+                      className="mt-4 rounded-xl bg-[#f5f5f7] px-4 py-3 dark:bg-[#1c1c1e]"
+                    >
+                      <p className="text-[13px] font-medium text-black dark:text-[#f5f5f7]">
+                        对照检查点自查
+                      </p>
+                      <p className="mt-1 text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]">
+                        先别看参考答案——对照下面几条，勾出你已经答到的。
+                      </p>
+                      <ul className="mt-2 space-y-2">
+                        {questionCheckpoints.map((checkpoint, checkpointIndex) => {
+                          const checkboxId = `checkpoint-${question.id}-${checkpointIndex}`;
+                          return (
+                            <li key={checkboxId} className="flex items-start gap-2.5">
+                              <input
+                                id={checkboxId}
+                                type="checkbox"
+                                checked={checks[checkpointIndex] === true}
+                                onChange={() => toggleCheckpoint(checkpointIndex)}
+                                className="mt-1 h-4 w-4 shrink-0 accent-[#0071e3]"
+                              />
+                              <label
+                                htmlFor={checkboxId}
+                                className="text-[13px] leading-6 text-black dark:text-[#f5f5f7]"
+                              >
+                                {checkpoint}
+                              </label>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ) : null}
                   {revealed ? (
                     <div className="mt-4 rounded-xl bg-[#f5f5f7] px-4 py-3 dark:bg-[#1c1c1e]">
                       <p className="text-[13px] leading-6 text-black dark:text-[#f5f5f7]">
@@ -759,6 +845,30 @@ export function LearningPane({
                       <p className="mt-1 whitespace-pre-wrap text-[13px] leading-6 text-gray-500 dark:text-[#a1a1a6]">
                         你写的是：{response}
                       </p>
+                      {answered && hasCheckpoints ? (
+                        // 高亮时机按 spec 字面（自评后，item 67 裁 A）：对答案
+                        // 揭示面板不即时高亮；漏勾是自评点击之后才渲染的回看。
+                        <ul aria-label="检查点对照" className="mt-2 space-y-1">
+                          {questionCheckpoints.map((checkpoint, checkpointIndex) => {
+                            const hit = checks[checkpointIndex] === true;
+                            return (
+                              <li
+                                key={checkpointIndex}
+                                data-hit={hit ? 'true' : 'false'}
+                                className={cn(
+                                  'rounded-lg px-2 py-1 text-[13px] leading-6',
+                                  hit
+                                    ? 'text-gray-500 dark:text-[#a1a1a6]'
+                                    : // 漏勾是信息不是错误：neutral amber, never the red verdict.
+                                      'bg-[#ffb340]/10 font-medium text-[#8a5a00] dark:text-[#ffb340]'
+                                )}
+                              >
+                                {hit ? `✓ ${checkpoint}` : `${checkpoint}（没答到）`}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : null}
                       {question.explanation ? (
                         <p className="mt-2 text-[13px] leading-6 text-gray-500 dark:text-[#a1a1a6]">
                           {question.explanation}
@@ -865,9 +975,14 @@ export function LearningPane({
               <div className="mt-5 flex gap-2">
                 {isShort ? (
                   <>
-                    {!revealed ? (
+                    {!revealed && !selfChecked ? (
                       <Button size="sm" disabled={!responseReady} onClick={reveal}>
                         提交
+                      </Button>
+                    ) : null}
+                    {awaitingCheckpointCheck ? (
+                      <Button size="sm" variant="secondary" onClick={revealReference}>
+                        对答案
                       </Button>
                     ) : null}
                     {awaitingSelfAssessment ? (

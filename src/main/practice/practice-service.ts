@@ -20,6 +20,7 @@ import {
   type SubmitShortAnswerInput,
   type UpdatePracticeSetInput
 } from '../../shared/practice';
+import { alignCheckpointHits, normalizeCheckpoints } from '../../shared/practice';
 import {
   createMutex,
   listDirectories,
@@ -142,7 +143,19 @@ function normalizeQuestions(input: unknown): PracticeQuestion[] {
         record.referenceAnswer,
         `Question ${index + 1} referenceAnswer`
       );
-      return { id, kind: 'short', prompt, options: [], answer: 0, referenceAnswer, explanation };
+      // 2-3 clean entries survive; fewer than 2 means no checkpoints (field
+      // omitted), so a set without checkpoints stays byte-identical to before.
+      const checkpoints = normalizeCheckpoints(record.checkpoints);
+      return {
+        id,
+        kind: 'short',
+        prompt,
+        options: [],
+        answer: 0,
+        referenceAnswer,
+        ...(checkpoints !== undefined ? { checkpoints } : {}),
+        explanation
+      };
     }
     const options = Array.isArray(record.options)
       ? record.options.filter((option): option is string => typeof option === 'string' && option.trim() !== '')
@@ -604,6 +617,10 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
       const strict = await strictMasteryEnabled();
 
       return runExclusively(async () => {
+        // The checkpoint self-ticks are a mirror, not a verdict: they are
+        // aligned with the question's checkpoints and never touch `correct`
+        // or the scheduler. A question without checkpoints writes no field.
+        const checkpointHits = alignCheckpointHits(input.checkpointHits, question.checkpoints);
         // `choice` stays 0: a free-recall attempt has no option index, and the
         // field is kept so every attempt record has the same shape.
         const attempt: PracticeAttempt = {
@@ -615,6 +632,7 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
           response,
           ...(confidence !== undefined ? { confidence } : {}),
           ...(durationMs !== undefined ? { durationMs } : {}),
+          ...(checkpointHits !== undefined ? { checkpointHits } : {}),
           correct,
           answeredAt
         };
