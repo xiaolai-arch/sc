@@ -6,7 +6,7 @@ import type { PracticeAttempt, PracticeMistake } from '../../shared/practice';
 import { planProgress } from '../../shared/plans';
 import type { LongPlan } from '../../shared/plans';
 import type { Reminder, Workspace, WorkspaceTask } from '../../shared/workspace';
-import { daysUntilTarget, effectiveReminderState, reminderState, targetCountdownLabel } from '../../shared/workspace';
+import { daysUntilTarget, effectiveReminderState, examWindowDaysLeft, reminderState, targetCountdownLabel } from '../../shared/workspace';
 import { accuracyTrend } from './accuracy-trend';
 import { ChevronRightIcon, CheckIcon, SendIcon } from '../ui/icons';
 import { PageFrame } from './PageFrame';
@@ -95,6 +95,22 @@ export function countdownWorkspace(
 
 /** The old quick-ask button, kept as a suggestion that fills the input. */
 const TODAY_SUGGESTION = '帮我看今天最重要的三件事，并给出具体下一步。';
+
+/**
+ * The pre-exam whole-paper nudge, one neutral sentence under the countdown
+ * line: only an exam project inside its final two weeks earns it, and it
+ * always points at the whole-paper entry that P2a added to 学习 → 练习集.
+ * Null outside the window (or for any non-exam project), so nothing renders.
+ */
+export function examWholePaperHint(
+  workspace: Pick<Workspace, 'kind' | 'targetDate'> | null | undefined,
+  today: string
+): string | null {
+  const days = examWindowDaysLeft(workspace, today);
+  return days === null
+    ? null
+    : `距考试还有 ${days} 天——适合来一次整卷模拟（学习 → 练习集）。`;
+}
 
 function timeOf(startAt: string | undefined): string | null {
   const match = /T(\d{2}:\d{2})/.exec(startAt ?? '');
@@ -236,7 +252,10 @@ export function TodayOverview({
     const dated = workspaces.filter(
       (entry) => entry.targetDate && daysUntilTarget(entry.targetDate, today) !== null
     );
-    return { label, name: dated.length > 1 ? workspace.name : null };
+    // The pre-exam whole-paper nudge rides under the same countdown project:
+    // only an exam project inside its final two weeks earns it.
+    const examHint = examWholePaperHint(workspace, today);
+    return { label, name: dated.length > 1 ? workspace.name : null, examHint };
   }, [workspaces, today, compact]);
   const activePlans = useMemo(
     () =>
@@ -339,14 +358,24 @@ export function TodayOverview({
   const body = (
     <div className={compact ? 'space-y-4' : 'space-y-6'}>
       {countdown ? (
-        <p
-          role="status"
-          aria-label="目标倒计时"
-          className="text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]"
-        >
-          {countdown.label}
-          {countdown.name ? `（${countdown.name}）` : ''}
-        </p>
+        <div className="space-y-1">
+          <p
+            role="status"
+            aria-label="目标倒计时"
+            className="text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]"
+          >
+            {countdown.label}
+            {countdown.name ? `（${countdown.name}）` : ''}
+          </p>
+          {countdown.examHint ? (
+            <p
+              aria-label="考前整卷提示"
+              className="text-[12px] leading-5 text-gray-500 dark:text-[#8e8e93]"
+            >
+              {countdown.examHint}
+            </p>
+          ) : null}
+        </div>
       ) : null}
       <section
         aria-label="接下来"

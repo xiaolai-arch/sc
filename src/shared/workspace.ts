@@ -94,6 +94,27 @@ export function targetCountdownLabel(
   return days >= 0 ? `距离目标 ${targetDate} 还有 ${days} 天` : '目标日已过';
 }
 
+/** How close to an exam the pre-exam window reaches: the final two weeks. */
+export const EXAM_WINDOW_DAYS = 14;
+
+/**
+ * Whole days left on an exam project's countdown while the pre-exam window
+ * applies (`0 ≤ days ≤ 14`). Null when the project is missing, not an exam,
+ * has no readable target date, or sits outside the window. Every caller (the
+ * Today page's whole-paper hint, the review opening's one-time writing ask)
+ * treats null as "stay silent and stay byte-identical to the baseline" — no
+ * new setting, no styling, nothing else changes outside the window.
+ */
+export function examWindowDaysLeft(
+  workspace: Pick<Workspace, 'kind' | 'targetDate'> | null | undefined,
+  today: string
+): number | null {
+  if (!workspace || workspace.kind !== 'exam' || !workspace.targetDate) return null;
+  const days = daysUntilTarget(workspace.targetDate, today);
+  if (days === null || days < 0 || days > EXAM_WINDOW_DAYS) return null;
+  return days;
+}
+
 export interface WorkspaceTask {
   id: string;
   workspaceId: string;

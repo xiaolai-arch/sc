@@ -20,7 +20,7 @@ import { Textarea } from '../ui/Textarea';
 import { AccuracyTrend } from './AccuracyTrend';
 import { CalibrationCard } from './CalibrationCard';
 import { PageFrame } from './PageFrame';
-import { ReviewRecords } from './ReviewRecords';
+import { ReviewRecords, type ExamWritingStore } from './ReviewRecords';
 import { StudyHeatmap } from './StudyHeatmap';
 import { WeeklyOverview } from './WeeklyOverview';
 
@@ -38,6 +38,8 @@ type ReviewPageProps = {
   onSubmitReview?: (input: SubmitReviewInput) => Promise<void>;
   /** Called after a successful backfill so the parent can reload reviews. */
   onSubmitted?: () => void;
+  /** Persistence for the one-time pre-exam writing ask; omitted = feature off. */
+  examWritingStore?: ExamWritingStore;
 };
 
 export function ReviewPage({
@@ -50,7 +52,8 @@ export function ReviewPage({
   onOpenSidebar,
   onPrompt,
   onSubmitReview,
-  onSubmitted
+  onSubmitted,
+  examWritingStore
 }: ReviewPageProps) {
   const [filterId, setFilterId] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -236,6 +239,8 @@ export function ReviewPage({
         workspaces={workspaces}
         workspace={filteredWorkspace}
         reviews={reviews}
+        today={today}
+        {...(examWritingStore ? { examWritingStore } : {})}
         onPrompt={(prompt) => onPrompt(prompt, filteredWorkspace?.id)}
       />
 
