@@ -132,5 +132,5 @@ ba9562c (HEAD -> xiaolai/iter30-e2e-accountability) test(qa): iter30 问责功�
 ebfd0fd (master) chore(release): cut 1.3.0
 ```
 
-产品代码零改动（`git diff master..HEAD --stat` 仅 6 个测试文件）。未推 origin。
+产品代码零改动（`git diff master..HEAD --stat` 为 6 个测试文件 + 1 份报告，共 7 个文件）。未推 origin。
 合并归 sc-lead。
