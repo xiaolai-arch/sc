@@ -24,6 +24,26 @@
   - `[pi-selftest] stream+tool: PASS — 终态=completed；流式 delta 与 plan_preview 提交齐备`
   - `[pi-selftest] cancel: PASS — 终态=cancelled；取消后无工具提交=true`
 
+## electron-builder 产物层实跑（2026-11-28，sc-lead 追加要求）
+
+同一份代码随后经 `npm run package`（=`electron-vite build` + `electron-builder
+--dir`）打成 `dist/win-unpacked/`（electron 45.2.1，未签名），直接在安装包形态
+的产物 `ASAKI.exe` 里跑同一条 selftest，三步全 PASS、exit code 0。逐字证据
+JSON：`pi-selftest-result-packaged-2026-11-28.json`（`packagedElectron: true`）。
+控制台输出（逐字）：
+
+```text
+[pi-selftest] ok=true node=24.22.1 electron=45.2.1
+[pi-selftest] load: PASS — engine-pi 动态加载器在打包主进程加载 Pi 包成功（Agent=function）
+[pi-selftest] stream+tool: PASS — 终态=completed；流式 delta 与 plan_preview 提交齐备；事件序列=[run.started → text.delta("我来为今天生成计划。") → tool.committed(plan_preview) → text.delta("预览完成（自测不再提交）。") → run.finished(completed)]
+[pi-selftest] cancel: PASS — 终态=cancelled；取消后无工具提交=true；事件=[run.started → text.delta("自测流开始。") → run.finished(cancelled)]
+```
+
+`dist/` 在 `.gitignore`，产物本身不入库；证据 JSON 入库。**这满足 sc-release
+后续验证的前提**（「electron-builder 产物层带工具会话可跑」——`npm run package`
+即可复现，无需安装器）。**排除配置（google/aws/smithy）未动**——按 sc-lead
+2026-11-28 明确，等 ESM 修复（本批 776f93f）落地后由 sc-release 自己做。
+
 ## 补档前发现的通道缺陷（如实记录，不粉饰）
 
 P2 批交付的自测通道**按当时提交的代码在打包产物里无法启动**：
@@ -49,6 +69,6 @@ P4 批的修复（最小、与 pi-engine.ts 同法）：pi-fake-model.ts 改为�
 
 - 自测 env 钩子（`src/main/index.ts`）按原注应在 P3 正式装配时移除；P4 批按
   F6 需求保留（本证据即经它产出），移除与否留 sc-review 在证据归档后裁定。
-- NSIS 安装产物级实跑（electron-builder 产物内点击进入）仍未做过；如 sc-review
-  认为验收 11 的「打包后的 Windows Electron」必须指安装产物，需补一次安装产物
-  实跑并把 JSON 追加进本目录。
+- electron-builder `--dir` 产物（win-unpacked，未签名）已实跑（见上节）；
+  NSIS **安装器**产物（需走安装流程的那层壳）仍未做过——如 sc-review 认为验收
+  11 必须指安装器产物，需补一次并把 JSON 追加进本目录。
