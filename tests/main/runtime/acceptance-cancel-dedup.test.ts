@@ -37,8 +37,13 @@ import type { WorkspaceService } from '../../../src/shared/workspace';
  *   不双写；失败的同参重试放行、需要**新的一次审批**（审批绑定这一次调用，
  *   无批准缓存）、最终恰好落盘一条。
  *
- * 已知边界（写进交付报告，不在本文件断言）：Legacy 不走网关（legacy-engine.ts
- * 缝②注释自证），确认级工具直执行——审批与去重语义只对 Fake/Pi 路径成立。
+ * 已知边界（sc-lead 2026-11-28 裁定：接受为 Legacy 边界，不改码；写进用户文档
+ * 与对照期说明归 sc-build）：Legacy 不走网关（legacy-engine.ts:20-26 自证
+ * 「产品取舍点」），确认级工具直执行。因此**本文件的审批与去重语义只对
+ * Fake/Pi 路径成立**——Legacy 下确认级工具无审批、无去重、`maxToolCalls`
+ * 不生效、只取第一个项目。Legacy 是对照与回滚引擎，统一治理由 Pi 在网关上
+ * 兑现；长期跑 Legacy 不接受，切引擎那次设复审门。别让后来的人以为 Legacy
+ * 也受这些约束。
  */
 
 const NOW = new Date(2026, 10, 28, 8, 0, 0); // 2026-11-28（周六）08:00 local —— 假时钟
@@ -323,6 +328,15 @@ test('验收 3（Legacy）：工具执行中取消 → cancelled，后续模型�
         if (probe.tasks.length > 0) break;
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
+      // ── 待补占位（sc-lead 2026-11-28 裁决；等 sc-build 把状态机改出来后由 sc-qa 改断言）──
+      // 现状（下面按现状断言）：取消时已在途的 createTask 在取消之后完成落盘
+      // （vault 多出「任务A」），而终态/journal 都是 cancelled、事件层零提交——
+      // 状态说谎：取消 ≠ 什么都没发生（spec 第六态「结果待核实」的反向同理）。
+      // 裁决落地后改成两条：
+      //   1) Legacy 在途取消 → 终态 `pending-verification` + 事件含「有一笔写入
+      //      可能在取消后落盘」的待核实提示 + vault 可能多一条；
+      //   2) 反向断言：取消时无在途工具 → 仍是 `cancelled`（别把「取消」废掉）。
+      // Pi 路径严格零写入，不受影响（上面 Pi 用例已经是零写入断言）。
       expect(controller.getRun('run-cancel-legacy')?.state).toBe('cancelled');
       // 取消后不再执行任何工具：第二轮模型调用从未发生，任务B从未创建。
       expect(scripted.calls).toHaveLength(1);
