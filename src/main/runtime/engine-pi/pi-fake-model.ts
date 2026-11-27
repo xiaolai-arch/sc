@@ -36,6 +36,12 @@ export interface ScriptedPiRoundData {
   toolCalls?: ScriptedPiToolCall[];
   /** 纯文本收尾（stopReason=stop），不再续轮。 */
   finalText?: string;
+  /**
+   * 缝③ scripted 形态：一次成段返回——全文只出现在 done 消息里（零
+   * text_delta，stopReason=stop），模拟不发增量的提供方。与 deltas/finalText
+   * 互斥（本字段优先，出现即整轮收尾）。
+   */
+  doneOnlyText?: string;
   /** 推完 deltas 后挂起，直到运行信号 abort，再以 stopReason=aborted 收尾（取消竞态）。 */
   holdUntilAbort?: boolean;
   /** 以 provider 错误收尾（模型调用失败路径），值为错误文案。 */
@@ -107,6 +113,16 @@ export function scriptedPiModel(rounds: ScriptedPiRound[]): StreamFn {
       }
       const partial = basePartial('pending');
       stream.push({ type: 'start', partial });
+      // 缝③ scripted 形态：一次成段——全文只进 done 消息，零 text_delta。
+      if (round.doneOnlyText !== undefined) {
+        partial.content = [{ type: 'text', text: round.doneOnlyText }];
+        stream.push({
+          type: 'done',
+          reason: 'stop',
+          message: { ...partial, stopReason: 'stop' as const }
+        });
+        return;
+      }
       let text = '';
       const deltas = [...(round.deltas ?? [])];
       if (round.finalText !== undefined) deltas.push(round.finalText);

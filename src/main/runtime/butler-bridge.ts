@@ -81,3 +81,36 @@ export function registerButlerTools(gateway: ToolGateway, options: ButlerBridgeO
     gateway.register(buildCommitPlanTool());
   }
 }
+
+/**
+ * 启动断言（P3 装配批，fail-fast）：网关注册表的确认级（confirm）工具集合
+ * 必须与 `BUTLER_TOOL_LEVELS` 完全一致——这是 RunController 完成规则（缝①
+ * 「有确认级提交 + 其后有回执 → completed」）与引擎 writeTools 默认值读取的
+ * 同一张期望表。缺一个 confirm 工具，写入提交就会被控制器静默当作普通提交
+ * （完成判定失效）；标级漂移则审批被旁路。任何不一致 → 抛错拒绝启动，不静默
+ * 降级。装配处（assembly.ts）在注册后立即调用本断言。
+ */
+export function assertButlerConfirmTools(gateway: ToolGateway): void {
+  const problems: string[] = [];
+  for (const [name, level] of Object.entries(BUTLER_TOOL_LEVELS)) {
+    if (level !== 'confirm') continue;
+    const entry = gateway.entry(name);
+    if (!entry) problems.push(`${name} 未注册`);
+    else if (entry.level !== 'confirm') problems.push(`${name} 标级为 ${entry.level}`);
+  }
+  const rosterConfirm = new Set(
+    Object.entries(BUTLER_TOOL_LEVELS)
+      .filter(([, level]) => level === 'confirm')
+      .map(([name]) => name)
+  );
+  for (const name of gateway.names()) {
+    if (gateway.entry(name)?.level === 'confirm' && !rosterConfirm.has(name)) {
+      problems.push(`${name} 是注册表里的确认级工具但不在标级表`);
+    }
+  }
+  if (problems.length > 0) {
+    throw new Error(
+      `装配断言失败：确认级工具与网关注册表不一致（${problems.join('；')}）——拒绝启动，不静默降级。`
+    );
+  }
+}

@@ -483,3 +483,53 @@ test('缝①负例：确认级成功但关闭回执映射（writeTools 空）→
     await dispose();
   }
 });
+
+test('缝③：一次成段返回（done 消息独带全文、零 text_delta）→ 补发一条 text.delta，正文不丢', async () => {
+  const stub = stubWorkspace();
+  const gateway = new ToolGateway();
+  registerButlerTools(gateway);
+  // doneOnlyText：脚本化「不发任何增量的提供方」——全文只进 done 消息。
+  const engine = makeEngine(gateway, [{ doneOnlyText: '一次成段的完整回复。' }]);
+  const { controller, dispose } = await makeHarness([engine]);
+  try {
+    const collector = collect(controller, 'run-1');
+    const handle = controller.start(makeRequest(), { butler: butlerContext(stub.service) });
+    expect(await handle.done).toBe('completed');
+    expect(collector.events.map((event) => event.type)).toEqual([
+      'run.started',
+      'text.delta', // 缝③补发的一条全文
+      'run.finished'
+    ]);
+    expect(collector.events[1]).toMatchObject({ type: 'text.delta', text: '一次成段的完整回复。' });
+    expect(collector.events[1]?.seq).toBe(2);
+  } finally {
+    await dispose();
+  }
+});
+
+test('缝③：已发过 delta → 终局消息的正文不补发不重复', async () => {
+  const stub = stubWorkspace();
+  const gateway = new ToolGateway();
+  registerButlerTools(gateway);
+  // 一轮两个增量（delta 已发）；终局 done 消息自带合并正文，但全程已发过
+  // delta → 不再补发。
+  const engine = makeEngine(gateway, [{ deltas: ['流式增量。'], finalText: '流式增量。（收尾）' }]);
+  const { controller, dispose } = await makeHarness([engine]);
+  try {
+    const collector = collect(controller, 'run-1');
+    const handle = controller.start(makeRequest(), { butler: butlerContext(stub.service) });
+    expect(await handle.done).toBe('completed');
+    expect(collector.events.map((event) => event.type)).toEqual([
+      'run.started',
+      'text.delta',
+      'text.delta', // 一轮两个增量，均走流式映射
+      'run.finished'
+    ]);
+    const deltas = collector.events
+      .filter((event) => event.type === 'text.delta')
+      .map((event) => (event as { text: string }).text);
+    expect(deltas).toEqual(['流式增量。', '流式增量。（收尾）']); // 恰为两轮增量，无补发
+  } finally {
+    await dispose();
+  }
+});

@@ -19,7 +19,12 @@ import { test, expect } from 'vitest';
  */
 
 const SOURCE_ROOT = fileURLToPath(new URL('../../../src', import.meta.url));
-const ALLOWED_PREFIX = join('src', 'main', 'runtime', 'engine-pi') + sep;
+/**
+ * 零泄漏白名单前缀（P3 装配批接上：先前本常量是 join+sep 形态且无消费者——
+ * 断言里各写了一份 `/` 归一后的字面量）。scan() 产出的 hit.file 一律是
+ * `/` 分隔的 src 相对路径，前缀必须用同一形态。
+ */
+const ALLOWED_PREFIX = 'main/runtime/engine-pi/';
 
 /** spec 的两条模式，逐字保留（`from 'pi` / `from "pi` 两种引号都算）。 */
 const SPEC_PATTERNS: RegExp[] = [/pi-agent-core/, /from\s+['"]pi/];
@@ -67,7 +72,7 @@ function scan(): Hit[] {
 
 test('验收 14：Pi 包引用只出现在 src/main/runtime/engine-pi/ 内', () => {
   const hits = scan();
-  const violations = hits.filter((hit) => !hit.file.startsWith('main/runtime/engine-pi/'));
+  const violations = hits.filter((hit) => !hit.file.startsWith(ALLOWED_PREFIX));
   expect(
     violations,
     `Pi 引用泄漏到 engine-pi/ 之外（renderer 与 vault 序列化代码必须零命中）：\n${violations
@@ -77,7 +82,7 @@ test('验收 14：Pi 包引用只出现在 src/main/runtime/engine-pi/ 内', () 
 });
 
 test('验收 14（防退化）：engine-pi/ 内确实存在 Pi 引用（断言不是空转）', () => {
-  const hits = scan().filter((hit) => hit.file.startsWith('main/runtime/engine-pi/'));
+  const hits = scan().filter((hit) => hit.file.startsWith(ALLOWED_PREFIX));
   expect(hits.length).toBeGreaterThan(0);
 });
 

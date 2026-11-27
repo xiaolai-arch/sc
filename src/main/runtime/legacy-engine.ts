@@ -1,6 +1,6 @@
 import type { ButlerStreamEvent } from '../../shared/butler-stream';
 import type { ButlerService } from '../../shared/workspace';
-import type { EnginePort, RunContext } from './contracts';
+import { doneOnlyCatchUp, type EnginePort, type RunContext } from './contracts';
 import { BUTLER_TOOL_LEVELS } from './butler-bridge';
 
 /**
@@ -45,7 +45,7 @@ import { BUTLER_TOOL_LEVELS } from './butler-bridge';
  * | `tool-result`（ok=false） | `tool.failed`（reason=`failed`） |
  * | `error` | 不映射为事件；结束时引擎抛错 → 运行「失败」 |
  * | `done`（canceled） | 不映射；取消终态由 `RunController.cancel` 合成 `run.finished` |
- * | `done`（其余） | 不映射；`run.finished` 由控制器合成 |
+ * | `done`（其余） | 缝③：全程零 delta 且 `done.text` 非空 → 先补发一条 `text.delta`（全文一次成段）；`run.finished` 仍由控制器合成 |
  * | `references` / `reasoning` / `retry` / `tool-start` | v1 契约无对应类型，不映射（报告写明） |
  */
 
@@ -82,11 +82,14 @@ export class LegacyEngine implements EnginePort {
     let lastWriteFailure: string | undefined;
     /** Legacy 循环的 `error` 事件（模型连接失败等）：结束时抛出 → 运行失败。 */
     let modelError: string | undefined;
+    /** 本会话已发出的 `text.delta` 条数（缝③补发判定：补发本身也计数）。 */
+    let textDeltaCount = 0;
 
     const onEvent = (event: ButlerStreamEvent): void => {
       switch (event.type) {
         case 'text':
         case 'narration':
+          textDeltaCount += 1;
           context.emit({ type: 'text.delta', text: event.text });
           return;
         case 'tool-result': {
@@ -122,8 +125,23 @@ export class LegacyEngine implements EnginePort {
         case 'error':
           modelError = event.message;
           return;
+        case 'done': {
+          // 缝③：正文只在 done 里携带而全程未流式（工具步数兜底模板等路径
+          // 从不发 text 事件）→ 先补发一条全文 delta 再交控制器收尾；已流式
+          // 发过则不补（不重复）。canceled 的 done 不映射（取消终态由
+          // RunController 合成）。error 路径的 done 文本是循环已持久化的兜底
+          // 回复，同样补发——终态仍由 modelError 的抛错判为失败。
+          if (!event.canceled) {
+            const catchUp = doneOnlyCatchUp(textDeltaCount, event.text);
+            if (catchUp !== null) {
+              textDeltaCount += 1;
+              context.emit({ type: 'text.delta', text: catchUp });
+            }
+          }
+          return;
+        }
         default:
-          // references / reasoning / retry / tool-start / done：v1 不映射。
+          // references / reasoning / retry / tool-start：v1 不映射。
           return;
       }
     };
