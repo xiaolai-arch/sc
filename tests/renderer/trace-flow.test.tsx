@@ -217,6 +217,36 @@ test('shows where the planned daily minutes came from on the plan row', () => {
   expect(screen.getByText('每天可用 90 分钟 · 本次指定')).toBeInTheDocument();
 });
 
+test('expands the week-availability row to its confirmation', async () => {
+  // item 66 P2-5: the Chinese-labeled row is expandable like plan_workspace's
+  // and the confirmation stays reachable — as the collapsed summary first,
+  // then as the full detail panel once expanded.
+  const user = userEvent.setup();
+  const { container } = render(
+    <TraceFlow
+      items={[
+        tool(
+          'w1',
+          '记录周可用性',
+          'done',
+          '已记下：下周 周三 会特别满，那几天我只给你排一件小事。'
+        )
+      ]}
+    />
+  );
+
+  const row = screen.getByRole('button', { name: /记录周可用性/ });
+  expect(row).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.getByText(/已记下：下周 周三 会特别满/)).toBeInTheDocument();
+  expect(container.querySelector('pre')).toBeNull();
+
+  await user.click(row);
+  expect(row).toHaveAttribute('aria-expanded', 'true');
+  expect(container.querySelector('pre')).toHaveTextContent(
+    '已记下：下周 周三 会特别满，那几天我只给你排一件小事。'
+  );
+});
+
 test('maps persisted steps to tool rows', () => {
   expect(
     stepsToTrace([

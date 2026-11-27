@@ -161,6 +161,63 @@ test('deduplicates the same trigger and respects the proactive budget', async ()
   }
 });
 
+test('a landed check-in fires onConversationChanged; a skipped one stays silent', async () => {
+  // item 66 P2-6: the sidebar can only know about a main-process conversation
+  // through this callback. It fires with the conversation id once the message
+  // has durably landed, and never for a check that was skipped.
+  const { dir, value } = await store();
+  try {
+    const changed: string[] = [];
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () => settings(),
+      onConversationChanged: (id) => {
+        changed.push(id);
+      },
+      now: () => NOW
+    });
+
+    const notification = await service.check('morning', '2026-11-01');
+    const conversationId = notification?.conversationId;
+    expect(typeof conversationId).toBe('string');
+    expect(changed).toEqual([conversationId]);
+    // The message is on disk before the callback fires.
+    const conversation = await value.get(conversationId!);
+    expect(conversation?.messages).toHaveLength(1);
+
+    // A duplicate trigger consumes itself silently — nothing changed.
+    expect(await service.check('morning', '2026-11-01')).toBeNull();
+    expect(changed).toHaveLength(1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a throwing onConversationChanged never fails the landed check', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () => settings(),
+      onConversationChanged: () => {
+        throw new Error('bridge gone');
+      },
+      now: () => NOW
+    });
+
+    const notification = await service.check('morning', '2026-11-01');
+    expect(notification).not.toBeNull();
+    const conversation = await value.get(notification!.conversationId!);
+    expect(conversation?.messages).toHaveLength(1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('stops proactive checks once the daily token budget is used', async () => {
   const { dir, value } = await store();
   try {

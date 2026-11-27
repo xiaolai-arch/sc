@@ -5,6 +5,7 @@ import {
   DEFAULT_AUTO_INTERVAL_DAYS,
   createAutoBackupRunner,
   describeAutoBackupError,
+  inspectAutoBackupDirectory,
   isAutoBackupDue
 } from '../../src/main/backup-auto';
 import { createDefaultAppState } from '../../src/main/context';
@@ -396,3 +397,37 @@ test('a stuck folder: the backup still succeeds and the next success retries the
   }
 });
 
+
+// --- item 66 P2-2: the settings card's directory stat -------------------------
+
+test('inspectAutoBackupDirectory reads existence and type without throwing', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'asaki-backup-stat-'));
+  try {
+    await writeFile(join(dir, 'a-file'), 'x');
+
+    expect(await inspectAutoBackupDirectory(dir)).toEqual({
+      exists: true,
+      isDirectory: true
+    });
+    // The destination was replaced by a file — the state the warning names.
+    expect(await inspectAutoBackupDirectory(join(dir, 'a-file'))).toEqual({
+      exists: true,
+      isDirectory: false
+    });
+    expect(await inspectAutoBackupDirectory(join(dir, 'missing'))).toEqual({
+      exists: false,
+      isDirectory: false
+    });
+    // A relative or empty path is invalid by definition, never a crash.
+    expect(await inspectAutoBackupDirectory('backups')).toEqual({
+      exists: false,
+      isDirectory: false
+    });
+    expect(await inspectAutoBackupDirectory('')).toEqual({
+      exists: false,
+      isDirectory: false
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

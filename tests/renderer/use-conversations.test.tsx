@@ -143,3 +143,49 @@ test('tray/notification opens are surfaced for the renderer to switch pages', as
   });
   expect(result.current.active?.id).toBe('check-in-1');
 });
+
+test('a main-process conversation change refreshes the sidebar summaries', async () => {
+  // item 66 P2-6: a proactive check-in the main process created must reach
+  // the sidebar. The hook re-reads the summaries on the `changed` event and
+  // never touches the open conversation.
+  let changedListener: ((id: string) => void) | undefined;
+  let unsubscribed = false;
+  const summaries = [
+    {
+      id: 'check-in-1',
+      title: '今天的检查',
+      kind: 'check-in' as const,
+      updatedAt: '2026-11-01T08:05:00.000Z',
+      preview: '早上好'
+    }
+  ];
+  const listConversations = vi
+    .fn<() => Promise<unknown>>()
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce(summaries);
+  window.studyCoach = {
+    listConversations,
+    getConversation: async (id: string) => conversation(id),
+    onConversationOpened: () => () => undefined,
+    onConversationChanged: (listener: (id: string) => void) => {
+      changedListener = listener;
+      return () => {
+        unsubscribed = true;
+      };
+    }
+  } as never;
+
+  const { result } = renderHook(() => useConversations());
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(result.current.summaries).toEqual([]);
+
+  act(() => changedListener?.('check-in-1'));
+
+  await waitFor(() => expect(result.current.summaries).toHaveLength(1));
+  expect(result.current.summaries[0]?.id).toBe('check-in-1');
+  expect(listConversations).toHaveBeenCalledTimes(2);
+  // The open conversation is left alone — a refresh never steals focus.
+  expect(result.current.active).toBeNull();
+  // The subscription follows the component lifecycle.
+  expect(unsubscribed).toBe(false);
+});

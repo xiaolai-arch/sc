@@ -658,6 +658,61 @@ describe('ButlerServiceImpl tool calls', () => {
     expect(persisted?.steps?.[0]).not.toHaveProperty('detail');
   });
 
+  test('persists the week-availability step with the Chinese label and confirmation', async () => {
+    // item 66 P2-5: the row shows 「记录周可用性」 (never the raw name) and is
+    // expandable because the deterministic confirmation lands as the detail —
+    // the same mechanism plan_workspace's budget line uses.
+    const client = new FakeModelClient([
+      {
+        text: '',
+        usage: { inputTokens: 2, outputTokens: 1 },
+        toolCalls: [
+          {
+            id: 'c1',
+            name: 'set_week_availability',
+            arguments: { weekStart: '2026-11-02', busyDays: [3] }
+          }
+        ]
+      },
+      { text: '好的，周三给你留一件小事。', usage: { inputTokens: 3, outputTokens: 1 } }
+    ]);
+    const { store } = fakeConversationStore({
+      id: 'c1',
+      title: '一周安排',
+      kind: 'chat',
+      workspaceId: 'ws-exam',
+      createdAt: NOW.toISOString(),
+      updatedAt: NOW.toISOString(),
+      messages: []
+    });
+    const weekAvailability = {
+      set: async (input: { weekStart: string; busyDates: string[] }) => ({
+        id: 'wa-1',
+        weekStart: input.weekStart,
+        busyDates: input.busyDates,
+        createdAt: NOW.toISOString()
+      })
+    };
+
+    await makeService(client, new MemoryWorkspaceService(), {
+      conversationStore: store,
+      weekAvailabilityService: weekAvailability as never
+    }).send({ conversationId: 'c1', message: '下周三我会特别忙' });
+
+    const appendMessage = store.appendMessage as unknown as {
+      mock: { calls: Array<[string, ConversationMessage]> };
+    };
+    const persisted = appendMessage.mock.calls.at(-1)?.[1];
+    expect(persisted?.steps).toEqual([
+      expect.objectContaining({
+        name: 'set_week_availability',
+        label: '记录周可用性',
+        status: 'done',
+        detail: '已记下：下周 周三 会特别满，那几天我只给你排一件小事。'
+      })
+    ]);
+  });
+
   test('write_note defaults to the selected workspace and derives the subject', async () => {
     const workspace = new MemoryWorkspaceService();
     const client = new FakeModelClient([

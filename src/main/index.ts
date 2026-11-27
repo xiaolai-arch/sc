@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, screen, shell } from 'electron';
-import { join } from 'node:path';
+import { join, isAbsolute } from 'node:path';
 import { handleExportBackup, handleRestoreBackup } from './backup';
+import { inspectAutoBackupDirectory } from './backup-auto';
 import { recordBackupFailure, recordBackupSuccess } from './backup-state';
 import { createAppContext } from './context';
 import { ConversationRunStore } from './butler/conversation-runs';
@@ -189,6 +190,15 @@ app.whenReady().then(async () => {
     defaultVaultPath: join(app.getPath('documents'), DEFAULT_VAULT_DIRECTORY),
     onSettingsUpdated: (next) => {
       applyLaunchAtLogin(app, next.launchAtLogin);
+    },
+    // A check-in conversation the main process just written must reach the
+    // renderer's sidebar; this is the `changed` channel's only emitter.
+    onConversationChanged: (conversationId) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) {
+          window.webContents.send(CONVERSATION_EVENT_CHANNELS.changed, { conversationId });
+        }
+      }
     }
   });
   // Re-apply the stored preference so a state file edited outside the app (or
@@ -305,6 +315,16 @@ app.whenReady().then(async () => {
     } catch (error) {
       throw new Error(serializeError(error).message);
     }
+  });
+
+  // The settings card's in-app directory-validity line (item 66 P2-2): a
+  // request/response stat, not a notification — item 52 ruled out new
+  // notification channels, and this adds none.
+  ipcMain.handle(APP_IPC_CHANNELS.statBackupDirectory, async (_event, value: unknown) => {
+    if (typeof value !== 'string' || value.trim().length === 0 || !isAbsolute(value) || value.length > 4096) {
+      throw new Error('路径无效。');
+    }
+    return inspectAutoBackupDirectory(value);
   });
 
   ipcMain.handle(APP_IPC_CHANNELS.pickVideoFiles, async () => {

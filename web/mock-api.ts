@@ -2579,6 +2579,10 @@ export function createMockApi(
       return () => undefined;
     },
 
+    onConversationChanged() {
+      return () => undefined;
+    },
+
     onQuickCapture() {
       return () => undefined;
     },

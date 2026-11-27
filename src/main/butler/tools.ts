@@ -438,7 +438,11 @@ export function createButlerTools(): ButlerToolDefinition[] {
               title: task.title,
               subject: task.subject,
               durationMin: task.durationMin,
-              acceptance: task.acceptance
+              acceptance: task.acceptance,
+              // The plan's own day is the task's due date. Without it the
+              // workspace service falls back to today, so a future-dated plan
+              // silently landed its tasks in tasks/<today>.md.
+              due: plan.date
             })
           );
         }

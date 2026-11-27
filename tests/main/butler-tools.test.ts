@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -7,6 +7,7 @@ import {
   ToolInputError
 } from '../../src/main/butler/tools';
 import { createWorkspaceService } from '../../src/main/workspace/create-workspace-service';
+import { parseTaskFile } from '../../src/main/workspace/records/tasks';
 import type { KnowledgeService, KnowledgeTopic } from '../../src/shared/knowledge';
 import type { ProfileService } from '../../src/shared/profile';
 import type {
@@ -645,6 +646,107 @@ test('plans a workspace and persists the plan tasks', async () => {
       tasks: [{ title: '极限 10 题', workspaceId: 'ws-exam' }]
     }
   });
+});
+
+test('plan_workspace dues its tasks to the plan day, including a future one', async () => {
+  // item 66 P1-1: a plan asked for a future day must land its tasks on that
+  // day. The createTask call carries `due` (like create_task does), so the
+  // workspace service writes tasks/<plan.date>.md instead of falling back to
+  // today. The same-day plan passes the same shape, so its behavior is
+  // unchanged.
+  const createTask = vi.fn(async (input: {
+    workspaceId: string;
+    title: string;
+    due?: string;
+  }) => ({ id: 'task-1', ...input, status: 'pending' as const }));
+  const planner = {
+    plan: async (input: { workspaceId: string; date?: string }) => ({
+      workspaceId: input.workspaceId,
+      date: input.date ?? '2026-11-22',
+      generatedBy: 'template' as const,
+      tasks: [
+        { title: '极限 10 题', subject: '数学', durationMin: 45, acceptance: '正确率 80%' }
+      ]
+    })
+  };
+  const toolContext = (now: () => Date) => ({
+    workspace: { ...workspaceService, createTask } as unknown as WorkspaceService,
+    workspaceId: 'ws-exam',
+    planner: planner as never,
+    now
+  });
+
+  await executeButlerTool(
+    { id: 'c7f', name: 'plan_workspace', arguments: { date: '2026-12-01' } },
+    tools,
+    toolContext(() => new Date('2026-11-22T09:00:00'))
+  );
+  expect(createTask).toHaveBeenCalledWith(
+    expect.objectContaining({ workspaceId: 'ws-exam', due: '2026-12-01' })
+  );
+
+  createTask.mockClear();
+  await executeButlerTool(
+    { id: 'c7t', name: 'plan_workspace', arguments: {} },
+    tools,
+    toolContext(() => new Date('2026-11-22T09:00:00'))
+  );
+  // Same-day plan: the due equals today, which is exactly what the service's
+  // fallback used to produce — behavior unchanged.
+  expect(createTask).toHaveBeenCalledWith(
+    expect.objectContaining({ workspaceId: 'ws-exam', due: '2026-11-22' })
+  );
+});
+
+test('plan_workspace lands a future-dated plan in tasks/<plan.date>.md', async () => {
+  // End to end over the real workspace service: the file the plan day names
+  // exists and the record carries the due, while today's file stays untouched.
+  const dir = await mkdtemp(join(tmpdir(), 'asaki-butler-plan-due-'));
+  try {
+    const service = createWorkspaceService(dir, { seed: false });
+    const workspace = await service.createWorkspace({
+      name: '考研',
+      kind: 'exam',
+      goal: '上岸',
+      description: ''
+    });
+    const planner = {
+      plan: async (input: { workspaceId: string; date?: string }) => ({
+        workspaceId: input.workspaceId,
+        date: input.date ?? '2026-11-22',
+        generatedBy: 'template' as const,
+        tasks: [
+          { title: '极限 10 题', subject: '数学', durationMin: 45, acceptance: '正确率 80%' }
+        ]
+      })
+    };
+    const result = await executeButlerTool(
+      { id: 'c7r', name: 'plan_workspace', arguments: { date: '2026-11-30' } },
+      tools,
+      {
+        workspace: service,
+        workspaceId: workspace.id,
+        planner: planner as never,
+        now: () => new Date('2026-11-22T09:00:00')
+      }
+    );
+    expect(result.ok).toBe(true);
+
+    const future = parseTaskFile(
+      await readFile(
+        join(dir, 'workspaces', workspace.id, 'tasks', '2026-11-30.md'),
+        'utf8'
+      )
+    );
+    expect(future).toHaveLength(1);
+    expect(future[0]).toMatchObject({ title: '极限 10 题', due: '2026-11-30' });
+    // The plan day owns the tasks; today stays empty.
+    await expect(
+      readFile(join(dir, 'workspaces', workspace.id, 'tasks', '2026-11-22.md'), 'utf8')
+    ).rejects.toThrow();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('creates a long plan through the long plan service', async () => {

@@ -665,6 +665,13 @@ export class ButlerServiceImpl implements ButlerService {
       const detail = availableMinutesDetailFromToolResult(result.content);
       if (detail) step.detail = detail;
     }
+    // A recorded week carries a deterministic confirmation (which weekdays
+    // became busy); quoting it as the step detail makes the tool row
+    // expandable, the same way plan_workspace's budget line is.
+    if (toolName === 'set_week_availability') {
+      const detail = messageDetailFromToolResult(result.content);
+      if (detail) step.detail = detail;
+    }
   }
 
   private async linkCreatedWorkspace(
@@ -890,6 +897,26 @@ function availableMinutesDetailFromToolResult(content: string): string | undefin
         ? source
         : undefined
     );
+  } catch {
+    return undefined;
+  }
+}
+
+/** Reads the human confirmation a tool result carries, for the step's detail. */
+function messageDetailFromToolResult(content: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(content);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
+    const record = parsed as Record<string, unknown>;
+    const result =
+      typeof record['result'] === 'object' &&
+      record['result'] !== null &&
+      !Array.isArray(record['result'])
+        ? (record['result'] as Record<string, unknown>)
+        : undefined;
+    if (result === undefined) return undefined;
+    const message = result['message'];
+    return typeof message === 'string' && message.trim() !== '' ? message : undefined;
   } catch {
     return undefined;
   }

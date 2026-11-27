@@ -25,7 +25,9 @@ test('locks the app IPC channels', () => {
     pickOutputDirectory: 'study-coach:app:pick-output-directory',
     openPath: 'study-coach:app:open-path',
     // iter31 P1: appended last so every existing channel keeps its position.
-    chooseBackupDirectory: 'study-coach:app:choose-backup-directory'
+    chooseBackupDirectory: 'study-coach:app:choose-backup-directory',
+    // item 66 P2-2: the settings card's directory-validity stat.
+    statBackupDirectory: 'study-coach:app:stat-backup-directory'
   });
 });
 
@@ -80,6 +82,43 @@ test('bridge invokes choose backup directory and passes null through', async () 
 
   const canceling = createStudyCoachBridge(async () => null);
   expect(await canceling.chooseBackupDirectory?.()).toBeNull();
+});
+
+test('bridge stats a backup directory with the path as the only argument', async () => {
+  const calls: Array<{ channel: string; args: unknown[] }> = [];
+  const bridge = createStudyCoachBridge(async (channel, ...args) => {
+    calls.push({ channel, args });
+    return { exists: false, isDirectory: false };
+  });
+
+  expect(await bridge.statBackupDirectory?.('D:\\gone')).toEqual({
+    exists: false,
+    isDirectory: false
+  });
+  expect(calls).toEqual([
+    { channel: APP_IPC_CHANNELS.statBackupDirectory, args: ['D:\\gone'] }
+  ]);
+});
+
+test('bridge forwards the conversation-changed event and unsubscribes', () => {
+  const listeners = new Map<string, (payload: unknown) => void>();
+  const unsubscribed: string[] = [];
+  const subscribe: Subscribe = (channel, listener) => {
+    listeners.set(channel, listener);
+    return () => unsubscribed.push(channel);
+  };
+  const bridge: StudyCoachApi = createStudyCoachBridge(async () => null, subscribe);
+  const received: string[] = [];
+
+  // item 66 P2-6: the sidebar refresh rides the `changed` channel; only a
+  // well-formed { conversationId } payload reaches the listener.
+  const unsubscribe = bridge.onConversationChanged((id) => received.push(id));
+  listeners.get('study-coach:conversations:changed')?.({ conversationId: 'c-check-in' });
+  listeners.get('study-coach:conversations:changed')?.({ unrelated: true });
+  expect(received).toEqual(['c-check-in']);
+
+  unsubscribe();
+  expect(unsubscribed).toEqual(['study-coach:conversations:changed']);
 });
 
 test('bridge subscribes to quick capture events and unsubscribes', () => {

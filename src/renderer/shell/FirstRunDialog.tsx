@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  BACKUP_CARRIES_NOUNS,
   backupCopiedParts,
   MIGRATION_STEP_LINE_SETTINGS_ADOPTED,
   MIGRATION_STEP_LINE_SETTINGS_UNCHANGED
@@ -21,11 +22,11 @@ const KIND_OPTIONS: Array<{ value: WorkspaceKind; label: string }> = [
 ];
 
 /**
- * 首启恢复确认语，与设置页那句「会覆盖当前项目、记录和对话」分开写：首启没有
- * 可覆盖的东西，确认语只陈述事实，不吓唬换机用户（spec 增补节原文）。
+ * 首启恢复确认语，与设置页那句「会覆盖当前项目、记录、对话和用量」分开写：首启
+ * 没有可覆盖的东西，确认语只陈述事实，不吓唬换机用户（spec 增补节原文）。名词
+ * 口径引用 shared 常量，与设置页/换机三行同源（item 66 P2-1）。
  */
-const FIRST_RUN_RESTORE_CONFIRM =
-  '选择备份文件夹后，阿咲会把里面的项目、记录和对话恢复到这台电脑；备份里带设置时会一起还原（API Key 不会）。';
+const FIRST_RUN_RESTORE_CONFIRM = `选择备份文件夹后，阿咲会把里面的${BACKUP_CARRIES_NOUNS}恢复到这台电脑；备份里带设置时会一起还原（API Key 不会）。`;
 
 type FirstRunDialogProps = {
   open: boolean;
