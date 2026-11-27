@@ -1,13 +1,71 @@
 import { useState } from 'react';
 import type { ReviewRecord } from '../../shared/ipc';
-import type { Workspace } from '../../shared/workspace';
+import {
+  examWindowDaysLeft,
+  type Workspace
+} from '../../shared/workspace';
+import { countdownWorkspace } from './TodayOverview';
 import { cn } from '../ui/cn';
+
+/**
+ * The opening message a review always starts with — byte-for-byte the baseline
+ * unless the pre-exam one-time writing ask fires on top of it.
+ */
+export const REVIEW_OPENING_PROMPT = '我们开始今天复盘';
+
+/**
+ * The Ramirez-style pre-exam writing sentence, appended to the opening once
+ * per exam target date. It is not a field and not an analysis outlet: the
+ * sentence simply rides inside the same opening message, and whatever the
+ * user writes flows into the review body through the existing save_review
+ * pipeline, untouched.
+ */
+export const EXAM_WRITING_APPENDIX =
+  '先花两分钟写下你现在最担心考试的一件事，写完我们继续复盘。';
+
+/**
+ * Where the "already asked for this exam" fact lives. The shell passes the
+ * localStorage-backed store from Workspace.tsx (the same lightweight-prefs
+ * family as the one-thing mode and the quiz-offer cooldown); tests inject a
+ * fake, and callers without a store simply keep the baseline opening.
+ */
+export type ExamWritingStore = {
+  /** The local day the ask was last sent for this target date, or null. */
+  load: (targetDate: string) => string | null;
+  /** Records the send date for this target date. */
+  save: (targetDate: string, sentOn: string) => void;
+};
+
+/**
+ * The message the review buttons send. Inside a pre-exam window the very
+ * first ask for that target date appends the writing sentence; every later
+ * click (the marker is already set) and everything outside a window — a
+ * non-exam project, a countdown past 14 days, a passed target date — stays
+ * byte-identical to the baseline opening.
+ */
+export function reviewOpeningPrompt(input: {
+  /** The project the review is filed under; null means no project in play. */
+  workspace: Pick<Workspace, 'kind' | 'targetDate'> | null;
+  today: string;
+  /** Stored send date for the effective target date; null when never asked. */
+  askedOn: string | null;
+}): string {
+  if (input.askedOn !== null) return REVIEW_OPENING_PROMPT;
+  if (examWindowDaysLeft(input.workspace, input.today) === null) {
+    return REVIEW_OPENING_PROMPT;
+  }
+  return `${REVIEW_OPENING_PROMPT} ${EXAM_WRITING_APPENDIX}`;
+}
 
 type ReviewRecordsProps = {
   workspaces: Workspace[];
   /** Current filter; null means every workspace plus global reviews. */
   workspace: Workspace | null;
   reviews: ReviewRecord[];
+  /** The shell's local day; omitted keeps the baseline opening (feature off). */
+  today?: string;
+  /** Persistence for the one-time exam writing ask; only injected it is on. */
+  examWritingStore?: ExamWritingStore;
   onPrompt: (prompt: string) => void;
 };
 
@@ -22,6 +80,8 @@ export function ReviewRecords({
   workspaces,
   workspace,
   reviews,
+  today,
+  examWritingStore,
   onPrompt
 }: ReviewRecordsProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -32,6 +92,40 @@ export function ReviewRecords({
   const toggle = (key: string) => {
     setExpanded((current) => ({ ...current, [key]: !current[key] }));
   };
+
+  // The one-time pre-exam writing ask: without the injected store (or the
+  // shell's local day) the feature is simply off and both buttons send the
+  // baseline opening. With it, the review counts as being filed under the
+  // filtered project — or, on 全部项目, under the countdown project the Today
+  // page is already tracking. Send-and-mark: the marker is written for that
+  // target date exactly when the appended message goes out, so the same exam
+  // is asked about once; clearing the store just asks again.
+  function startReview() {
+    if (today === undefined || examWritingStore === undefined) {
+      onPrompt(REVIEW_OPENING_PROMPT);
+      return;
+    }
+    const effective = workspace ?? countdownWorkspace(workspaces, today);
+    const targetDate = effective?.targetDate;
+    if (targetDate === undefined || examWindowDaysLeft(effective, today) === null) {
+      onPrompt(REVIEW_OPENING_PROMPT);
+      return;
+    }
+    let askedOn: string | null = null;
+    try {
+      askedOn = examWritingStore.load(targetDate);
+    } catch {
+      askedOn = null;
+    }
+    if (askedOn === null) {
+      try {
+        examWritingStore.save(targetDate, today);
+      } catch {
+        // Storage unavailable; the worst case is the ask appearing again.
+      }
+    }
+    onPrompt(reviewOpeningPrompt({ workspace: effective, today, askedOn }));
+  }
 
   if (filteredReviews.length === 0) {
     const hasOtherWorkspaces = Boolean(workspace) && reviews.length > 0;
@@ -49,7 +143,7 @@ export function ReviewRecords({
         ) : null}
         <button
           type="button"
-          onClick={() => onPrompt('我们开始今天复盘')}
+          onClick={startReview}
           className={cn('mt-3', linkButtonClass)}
         >
           开始今天复盘
@@ -139,7 +233,7 @@ export function ReviewRecords({
       </div>
       <button
         type="button"
-        onClick={() => onPrompt('我们开始今天复盘')}
+        onClick={startReview}
         className={cn('mt-3', linkButtonClass)}
       >
         开始复盘

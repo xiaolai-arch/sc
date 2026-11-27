@@ -60,6 +60,7 @@ import { QuickCaptureDialog } from './QuickCaptureDialog';
 import { NotificationCenter } from './NotificationCenter';
 import { RemindersPage } from './RemindersPage';
 import { ReviewPage } from './ReviewPage';
+import type { ExamWritingStore } from './ReviewRecords';
 import { SchedulePage } from './SchedulePage';
 import {
   conversationRuns,
@@ -173,6 +174,34 @@ function recordOneThingPreference(preference: OneThingPreference): void {
 const oneThingStore: OneThingStore = {
   load: readOneThingPreference,
   save: recordOneThingPreference
+};
+
+/**
+ * The one-time pre-exam writing ask lives beside the quiz-offer cooldown and
+ * the one-thing mode in the same lightweight-prefs store: the fact "already
+ * asked for this exam" is a renderer-side fact, and extending AppSettings
+ * would change the shared settings/IPC contract for a purely local preference.
+ * One key per exam target date (`asaki:exam-writing-asked:<targetDate>`),
+ * value = the local day the ask was sent; clearing browser data simply asks
+ * again. Storage failures degrade to "ask again next launch".
+ */
+const EXAM_WRITING_ASKED_PREFIX = 'asaki:exam-writing-asked:';
+
+const examWritingStore: ExamWritingStore = {
+  load: (targetDate) => {
+    try {
+      return window.localStorage.getItem(`${EXAM_WRITING_ASKED_PREFIX}${targetDate}`);
+    } catch {
+      return null;
+    }
+  },
+  save: (targetDate, sentOn) => {
+    try {
+      window.localStorage.setItem(`${EXAM_WRITING_ASKED_PREFIX}${targetDate}`, sentOn);
+    } catch {
+      // Storage unavailable; the worst case is the ask appearing again.
+    }
+  }
 };
 
 function WorkspaceStatus({
@@ -1837,6 +1866,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
               knowledgeTopics={knowledgeTopics}
               onOpenSidebar={openSidebar}
               onPrompt={promptButler}
+              examWritingStore={examWritingStore}
               onSubmitReview={async (input) => {
                 const api = window.studyCoach;
                 if (!api) throw new Error('数据服务不可用，请重启应用后重试。');
