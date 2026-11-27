@@ -2,6 +2,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
+  BACKUP_CARRIES_NOUNS,
   MIGRATION_STEP_LINE_SETTINGS_ADOPTED,
   MIGRATION_STEP_LINE_SETTINGS_UNCHANGED
 } from '../../src/shared/backup-copy';
@@ -9,9 +10,12 @@ import { FirstRunDialog } from '../../src/renderer/shell/FirstRunDialog';
 import { Workspace } from '../../src/renderer/shell/Workspace';
 import { createMockApi } from '../../web/mock-api';
 
-/** The spec's 首启确认语, quoted verbatim. */
-const FIRST_RUN_CONFIRM =
-  '选择备份文件夹后，阿咲会把里面的项目、记录和对话恢复到这台电脑；备份里带设置时会一起还原（API Key 不会）。';
+/**
+ * The spec's 首启确认语, quoted verbatim — and built from the shared noun
+ * constant so this assertion pins the same口径 the dialog renders (item 66
+ * P2-1: usage.json is overwritten by a restore, so it must be named here).
+ */
+const FIRST_RUN_CONFIRM = `选择备份文件夹后，阿咲会把里面的${BACKUP_CARRIES_NOUNS}恢复到这台电脑；备份里带设置时会一起还原（API Key 不会）。`;
 
 const RESTORED_FULL = {
   path: '/tmp/my-backup',

@@ -49,10 +49,10 @@ test('exports a backup and shows the destination', async () => {
   window.studyCoach = apiStub({ exportBackup }) as never;
   render(<SettingsPage onClose={() => {}} />);
 
-  // G5 文案口径：卡片说明与 spec 原句逐字符一致。
+  // G5 文案口径：卡片说明与 spec 原句逐字符一致（item 66 P2-1：覆盖面补上用量）。
   expect(
     await screen.findByText(
-      '备份包含项目、记录、对话、设置和用量的副本。恢复会覆盖项目、记录和对话；当前设置与 API Key 保持不变。'
+      '备份包含项目、记录、对话、设置和用量的副本。恢复会覆盖项目、记录、对话和用量；当前设置与 API Key 保持不变。'
     )
   ).toBeInTheDocument();
   await userEvent.click(screen.getByRole('button', { name: '导出备份…' }));
@@ -92,7 +92,10 @@ test('shows a canceled state when the picker is dismissed', async () => {
   expect(await screen.findByText('已取消')).toBeInTheDocument();
 });
 
-test('shows an error when export fails', async () => {
+test('a failed export shows the reason exactly once, in the status line', async () => {
+  // item 66 P2-4: the red alert used to repeat the status line's sentence.
+  // The status line is the kept surface (reason + last success); no alert
+  // with the same cause remains on screen.
   window.studyCoach = apiStub({
     exportBackup: vi.fn().mockRejectedValue(new Error('备份失败'))
   }) as never;
@@ -100,7 +103,12 @@ test('shows an error when export fails', async () => {
 
   await userEvent.click(await screen.findByRole('button', { name: '导出备份…' }));
 
-  expect(await screen.findByRole('alert')).toHaveTextContent('备份失败');
+  expect(
+    await screen.findByText('上次备份没有成功（备份失败）。')
+  ).toBeInTheDocument();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  // Counting text matches: the reason appears once in the whole document.
+  expect(screen.getAllByText(/备份失败/)).toHaveLength(1);
 });
 
 test('disables the button while exporting', async () => {
@@ -191,6 +199,8 @@ test('a failed export names the reason and keeps the last success', async () => 
   expect(await screen.findByText('上次成功：2 天前。')).toBeInTheDocument();
   // Never a fake date for the failed try itself.
   expect(screen.queryByText(/上次备份：今天/)).not.toBeInTheDocument();
+  // item 66 P2-4: the cause is stated once — no duplicate alert.
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });
 
 test('a successful export refreshes the status line to today', async () => {
@@ -256,8 +266,10 @@ test('the restore confirmation appends the fresh-machine adoption sentence', asy
   await userEvent.click(await screen.findByRole('button', { name: '从备份恢复…' }));
 
   // The original sentences stay, the adoption sentence joins them before 继续？.
+  // item 66 P2-1: the overwrite scope names usage too, matching what the
+  // restore actually replaces (usage.json is unconditionally rewritten).
   expect(confirm).toHaveBeenCalledWith(
-    '从备份恢复会覆盖当前项目、记录和对话。恢复前会自动保存一份当前数据的快照；当前设置和 API Key 保持不变。新机器上没有设置时，备份里的设置会一起还原。继续？'
+    '从备份恢复会覆盖当前项目、记录、对话和用量。恢复前会自动保存一份当前数据的快照；当前设置和 API Key 保持不变。新机器上没有设置时，备份里的设置会一起还原。继续？'
   );
   confirm.mockRestore();
 });
@@ -471,4 +483,108 @@ test('a persisted auto-backup failure names its reason beside the last success',
 
   expect(await screen.findByText('上次备份没有成功（磁盘空间不足）。')).toBeInTheDocument();
   expect(await screen.findByText('上次成功：3 天前。')).toBeInTheDocument();
+});
+
+// --- item 66 P2-2: the in-app invalid-directory warning -----------------------
+
+const INVALID_DIR_WARNING =
+  '备份目录当前不存在或已不可用，自动备份会暂时失败；请重新选择有效目录。';
+
+test('a directory that no longer exists shows the in-app warning line', async () => {
+  window.studyCoach = apiStub({
+    getSettings: vi.fn().mockResolvedValue({
+      ...baseSettings,
+      backup: { autoEnabled: true, autoDestination: 'D:/backups/gone' }
+    }),
+    statBackupDirectory: vi
+      .fn()
+      .mockResolvedValue({ exists: false, isDirectory: false })
+  }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  expect(await screen.findByText('自动备份到：D:/backups/gone')).toBeInTheDocument();
+  expect(await screen.findByText(INVALID_DIR_WARNING)).toBeInTheDocument();
+  // The row itself stays; the warning sits under it.
+  expect(screen.getByRole('button', { name: '选择目录…' })).toBeInTheDocument();
+});
+
+test('a path that turned into a file counts as invalid', async () => {
+  window.studyCoach = apiStub({
+    getSettings: vi.fn().mockResolvedValue({
+      ...baseSettings,
+      backup: { autoDestination: 'D:/backups/now-a-file' }
+    }),
+    statBackupDirectory: vi
+      .fn()
+      .mockResolvedValue({ exists: true, isDirectory: false })
+  }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  expect(await screen.findByText(INVALID_DIR_WARNING)).toBeInTheDocument();
+});
+
+test('a valid directory never shows the warning', async () => {
+  window.studyCoach = apiStub({
+    getSettings: vi.fn().mockResolvedValue({
+      ...baseSettings,
+      backup: { autoEnabled: true, autoDestination: 'D:/backups' }
+    }),
+    statBackupDirectory: vi
+      .fn()
+      .mockResolvedValue({ exists: true, isDirectory: true })
+  }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  expect(await screen.findByText('自动备份到：D:/backups')).toBeInTheDocument();
+  expect(screen.queryByText(INVALID_DIR_WARNING)).not.toBeInTheDocument();
+});
+
+test('re-picking a valid directory clears the warning', async () => {
+  const statBackupDirectory = vi
+    .fn<(path: string) => Promise<{ exists: boolean; isDirectory: boolean }>>()
+    .mockResolvedValueOnce({ exists: false, isDirectory: false })
+    .mockResolvedValueOnce({ exists: true, isDirectory: true });
+  const getSettings = vi
+    .fn()
+    .mockResolvedValueOnce({
+      ...baseSettings,
+      backup: { autoDestination: 'D:/backups/gone' }
+    })
+    .mockResolvedValue({
+      ...baseSettings,
+      backup: { autoEnabled: true, autoDestination: 'E:/fresh' }
+    });
+  window.studyCoach = apiStub({
+    getSettings,
+    statBackupDirectory,
+    chooseBackupDirectory: vi.fn().mockResolvedValue('E:/fresh')
+  }) as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  expect(await screen.findByText(INVALID_DIR_WARNING)).toBeInTheDocument();
+  expect(statBackupDirectory).toHaveBeenCalledWith('D:/backups/gone');
+
+  await userEvent.click(screen.getByRole('button', { name: '选择目录…' }));
+
+  expect(await screen.findByText('自动备份到：E:/fresh')).toBeInTheDocument();
+  await vi.waitFor(() => {
+    expect(statBackupDirectory).toHaveBeenCalledWith('E:/fresh');
+    expect(screen.queryByText(INVALID_DIR_WARNING)).not.toBeInTheDocument();
+  });
+});
+
+test('a bridge without the stat channel never shows the warning', async () => {
+  const stub = apiStub({
+    getSettings: vi.fn().mockResolvedValue({
+      ...baseSettings,
+      backup: { autoDestination: 'D:/backups' }
+    })
+  }) as Record<string, unknown>;
+  // An older bridge predates the stat channel; the card must stay quiet.
+  delete stub.statBackupDirectory;
+  window.studyCoach = stub as never;
+  render(<SettingsPage onClose={() => {}} />);
+
+  expect(await screen.findByText('自动备份到：D:/backups')).toBeInTheDocument();
+  expect(screen.queryByText(INVALID_DIR_WARNING)).not.toBeInTheDocument();
 });

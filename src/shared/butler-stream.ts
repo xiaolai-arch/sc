@@ -89,7 +89,8 @@ export const BUTLER_TOOL_LABELS: Record<string, string> = {
   record_knowledge: '记录知识',
   save_profile: '记录个人信息',
   record_commitment: '记下承诺',
-  resolve_commitment: '结掉承诺'
+  resolve_commitment: '结掉承诺',
+  set_week_availability: '记录周可用性'
 };
 
 export function butlerToolLabel(name: string): string {

@@ -158,6 +158,12 @@ export interface ConversationApi {
   cancelRun?(runId: string): Promise<void>;
   /** Proactive check-ins ask the renderer to open a conversation. */
   onConversationOpened(listener: (conversationId: string) => void): () => void;
+  /**
+   * The main process created (or appended to) a conversation — a proactive
+   * check-in landed. The conversation sidebar refreshes on this event instead
+   * of waiting for its own CRUD (item 66 P2-6).
+   */
+  onConversationChanged(listener: (conversationId: string) => void): () => void;
   /** Global shortcut / tray asks the renderer to open the quick capture dialog. */
   onQuickCapture?(listener: () => void): () => void;
   /** Tray menu asks the renderer to open a specific page. */
@@ -170,6 +176,12 @@ export interface ConversationApi {
   restartApp?(): Promise<void>;
   /** Opens the native directory picker for the auto-backup destination. */
   chooseBackupDirectory?(): Promise<string | null>;
+  /**
+   * `stat`s one candidate auto-backup destination for the settings card's
+   * in-app validity line (item 66 P2-2): shown when the card renders and
+   * again after the user re-picks the directory. Never a notification.
+   */
+  statBackupDirectory?(path: string): Promise<BackupDirectoryStatus>;
 }
 
 /** Partial settings update; nested notifications/budget accept partials. */
@@ -254,6 +266,21 @@ export interface BackupCopied {
   conversations: boolean;
   state: boolean;
   usage: boolean;
+}
+
+/**
+ * What the main process's `stat` found at a candidate auto-backup destination
+ * (item 66 P2-2). Valid means `exists && isDirectory`; anything else — missing,
+ * a file, unreadable — reads as invalid so the settings card can say so.
+ */
+export interface BackupDirectoryStatus {
+  exists: boolean;
+  isDirectory: boolean;
+}
+
+/** True when the auto backup may write into this directory. */
+export function isBackupDirectoryValid(status: BackupDirectoryStatus): boolean {
+  return status.exists && status.isDirectory;
 }
 
 /** Result of a local backup; the backup never contains secrets. */

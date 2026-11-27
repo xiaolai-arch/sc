@@ -1,10 +1,34 @@
+import { stat } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import { isLocalDate, isLocalDateTimeSeconds, localDaysBetween } from '../shared/date';
 import type { BackupSettings } from '../shared/types';
+import type { BackupDirectoryStatus } from '../shared/ipc';
 import { createBackup } from './backup';
 import { recordBackupFailure, recordBackupSuccess } from './backup-state';
 import { pruneAutoBackups } from './backup-rotation';
 import type { SettingsService } from './settings/settings-service';
+
+/**
+ * `stat`s one candidate auto-backup destination for the settings card's
+ * in-app validity line (item 66 P2-2). Purely a read: it never creates the
+ * directory, never writes, and never throws — an unreadable path reads as
+ * invalid, because that is exactly the state the card must name. The auto
+ * backup's own gates (`runIfDue`) are untouched and keep failing into
+ * `lastBackupError` as before.
+ */
+export async function inspectAutoBackupDirectory(
+  destination: string
+): Promise<BackupDirectoryStatus> {
+  if (typeof destination !== 'string' || destination.trim() === '' || !isAbsolute(destination)) {
+    return { exists: false, isDirectory: false };
+  }
+  try {
+    const info = await stat(destination);
+    return { exists: true, isDirectory: info.isDirectory() };
+  } catch {
+    return { exists: false, isDirectory: false };
+  }
+}
 
 /** Default cadence when `autoIntervalDays` is absent (spec P1). */
 export const DEFAULT_AUTO_INTERVAL_DAYS = 7;

@@ -5,7 +5,12 @@ import {
   localDaysBetween
 } from '../../shared/date';
 import { friendlyErrorMessage } from '../../shared/errors';
-import { backupCopiedLabel, MIGRATION_STEP_LINE_SETTINGS_ADOPTED } from '../../shared/backup-copy';
+import {
+  BACKUP_CARRIES_NOUNS,
+  backupCopiedLabel,
+  MIGRATION_STEP_LINE_SETTINGS_ADOPTED
+} from '../../shared/backup-copy';
+import { isBackupDirectoryValid } from '../../shared/ipc';
 import {
   MAX_ACCOUNTABILITY_NAME,
   type BackupSettings,
@@ -222,6 +227,11 @@ export function SettingsPage({
   // The persisted last-backup facts; written by the export flow in the main
   // process, so the page only reads and refreshes them.
   const [backupInfo, setBackupInfo] = useState<BackupSettings | null>(null);
+  // item 66 P2-2: whether the stored auto-backup directory failed the stat
+  // check (missing, or replaced by a file). In-app line only — no popup, no
+  // toast, no new notification channel (item 52). null-safe: a bridge without
+  // the stat channel simply never shows the warning.
+  const [autoDestinationInvalid, setAutoDestinationInvalid] = useState(false);
   // Why this session's export failed. A failure from before this session (an
   // auto backup) falls back to the persisted `lastBackupError` reason.
   const [backupFailureReason, setBackupFailureReason] = useState<string | null>(null);
@@ -388,6 +398,33 @@ export function SettingsPage({
   useEffect(() => {
     void load();
   }, [load]);
+
+  // item 66 P2-2: the directory is stat'ed when the card shows it (settings
+  // loaded on mount) and again whenever it changes (the picker's refresh
+  // rewrites `backupInfo`). Keyed on the path string, so both timings are the
+  // same effect and a stale answer can never outlive the path it checked.
+  const autoDestinationPath = backupInfo?.autoDestination ?? null;
+  useEffect(() => {
+    const api = window.studyCoach;
+    if (!autoDestinationPath || typeof api?.statBackupDirectory !== 'function') {
+      setAutoDestinationInvalid(false);
+      return undefined;
+    }
+    let cancelled = false;
+    void api
+      .statBackupDirectory(autoDestinationPath)
+      .then((status) => {
+        if (!cancelled) setAutoDestinationInvalid(!isBackupDirectoryValid(status));
+      })
+      .catch(() => {
+        // A failed check is not evidence of a broken directory; the line
+        // hides and the next render/pick retries.
+        if (!cancelled) setAutoDestinationInvalid(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [autoDestinationPath]);
 
   useEffect(() => {
     if (!loaded || kind !== 'local-cli') return;
@@ -686,7 +723,10 @@ export function SettingsPage({
       }
     } catch (cause) {
       const reason = friendlyErrorMessage(cause, '导出备份失败，请重试。');
-      setBackupStatus({ kind: 'error', message: reason });
+      // item 66 P2-4: the reason lives only in the persistent status line —
+      // the red alert repeated the same sentence one line above it. The
+      // status line is the more complete surface (reason + last success).
+      setBackupStatus(null);
       setBackupFailureReason(reason);
       await refreshBackupInfo();
     } finally {
@@ -774,7 +814,7 @@ export function SettingsPage({
       return;
     }
     const confirmed = window.confirm(
-      '从备份恢复会覆盖当前项目、记录和对话。恢复前会自动保存一份当前数据的快照；当前设置和 API Key 保持不变。新机器上没有设置时，备份里的设置会一起还原。继续？'
+      `从备份恢复会覆盖当前${BACKUP_CARRIES_NOUNS}。恢复前会自动保存一份当前数据的快照；当前设置和 API Key 保持不变。新机器上没有设置时，备份里的设置会一起还原。继续？`
     );
     if (!confirmed) {
       setBackupStatus({ kind: 'canceled', message: '已取消恢复' });
@@ -1574,7 +1614,8 @@ export function SettingsPage({
               数据与备份
             </h3>
             <p className="mt-2 text-gray-500 dark:text-[#a1a1a6]">
-              备份包含项目、记录、对话、设置和用量的副本。恢复会覆盖项目、记录和对话；当前设置与 API Key 保持不变。
+              备份包含项目、记录、对话、设置和用量的副本。恢复会覆盖{BACKUP_CARRIES_NOUNS}；当前设置与
+              API Key 保持不变。
             </p>
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <Button
@@ -1687,6 +1728,14 @@ export function SettingsPage({
                 选择目录…
               </Button>
             </div>
+            {autoDestinationInvalid && backupInfo?.autoDestination ? (
+              // item 66 P2-2: the in-app validity warning. Red reuses the
+              // card's existing error color; it is a rendered line, not a
+              // popup/toast/notification, so no new channel of any kind.
+              <p className="mt-1 text-sm text-[#d70015] dark:text-[#ff7b72]">
+                备份目录当前不存在或已不可用，自动备份会暂时失败；请重新选择有效目录。
+              </p>
+            ) : null}
             <label className="mt-4 flex min-h-11 items-center gap-3 text-sm font-medium text-gray-500 dark:text-[#a1a1a6]">
               <input
                 type="checkbox"

@@ -167,6 +167,12 @@ export interface CreateAppContextOptions {
    * for the next launch.
    */
   onSettingsUpdated?: (settings: AppSettings) => void | Promise<void>;
+  /**
+   * Fires when the main process created (or appended to) a check-in
+   * conversation; the entry point forwards it to open windows as
+   * `CONVERSATION_EVENT_CHANNELS.changed` so the sidebar refreshes.
+   */
+  onConversationChanged?: (conversationId: string) => void;
   now?: () => Date;
 }
 
@@ -763,6 +769,10 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       // awaited by it; the spoken failure reason is cleared the same way.
       autoBackup,
       consumeBackupError: () => clearBackupError(settings),
+      // The sidebar refresh: the entry point broadcasts it to open windows.
+      ...(options.onConversationChanged
+        ? { onConversationChanged: options.onConversationChanged }
+        : {}),
       now
     });
 
@@ -1440,6 +1450,12 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       await usageStore.clear();
     },
     onConversationOpened() {
+      return () => undefined;
+    },
+    onConversationChanged() {
+      // No-op here: this in-context api object has no windows to notify. The
+      // electron entry point wires the real emitter via createAppContext's
+      // `onConversationChanged` option (item 66 P2-6).
       return () => undefined;
     },
     async send(input: SendMessageInput) {

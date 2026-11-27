@@ -8,13 +8,20 @@ import type { BackupCopied } from './ipc';
  * whether the restore adopted settings, not by where it is rendered.
  */
 
+/**
+ * The nouns one restore actually carries: what a backup holds and what a
+ * restore overwrites/brings back. item 66 P2-1: usage.json was always
+ * overwritten but three sentences named only 项目、记录和对话 — every
+ * overwrite/coverage sentence now quotes this constant, so the告知面 can
+ * never drift from the覆盖面 again.
+ */
+export const BACKUP_CARRIES_NOUNS = '项目、记录、对话和用量';
+
 /** P3 版：备份里的设置会一起还原（全新机器采纳了 `state.json` 时）。 */
-export const MIGRATION_STEP_LINE_SETTINGS_ADOPTED =
-  '恢复会带回项目、记录、对话和用量；新机器上没有设置时，备份里的设置会一起还原，API Key 需要重新填写（它从未进入备份）。';
+export const MIGRATION_STEP_LINE_SETTINGS_ADOPTED = `恢复会带回${BACKUP_CARRIES_NOUNS}；新机器上没有设置时，备份里的设置会一起还原，API Key 需要重新填写（它从未进入备份）。`;
 
 /** P2 版：恢复不改动设置（备份无可用 `state.json`，或本机已有 `state.json`）。 */
-export const MIGRATION_STEP_LINE_SETTINGS_UNCHANGED =
-  '恢复会带回项目、记录、对话和用量；恢复不改动设置，换机后设置和 API Key 需要重新填写（API Key 从未进入备份）。';
+export const MIGRATION_STEP_LINE_SETTINGS_UNCHANGED = `恢复会带回${BACKUP_CARRIES_NOUNS}；恢复不改动设置，换机后设置和 API Key 需要重新填写（API Key 从未进入备份）。`;
 
 /**
  * The nouns one backup/restore actually carried, from the `copied`/`restored`

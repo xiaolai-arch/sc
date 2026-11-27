@@ -121,6 +121,18 @@ export function useConversations(): ConversationController {
     });
   }, []);
 
+  useEffect(() => {
+    // A conversation the main process just wrote (a proactive check-in) must
+    // reach the sidebar without any renderer CRUD happening first (item 66
+    // P2-6). Re-reading the summaries is idempotent; it never touches the
+    // open conversation, so a check-in landing mid-draft cannot steal focus.
+    const api = window.studyCoach;
+    if (!api?.onConversationChanged) return undefined;
+    return api.onConversationChanged(() => {
+      void refresh();
+    });
+  }, [refresh]);
+
   const startDraft = useCallback(() => {
     selectRequestRef.current += 1;
     setActive(null);

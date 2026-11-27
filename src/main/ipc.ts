@@ -4,6 +4,7 @@ import { isTaskRepeat } from '../shared/recurrence';
 import type { AppSettings } from '../shared/types';
 import { MAX_TASK_CUE_LENGTH, REMINDER_STATES, isTargetDate, taskCueLength, type ReminderState } from '../shared/workspace';
 import type {
+  BackupDirectoryStatus,
   BackupResult,
   ListCommitmentsInput,
   ResolveCommitmentEntryInput,
@@ -225,7 +226,9 @@ export const APP_IPC_CHANNELS = {
   openPath: 'study-coach:app:open-path',
   // iter31 P1: the auto-backup directory picker. Appended last so every
   // existing channel keeps its position.
-  chooseBackupDirectory: 'study-coach:app:choose-backup-directory'
+  chooseBackupDirectory: 'study-coach:app:choose-backup-directory',
+  // item 66 P2-2: the settings card's in-app directory-validity stat.
+  statBackupDirectory: 'study-coach:app:stat-backup-directory'
 } as const;
 
 /** Video-note generation streams progress on its own event channel. */
@@ -1988,6 +1991,14 @@ export function createStudyCoachBridge(
         }
       });
     },
+    onConversationChanged(listener) {
+      if (!subscribe) return () => undefined;
+      return subscribe(CONVERSATION_EVENT_CHANNELS.changed, (payload) => {
+        if (isRecord(payload) && typeof payload['conversationId'] === 'string') {
+          listener(payload['conversationId']);
+        }
+      });
+    },
     onQuickCapture(listener) {
       if (!subscribe) return () => undefined;
       return subscribe(APP_EVENT_CHANNELS.quickCapture, () => listener());
@@ -2005,6 +2016,8 @@ export function createStudyCoachBridge(
     restartApp: () => call<void>(APP_IPC_CHANNELS.restartApp),
     chooseBackupDirectory: () =>
       call<string | null>(APP_IPC_CHANNELS.chooseBackupDirectory),
+    statBackupDirectory: (path) =>
+      call<BackupDirectoryStatus>(APP_IPC_CHANNELS.statBackupDirectory, path),
     pickVideoFiles: () => call<string[] | null>(APP_IPC_CHANNELS.pickVideoFiles),
     pickVideoFolder: () => call<string | null>(VIDEO_NOTES_CHANNELS.pickVideoFolder),
     pickOutputDirectory: () =>

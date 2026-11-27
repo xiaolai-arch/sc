@@ -95,6 +95,14 @@ export interface ProactiveCheckInOptions {
    * it has landed, so the three-layer copy is said exactly once.
    */
   consumeBackupError?: () => Promise<void>;
+  /**
+   * Fires after a check-in message has durably landed in a conversation the
+   * main process created (or appended to), so the renderer's sidebar can
+   * refresh without waiting for the user to touch anything (item 66 P2-6).
+   * Must not throw into the check; the default wiring sends to open windows
+   * and never rejects.
+   */
+  onConversationChanged?: (conversationId: string) => void;
   now?: () => Date;
 }
 
@@ -178,6 +186,7 @@ export class ProactiveCheckInService {
   private readonly consumeResume: (() => Promise<void>) | undefined;
   private readonly autoBackup: AutoBackupRunner | null;
   private readonly consumeBackupError: (() => Promise<void>) | undefined;
+  private readonly onConversationChanged: ((conversationId: string) => void) | undefined;
   private readonly now: () => Date;
 
   constructor(options: ProactiveCheckInOptions) {
@@ -195,6 +204,7 @@ export class ProactiveCheckInService {
     this.consumeResume = options.consumeResume;
     this.autoBackup = options.autoBackup ?? null;
     this.consumeBackupError = options.consumeBackupError;
+    this.onConversationChanged = options.onConversationChanged;
     this.now = options.now ?? (() => new Date());
   }
 
@@ -277,6 +287,16 @@ export class ProactiveCheckInService {
       source: 'check-in',
       trigger
     });
+    // The message landed: tell the renderer the sidebar changed. Covers both
+    // a freshly created check-in conversation and an append into an existing
+    // one; a listener failure must never fail the check that already wrote.
+    if (this.onConversationChanged) {
+      try {
+        this.onConversationChanged(conversation.id);
+      } catch {
+        // The notification channels stay best-effort, like the open channel.
+      }
+    }
     // The message landed: spend the pending resume so no later check repeats
     // the sentence. A failed consume keeps the flag and would repeat it once —
     // the honest failure mode for a write that could not be recorded.
