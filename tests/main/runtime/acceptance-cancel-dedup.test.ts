@@ -258,7 +258,7 @@ test('验收 3（Pi）：等待提交确认时取消 → cancelled，不再执�
   }
 });
 
-test('验收 3（Legacy）：工具执行中取消 → cancelled，后续模型轮与后续工具不再发生', async () => {
+test('验收 3（Legacy·时序二）：工具执行中取消（在途未提交）→ pending-verification，事件与 journal 暴露待核实名单', async () => {
   const fixture = await makeFixture();
   try {
     let releaseTask!: () => void;
@@ -321,38 +321,177 @@ test('验收 3（Legacy）：工具执行中取消 → cancelled，后续模型�
       expect(createCalls).toBe(1);
       expect(await controller.cancel('run-cancel-legacy')).toBe(true);
       releaseTask();
-      expect(await handle.done).toBe('cancelled');
+      // ── 时序二（sc-lead 2026-11-28 裁决；P4 d237eb5 状态机落地后由 sc-qa 改断言）──
+      // 取消时 create_task 已在途：取消后在途写入照常收尾落盘（vault 多出「任务A」），
+      // 所以终态必须说真话——`pending-verification` + 待核实名单，而不是 cancelled。
+      // 判定与「确认级写入无回执」同一条（run-controller 的 pendingWrites 判定在取消
+      // 分支同样触发），不是新造状态。三种时序见本文件其余两条。
+      expect(await handle.done).toBe('pending-verification');
       // 取消即刻定终态；在途写入（任务A）在取消后自行收尾落盘——等它落完再读盘。
       for (let settle = 0; settle < 50; settle += 1) {
         const probe = await fixture.service.getWorkspaceSnapshot(fixture.workspaceId);
         if (probe.tasks.length > 0) break;
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
-      // ── 待补占位（sc-lead 2026-11-28 裁决 + 补充；等 sc-build 状态机合入后由 sc-qa 改断言）──
-      // 现状（下面按现状断言）：取消时已在途的 createTask 在取消之后完成落盘
-      // （vault 多出「任务A」），而终态/journal 都是 cancelled、事件层零提交——
-      // 状态说谎：取消 ≠ 什么都没发生。
-      // 依据（sc-build 提示）：contracts.ts:27 已有 pending-verification 态，
-      // run-controller.ts:195 现在只有「确认级写入无回执」一条路落进去——修复是
-      // 在取消分支加**同款判定**，不是新造状态。届时断言的不是「状态名出现了」，
-      // 而是同一条「写入无回执」判定在取消路径上也被触发（更能防退化）。
-      // 三种时序各一条（证明判定按「有没有在途」分流）：
-      //   1) 取消时无在途工具 → 仍 `cancelled`；
-      //   2) 取消时在途未提交（本用例的时序）→ `pending-verification` + 事件含
-      //      「有一笔写入可能在取消后落盘」的待核实提示 + vault 可能多一条；
-      //   3) 工具已提交之后才取消 → 仍 `cancelled`（取消晚了一步，已无在途）。
-      // Pi 路径严格零写入，不受影响（上面 Pi 用例已经是零写入断言）。
-      expect(controller.getRun('run-cancel-legacy')?.state).toBe('cancelled');
+      expect(controller.getRun('run-cancel-legacy')?.state).toBe('pending-verification');
+      // 取消时刻冻结的待核实名单点名了那个在途工具（快照与终态事件同源）。
+      expect(controller.getRun('run-cancel-legacy')?.pendingWrites).toEqual(['create_task']);
       // 取消后不再执行任何工具：第二轮模型调用从未发生，任务B从未创建。
       expect(scripted.calls).toHaveLength(1);
       expect(createCalls).toBe(1);
       const snapshot = await fixture.service.getWorkspaceSnapshot(fixture.workspaceId);
       expect(snapshot.tasks.map((task) => task.title)).toEqual(['任务A']);
-      // 被取消的在途调用不产生提交，更没有回执；终态与 journal 一致。
+      // 被取消的在途调用不产生提交，更没有回执。
       expect(collector.events.some((event) => event.type === 'tool.committed')).toBe(false);
       expect(collector.events.some((event) => event.type === 'service.receipt')).toBe(false);
-      expect(collector.events.at(-1)).toMatchObject({ type: 'run.finished', state: 'cancelled' });
+      expect(collector.events.at(-1)).toMatchObject({
+        type: 'run.finished',
+        state: 'pending-verification',
+        pendingWrites: ['create_task']
+      });
       const journaled = await journal.readRun('run-cancel-legacy');
+      expect(journaled.at(-1)).toMatchObject({
+        type: 'run.finished',
+        state: 'pending-verification',
+        pendingWrites: ['create_task']
+      });
+    } finally {
+      await dispose();
+    }
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test('验收 3（Legacy·时序一）：模型流式轮中取消（无在途写入）→ 仍是 cancelled，一次工具都没开始', async () => {
+  const fixture = await makeFixture();
+  try {
+    // 模型流停在闸门上：没有任何工具开始过，不可能有写落在取消之后。
+    class ParkedStreamingClient implements StreamingModelClient {
+      async complete(): Promise<ModelResponse> {
+        throw new Error('complete 不应被调用');
+      }
+      async stream(): Promise<ModelResponse> {
+        await new Promise<void>(() => {
+          /* 永不返回：取消会斩断这一轮 */
+        });
+        return { text: '', usage: ZERO_USAGE };
+      }
+    }
+    const planner = createWorkspacePlanner({ workspaceService: fixture.service, now });
+    const butler = new ButlerServiceImpl({
+      workspaceService: fixture.service,
+      modelClient: new ParkedStreamingClient(),
+      planner,
+      now,
+      maxToolSteps: 4
+    });
+    const { controller, journal, dispose } = await makeHarness({
+      legacy: new LegacyEngine({ butler })
+    });
+    try {
+      const collector = collect(controller, 'run-cancel-legacy-none');
+      const handle = controller.start(
+        makeRequest({
+          runId: 'run-cancel-legacy-none',
+          workspaceIds: [fixture.workspaceId],
+          engineId: 'legacy'
+        }),
+        { butler: butlerContext(fixture, planner) }
+      );
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(await controller.cancel('run-cancel-legacy-none')).toBe(true);
+      expect(await handle.done).toBe('cancelled');
+      expect(controller.getRun('run-cancel-legacy-none')?.state).toBe('cancelled');
+      // 无在途写入 → 没有待核实名单：取消就是什么都没发生。
+      expect(controller.getRun('run-cancel-legacy-none')?.pendingWrites).toBeUndefined();
+      const snapshot = await fixture.service.getWorkspaceSnapshot(fixture.workspaceId);
+      expect(snapshot.tasks).toHaveLength(0);
+      expect(collector.events.some((event) => event.type === 'tool.committed')).toBe(false);
+      expect(collector.events.at(-1)).toMatchObject({ type: 'run.finished', state: 'cancelled' });
+      const journaled = await journal.readRun('run-cancel-legacy-none');
+      expect(journaled.at(-1)).toMatchObject({ type: 'run.finished', state: 'cancelled' });
+    } finally {
+      await dispose();
+    }
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test('验收 3（Legacy·时序三）：工具已提交之后才取消 → 仍是 cancelled（已无在途）', async () => {
+  const fixture = await makeFixture();
+  try {
+    let releaseSecondRound!: () => void;
+    const secondRoundGate = new Promise<void>((resolve) => {
+      releaseSecondRound = resolve;
+    });
+    const scripted = new ScriptedStreamingClient([
+      {
+        events: [],
+        response: {
+          text: '',
+          usage: ZERO_USAGE,
+          toolCalls: [{ id: 'c1', name: 'create_task', arguments: { title: '任务A', durationMin: 5 } }]
+        }
+      }
+    ]);
+    // 第一轮写入正常落盘；第二轮模型流停在闸门上——此时已无在途写入。
+    const planner = createWorkspacePlanner({ workspaceService: fixture.service, now });
+    class GatedSecondRound implements StreamingModelClient {
+      private round = 0;
+      complete(): Promise<ModelResponse> {
+        throw new Error('complete 不应被调用');
+      }
+      async stream(
+        request: ModelRequest,
+        onEvent: (event: ModelStreamEvent) => void
+      ): Promise<ModelResponse> {
+        this.round += 1;
+        if (this.round === 1) return scripted.stream(request, onEvent);
+        await secondRoundGate;
+        return { text: '', usage: ZERO_USAGE };
+      }
+    }
+    const butler = new ButlerServiceImpl({
+      workspaceService: fixture.service,
+      modelClient: new GatedSecondRound(),
+      planner,
+      now,
+      maxToolSteps: 4
+    });
+    const { controller, journal, dispose } = await makeHarness({
+      legacy: new LegacyEngine({ butler })
+    });
+    try {
+      const collector = collect(controller, 'run-cancel-legacy-after');
+      const handle = controller.start(
+        makeRequest({
+          runId: 'run-cancel-legacy-after',
+          workspaceIds: [fixture.workspaceId],
+          engineId: 'legacy'
+        }),
+        { butler: butlerContext(fixture, planner) }
+      );
+      // 等任务A真正落盘（第一轮工具已提交完成），再取消第二轮。
+      let landed = false;
+      for (let settle = 0; settle < 100; settle += 1) {
+        const probe = await fixture.service.getWorkspaceSnapshot(fixture.workspaceId);
+        if (probe.tasks.length > 0) {
+          landed = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(landed).toBe(true);
+      expect(await controller.cancel('run-cancel-legacy-after')).toBe(true);
+      releaseSecondRound();
+      // 取消晚了一步：写入已经完成，没有在途 → 仍是干净的 cancelled。
+      expect(await handle.done).toBe('cancelled');
+      expect(controller.getRun('run-cancel-legacy-after')?.state).toBe('cancelled');
+      expect(controller.getRun('run-cancel-legacy-after')?.pendingWrites).toBeUndefined();
+      expect(collector.events.at(-1)).toMatchObject({ type: 'run.finished', state: 'cancelled' });
+      const journaled = await journal.readRun('run-cancel-legacy-after');
       expect(journaled.at(-1)).toMatchObject({ type: 'run.finished', state: 'cancelled' });
     } finally {
       await dispose();
