@@ -12,7 +12,7 @@
 | `npm run typecheck` | （无输出，tsc node + web 双项目零错误） | 0 |
 | `npm run typecheck:e2e` | （无输出，零错误） | 0 |
 | `npx vitest run --maxWorkers=4` | `Test Files  217 passed \| 1 skipped (218)`；`Tests  2392 passed \| 3 skipped (2395)` | 0 |
-| `npm run build` | `✓ built in 81ms` / `✓ built in 16ms` / `✓ built in 184ms`（main / preload / renderer 三段全绿） | 0 |
+| `npm run build` | `✓ built in 79ms` / `✓ built in 15ms` / `✓ built in 178ms`（main / preload / renderer 三段全绿） | 0 |
 | `npm run test:e2e` | `26 passed (51.9s)` | 0 |
 
 Runtime 显式基线（纪律 2）：
@@ -71,7 +71,7 @@ Runtime 显式基线（纪律 2）：
 - **任何产品行为变更**：无。本批触面全部在 `src/main/runtime/`、测试、docs 与依赖声明；`src/main/index.ts`/`ipc.ts`/renderer/vault 零改动。
 - 顺带核实：缝①②的既有语义、验收 3/5/9 等既有断言未动（全量 vitest 绿）。
 
-## 提交清单（5 个功能提交 + 本报告提交；分支顶端 = 本报告提交的哈希，见 worker_done）
+## 提交清单（5 个功能提交 + 本报告提交及其 docs-only 小修；最终顶端哈希以 worker_done 申报为准）
 
 1. `177fef8` feat(runtime): seam 3 - done-only text catch-up in both engine adapters
 2. `6275dd1` feat(runtime): assembly entry point - explicit registerButlerTools + confirm fail-fast
@@ -83,5 +83,5 @@ Runtime 显式基线（纪律 2）：
 ## 偏离与说明
 
 - 无 spec 与现实冲突，无范围扩大。
-- package-lock 的写入方式（脚本而非 `npm install --package-lock-only`）是环境网络限制的等价替代，字段形态与 npm 产物一致，已声明如上。
-- 五门禁第一次实跑在 `7fd01c4`；加入本 docs-only 报告提交后，在最终顶端提交复跑五门禁，上表数字为最终复跑的逐字输出。
+- package-lock 的写入方式（脚本而非 `npm install --package-lock-only`）是环境网络不可达下的等价替代，字段形态与 npm 产物一致，已声明如上。
+- 五门禁第一次实跑在 `7fd01c4`；加入本 docs-only 报告后，在最终顶端提交复跑五门禁，上表数字为最终复跑的逐字输出（e2e 逐字行 `26 passed (53.9s)`；本表 build 时刻为最终复跑的 `79ms/15ms/178ms`，首次实跑为 `81ms/16ms/184ms`，同为三段全绿）。报告自身的后续小修（本行）为 docs-only，不触任何代码。
