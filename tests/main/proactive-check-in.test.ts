@@ -3,11 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FakeModelClient } from '../../src/main/agent/model-client';
 import { ProactiveCheckInService } from '../../src/main/check-ins/proactive-check-in-service';
-import type { ResumeFacts } from '../../src/main/check-ins/prompt';
+import type { ResumeFacts, TomorrowBridgeLike } from '../../src/main/check-ins/prompt';
 import { ConversationStore } from '../../src/main/conversations/conversation-store';
 import { Scheduler, type SchedulerNotification } from '../../src/main/scheduler/scheduler';
 import { createDefaultSettings } from '../../src/main/settings/defaults';
+import { formatLocalDate } from '../../src/shared/date';
 import type { AppSettings } from '../../src/shared/types';
+import { tomorrowBridge, type TomorrowBridgeReview } from '../../src/shared/review-stats';
 import type { PracticeMistake, PracticeService } from '../../src/shared/practice';
 import type {
   Workspace,
@@ -2101,5 +2103,262 @@ test('with the auto backup wired but nothing pending the weekly bytes are unchan
   } finally {
     await rm(hookedStore.dir, { recursive: true, force: true });
     await rm(plainStore.dir, { recursive: true, force: true });
+  }
+});
+
+// --- the tomorrow bridge (iter33 P0) -----------------------------------------
+
+const MORNING_MODEL_TEXT = '早上好。今天先做极限基础，做完告诉我。';
+const STEP = '把第三章的错题重做一遍';
+const LINE_A = `你在复盘里写下明天第一步：${STEP}——今天第一件事就是它吗？`;
+const LINE_B = '这步写了好几天了——要不要把它切小一点，或者干脆换一步？';
+
+function tomorrowReview(
+  date: string,
+  tomorrow: unknown,
+  submittedAt = `${date}T21:30:00`
+): TomorrowBridgeReview {
+  return { date, submittedAt, tomorrow };
+}
+
+/** The same wiring `createAppContext` uses: the pure bridge over the records. */
+function bridgeProvider(
+  reviews: TomorrowBridgeReview[]
+): (today: Date) => Promise<TomorrowBridgeLike | null> {
+  return async (today) => tomorrowBridge(reviews, formatLocalDate(today));
+}
+
+/** Runs a morning check with the given provider shape and returns the message text. */
+async function morningText(
+  value: ConversationStore,
+  client: FakeModelClient | null,
+  extra: {
+    getTomorrowBridge?: (today: Date) => Promise<TomorrowBridgeLike | null>;
+  } = {}
+): Promise<string> {
+  const service = new ProactiveCheckInService({
+    conversationStore: value,
+    workspaceService,
+    modelClient: client,
+    getSettings: async () => settings(),
+    ...extra,
+    now: () => NOW
+  });
+  const notification = await service.check('morning', '2026-11-01');
+  expect(notification).not.toBeNull();
+  return (await value.get(notification!.conversationId!))!.messages[0]!.text;
+}
+
+test('the morning message carries exactly one bridge line for the latest tomorrow (验收 1)', async () => {
+  const hooked = await store();
+  const plain = await store();
+  try {
+    const reviews = [tomorrowReview('2026-10-31', STEP)];
+    const withText = await morningText(hooked.value, new FakeModelClient([MORNING_MODEL_TEXT]), {
+      getTomorrowBridge: bridgeProvider(reviews)
+    });
+    const baseline = await morningText(plain.value, new FakeModelClient([MORNING_MODEL_TEXT]));
+    // Exactly one appended line; everything else byte-identical to baseline.
+    expect(withText).toBe(`${baseline}\n${LINE_A}`);
+    expect(withText.split(LINE_A)).toHaveLength(2);
+    // The banner stays generic; the line lives in the conversation message.
+    const client = new FakeModelClient([MORNING_MODEL_TEXT]);
+    const bannerService = new ProactiveCheckInService({
+      conversationStore: hooked.value,
+      workspaceService,
+      modelClient: client,
+      getTomorrowBridge: bridgeProvider(reviews),
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+    const notification = await bannerService.check('morning', '2026-11-02');
+    expect(notification?.body).toBe('今天还有 1 个任务没完成，点开看看。');
+  } finally {
+    await rm(hooked.dir, { recursive: true, force: true });
+    await rm(plain.dir, { recursive: true, force: true });
+  }
+});
+
+test('a 61-code-point tomorrow is truncated before embedding (验收 1)', async () => {
+  const { dir, value } = await store();
+  try {
+    const reviews = [tomorrowReview('2026-10-31', '一'.repeat(61))];
+    const text = await morningText(value, new FakeModelClient([MORNING_MODEL_TEXT]), {
+      getTomorrowBridge: bridgeProvider(reviews)
+    });
+    expect(text).toBe(
+      `${MORNING_MODEL_TEXT}\n你在复盘里写下明天第一步：${'一'.repeat(57)}…——今天第一件事就是它吗？`
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a three-days-old tomorrow still hands back, without claiming 昨天 (验收 2)', async () => {
+  const { dir, value } = await store();
+  try {
+    // Latest (only) non-empty tomorrow was written 2026-10-29, three days
+    // before the 2026-11-01 check-in. The line must not say 昨天.
+    const reviews = [tomorrowReview('2026-10-29', STEP)];
+    const text = await morningText(value, null, { getTomorrowBridge: bridgeProvider(reviews) });
+    expect(text).toBe(
+      `早上好。今天有 1 个任务，先做「极限基础」怎么样？做完告诉我一声。\n${LINE_A}`
+    );
+    expect(text).not.toContain('昨天');
+    expect(text).toContain('你在复盘里写下');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('three normalized-identical tomorrows switch to the staleness line (验收 3)', async () => {
+  const { dir, value } = await store();
+  try {
+    const reviews = [
+      tomorrowReview('2026-10-29', '背 单词'),
+      tomorrowReview('2026-10-30', '背\t单词'),
+      tomorrowReview('2026-10-31', '  背 单词  ')
+    ];
+    const text = await morningText(value, null, { getTomorrowBridge: bridgeProvider(reviews) });
+    expect(text).toBe(
+      `早上好。今天有 1 个任务，先做「极限基础」怎么样？做完告诉我一声。\n${LINE_B}`
+    );
+    expect(text).not.toContain('你在复盘里写下');
+    expect(text.split(LINE_B)).toHaveLength(2);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the second same and third different keep the regular line A (验收 3)', async () => {
+  const { dir, value } = await store();
+  try {
+    const reviews = [
+      tomorrowReview('2026-10-29', '背英语单词'),
+      tomorrowReview('2026-10-30', STEP),
+      tomorrowReview('2026-10-31', STEP)
+    ];
+    const text = await morningText(value, null, { getTomorrowBridge: bridgeProvider(reviews) });
+    expect(text).toBe(
+      `早上好。今天有 1 个任务，先做「极限基础」怎么样？做完告诉我一声。\n${LINE_A}`
+    );
+    expect(text).not.toContain(LINE_B);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('empty, blank and badly-typed tomorrows leave the message byte-identical (验收 4)', async () => {
+  const hooked = await store();
+  const plain = await store();
+  try {
+    const reviews = [
+      tomorrowReview('2026-10-29', ''),
+      tomorrowReview('2026-10-30', '   '),
+      tomorrowReview('2026-10-31', 42)
+    ];
+    const withText = await morningText(hooked.value, new FakeModelClient([MORNING_MODEL_TEXT]), {
+      getTomorrowBridge: bridgeProvider(reviews)
+    });
+    const baseline = await morningText(plain.value, new FakeModelClient([MORNING_MODEL_TEXT]));
+    expect(withText).toBe(baseline);
+  } finally {
+    await rm(hooked.dir, { recursive: true, force: true });
+    await rm(plain.dir, { recursive: true, force: true });
+  }
+});
+
+test('a failing or missing bridge provider never changes the morning message (验收 4)', async () => {
+  const failing = await store();
+  const unwired = await store();
+  try {
+    const text = await morningText(failing.value, new FakeModelClient([MORNING_MODEL_TEXT]), {
+      getTomorrowBridge: async () => {
+        throw new Error('vault unreadable');
+      }
+    });
+    expect(text).toBe(MORNING_MODEL_TEXT);
+    // No provider wired at all is the pre-change baseline, byte for byte.
+    const baseline = await morningText(unwired.value, new FakeModelClient([MORNING_MODEL_TEXT]));
+    expect(baseline).toBe(MORNING_MODEL_TEXT);
+  } finally {
+    await rm(failing.dir, { recursive: true, force: true });
+    await rm(unwired.dir, { recursive: true, force: true });
+  }
+});
+
+test('an empty tomorrow in between neither breaks the run nor counts toward it (验收 5)', async () => {
+  const first = await store();
+  const second = await store();
+  try {
+    // Case 1 — 不断开: the empty review between three same steps must not
+    // reset the run; line B still fires.
+    const notBreaking = [
+      tomorrowReview('2026-10-28', STEP),
+      tomorrowReview('2026-10-29', ''),
+      tomorrowReview('2026-10-30', STEP),
+      tomorrowReview('2026-10-31', STEP)
+    ];
+    const text = await morningText(first.value, null, {
+      getTomorrowBridge: bridgeProvider(notBreaking)
+    });
+    expect(text.endsWith(`\n${LINE_B}`)).toBe(true);
+    // Case 2 — 不计入: the newest review is empty. It must not consume a
+    // threshold slot, so the three same steps behind it still fire line B.
+    const notCounting = [
+      tomorrowReview('2026-10-28', STEP),
+      tomorrowReview('2026-10-29', STEP),
+      tomorrowReview('2026-10-30', STEP),
+      tomorrowReview('2026-10-31', '   ')
+    ];
+    const secondText = await morningText(second.value, null, {
+      getTomorrowBridge: bridgeProvider(notCounting)
+    });
+    expect(secondText.endsWith(`\n${LINE_B}`)).toBe(true);
+  } finally {
+    await rm(first.dir, { recursive: true, force: true });
+    await rm(second.dir, { recursive: true, force: true });
+  }
+});
+
+test('the bridge line also ends a model-written reply and never enters its prompt', async () => {
+  const { dir, value } = await store();
+  try {
+    const client = new FakeModelClient([MORNING_MODEL_TEXT]);
+    const reviews = [tomorrowReview('2026-10-31', STEP)];
+    const text = await morningText(value, client, {
+      getTomorrowBridge: bridgeProvider(reviews)
+    });
+    expect(text).toBe(`${MORNING_MODEL_TEXT}\n${LINE_A}`);
+    // Code-owned copy: the model's prompt carries neither line nor step.
+    const prompt = client.calls[0]!.messages[0]!.content;
+    expect(prompt).not.toContain('明天第一步');
+    expect(prompt).not.toContain(STEP);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the evening check-in never reads the tomorrow bridge', async () => {
+  const { dir, value } = await store();
+  try {
+    const getTomorrowBridge = vi.fn(
+      bridgeProvider([tomorrowReview('2026-10-31', STEP)])
+    );
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getTomorrowBridge,
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+    const notification = await service.check('evening', '2026-11-01');
+    expect(notification).not.toBeNull();
+    const text = (await value.get(notification!.conversationId!))!.messages[0]!.text;
+    expect(text).toBe('晚上好。今天还有 1 个任务没完成，最卡的是哪一步？');
+    expect(getTomorrowBridge).not.toHaveBeenCalled();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 });

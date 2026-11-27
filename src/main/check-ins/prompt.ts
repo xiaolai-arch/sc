@@ -5,6 +5,7 @@ import {
   isLocalDateTimeSeconds,
   localDaysBetween
 } from '../../shared/date';
+import type { TomorrowBridgeFacts } from '../../shared/review-stats';
 import {
   buildBehindScheduleNotification,
   isTaskForDate
@@ -104,6 +105,54 @@ export function freshStartCheckInLine(
   facts: ReviewRecoveryLike | null | undefined
 ): string {
   return facts?.freshStart ? FRESH_START_CHECK_IN_LINE : '';
+}
+
+/**
+ * The tomorrow-bridge fact a morning check-in may act on (iter33 P0):
+ * yesterday's-or-earlier `tomorrow` as written, plus whether the newest few
+ * such reviews all wrote the same step. Produced by `tomorrowBridge` in
+ * `shared/review-stats.ts`; one source of truth for the shape.
+ */
+export type TomorrowBridgeLike = TomorrowBridgeFacts;
+
+/** Upper bound for the embedded `tomorrow` text, counted in code points. */
+const MAX_TOMORROW_CODE_POINTS = 60;
+/** Head length kept when truncating, so 「…」 lands at exactly 60 code points. */
+const TOMORROW_TRUNCATE_HEAD = 57;
+
+/** The staleness variant: a way out, never an evaluation (不羞辱口径). */
+const STALE_TOMORROW_LINE =
+  '这步写了好几天了——要不要把它切小一点，或者干脆换一步？';
+
+/**
+ * The raw text when it fits 60 code points, else its first 57 code points
+ * plus 「…」. Code points, not UTF-16 units: an astral character counts as
+ * one and can never be cut in half. A deterministic rule, not a smart one —
+ * no word-aware trimming.
+ */
+function truncateTomorrow(tomorrow: string): string {
+  const codePoints = [...tomorrow];
+  if (codePoints.length <= MAX_TOMORROW_CODE_POINTS) return tomorrow;
+  return `${codePoints.slice(0, TOMORROW_TRUNCATE_HEAD).join('')}…`;
+}
+
+/**
+ * The one tomorrow-bridge line for the morning check-in, or '' when there is
+ * nothing to hand back. Line A asks whether today starts with the step the
+ * user wrote down, embedding it verbatim after deterministic truncation. The
+ * staleness fact swaps in line B — same slot, one line, no line A beside it.
+ * The wording never names 「昨天」: the review may be days older, and the
+ * line must not lie. Like the fresh-start line it is deterministic, appended
+ * to the composed message, never handed to the model to reword or repeat.
+ */
+export function tomorrowCheckInLine(
+  facts: TomorrowBridgeLike | null | undefined
+): string {
+  if (!facts) return '';
+  const tomorrow = typeof facts.tomorrow === 'string' ? facts.tomorrow : '';
+  if (tomorrow.trim() === '') return '';
+  if (facts.stale) return STALE_TOMORROW_LINE;
+  return `你在复盘里写下明天第一步：${truncateTomorrow(tomorrow)}——今天第一件事就是它吗？`;
 }
 
 /** True when the week has at least one number worth telling the user. */
@@ -416,7 +465,8 @@ export function buildCheckInTemplate(
   weeklyHonest: WeeklyHonestLike | null = null,
   commitment: CommitmentLike | null = null,
   backup: BackupStatusLike | null = null,
-  reviewRecovery: ReviewRecoveryLike | null = null
+  reviewRecovery: ReviewRecoveryLike | null = null,
+  tomorrowBridge: TomorrowBridgeLike | null = null
 ): string {
   const tasks = activeTasks(context);
   if (trigger === 'weekly') {
@@ -455,10 +505,13 @@ export function buildCheckInTemplate(
       : '早上好。今天还没有安排任务，想先做点什么？';
     // The morning's deterministic tail: the fresh-start line precedes the
     // promise revisit when both fire (fixed order); each alone, or neither,
-    // keeps every existing fixture byte-identical.
+    // keeps every existing fixture byte-identical. The tomorrow bridge is
+    // the newest member and appends last, so any existing combination stays
+    // at its previous bytes when the bridge has nothing to say.
     const freshStart = freshStartCheckInLine(reviewRecovery);
     const promise = commitmentCheckInLine(commitment, date);
-    const tail = [freshStart, promise].filter((line) => line !== '');
+    const tomorrow = tomorrowCheckInLine(tomorrowBridge);
+    const tail = [freshStart, promise, tomorrow].filter((line) => line !== '');
     return tail.length === 0 ? base : `${base}\n${tail.join('\n')}`;
   }
   return tasks.length > 0
