@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { formatLocalDate } from '../../shared/date';
-import { reviewStreak } from '../../shared/review-stats';
+import { isReviewLapsed, longestReviewStreak, reviewStreak } from '../../shared/review-stats';
 import { weeklyOverview } from '../../shared/weekly-stats';
 import { friendlyErrorMessage } from '../../shared/errors';
 import type { ReviewRecord } from '../../shared/ipc';
@@ -76,6 +76,11 @@ export function ReviewPage({
   const streak = reviewedToday
     ? reviewStreak(reviews, today)
     : reviewStreak(reviews, formatLocalDate(yesterday));
+  // The all-time best run is a fact that survives a lapse, and the lapse
+  // itself (today and yesterday both unreviewed, history exists) earns one
+  // recovery sentence. Never-reviewed shows neither.
+  const longestStreak = longestReviewStreak(reviews);
+  const lapsed = isReviewLapsed(reviews, today);
 
   const inFilter = (workspaceId?: string) => !filterId || workspaceId === filterId;
   const filteredTasks = tasks.filter((task) => inFilter(task.workspaceId));
@@ -211,9 +216,17 @@ export function ReviewPage({
           <span className="font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
             连续复盘 {streak} 天
           </span>
+          <span className="font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">
+            最长连续复盘 {longestStreak} 天
+          </span>
           {!reviewedToday ? (
             <span className="ml-auto font-medium text-[#0071e3] dark:text-[#4da3ff]">
               今天还没复盘
+            </span>
+          ) : null}
+          {lapsed ? (
+            <span className="w-full">
+              中断了一次，但「最长连续复盘 {longestStreak} 天」还在——今天记一笔，就重新开始。
             </span>
           ) : null}
         </div>
