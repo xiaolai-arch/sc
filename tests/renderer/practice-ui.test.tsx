@@ -522,10 +522,12 @@ describe('checkpoint self-check (对照检查点自查)', () => {
 
     await user.click(screen.getByRole('button', { name: '答对了' }));
     await waitFor(() => expect(onSubmitShortAnswer).toHaveBeenCalledTimes(1));
+    // P1 口径 B 的 durationMs 与 P2a 的 checkpointHits 并存于同一次提交。
     expect(onSubmitShortAnswer).toHaveBeenCalledWith({
       questionId: 'sq-cp',
       response: '极限是 1',
       selfCorrect: true,
+      durationMs: expect.any(Number),
       checkpointHits: [true, false]
     });
     expect(await screen.findByText('回答正确')).toBeInTheDocument();
@@ -550,11 +552,12 @@ describe('checkpoint self-check (对照检查点自查)', () => {
 
     await user.click(screen.getByRole('button', { name: '答对了' }));
     await waitFor(() => expect(onSubmitShortAnswer).toHaveBeenCalledTimes(1));
-    // 无检查点 → 调用参数与基线完全一致，不带 checkpointHits。
+    // 无检查点 → 不带 checkpointHits；P1 的 durationMs 照常随行。
     expect(onSubmitShortAnswer).toHaveBeenCalledWith({
       questionId: 'sq-plain',
       response: '极限是 1',
-      selfCorrect: true
+      selfCorrect: true,
+      durationMs: expect.any(Number)
     });
   });
 });
