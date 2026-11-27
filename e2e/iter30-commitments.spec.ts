@@ -31,6 +31,14 @@ async function writeVaultFile(vault: string, relative: string, body: string): Pr
   await writeFile(file, body, 'utf8');
 }
 
+/** Local YYYY-MM-DD `days` from today, so seeded due dates never rot. */
+function dueFromToday(days: number): string {
+  const now = new Date();
+  const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() + days);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`;
+}
+
 /** A commitments.md the app itself could have written. */
 function commitmentsBody(
   entries: Array<{ id: string; text: string; due: string; status?: string; resolvedAt?: string }>
@@ -75,10 +83,12 @@ async function launchWith(files: Record<string, string>): Promise<{
 
 test.describe('visible commitments (iter30 P0)', () => {
   test('lists open promises, resurfaces an overdue one, and reschedules it on disk', async () => {
+    const overdueDue = dueFromToday(-7);
+    const openDue = dueFromToday(5);
     const { launched, environment } = await launchWith({
       'commitments.md': commitmentsBody([
-        { id: 'cm-overdue', text: '整理错题本', due: '2026-11-18' },
-        { id: 'cm-open', text: '背完这一课的单词', due: '2026-11-25' }
+        { id: 'cm-overdue', text: '整理错题本', due: overdueDue },
+        { id: 'cm-open', text: '背完这一课的单词', due: openDue }
       ])
     });
     const { page } = launched;
@@ -93,7 +103,7 @@ test.describe('visible commitments (iter30 P0)', () => {
       await expect(page.getByText('你说过的、还开着的事。这里能改日期，也能放下。')).toBeVisible();
       await expect(page.getByText('整理错题本')).toBeVisible();
       await expect(page.getByText('背完这一课的单词')).toBeVisible();
-      await expect(page.getByText(/原定 11-18 · 已过期 \d+ 天/)).toBeVisible();
+      await expect(page.getByText(`原定 ${overdueDue.slice(5)} · 已过期 7 天`)).toBeVisible();
       await expect(page.getByText('这是你答应的事，不是任务。')).toBeVisible();
 
       // 改期: pick a concrete future date and save.
@@ -117,7 +127,7 @@ test.describe('visible commitments (iter30 P0)', () => {
       // On disk only that entry moved: still open, no resolvedAt, others intact.
       const raw = await readFile(join(environment.vault, 'commitments.md'), 'utf8');
       expect(raw).toContain(`- [ ] 整理错题本（原定 ${targetDate}）`);
-      expect(raw).toContain('- [ ] 背完这一课的单词（原定 2026-11-25）');
+      expect(raw).toContain(`- [ ] 背完这一课的单词（原定 ${openDue}）`);
       expect(raw).not.toContain('resolvedAt');
       expect(raw).not.toMatch(/整理错题本[\s\S]*?resolvedAt/);
 
@@ -128,10 +138,11 @@ test.describe('visible commitments (iter30 P0)', () => {
   });
 
   test('放下 removes the promise from the default list and records it as dropped', async () => {
+    const droppedDue = dueFromToday(-6);
     const { launched, environment } = await launchWith({
       'commitments.md': commitmentsBody([
-        { id: 'cm-drop', text: '报个冲刺班', due: '2026-11-20' },
-        { id: 'cm-keep', text: '完成极限基础', due: '2026-11-26' }
+        { id: 'cm-drop', text: '报个冲刺班', due: droppedDue },
+        { id: 'cm-keep', text: '完成极限基础', due: dueFromToday(6) }
       ])
     });
     const { page } = launched;
@@ -147,7 +158,7 @@ test.describe('visible commitments (iter30 P0)', () => {
       await expect(page.getByText('完成极限基础')).toBeVisible();
 
       const raw = await readFile(join(environment.vault, 'commitments.md'), 'utf8');
-      expect(raw).toContain('- [-] 报个冲刺班（原定 2026-11-20）');
+      expect(raw).toContain(`- [-] 报个冲刺班（原定 ${droppedDue}）`);
       expect(raw).toMatch(/status: dropped/);
       expect(raw).toMatch(/resolvedAt: '/);
 
