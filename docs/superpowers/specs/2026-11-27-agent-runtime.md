@@ -26,10 +26,10 @@
 
 | 批次 | 内容 | 依赖 |
 |---|---|---|
-| **P0 底座骨架** | 契约三件套（RunRequest / RunEvent / RunState 六态）+ `EnginePort` + `FakeEngine`（测试里稳定制造失败）+ `RunJournal` + `ToolGateway`（工具注册表、三级行为、去重）；现有 14 个管家工具经网关重新注册（`createButlerTools`，`tools.ts:203`）；`plan_workspace`（`tools.ts:389`，现在生成+写入一体）拆成**预览（只读）与提交（写入）两个工具** | 无 |
+| **P0 底座骨架** | 契约三件套（RunRequest / RunEvent / RunState 六态）+ `EnginePort` + `FakeEngine`（测试里稳定制造失败）+ `RunJournal` + `ToolGateway`（工具注册表、三级行为、去重）；现有 19 个管家工具经网关**全部**重新注册（`createButlerTools`，`tools.ts:203`，名单以该函数返回为准）；`plan_workspace`（`tools.ts:389`，现在生成+写入一体）拆成**预览（只读）与提交（写入）两个工具** | 无 |
 | **P1 场景一 + Legacy 对照** | `LegacyEngine` 包装现有 `ButlerService.stream`（映射 `ButlerStreamEvent`（`src/shared/butler-stream.ts:30`）→ RunEvent）；场景一在 Fake/Legacy 上端到端走通：取消、确认、失败不说成功 | P0 |
 | **P2 PiEngine 接入** | `engine-pi` 适配锁定的 `pi-agent-core`（上游 `main` 标 **1.6.1、MIT、Node ≥ 22.19.0**，方案草稿 3/4）；**硬门：打包后的 Windows Electron 里**完成一次流式、一次工具调用、一次取消（开发机 Node 跑通不算）；场景一切到 Pi 与 Legacy 对照；Pi 类型零泄漏 | P0、P1 |
-| **P3 场景二：承诺改期** | **`CommitmentService` 新增 `reschedule` 方法**（现接口只有 list/listSummaries/create/resolve/pending——`src/main/commitments/service.ts:68-76`，**没有改期**，这是接缝空缺）+ `reschedule_commitment` 工具（确认级）+ renderer 审批卡（approval.requested → approved/rejected）+ 同名承诺先让用户选 | P0（网关审批）；不依赖 P2，Legacy/Pi 都能跑 |
+| **P3 场景二：承诺改期** | 改期语义**已存在**，不新增服务方法：`CommitmentService.resolve({ newDue })`（`service.ts:195`；日期校验 `:203-205`；改期下界唯一权威 `:210-218`，注释自证所有入口都走 `resolve`；写 due+恢复 open+清 resolvedAt `:228-231`），旧 `resolve_commitment` 工具已带 newDue 入口（`tools.ts:938`，描述 `:940`）。v1 做法：新增 `reschedule_commitment` 工具（**确认级**）以后端 `resolve({ newDue })` 为唯一改期路径；旧 `resolve_commitment` 收敛为纯「结掉」语义——工具 schema 移除 `newDue`，网关校验拒绝携带 `newDue` 的旧工具调用（防确认级审批被旁路）；renderer 审批卡（approval.requested → approved/rejected）+ 同名承诺先让用户选。（备选「新增显式 `reschedule` 服务方法并收敛 newDue」——接口重构，触 reminders page/IPC/工具全部入口——记入给 builder 决定 7，留 v2 评估） | P0（网关审批）；不依赖 P2，Legacy/Pi 都能跑 |
 | **P4 场景三：周总结** | 只读跨项目周复盘工具（来源引用 + 「没有记录就说明没有」）；对照期结束判据：Legacy 退役评估 | P0；建议在 P2 后 |
 
 **实施排期**：iter32 的 P0–P3 全部收口后，才由 sc-build 派本 spec 的批次（item 61 已定，主人 2026-11-27）。文件交集见「依赖与冲突」。
@@ -79,7 +79,7 @@
 ## 与现有代码的接缝（基线 `6dd3253`，行号已复核）
 
 **复用不动**：
-- 领域服务全套：planner（`src/main/planning/workspace-planner.ts` + `busy-day.ts:23`）、`CommitmentService`（`src/main/commitments/service.ts:68`，P3 增补 `reschedule`）、practice/knowledge/memory/availability。
+- 领域服务全套：planner（`src/main/planning/workspace-planner.ts` + `busy-day.ts:23`）、`CommitmentService`（`src/main/commitments/service.ts:68`，改期复用其 `resolve({ newDue })`，见 P3 行）、practice/knowledge/memory/availability。
 - vault：用户业务事实唯一来源（方案 §二⑤）。
 - 模型接入：`ModelClient`（`src/main/agent/model-client.ts:84`）/ `StreamingModelClient`（`:107`）与 provider 配置（ai-sdk / local-cli 两族）——Runtime 的引擎层坐在其上，首版不迁移全部 provider（草稿 5：不同时迁移执行引擎和所有模型供应商，先打通一个已配置、支持工具调用的模型）。
 - 上下文收集先例：`gatherContext`（`src/main/butler/context.ts:86`）——Runtime 的 ContextBuilder 按本次任务选材，不整库塞提示词。
@@ -88,20 +88,20 @@
 - 模型-工具循环：`ButlerService.stream`（`butler-service.ts:275`）+ 循环体（`:380-450`，含 `maxToolSteps`（`:98,122`）、`runTool`（`:734`）、中止处理（`:441-447`）、重试（`model-retry.ts`））。
 - 工具表与执行器：`createButlerTools`（`tools.ts:203`）/ `toModelToolDefinitions`（`:1288`）/ `executeButlerTool`（`:1300`）——迁到 ToolGateway 注册表下，行为类标级。
 
-**新增**：`src/main/runtime/`（contracts、RunController、EnginePort、ToolGateway、RunJournal）+ `src/main/runtime/engine-pi/`；`CommitmentService.reschedule`；renderer 审批卡组件（订阅运行事件，参照现有流订阅 IPC：`src/main/ipc.ts:195-197` 的 stream/cancel/event 三通道与 `:202-203` 的 runs list/cancel）。
+**新增**：`src/main/runtime/`（contracts、RunController、EnginePort、ToolGateway、RunJournal）+ `src/main/runtime/engine-pi/`；`reschedule_commitment` 工具（后端复用 `resolve({ newDue })`，不新增服务方法——见 P3 行）+ `resolve_commitment` 工具 schema 收敛（移除 `newDue`）；renderer 审批卡组件（订阅运行事件，参照现有流订阅 IPC：`src/main/ipc.ts:195-197` 的 stream/cancel/event 三通道与 `:202-203` 的 runs list/cancel）。
 
 **renderer 现状**：已有取消通道（`ipc.ts:196` cancel-stream）与运行列表（`:202-203`）；v1 补审批卡与按序号补读，重连不新开协议。
 
 ## 验收（编号可测；分批对应；「最终数据为准」贯穿全部场景）
 
 **架构总验收**
-1. 移除 PiEngine 注册（仅留 Fake/Legacy），P0–P4 全部验收用例照常通过；UI 代码、vault 数据、领域服务零改动——diff 断言仅 `src/main/runtime/` 与其装配点变化。
+1. 移除 PiEngine 注册（仅留 Fake/Legacy），P0–P4 全部验收用例照常通过；UI 代码、vault 数据、领域服务零改动。可执行形式：对合入 diff 跑 `git diff --name-only <base>...HEAD` 做**路径白名单断言**（允许清单：`src/main/runtime/` 新目录、装配点 `src/main/index.ts` 与 `src/main/ipc.ts`、`package.json`、`tests/`、`docs/`；断言进 CI）。
 
 **P0**
 2. 每条 RunEvent 序号在单次运行内严格递增且连续（FakeEngine 回放断言）。
 3. `cancel` 后运行进入「取消」态，**不再执行任何后续工具**（FakeEngine 注入「工具+取消竞态」负例断言）。
 4. 工具网关拒绝未注册工具与未声明行为级的工具：返回 `tool.failed`，模型收到错误回执而不是静默忽略。
-5. 同一 `runId` 内「参数与项目范围完全相同」的重复写入类调用被去重拦截（FakeEngine 连发两次 `reschedule_commitment` 同参，第二次被网关拒绝）。
+5. 重复写入类调用**仅对已提交（`tool.committed`）的调用**去重：同一 `runId` 内同参同范围的调用在首次提交后再次出现即被网关拒绝；**`tool.failed` 后的同参重试放行**——重试被允许，只是不能双写（方案 A1 验收标准 2 原文「取消或重试不能把同一计划写两遍」）。测试拆两条：提交后同参 → 拒；失败后同参 → 放行。
 6. `plan_workspace` 拆分后：预览工具**零写盘**（临时 vault 探针断言无文件变化），提交工具才有写入。
 
 **P1（场景一，Fake/Legacy）**
@@ -119,14 +119,17 @@
 **P3（场景二：改期）**
 15. 改期成功后：承诺详情与通知中心读到的 `due` 是同一天（`records.ts:17` 的 `due` 字段，经 `coerceDue`（`records.ts:102`）净化后仍一致）。
 16. 无效日期（过去日期、格式错、空串）：服务拒绝、**不写盘**、运行进「失败」；UI 不显示「已改期」。
-17. 两条同名承诺：Runtime 先发 `approval.requested` 附两条候选让用户选；未选择前不写盘。
-18. 审批绑定参数：批准 `A→周五` 后模型再提 `A→周六`，必须重新确认，不能用旧批准（网关断言）。
+17. 两条同名承诺：Runtime 先发 `approval.requested` 附两条候选让用户选；未选择前不写盘；候选选择不可经旧工具调用替代（旁路负例见验收 23）。
+18. 审批绑定参数：批准 `A→周五` 后模型再提 `A→周六`，必须重新确认，不能用旧批准（网关断言）；把改期伪装成旧工具调用同样无效（见验收 23）。
 19. 「准备修改」与「已经修改」事件可区分：`approval.requested` ≠ `tool.committed`；只有服务回执后才产生 committed。
 
 **P4（场景三：周总结）**
 20. 复盘输出每条结论附来源记录标识（记录 ID/文件路径）；无记录支撑的结论必须明示「推断」。
 21. 请求本周总结时某项目无记录：输出明说「没有记录」，不编补。
 22. 场景三运行全程只读：任何写入类工具调用被网关拒绝并记 `tool.failed`（测试注入模型尝试写入的负例）。
+
+**旁路负例（P3）**
+23. 旧入口旁路被堵死：模型经 `resolve_commitment` 携带 `newDue` 提改期 → 网关/schema 层拒绝（该工具 schema 已移除 `newDue` 参数，多余参数即拒），不写盘、不产生 `tool.committed`；改期只能走确认级 `reschedule_commitment`，且用户批准后该次调用才落盘（FakeEngine 负例断言）。
 
 ## 测试点（落点建议）
 
@@ -141,7 +144,7 @@
 ## 依赖与冲突
 
 - **iter32 优先**：实施等 iter32 全批收口（item 61，主人 2026-11-27）。本 spec 是文档工作，不占 worker。
-- 文件交集：本 spec 主要落 `src/main/runtime/`（全新）与 `src/main/commitments/service.ts`（iter32 各批未触碰）、`src/main/ipc.ts`（新增通道，iter32 未触碰）；`tools.ts` 仅在 P0 注册表迁移时触碰——iter32 P2b（回访阶梯）改同文件 `:839` 的 `schedule_revisit` 内部，冲突面小但派单时需声明先后。
+- 文件交集：本 spec 主要落 `src/main/runtime/`（全新）与 `src/main/commitments/service.ts`（iter32 各批未触碰）、`src/main/ipc.ts`（新增通道，iter32 未触碰）；`tools.ts` 仅在 P0 注册表迁移时触碰——iter32 P2b（回访阶梯）改同文件 `:839` 的 `schedule_revisit` 内部，冲突面小但派单时需声明先后。**P2b 合入后 `tools.ts` 尾部净增约 +35 行，`:1288/:1300` 等尾部锚点届时偏移（`:203/:389` 不受影响）——派单与实施按合入后的新 master 重核行号。**
 - 不推 origin（团队边界）；本 spec 分支随 iter32 之外独立评审。
 
 ## 给 builder 的默认决定（评审可推翻）
@@ -152,6 +155,7 @@
 4. 审批卡确认粒度：一次批准 = 一次工具调用 + 一组参数 + 一个项目范围；会话级「始终允许」不做（草稿 4）。
 5. Legacy 的会话摘要（`maybeSummarize`，`butler-service.ts:576`）不迁入 Runtime v1——它是 Legacy 引擎内部实现，Runtime 契约不管对话压缩。
 6. 打包验证门（验收 11）作为 P2 的**手测清单**记录在交付报告，不进 CI（CI 没有打包产物）。
+7. 改期后端选 `resolve({ newDue })` 复用而非新增 `reschedule` 服务方法（P3 行）：服务注释自证 `resolve` 是改期唯一权威入口（`service.ts:210-215`），新增方法会造成第二路径、破坏「一条写入路径」；备选 a（显式 `reschedule` 方法并收敛 newDue，接口重构、迁移全部入口）若 v2 认为「resolve 兼两职」语义不清再评估。
 
 ## 风险
 
@@ -167,3 +171,4 @@
 3. 首批三场景与顺序：先计划、再改期、最后复盘（方案 §一）。
 4. 方案 v1 群发被 502 截断，spec 以「已发出部分 + 草稿回收」为准绳、未定处标「spec 填充，待方案 v2 确认」（sc-lead 2026-11-27 批准，回执 `msg_4d3ebd034038`；sc-lead 负责向主人如实报告截断一事）。
 5. 团队边界：本分支不推 origin；合入由 sc-release 收口。
+6. 2026-11-27 sc-review 评审：三条阻断已折叠——工具实数 19（原误写 14）、改期复用 `resolve({ newDue })` 并收敛旧入口（原「接缝空缺需新增方法」系误判）、去重仅限已提交调用；非阻断 4/5 一并折叠（验收 1 改路径白名单断言、P2b 合入后行号重核注记），非阻断 6 仅记录不改。评审同时声明：其无群历史读取通道，落盘原文的逐字一致性采信 sc-spec 的逐字回收 + sc-lead 批准回执（见「已定 4」）。
