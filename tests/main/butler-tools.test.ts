@@ -1191,16 +1191,45 @@ function updatingKnowledge(topics: KnowledgeTopic[]): {
   service: KnowledgeService;
   update: ReturnType<typeof vi.fn>;
 } {
-  const update = vi.fn(async (input: { id: string; revisitDue?: string | null }) => ({
-    ...topics.find((topic) => topic.id === input.id)!,
-    revisitDue: input.revisitDue ?? undefined
-  }));
+  const update = vi.fn(
+    async (input: { id: string; revisitDue?: string | null; revisitStep?: number | null }) => ({
+      ...topics.find((topic) => topic.id === input.id)!,
+      revisitDue: input.revisitDue ?? undefined,
+      ...(input.revisitStep !== undefined ? { revisitStep: input.revisitStep ?? undefined } : {})
+    })
+  );
   return {
     update,
     service: knowledgeStub({
       list: async () => topics,
       update: update as unknown as KnowledgeService['update']
     })
+  };
+}
+
+/**
+ * An in-memory knowledge service whose `update` persists back onto the topic,
+ * so a sequence of tool calls reads the step written by the one before it.
+ */
+function persistedKnowledge(topic: KnowledgeTopic): {
+  service: KnowledgeService;
+  current: () => KnowledgeTopic;
+} {
+  let state: KnowledgeTopic = { ...topic };
+  return {
+    service: knowledgeStub({
+      list: async () => [state],
+      update: async (input) => {
+        const next: KnowledgeTopic = { ...state, id: state.id, updatedAt: 'stamp' };
+        if (input.revisitDue === null) delete next.revisitDue;
+        else if (input.revisitDue !== undefined) next.revisitDue = input.revisitDue;
+        if (input.revisitStep === null) delete next.revisitStep;
+        else if (input.revisitStep !== undefined) next.revisitStep = input.revisitStep;
+        state = next;
+        return state;
+      }
+    }),
+    current: () => state
   };
 }
 
@@ -1243,6 +1272,128 @@ test('schedule_revisit resolves an alias and rolls over the month', async () => 
   const payload = JSON.parse(result.content) as { result: { message: string } };
   expect(payload.result.message).toContain('10 天后（2026-12-05）');
   expect(payload.result.message).toContain('LangChain');
+});
+
+test('schedule_revisit lands on the ladder and writes the step when recalled', async () => {
+  const { service, update } = updatingKnowledge([
+    makeTopic({ id: 'kt-1', name: 'LangChain', revisitDue: '2026-11-21' })
+  ]);
+  const result = await executeButlerTool(
+    { id: 'l1', name: 'schedule_revisit', arguments: { name: 'LangChain', recalled: true } },
+    tools,
+    {
+      workspace: workspaceService,
+      knowledge: service,
+      now: () => new Date('2026-11-21T10:00:00')
+    }
+  );
+
+  // No step yet -> first rung: 3 days later, step 1.
+  expect(update).toHaveBeenCalledWith({
+    id: 'kt-1',
+    revisitDue: '2026-11-24',
+    revisitStep: 1
+  });
+  expect(result.ok).toBe(true);
+  const payload = JSON.parse(result.content) as {
+    result: { message: string; revisitDue: string };
+  };
+  expect(payload.result.message).toBe('已安排：3 天后（2026-11-24）抽 5 分钟自测「LangChain」。');
+  expect(payload.result.revisitDue).toBe('2026-11-24');
+});
+
+test('schedule_revisit with recalled ignores days entirely', async () => {
+  const { service, update } = updatingKnowledge([
+    makeTopic({ id: 'kt-1', name: 'LangChain', revisitDue: '2026-11-21', revisitStep: 1 })
+  ]);
+  await executeButlerTool(
+    {
+      id: 'l2',
+      name: 'schedule_revisit',
+      arguments: { name: 'LangChain', days: 5, recalled: true }
+    },
+    tools,
+    {
+      workspace: workspaceService,
+      knowledge: service,
+      now: () => new Date('2026-11-21T10:00:00')
+    }
+  );
+
+  // `recalled` wins over `days`: step 1 caught -> 7 days, not 5.
+  expect(update).toHaveBeenCalledWith({
+    id: 'kt-1',
+    revisitDue: '2026-11-28',
+    revisitStep: 2
+  });
+});
+
+test('schedule_revisit walks the ladder across catches and clears the key on a miss', async () => {
+  const { service, current } = persistedKnowledge(makeTopic({ id: 'kt-1', name: 'LangChain' }));
+  const context = {
+    workspace: workspaceService,
+    knowledge: service,
+    now: () => new Date('2026-11-21T10:00:00')
+  };
+  const run = (args: Record<string, unknown>, id: string) =>
+    executeButlerTool({ id, name: 'schedule_revisit', arguments: args }, tools, context);
+
+  // Catch once -> step 1 / 3 days.
+  await run({ name: 'LangChain', recalled: true }, 'l3');
+  expect(current().revisitStep).toBe(1);
+  expect(current().revisitDue).toBe('2026-11-24');
+
+  // Catch twice -> step 2 / 7 days.
+  await run({ name: 'LangChain', recalled: true }, 'l4');
+  expect(current().revisitStep).toBe(2);
+  expect(current().revisitDue).toBe('2026-11-28');
+
+  // Then a miss -> the step key is removed (never written as 0), tomorrow.
+  await run({ name: 'LangChain', recalled: false }, 'l5');
+  expect(current().revisitStep).toBeUndefined();
+  expect('revisitStep' in current()).toBe(false);
+  expect(current().revisitDue).toBe('2026-11-22');
+});
+
+test('schedule_revisit omitting recalled stays byte-identical to the baseline', async () => {
+  const { service, update } = updatingKnowledge([
+    makeTopic({ id: 'kt-1', name: 'LangChain', revisitStep: 3 })
+  ]);
+  const context = {
+    workspace: workspaceService,
+    knowledge: service,
+    now: () => new Date('2026-11-21T10:00:00')
+  };
+
+  // Explicit days: only revisitDue is written, the existing step is untouched.
+  await executeButlerTool(
+    { id: 'l6', name: 'schedule_revisit', arguments: { name: 'LangChain', days: 10 } },
+    tools,
+    context
+  );
+  expect(update).toHaveBeenLastCalledWith({ id: 'kt-1', revisitDue: '2026-12-01' });
+
+  // Default tomorrow: same shape, no step key in the input.
+  await executeButlerTool(
+    { id: 'l7', name: 'schedule_revisit', arguments: { name: 'LangChain' } },
+    tools,
+    context
+  );
+  expect(update).toHaveBeenLastCalledWith({ id: 'kt-1', revisitDue: '2026-11-22' });
+  for (const call of update.mock.calls) {
+    expect(Object.keys(call[0]).sort()).toEqual(['id', 'revisitDue']);
+  }
+});
+
+test('schedule_revisit documents that recalled wins over days', () => {
+  const tool = createButlerTools().find((entry) => entry.name === 'schedule_revisit');
+  if (!tool) throw new Error('schedule_revisit tool is missing');
+  expect(tool.description).toContain('recalled 与 days 同时给出时以 recalled 为准');
+  const properties = (tool.parameters as {
+    properties: Record<string, { description?: string }>;
+  }).properties;
+  expect(properties.recalled).toBeDefined();
+  expect(properties.days?.description).toContain('忽略');
 });
 
 test('schedule_revisit clamps days into 1-30', async () => {

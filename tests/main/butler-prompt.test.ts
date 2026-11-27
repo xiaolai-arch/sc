@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { BUTLER_SYSTEM_PROMPT, buildSystemPrompt } from '../../src/main/butler/prompt';
+import { createButlerTools } from '../../src/main/butler/tools';
 
 test('guides the butler to save and plan after a weekly review', () => {
   expect(BUTLER_SYSTEM_PROMPT).toContain('周复盘');
@@ -326,4 +328,40 @@ test('shrinks once more when the user is still stuck, and plans only on request'
   expect(BUTLER_SYSTEM_PROMPT).toContain('这一步只是聊天里的句子');
   expect(BUTLER_SYSTEM_PROMPT).toContain('除非用户明确让你把它记成任务（才调用 create_task）');
   expect(BUTLER_SYSTEM_PROMPT).toContain('否则不要新建任务');
+});
+
+test('teaches the butler to report a revisit self-test result through recalled', () => {
+  // After the revisit-day self-test, the result drives the next step.
+  expect(BUTLER_SYSTEM_PROMPT).toContain('回访日自测结束后按结果调用 schedule_revisit 传 recalled');
+  expect(BUTLER_SYSTEM_PROMPT).toContain('接住传 true，没接住传 false');
+  // days and recalled are mutually exclusive in practice.
+  expect(BUTLER_SYSTEM_PROMPT).toContain('传了 recalled 就不要再传 days');
+  // First-time scheduling keeps the legacy shape.
+  expect(BUTLER_SYSTEM_PROMPT).toContain('首次讲完后的安排不传 recalled');
+});
+
+test('never exposes scheduling-algorithm vocabulary in guidance or revisit UI copy', () => {
+  const forbidden = ['间隔重复', 'FSRS', '遗忘曲线', '保持率'];
+  // The guidance the model sees.
+  expect(BUTLER_SYSTEM_PROMPT).not.toContain('间隔重复');
+  expect(BUTLER_SYSTEM_PROMPT).not.toContain('FSRS');
+  expect(BUTLER_SYSTEM_PROMPT).not.toContain('遗忘曲线');
+  expect(BUTLER_SYSTEM_PROMPT).not.toContain('保持率');
+  // The tool text the model sees.
+  const tool = createButlerTools().find((entry) => entry.name === 'schedule_revisit');
+  if (!tool) throw new Error('schedule_revisit tool is missing');
+  expect(tool.description).not.toContain('间隔重复');
+  expect(tool.description).not.toContain('FSRS');
+  expect(tool.description).not.toContain('遗忘曲线');
+  expect(tool.description).not.toContain('保持率');
+  // The revisit UI copy: scan the renderer files that carry it verbatim.
+  for (const relative of [
+    'src/renderer/shell/TodayOverview.tsx',
+    'src/renderer/shell/KnowledgeNotePane.tsx'
+  ]) {
+    const source = readFileSync(new URL(`../../${relative}`, import.meta.url), 'utf8');
+    for (const word of forbidden) {
+      expect(source, `${relative} must not contain ${word}`).not.toContain(word);
+    }
+  }
 });

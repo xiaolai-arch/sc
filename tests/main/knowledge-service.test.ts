@@ -610,3 +610,109 @@ test('a stored bad revisit date is dropped on load, not fatal', async () => {
   expect(loaded?.name).toBe('LangChain');
   expect(loaded?.revisitDue).toBeUndefined();
 });
+
+test('revisitStep round-trips only when on the ladder (1-4)', () => {
+  const base: KnowledgeTopic = {
+    id: 'kt-1',
+    name: 'LangChain',
+    aliases: [],
+    status: 'learning',
+    summary: '',
+    evidence: [],
+    createdAt: '2026-11-01T00:00:00.000Z',
+    updatedAt: '2026-11-01T00:00:00.000Z'
+  };
+  // Absent stays absent: ordinary topics never gain the key.
+  const plain = serializeKnowledgeTopicFile(base);
+  expect(plain).not.toContain('revisitStep');
+  const parsed = parseKnowledgeTopicFile(plain, 'kt-1');
+  expect(parsed?.revisitStep).toBeUndefined();
+  expect(serializeKnowledgeTopicFile(parsed as KnowledgeTopic)).toBe(plain);
+
+  for (const step of [1, 2, 3, 4]) {
+    const raw = serializeKnowledgeTopicFile({ ...base, revisitStep: step });
+    expect(raw).toContain('revisitStep');
+    const roundTripped = parseKnowledgeTopicFile(raw, 'kt-1');
+    expect(roundTripped?.revisitStep).toBe(step);
+    // Re-saving an existing file rewrites nothing.
+    expect(serializeKnowledgeTopicFile(roundTripped as KnowledgeTopic)).toBe(raw);
+  }
+});
+
+test('a zero step is never serialized - the key disappears instead', () => {
+  const base: KnowledgeTopic = {
+    id: 'kt-1',
+    name: 'LangChain',
+    aliases: [],
+    status: 'learning',
+    summary: '',
+    evidence: [],
+    createdAt: '2026-11-01T00:00:00.000Z',
+    updatedAt: '2026-11-01T00:00:00.000Z',
+    revisitStep: 0
+  };
+  const raw = serializeKnowledgeTopicFile(base);
+  expect(raw).not.toContain('revisitStep');
+  expect(parseKnowledgeTopicFile(raw, 'kt-1')?.revisitStep).toBeUndefined();
+});
+
+test('a hand-edited bad revisitStep (0, 5, x) is dropped without losing the topic', () => {
+  for (const [badValue, expectedLine] of [
+    ['0', 'revisitStep: 0'],
+    ['5', 'revisitStep: 5'],
+    ["'x'", "revisitStep: 'x'"]
+  ] as const) {
+    const meta = [
+      '---',
+      'type: note',
+      'source: user',
+      'kind: knowledge-topic',
+      'id: kt-1',
+      'name: LangChain',
+      'status: learning',
+      `revisitStep: ${badValue}`,
+      '---',
+      ''
+    ].join('\n');
+    const parsed = parseKnowledgeTopicFile(`${meta}# LangChain\n`, 'kt-1');
+    expect(parsed, `bad value ${expectedLine}`).not.toBeNull();
+    expect(parsed?.name).toBe('LangChain');
+    expect(parsed?.revisitStep).toBeUndefined();
+    // Re-saving after the bad value is dropped must not reintroduce it.
+    expect(serializeKnowledgeTopicFile(parsed as KnowledgeTopic)).not.toContain(
+      'revisitStep'
+    );
+  }
+});
+
+test('schedules, advances and clears a revisitStep through the service', async () => {
+  const { dir, service } = await setup();
+  const topic = await service.create({ name: 'LangChain' });
+  const file = join(dir, 'knowledge', 'topics', `${topic.id}.md`);
+
+  const written = await service.update({ id: topic.id, revisitStep: 2 });
+  expect(written.revisitStep).toBe(2);
+  expect((await service.get(topic.id))?.revisitStep).toBe(2);
+  expect(await readFile(file, 'utf8')).toContain('revisitStep: 2');
+
+  // An unrelated update leaves the step untouched.
+  await service.update({ id: topic.id, summary: '会调用' });
+  expect((await service.get(topic.id))?.revisitStep).toBe(2);
+
+  // null clears the key back to "never entered the ladder".
+  const cleared = await service.update({ id: topic.id, revisitStep: null });
+  expect(cleared.revisitStep).toBeUndefined();
+  expect((await service.get(topic.id))?.revisitStep).toBeUndefined();
+  expect(await readFile(file, 'utf8')).not.toContain('revisitStep');
+});
+
+test('rejects a revisitStep outside 1-4 when writing', async () => {
+  const { service } = await setup();
+  const topic = await service.create({ name: 'LangChain' });
+  for (const badValue of [0, 5, 2.5, 'x']) {
+    await expect(
+      service.update({ id: topic.id, revisitStep: badValue as number })
+    ).rejects.toThrow('回访阶梯步数');
+  }
+  expect((await service.get(topic.id))?.revisitStep).toBeUndefined();
+});
