@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { formatLocalDate, isLocalDate } from '../shared/date';
-import { isReviewFreshStart } from '../shared/review-stats';
+import { isReviewFreshStart, tomorrowBridge } from '../shared/review-stats';
 import type {
   ListCommitmentsInput,
   ListReviewsInput,
@@ -33,7 +33,11 @@ import {
   type CommitmentService
 } from './commitments/service';
 import { ProactiveCheckInService } from './check-ins/proactive-check-in-service';
-import type { ResumeFacts, ReviewRecoveryLike } from './check-ins/prompt';
+import type {
+  ResumeFacts,
+  ReviewRecoveryLike,
+  TomorrowBridgeLike
+} from './check-ins/prompt';
 import {
   projectResolvedCommitment,
   weeklyAccuracyBySubject,
@@ -698,6 +702,26 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       }
     }
 
+    /**
+     * The newest review `tomorrow` written before today, for the morning
+     * bridge line (iter33 P0).
+     *
+     * Like the fresh-start fact, a review follows the person, not the
+     * project: reviews recorded in any workspace (check-in off included)
+     * count, so the line can hand back a step the user wrote anywhere. Read
+     * live on every check — no cache — so a review that landed overnight is
+     * handed back that same morning. Any read failure means null and the
+     * morning message keeps its shape.
+     */
+    async function readTomorrowBridge(today: Date): Promise<TomorrowBridgeLike | null> {
+      try {
+        const reviews = await readReviews({ limit: 200 });
+        return tomorrowBridge(reviews, formatLocalDate(today));
+      } catch {
+        return null;
+      }
+    }
+
         /**
      * The mute-resume facts for the first allowed check after a mute ended.
      *
@@ -762,6 +786,9 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       // Read-only fresh-start fact: one line on the morning after a missed
       // review day, computed live from the vault on every check.
       getReviewRecovery: readReviewRecovery,
+      // Read-only tomorrow bridge: one line handing back the newest pre-today
+      // review `tomorrow`, computed live from the vault on every check.
+      getTomorrowBridge: readTomorrowBridge,
       // The one mute-resume sentence: peeked before composing, consumed once.
       getResume: () => peekResume(today()),
       consumeResume,

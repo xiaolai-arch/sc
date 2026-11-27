@@ -4,11 +4,19 @@ import {
   buildCheckInPrompt,
   buildCheckInTemplate,
   resumeCheckInLine,
+  tomorrowCheckInLine,
   WEEK_AVAILABILITY_QUESTION,
   weekAvailabilityQuestion,
   type BackupStatusLike,
+  type TomorrowBridgeLike,
   type WeeklyOverviewLike
 } from '../../src/main/check-ins/prompt';
+import {
+  normalizeTomorrow,
+  STALE_TOMORROW_THRESHOLD,
+  tomorrowBridge,
+  type TomorrowBridgeReview
+} from '../../src/shared/review-stats';
 import type { ButlerContext } from '../../src/main/butler/context';
 import type { MemoryItem, Workspace, WorkspaceTask } from '../../src/shared/workspace';
 
@@ -850,4 +858,214 @@ test('no other trigger carries the fresh-start line', () => {
       buildCheckInTemplate(context, trigger, DATE, null, null, null, null, { freshStart: true })
     ).toBe(buildCheckInTemplate(context, trigger, DATE));
   }
+});
+
+// --- the tomorrow bridge (iter33 P0) -----------------------------------------
+
+const STEP = '把第三章的错题重做一遍';
+const LINE_A = `你在复盘里写下明天第一步：${STEP}——今天第一件事就是它吗？`;
+const LINE_B = '这步写了好几天了——要不要把它切小一点，或者干脆换一步？';
+
+function tomorrowReview(
+  date: string,
+  tomorrow: unknown,
+  submittedAt = `${date}T21:30:00`
+): TomorrowBridgeReview {
+  return { date, submittedAt, tomorrow };
+}
+
+test('the staleness threshold is the spec-filled default of 3', () => {
+  expect(STALE_TOMORROW_THRESHOLD).toBe(3);
+});
+
+test('tomorrowBridge hands back the newest pre-today review with a non-empty tomorrow', () => {
+  const reviews = [
+    tomorrowReview('2026-11-05', '早上的计划'),
+    tomorrowReview('2026-11-06', STEP),
+    // Newest before today, but empty: selection falls to the one above.
+    tomorrowReview('2026-11-07', '   '),
+    // Dated today: can never leak into this morning's line.
+    tomorrowReview('2026-11-08', '今天才写的')
+  ];
+  expect(tomorrowBridge(reviews, DATE)).toEqual({ tomorrow: STEP, stale: false });
+  // Unordered input is re-sorted by submittedAt, like readReviews does.
+  expect(tomorrowBridge([...reviews].reverse(), DATE)).toEqual({
+    tomorrow: STEP,
+    stale: false
+  });
+});
+
+test('tomorrowBridge reads empty, blank and badly-typed tomorrows as no data', () => {
+  expect(tomorrowBridge([], DATE)).toBeNull();
+  expect(tomorrowBridge([tomorrowReview('2026-11-07', '')], DATE)).toBeNull();
+  expect(tomorrowBridge([tomorrowReview('2026-11-07', '  \n\t ')], DATE)).toBeNull();
+  expect(tomorrowBridge([tomorrowReview('2026-11-07', 42)], DATE)).toBeNull();
+  expect(tomorrowBridge([tomorrowReview('2026-11-07', null)], DATE)).toBeNull();
+  expect(tomorrowBridge([tomorrowReview('2026-11-07', {})], DATE)).toBeNull();
+});
+
+test('normalizeTomorrow trims and collapses whitespace runs, and nothing else', () => {
+  expect(normalizeTomorrow('  背\t\n 单词 \t')).toBe('背 单词');
+  expect(normalizeTomorrow('背  单词')).toBe(normalizeTomorrow('背 单词'));
+  // Full- and half-width characters are different spellings: 写什么比什么.
+  expect(normalizeTomorrow('ＡＢ卷')).toBe('ＡＢ卷');
+  expect(normalizeTomorrow('ＡＢ卷')).not.toBe(normalizeTomorrow('AB卷'));
+});
+
+test('three normalized-identical tomorrows produce the staleness line only (验收 3)', () => {
+  const reviews = [
+    tomorrowReview('2026-11-05', '  背\t单词  '),
+    tomorrowReview('2026-11-06', '背 单词'),
+    tomorrowReview('2026-11-07', '背  单词 ')
+  ];
+  const facts = tomorrowBridge(reviews, DATE);
+  expect(facts?.stale).toBe(true);
+  expect(tomorrowCheckInLine(facts)).toBe(LINE_B);
+  // Line B replaces line A; there is no embed beside it.
+  expect(tomorrowCheckInLine(facts)).not.toContain('你在复盘里写下');
+});
+
+test('a differing third step keeps the regular line A (验收 3)', () => {
+  const reviews = [
+    tomorrowReview('2026-11-05', '换英语单词'),
+    tomorrowReview('2026-11-06', STEP),
+    tomorrowReview('2026-11-07', STEP)
+  ];
+  const facts = tomorrowBridge(reviews, DATE);
+  expect(facts?.stale).toBe(false);
+  expect(tomorrowCheckInLine(facts)).toBe(LINE_A);
+  // Two identical steps alone never reach the threshold.
+  expect(
+    tomorrowBridge(
+      [tomorrowReview('2026-11-06', STEP), tomorrowReview('2026-11-07', STEP)],
+      DATE
+    )?.stale
+  ).toBe(false);
+  // Full-width vs half-width spellings count as different steps.
+  const widths = [
+    tomorrowReview('2026-11-05', 'ＡＢ卷'),
+    tomorrowReview('2026-11-06', 'AB卷'),
+    tomorrowReview('2026-11-07', 'ＡＢ卷')
+  ];
+  const widthFacts = tomorrowBridge(widths, DATE);
+  expect(widthFacts?.stale).toBe(false);
+  expect(tomorrowCheckInLine(widthFacts)).toBe(LINE_A.replace(STEP, 'ＡＢ卷'));
+});
+
+test('an empty tomorrow in between neither breaks the run nor counts toward it (验收 5)', () => {
+  // Case 1 — 不断开: a reset-based count would stop at the empty review and
+  // see only two consecutive steps; skipping it keeps three, so line B fires.
+  const notBreaking = [
+    tomorrowReview('2026-11-04', STEP),
+    tomorrowReview('2026-11-05', ''),
+    tomorrowReview('2026-11-06', STEP),
+    tomorrowReview('2026-11-07', STEP)
+  ];
+  expect(tomorrowBridge(notBreaking, DATE)?.stale).toBe(true);
+  // Case 2 — 不计入: the newest review is empty. If empties consumed a
+  // threshold slot the window would be [empty, STEP, STEP] and line B would
+  // not fire; skipping it keeps three counted same steps.
+  const notCounting = [
+    tomorrowReview('2026-11-04', STEP),
+    tomorrowReview('2026-11-05', STEP),
+    tomorrowReview('2026-11-06', STEP),
+    tomorrowReview('2026-11-07', '   ')
+  ];
+  expect(tomorrowBridge(notCounting, DATE)?.stale).toBe(true);
+});
+
+test('line A embeds the step verbatim and neither line ever says 昨天', () => {
+  expect(tomorrowCheckInLine({ tomorrow: STEP, stale: false })).toBe(LINE_A);
+  expect(LINE_A).not.toContain('昨天');
+  expect(LINE_B).not.toContain('昨天');
+  expect(LINE_A).toContain('你在复盘里写下');
+});
+
+test('a tomorrow past 60 code points is truncated to 57 plus an ellipsis', () => {
+  // Exactly 60 code points embeds unchanged.
+  const exact = '一'.repeat(60);
+  expect(tomorrowCheckInLine({ tomorrow: exact, stale: false })).toBe(
+    `你在复盘里写下明天第一步：${exact}——今天第一件事就是它吗？`
+  );
+  // One over cuts at 57 code points plus 「…」.
+  const over = '一'.repeat(61);
+  expect(tomorrowCheckInLine({ tomorrow: over, stale: false })).toBe(
+    `你在复盘里写下明天第一步：${'一'.repeat(57)}…——今天第一件事就是它吗？`
+  );
+  // Astral characters are one code point each, never split in half.
+  const astralLine = tomorrowCheckInLine({ tomorrow: '𠮷'.repeat(61), stale: false });
+  const embedded = astralLine.slice(
+    astralLine.indexOf('：') + 1,
+    astralLine.indexOf('——')
+  );
+  expect([...embedded]).toHaveLength(58);
+  expect(embedded.endsWith('…')).toBe(true);
+  // Code-point slicing: UTF-16 .slice would cut a surrogate pair in half.
+  expect([...embedded].slice(0, 57).join('')).toBe('𠮷'.repeat(57));
+  // The staleness variant has no embed, so truncation never touches it.
+  expect(tomorrowCheckInLine({ tomorrow: over, stale: true })).toBe(LINE_B);
+});
+
+test('absent or empty facts keep the empty line', () => {
+  expect(tomorrowCheckInLine(null)).toBe('');
+  expect(tomorrowCheckInLine(undefined)).toBe('');
+  expect(tomorrowCheckInLine({} as unknown as TomorrowBridgeLike)).toBe('');
+  expect(tomorrowCheckInLine({ tomorrow: '', stale: false })).toBe('');
+  expect(tomorrowCheckInLine({ tomorrow: '   ', stale: true })).toBe('');
+  expect(tomorrowCheckInLine({ tomorrow: 42 as unknown as string, stale: false })).toBe('');
+});
+
+test('the morning template appends exactly one bridge line, stale or not', () => {
+  const regular = buildCheckInTemplate(
+    context, 'morning', DATE, null, null, null, null, null, { tomorrow: STEP, stale: false }
+  );
+  expect(regular).toBe(`${MORNING_BASE}\n${LINE_A}`);
+  expect(regular.split(LINE_A)).toHaveLength(2);
+  const stale = buildCheckInTemplate(
+    context, 'morning', DATE, null, null, null, null, null, { tomorrow: STEP, stale: true }
+  );
+  expect(stale).toBe(`${MORNING_BASE}\n${LINE_B}`);
+  expect(stale).not.toContain('你在复盘里写下');
+});
+
+test('the bridge line stacks after the fresh-start and promise lines, in that order', () => {
+  const all = buildCheckInTemplate(
+    context,
+    'morning',
+    DATE,
+    null,
+    null,
+    { text: '背 20 个单词', due: '2026-11-07' },
+    null,
+    { freshStart: true },
+    { tomorrow: STEP, stale: false }
+  );
+  expect(all).toBe([MORNING_BASE, FRESH_START_LINE, PROMISE_YESTERDAY, LINE_A].join('\n'));
+});
+
+test('no bridge fact keeps the morning template byte-identical', () => {
+  expect(buildCheckInTemplate(context, 'morning', DATE)).toBe(MORNING_BASE);
+  expect(
+    buildCheckInTemplate(context, 'morning', DATE, null, null, null, null, null, null)
+  ).toBe(MORNING_BASE);
+  expect(
+    buildCheckInTemplate(context, 'morning', DATE, null, null, null, null, null, {
+      tomorrow: '',
+      stale: false
+    })
+  ).toBe(MORNING_BASE);
+});
+
+test('no other trigger carries the bridge line, and the model never sees it', () => {
+  const facts: TomorrowBridgeLike = { tomorrow: STEP, stale: false };
+  for (const trigger of ['weekly', 'evening', 'behind'] as const) {
+    expect(
+      buildCheckInTemplate(context, trigger, DATE, null, null, null, null, null, facts)
+    ).toBe(buildCheckInTemplate(context, trigger, DATE));
+  }
+  // Like the fresh-start line the bridge is code-owned: the prompt builder
+  // takes no such input, so no call site can leak it into a model prompt.
+  expect(buildCheckInPrompt.length).toBeLessThanOrEqual(6);
+  expect(buildCheckInPrompt(context, 'morning', DATE)).not.toContain('明天第一步');
+  expect(buildCheckInPrompt(context, 'morning', DATE)).not.toContain(STEP);
 });
