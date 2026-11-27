@@ -13,7 +13,8 @@ import { buildWeeklyReviewTool } from './weekly-review';
  */
 
 /**
- * 三级行为标级表（19 个工具，名单以 `createButlerTools` 返回为准）：
+ * 三级行为标级表（20 个工具，名单以 `createButlerTools` 返回为准；P4 批加
+ * reschedule_commitment）：
  * - query：只读查询/预览（requiresWrite === false）。
  * - confirm：修改本地数据——批准绑定这一次操作 + 项目 + 参数。
  * - 第三级（删除 / 批量改动 / 对外发送）：v1 无此类工具，注册即违规。
@@ -56,7 +57,7 @@ function assertLevelConsistent(tool: ButlerToolDefinition, level: ToolBehaviorLe
 }
 
 export interface ButlerBridgeOptions {
-  /** Defaults to `createButlerTools()` — the authoritative 19-tool roster. */
+  /** Defaults to `createButlerTools()` — the authoritative 20-tool roster. */
   tools?: ButlerToolDefinition[];
   /** Register the plan-split tools too; tests may opt out. Default true. */
   includePlanSplit?: boolean;
