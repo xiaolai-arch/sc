@@ -1344,6 +1344,41 @@ test('checkpoint helpers normalize on read and align hits at stats time', () => 
   ]);
 });
 
+test('parseAttemptFile keeps raw length and reads non-boolean hits as unchecked', () => {
+  // 手编文件负例：`[true, x, true]` 不解成 `[true, true]` —— parse 侧逐索引
+  // `=== true`（与 alignCheckpointHits 同语义），原长度保留；与题目 checkpoints
+  // 的对齐只发生在统计时。
+  const raw = [
+    '---',
+    'type: log',
+    'source: user',
+    'kind: practice-attempts',
+    'date: 2026-11-01',
+    'entries:',
+    '  - id: pa-x',
+    '    workspaceId: kaoyan',
+    '    setId: ps1',
+    '    questionId: q2',
+    '    choice: 0',
+    '    response: 答案。',
+    '    checkpointHits: [true, x, true]',
+    '    correct: true',
+    '    answeredAt: 2026-11-01T09:10:00.000Z',
+    '---',
+    ''
+  ].join('\n');
+  const parsed = parseAttemptFile(raw)[0];
+  expect(parsed?.checkpointHits).not.toEqual([true, true]);
+  expect(parsed?.checkpointHits).toEqual([true, false, true]);
+  expect(parsed?.checkpointHits).toHaveLength(3);
+  // 与 3 条 checkpoints 对齐时第三条读 true，不会因字符串污染整体错位。
+  expect(alignCheckpointHits(parsed?.checkpointHits, ['一', '二', '三'])).toEqual([
+    true,
+    false,
+    true
+  ]);
+});
+
 test('a short mistake resolves after a spaced correct self-assessment', async () => {
   const service = at('2026-11-01');
   const created = await service.createSet({

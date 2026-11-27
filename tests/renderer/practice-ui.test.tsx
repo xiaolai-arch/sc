@@ -423,8 +423,9 @@ describe('short-answer (free recall) practice UI', () => {
 
 // ---------------------------------------------------------------------------
 // 对照检查点自查（P2a）：带检查点的简答题在 提交 与 对答案 之间多一步逐条自勾；
-// 自查时不展示参考答案；对答案后高亮漏勾项（中性色，不给分）。无检查点的
-// 简答题保持基线两步流，UI 文案与步骤逐字节不变。
+// 自查时不展示参考答案；对答案揭示面板不即时高亮——漏勾项（中性色，不给分）
+// 在自评点击之后才渲染（spec :42 字面顺序，item 67 裁 A）。无检查点的简答题
+// 保持基线两步流，UI 文案与步骤逐字节不变。
 // ---------------------------------------------------------------------------
 
 describe('checkpoint self-check (对照检查点自查)', () => {
@@ -494,6 +495,8 @@ describe('checkpoint self-check (对照检查点自查)', () => {
     const onSubmitShortAnswer = vi.fn(async () => checkpointResult(true));
     renderPane({ set: checkpointSet, onSubmitShortAnswer });
 
+    // 验收 14 顺序（item 67 裁 A，按 spec 字面）：提交 → 自查（不展示参考答案）
+    // → 对答案（揭示，无高亮）→ 自评点击之后才高亮漏勾项。
     await user.type(screen.getByLabelText('用你自己的话回答'), '极限是 1');
     await user.click(screen.getByRole('button', { name: '提交' }));
 
@@ -508,17 +511,11 @@ describe('checkpoint self-check (对照检查点自查)', () => {
     await user.click(screen.getByRole('checkbox', { name: '极限值是 1' })); // 取消再勾回
     await user.click(screen.getByRole('checkbox', { name: '极限值是 1' }));
 
-    // 对答案之后参考答案才显示，漏勾项带中性高亮与「没答到」标记。
+    // 对答案之后参考答案显示，但揭示面板不即时高亮——漏勾回看等自评点击之后。
     await user.click(screen.getByRole('button', { name: '对答案' }));
     expect(screen.getByText('参考答案：x→0 时 sin x / x 的极限是 1。')).toBeInTheDocument();
-    const hit = screen.getByText(/极限值是 1/).closest('li');
-    const missed = screen.getByText(/用到了夹逼准则/).closest('li');
-    expect(hit).toHaveAttribute('data-hit', 'true');
-    expect(missed).toHaveAttribute('data-hit', 'false');
-    expect(missed).toHaveTextContent('（没答到）');
-    // 漏勾是信息不是错误：中性琥珀，不是判错红。
-    expect(missed?.className).toContain('#ffb340');
-    expect(missed?.className).not.toContain('#d70015');
+    expect(screen.queryByRole('list', { name: '检查点对照' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/（没答到）/)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '答对了' }));
     await waitFor(() => expect(onSubmitShortAnswer).toHaveBeenCalledTimes(1));
@@ -531,6 +528,16 @@ describe('checkpoint self-check (对照检查点自查)', () => {
       checkpointHits: [true, false]
     });
     expect(await screen.findByText('回答正确')).toBeInTheDocument();
+
+    // 自评点击之后：漏勾项带中性高亮与「没答到」标记，勾到的带 ✓。
+    const hit = screen.getByText(/极限值是 1/).closest('li');
+    const missed = screen.getByText(/用到了夹逼准则/).closest('li');
+    expect(hit).toHaveAttribute('data-hit', 'true');
+    expect(missed).toHaveAttribute('data-hit', 'false');
+    expect(missed).toHaveTextContent('（没答到）');
+    // 漏勾是信息不是错误：中性琥珀，不是判错红。
+    expect(missed?.className).toContain('#ffb340');
+    expect(missed?.className).not.toContain('#d70015');
   });
 
   it('keeps the baseline two-step flow for a short question without checkpoints', async () => {

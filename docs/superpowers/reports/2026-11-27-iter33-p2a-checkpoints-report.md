@@ -59,16 +59,17 @@ P1 的 `durationMs` 与 P2a 的 `checkpointHits` 在四处同一插入点相邻�
 
 - 共享助手 `src/shared/practice.ts`：`normalizeCheckpoints`（空串/纯空白丢弃、超 3 截前 3、<2 → `undefined` 视为无）与 `alignCheckpointHits`（按索引截断对齐、缺失=未勾、非布尔=未勾、题目无 checkpoints → `undefined` 不落字段）。但ler 工具、vault 读（`coerceQuestion`）、服务写（`normalizeQuestions`）、渲染端（LearningPane 渲染前再归一）共用同一实现，无第二套口径。
 - `CreatePracticeQuestionInput.checkpoints`：手工建集（`source:'user'`/缺省）与建模集同一条 `normalizeQuestions` 路径——填 1 条 → 整字段省略（服务测试「createSet keeps 2-3 checkpoints…」覆盖 0/1/2/3/4 与 choice 各例）。
-- `checkpointHits`：`submitShortAnswer` 服务端 `alignCheckpointHits(input.checkpointHits, question.checkpoints)` 对齐后落盘；旧调用方不带 hits → 全 false 对齐数组（「缺失视为未勾」落到写侧）；题目无 checkpoints → 永不写字段（含多余 hits 输入，测试「writes no checkpointHits for questions without checkpoints」）。3 checkpoints / 2 hits 负例：落盘 `[true,false,false]`（测试「aligns checkpointHits with the question checkpoints (3 vs 2 negative case)」）；读侧 `parseAttemptFile` 保留原始数组、对齐只发生在统计时（「checkpoint helpers normalize on read and align hits at stats time」）。
+- `checkpointHits`：`submitShortAnswer` 服务端 `alignCheckpointHits(input.checkpointHits, question.checkpoints)` 对齐后落盘；旧调用方不带 hits → 全 false 对齐数组（「缺失视为未勾」落到写侧）；题目无 checkpoints → 永不写字段（含多余 hits 输入，测试「writes no checkpointHits for questions without checkpoints」）。3 checkpoints / 2 hits 负例：落盘 `[true,false,false]`（测试「aligns checkpointHits with the question checkpoints (3 vs 2 negative case)」）。读侧 `parseAttemptFile` **逐索引 `=== true`**（与 `alignCheckpointHits` 同一语义）：原长度保留、非布尔记未勾，与题目 checkpoints 的对齐只发生在统计时——手编文件 `checkpointHits: [true, x, true]` 解析为 `[true,false,true]` 而非 `[true,true]`（测试「parseAttemptFile keeps raw length and reads non-boolean hits as unchecked」）。
 - IPC `requireSubmitShortAnswer`（`src/main/ipc.ts`）：`checkpointHits` 数组透传、非数组视为无；`requireCreatePracticeSet`/`requireUpdatePracticeSet` 本就 spread/questions 透传，`checkpoints` 无需改即达。
 
 ### 作答流（验收 14）
 
 `src/renderer/shell/LearningPane.tsx`，仅带检查点的 short 题出现第三步：
 
-- 写答案 → **提交**（进入「对照检查点自查」面板，spec 默认决定 7 标题逐字；**不展示 referenceAnswer**——测试断言 `queryByText(/参考答案：/)` 为 null）→ 逐条自勾「答到了吗」（checkbox）→ **对答案**（新按钮）→ 参考答案 + 答对了/没答对（基线自评 UI 原样）→ 漏勾项以中性琥珀高亮（`#8a5a00`/`#ffb340`，浅底 `#ffb340/10`）并缀「（没答到）」，勾到的显示 `✓`；**不给分、不进错题本、不进调度**。
+- 写答案 → **提交**（进入「对照检查点自查」面板，spec 默认决定 7 标题逐字；**不展示 referenceAnswer**——测试断言 `queryByText(/参考答案：/)` 为 null）→ 逐条自勾「答到了吗」（checkbox）→ **对答案**（新按钮，揭示参考答案 + 答对了/没答对，基线自评 UI 原样）→ **自评点击之后**渲染漏勾回看：漏勾项以中性琥珀高亮（`#8a5a00`/`#ffb340`，浅底 `#ffb340/10`）并缀「（没答到）」，勾到的显示 `✓`；**不给分、不进错题本、不进调度**。
+- **高亮时机按 spec 字面（自评后，item 67 裁 A）**：对答案揭示面板**不即时高亮**——「检查点对照」列表整体挂 `answered && hasCheckpoints` 条件，自评点击前不出现。渲染位置：`LearningPane` 组件 short 题揭示面板（`revealed ?` 分支内）的 `<ul aria-label="检查点对照">` 块；若日后改回即时揭示，把该块条件从 `answered && hasCheckpoints` 改回 `hasCheckpoints` 即可，一行条件。
 - 负例：无 checkpoints 的 short 题作答流与基线两步逐字节一致（提交直达参考答案+自评；测试断言不出现「对照检查点自查」与「对答案」按钮，提交参数不含 `checkpointHits`）。
-- 高亮落点：在「对答案」揭示时即高亮（此刻勾选状态已是学习者自己的输入，非判分信息），早于自评点击，位于现有 UI 流的自然位置（spec 允许「之前或之后，按现有 UI 流自然位置实现」）。
+- UI 测试顺序与 spec :42 逐条对应：提交 → 自查（无参考答案）→ 对答案（揭示，断言 `queryByRole('list', { name: '检查点对照' })` 为 null、无「（没答到）」）→ 答对了 → 断言 `data-hit`/中性琥珀/「（没答到）」缀注。
 
 ### 判分链零改动与无 AI 打分（验收 16）
 
@@ -85,7 +86,7 @@ P1 的 `durationMs` 与 P2a 的 `checkpointHits` 在四处同一插入点相邻�
 |---|---|---|---|
 | 12 | butler 建 short 题建模集 → 每题 2–3 条检查点、`source:'model'`+`reviewedAt` 待核对；choice/无 referenceAnswer 短题零检查点、提示词其余逐字节不变 | ✅ | butler 两测试 + service createSet 测试；提示词快照断言见上 |
 | 13 | 手工建集可自填 0–3 条；填 1 条 → 字段省略 | ✅（数据面，见「偏离」①） | service「createSet keeps 2-3 checkpoints…」1 条 → `undefined` |
-| 14 | 作答流顺序可测：提交 → 自查不显示参考答案 → 对答案后显示并高亮漏勾；负例基线两步一致 | ✅ | practice-ui 两个新测试（正例顺序 + 基线负例） |
+| 14 | 作答流顺序可测：提交 → 自查不显示参考答案 → 对答案后显示并高亮漏勾；负例基线两步一致 | ✅（高亮时机按 item 67 裁 A：自评点击后） | practice-ui 两个新测试（正例四步顺序 + 基线负例） |
 | 15 | hits 与 checkpoints 等长才入统计；不等长按索引截断、缺失记未勾（3/2 负例） | ✅ | service 对齐测试 + helper 测试（读侧原样、统计侧 `alignCheckpointHits`） |
 | 16 | selfCorrect 判分与统计链零改动（`:603-604`、`:716-717` 回归）；无 AI 打分调用 | ✅ | 门禁 3 全绿 + grep = 0（见上） |
 | 17 | 明文可读（临时 vault 探针） | ✅ | 两组 vault 探针测试 |
@@ -99,7 +100,7 @@ P1 的 `durationMs` 与 P2a 的 `checkpointHits` 在四处同一插入点相邻�
 ## 偏离 spec 之处
 
 1. **验收 13 的「手工建集可自填」只做了数据/服务层，未加对话框 UI 字段**。现状 `PracticeSetDialog` 本就不支持编写 short 题（`draftFrom` 不带 `kind`/`referenceAnswer`，重命名含 short 题的集会在对话框校验层报「至少需要 2 个选项」——P2a 之前即如此），没有可挂「检查点 0–3 条输入框」的 short 题编辑器；新增 short 题编辑器是超出本批范围的新功能。`CreatePracticeQuestionInput.checkpoints` 已全链路可用（对话框之外的手工建集调用方、未来 UI 皆可直接传），服务层测试覆盖 0–3 条与 <2 省略。建议后续批次随「对话框支持 short 题」一并补 UI。
-2. **高亮时机**：spec 文字「对答案（…selfCorrect 照旧）→ 高亮漏掉的检查点」未裁明高亮在揭示时还是自评后；实现取「对答案揭示时即高亮」（勾选是学习者自己的输入，非判分信息），早于自评点击，属 spec 允许的「按现有 UI 流自然位置」。
+2. **高亮时机（已按 sc-lead 裁 A 收口）**：首版实现曾取「对答案揭示时即高亮」；item 67 裁 A 改为 spec :42 字面顺序——漏勾高亮（含「（没答到）」缀注）在**自评点击之后**才渲染，揭示面板不即时高亮。**注记（sc-lead 指定原文要点）：高亮时机按 spec 字面（自评后）；若日后改回即时揭示，为一行条件**——`LearningPane` 揭示面板内 `<ul aria-label="检查点对照">` 块的条件由 `answered && hasCheckpoints` 改回 `hasCheckpoints` 即可。
 3. **旧调用方写全 false hits**：题目带 checkpoints 而提交方未带 hits（旧调用方/服务直调）时落盘全 false 对齐数组而非省略字段——依据 spec「缺失视为未勾」把对齐Invariant 固化为「有 checkpoints 的 attempt 必有 checkpointHits」，便于统计；渲染端真实作答流总是带真实勾选。
 4. 行号引用漂移：任务书里的 `practice-service.ts:585-586、690-691` 是基线 `4752928`/`1bce8fa` 行号，P1 合入后同一判分逻辑现位于 `:603-604`、`:716-717`（零改动已核）。
 

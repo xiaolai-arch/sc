@@ -845,7 +845,9 @@ export function LearningPane({
                       <p className="mt-1 whitespace-pre-wrap text-[13px] leading-6 text-gray-500 dark:text-[#a1a1a6]">
                         你写的是：{response}
                       </p>
-                      {hasCheckpoints ? (
+                      {answered && hasCheckpoints ? (
+                        // 高亮时机按 spec 字面（自评后，item 67 裁 A）：对答案
+                        // 揭示面板不即时高亮；漏勾是自评点击之后才渲染的回看。
                         <ul aria-label="检查点对照" className="mt-2 space-y-1">
                           {questionCheckpoints.map((checkpoint, checkpointIndex) => {
                             const hit = checks[checkpointIndex] === true;

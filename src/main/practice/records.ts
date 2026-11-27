@@ -12,7 +12,7 @@ import {
   type PracticeSet,
   type PracticeSetSource
 } from '../../shared/practice';
-import { asBoolean, asBooleanArray, asFiniteNumber, asRecord, asString, asStringArray } from '../workspace/records/coerce';
+import { asBoolean, asFiniteNumber, asRecord, asString, asStringArray } from '../workspace/records/coerce';
 
 function asInt(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) ? value : undefined;
@@ -212,9 +212,14 @@ export function parseAttemptFile(raw: string): PracticeAttempt[] {
     // hand-edited or legacy entry can never poison the fluent stats; a record
     // without the field simply stays without it.
     const durationMs = normalizePracticeDurationMs(record.durationMs);
-    // Kept raw here; stats align it with the question's checkpoints via
-    // `alignCheckpointHits` (truncated, missing = unchecked).
-    const checkpointHits = asBooleanArray(record.checkpointHits);
+    // Per-index `=== true`, the same semantics `alignCheckpointHits` applies:
+    // the raw length is kept (alignment against the question's checkpoints
+    // happens at stats time) and a non-boolean entry reads as unchecked, so a
+    // hand-edited `[true, 'x', true]` never collapses to `[true, true]`.
+    const storedHits = record.checkpointHits;
+    const checkpointHits = Array.isArray(storedHits)
+      ? storedHits.map((entry) => entry === true)
+      : [];
     attempts.push({
       id,
       workspaceId,
