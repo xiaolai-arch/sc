@@ -7,12 +7,10 @@ import { createWorkspaceService } from '../workspace/create-workspace-service';
 import { createWorkspacePlanner } from '../planning/workspace-planner';
 import type { ButlerToolContext } from '../butler/tools';
 import type { RunEvent, RunRequest } from './contracts';
-import { assembleEngines } from './engine-selection';
+import { assembleRuntime } from './assembly';
 import { PiEngine, loadPiAgentCore, scriptedPiModel } from './engine-pi';
-import { registerButlerTools } from './butler-bridge';
-import { RunController } from './run-controller';
-import { RunJournal } from './run-journal';
 import { ToolGateway } from './tool-gateway';
+import { RunJournal } from './run-journal';
 
 /**
  * P2 打包自测引导（验收 11 的手测通道，spec :31/:114「打包产物实跑，开发机
@@ -107,13 +105,14 @@ async function runSelfTest(): Promise<SelfTestReport> {
       now
     };
     const journal = new RunJournal({ dirPath: journalDir, now });
-    const gateway = new ToolGateway();
-    registerButlerTools(gateway);
 
     // 步骤 A：流式响应 + 工具调用（plan_preview → commit_plan，含审批与回执）。
     {
-      const controller = new RunController({
-        engines: assembleEngines({
+      const gateway = new ToolGateway();
+      const { controller } = assembleRuntime({
+        gateway,
+        journal,
+        engines: {
           pi: new PiEngine({
             streamFn: scriptedPiModel([
               {
@@ -125,9 +124,7 @@ async function runSelfTest(): Promise<SelfTestReport> {
             tools: gateway,
             systemPrompt: '你是学习管家（自测）。'
           })
-        }),
-        gateway,
-        journal
+        }
       });
       const events: RunEvent[] = [];
       controller.subscribe('selftest-stream', (event) => events.push(event));
@@ -159,8 +156,11 @@ async function runSelfTest(): Promise<SelfTestReport> {
 
     // 步骤 B：取消（流中 cancel → cancelled，无工具提交）。
     {
-      const controller = new RunController({
-        engines: assembleEngines({
+      const gateway = new ToolGateway();
+      const { controller } = assembleRuntime({
+        gateway,
+        journal,
+        engines: {
           pi: new PiEngine({
             streamFn: scriptedPiModel([
               { deltas: ['自测流开始。'], holdUntilAbort: true },
@@ -173,9 +173,7 @@ async function runSelfTest(): Promise<SelfTestReport> {
             tools: gateway,
             systemPrompt: '你是学习管家（自测）。'
           })
-        }),
-        gateway,
-        journal
+        }
       });
       const events: RunEvent[] = [];
       const sawDelta = new Promise<void>((resolve) => {
