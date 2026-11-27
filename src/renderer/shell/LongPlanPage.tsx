@@ -16,8 +16,10 @@ import {
   phaseGate,
   phaseProgress,
   planBasis,
+  planElapsedDays,
   planMonthDay,
   planProgress,
+  suggestedRecalibrateHours,
   weekProgress
 } from '../../shared/plans';
 import type { KnowledgeStatus } from '../../shared/knowledge';
@@ -84,6 +86,20 @@ function messageOf(cause: unknown): string {
 
 function errorText(cause: unknown): string {
   return messageOf(cause);
+}
+
+/**
+ * Where the recalibrate dialog's default hours came from, stated in one line:
+ * the plan's own setting when there is not enough history to scale from
+ * (fewer than seven days elapsed, or no plan items at all), otherwise the
+ * pace the user actually kept over the elapsed days.
+ */
+function recalibrateSourceNote(plan: LongPlan, today: string): string {
+  const elapsed = planElapsedDays(plan, today);
+  const enoughHistory = elapsed >= 7 && planProgress(plan).total > 0;
+  return enoughHistory
+    ? `按你过去 ${elapsed} 天的实际进度建议`
+    : '沿用计划的每周小时数';
 }
 
 function dateRangeLabel(week: LongPlanWeek): string {
@@ -501,7 +517,9 @@ export function LongPlanPage({
   const [recalibrating, setRecalibrating] = useState(false);
   const [recalibrateError, setRecalibrateError] = useState<string | null>(null);
   const [recalibrateNotice, setRecalibrateNotice] = useState<string | null>(null);
-  const [recalibrateHours, setRecalibrateHours] = useState('10');
+  // Filled from the plan's own history when the dialog opens (see
+  // openRecalibrate); never a hardcoded default.
+  const [recalibrateHours, setRecalibrateHours] = useState('');
   const [recalibrateNotes, setRecalibrateNotes] = useState('');
   const [editOpen, setEditOpen] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
@@ -671,7 +689,10 @@ export function LongPlanPage({
 
   function openRecalibrate() {
     if (!selectedPlan || !onRecalibrate) return;
-    setRecalibrateHours(String(selectedPlan.weeklyHours));
+    // The default comes from the plan's own history (weekly hours scaled by
+    // the pace so far), never a hardcoded number. It stays a default: the
+    // user can change it before confirming.
+    setRecalibrateHours(String(suggestedRecalibrateHours(selectedPlan, today)));
     setRecalibrateNotes('');
     setRecalibrateError(null);
     setRecalibrateOpen(true);
@@ -1321,6 +1342,11 @@ export function LongPlanPage({
               disabled={recalibrating}
               className="h-10 w-full rounded-xl border-0 bg-[#f5f5f7] px-3 text-[13px] text-[#1d1d1f] outline-none focus:ring-2 focus:ring-[#0071e3]/30 dark:bg-[#242426] dark:text-[#f5f5f7]"
             />
+            {selectedPlan ? (
+              <p className="mt-1.5 text-[12px] leading-5 text-gray-400 dark:text-[#8e8e93]">
+                {recalibrateSourceNote(selectedPlan, today)}
+              </p>
+            ) : null}
           </div>
 
           <div className="mt-4">

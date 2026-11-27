@@ -4,9 +4,11 @@ import {
   phaseGate,
   phaseProgress,
   planBasis,
+  planElapsedDays,
   planProgress,
   planMonthDay,
   planWeekday,
+  suggestedRecalibrateHours,
   weekProgress,
   type LongPlan,
   type LongPlanPhase,
@@ -198,4 +200,66 @@ test('formats weekday and short dates without drifting across time zones', () =>
   expect(planWeekday('2026-11-01')).toBe('周日');
   expect(planWeekday('2026-11-02')).toBe('周一');
   expect(planMonthDay('2026-11-02')).toBe('11/2');
+});
+
+// --- planElapsedDays / suggestedRecalibrateHours ---
+test('clamps elapsed plan days to the plan span', () => {
+  // plan: starts 2026-11-01, 3 weeks (21 days).
+  expect(planElapsedDays(plan, '2026-10-25')).toBe(0);
+  expect(planElapsedDays(plan, '2026-11-08')).toBe(7);
+  expect(planElapsedDays(plan, '2027-02-01')).toBe(21);
+});
+
+test('the first seven days suggest the plan’s own weekly hours', () => {
+  // 3 days in, and even before the start date (elapsed clamps to 0).
+  expect(suggestedRecalibrateHours(plan, '2026-11-04')).toBe(10);
+  expect(suggestedRecalibrateHours(plan, '2026-10-25')).toBe(10);
+  // Day 6 is still inside the no-history window; day 7 is not.
+  expect(suggestedRecalibrateHours(plan, '2026-11-07')).toBe(10);
+});
+
+test('after a week the default scales by actual pace over expected pace', () => {
+  // plan progress: 50%. Day 7 of 21 → expected 1/3 → 10 × 0.5 / (1/3) = 15.
+  expect(suggestedRecalibrateHours(plan, '2026-11-08')).toBe(15);
+  // Day 14 of 21 → expected 2/3 → 10 × 0.5 / (2/3) = 7.5 → 8.
+  expect(suggestedRecalibrateHours(plan, '2026-11-15')).toBe(8);
+});
+
+test('elapsed beyond the plan length stops growing the expected pace', () => {
+  // Capped at 21 days → expected 1 → 10 × 0.5 = 5.
+  expect(suggestedRecalibrateHours(plan, '2027-02-01')).toBe(5);
+});
+
+test('a plan with no items has no pace to scale from', () => {
+  const empty: LongPlan = { ...plan, phases: [] };
+  expect(planProgress(empty).total).toBe(0);
+  expect(suggestedRecalibrateHours(empty, '2026-11-15')).toBe(10);
+});
+
+test('clamps the suggestion to the input range of 1 to 80 hours', () => {
+  // Zero progress → 0 hours → floored to 1.
+  const untouched = gatePlan(
+    gatePhase('ph-1', [false]),
+    gatePhase('ph-2', [false])
+  );
+  expect(planProgress(untouched).percent).toBe(0);
+  expect(suggestedRecalibrateHours({ ...plan, phases: untouched.phases }, '2026-11-15')).toBe(1);
+
+  // Finishing everything in two of sixteen weeks → 80 × 1 / 0.125 = 640 → 80.
+  const sprint: LongPlan = {
+    ...plan,
+    weeklyHours: 80,
+    weeks: 16,
+    phases: [
+      {
+        id: 'ph-sprint',
+        title: '冲刺',
+        subtitle: '',
+        goal: '',
+        weeks: [week(1, '2026-11-01', true, true)]
+      }
+    ]
+  };
+  expect(planProgress(sprint).percent).toBe(100);
+  expect(suggestedRecalibrateHours(sprint, '2026-11-15')).toBe(80);
 });

@@ -32,6 +32,16 @@ export type WeeklyOverviewInput = {
   today: Date;
 };
 
+/** Completion facts for the past seven days, fed back into planning. */
+export interface Recent7DayCompletion {
+  /** Dated tasks in the window that were neither skipped nor undated. */
+  planned: number;
+  /** How many of those the user marked done. */
+  done: number;
+  /** `done / planned` rounded to a whole percent. */
+  percent: number;
+}
+
 function startOfWeek(today: Date): Date {
   const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   // getDay(): 0 = Sunday; shift so Monday starts the week.
@@ -104,4 +114,36 @@ export function weeklyOverview({
     masteredTopics: topics.filter((topic) => topic.status === 'mastered').length,
     weakestTopic: weakest?.name ?? null
   };
+}
+
+/**
+ * Completion facts for the seven local days ending `today` (the window
+ * `[today-6, today]`), counted by due date. A task belongs to the day it was
+ * due, and undated backlog is never part of a day's plan — the same rule the
+ * behind-schedule nudge uses, so a standing backlog cannot drag the rate down
+ * forever. `skipped` counts neither as planned nor as done.
+ *
+ * Returns null when fewer than five dated tasks fall in the window: a sample
+ * that small must not be reported as a fact, and callers (the planning
+ * prompt) stay byte-identical without it.
+ */
+export function recent7DayCompletion(
+  tasks: readonly WorkspaceTask[],
+  today: Date
+): Recent7DayCompletion | null {
+  const todayKey = formatLocalDate(today);
+  const startKey = formatLocalDate(
+    new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6)
+  );
+  let planned = 0;
+  let done = 0;
+  for (const task of tasks) {
+    // A missing/malformed due date never lands inside the window.
+    if (task.due === undefined || task.due < startKey || task.due > todayKey) continue;
+    if (task.status === 'skipped') continue;
+    planned += 1;
+    if (task.status === 'done') done += 1;
+  }
+  if (planned < 5) return null;
+  return { planned, done, percent: Math.round((done / planned) * 100) };
 }

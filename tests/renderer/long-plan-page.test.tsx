@@ -496,3 +496,136 @@ test('switches between multiple plans', async () => {
     within(screen.getByRole('region', { name: '计划详情' })).getByText('学会 AI Agent')
   ).toBeInTheDocument();
 });
+
+// Two weeks fully in the past with half the items done: elapsed 14 of 14
+// days, progress 50% → suggestion = 12 × 0.5 / 1 = 6 hours.
+const progressedPlan: LongPlan = {
+  ...plan,
+  startDate: '2026-10-20',
+  weeks: 2,
+  weeklyHours: 12,
+  phases: [
+    {
+      id: 'ph1',
+      title: '阶段一：建立基础',
+      subtitle: 'LLM → Prompt → RAG',
+      goal: '打牢基础',
+      weeks: [
+        {
+          id: 'w1',
+          number: 1,
+          title: '第 1 周：LLM 基础',
+          goal: '理解 Transformer',
+          startDate: '2026-10-20',
+          endDate: '2026-10-26',
+          days: [
+            day('w1d1', '2026-10-20', '周二', true),
+            day('w1d2', '2026-10-21', '周三', true)
+          ],
+          checks: []
+        },
+        {
+          id: 'w2',
+          number: 2,
+          title: '第 2 周：Prompt',
+          goal: '写结构化 Prompt',
+          startDate: '2026-10-27',
+          endDate: '2026-11-02',
+          days: [
+            day('w2d1', '2026-10-27', '周二'),
+            day('w2d2', '2026-10-28', '周三')
+          ],
+          checks: []
+        }
+      ]
+    }
+  ]
+};
+
+test('suggests recalibrate hours from the actual pace and names the source', async () => {
+  const onRecalibrate = vi.fn(async (input: RecalibrateLongPlanInput) => ({
+    ...progressedPlan,
+    weeklyHours: input.weeklyHours ?? progressedPlan.weeklyHours
+  }));
+  renderPage({ plans: [progressedPlan], onRecalibrate });
+
+  await userEvent.click(screen.getByRole('button', { name: '重排剩余安排' }));
+
+  const hours = screen.getByLabelText('接下来的每周投入（小时）') as HTMLInputElement;
+  // Never a hardcoded default: 12 weekly hours scaled by a 50% actual pace
+  // over 14 elapsed of 14 expected days.
+  expect(hours.value).toBe('6');
+  expect(screen.getByText('按你过去 14 天的实际进度建议')).toBeInTheDocument();
+
+  // The suggestion stays a default: a manual change submits as typed.
+  await userEvent.clear(hours);
+  await userEvent.type(hours, '9');
+  await userEvent.click(screen.getByRole('button', { name: '开始重排' }));
+  await waitFor(() =>
+    expect(onRecalibrate).toHaveBeenCalledWith({ planId: 'lp-1', weeklyHours: 9 })
+  );
+});
+
+test('falls back to the plan’s own weekly hours and says so without enough history', async () => {
+  renderPage({
+    plans: [{ ...plan, weeklyHours: 12 }],
+    onRecalibrate: vi.fn(async (input: RecalibrateLongPlanInput) => ({
+      ...plan,
+      weeklyHours: input.weeklyHours ?? plan.weeklyHours
+    }))
+  });
+
+  await userEvent.click(screen.getByRole('button', { name: '重排剩余安排' }));
+
+  const hours = screen.getByLabelText('接下来的每周投入（小时）') as HTMLInputElement;
+  // One day elapsed → the plan's own 12 hours, not a hardcoded 10.
+  expect(hours.value).toBe('12');
+  expect(screen.getByText('沿用计划的每周小时数')).toBeInTheDocument();
+});
+
+test('a plan with no items yet also falls back to its own weekly hours', async () => {
+  const bare: LongPlan = {
+    ...progressedPlan,
+    phases: progressedPlan.phases.map((phase) => ({
+      ...phase,
+      weeks: phase.weeks.map((week) => ({ ...week, days: [], checks: [] }))
+    }))
+  };
+  renderPage({
+    plans: [bare],
+    onRecalibrate: vi.fn(async (input: RecalibrateLongPlanInput) => ({
+      ...bare,
+      weeklyHours: input.weeklyHours ?? bare.weeklyHours
+    }))
+  });
+
+  await userEvent.click(screen.getByRole('button', { name: '重排剩余安排' }));
+
+  expect(
+    (screen.getByLabelText('接下来的每周投入（小时）') as HTMLInputElement).value
+  ).toBe('12');
+  expect(screen.getByText('沿用计划的每周小时数')).toBeInTheDocument();
+});
+
+test('keeps the existing 1–80 validation after a manual edit', async () => {
+  const onRecalibrate = vi.fn(async (input: RecalibrateLongPlanInput) => ({
+    ...progressedPlan,
+    weeklyHours: input.weeklyHours ?? progressedPlan.weeklyHours
+  }));
+  renderPage({ plans: [progressedPlan], onRecalibrate });
+
+  await userEvent.click(screen.getByRole('button', { name: '重排剩余安排' }));
+  const hours = screen.getByLabelText('接下来的每周投入（小时）');
+  // An emptied field still goes through the existing client-side range check.
+  await userEvent.clear(hours);
+  await userEvent.click(screen.getByRole('button', { name: '开始重排' }));
+
+  expect(await screen.findByText('每周投入必须在 1 到 80 小时之间。')).toBeInTheDocument();
+  expect(onRecalibrate).not.toHaveBeenCalled();
+
+  await userEvent.type(hours, '80');
+  await userEvent.click(screen.getByRole('button', { name: '开始重排' }));
+  await waitFor(() =>
+    expect(onRecalibrate).toHaveBeenCalledWith({ planId: 'lp-1', weeklyHours: 80 })
+  );
+});

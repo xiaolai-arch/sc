@@ -1,7 +1,7 @@
 import type { KnowledgeTopic } from '../../src/shared/knowledge';
 import type { PracticeAttempt, PracticeMistake } from '../../src/shared/practice';
 import type { WorkspaceTask } from '../../src/shared/workspace';
-import { weeklyOverview } from '../../src/shared/weekly-stats';
+import { recent7DayCompletion, weeklyOverview } from '../../src/shared/weekly-stats';
 
 // Wednesday 4 November 2026; the Monday-based week runs 11-02 to 11-08.
 const today = new Date(2026, 10, 4, 10, 0, 0);
@@ -161,4 +161,119 @@ test('treats an unrated learning topic as the weakest one', () => {
 test('has no weakest topic when nothing is being learned', () => {
   const result = overview({ topics: [topic({ id: 'kt1', status: 'mastered' })] });
   expect(result.weakestTopic).toBeNull();
+});
+
+// --- recent7DayCompletion ---
+// Fixed today = 2026-11-04, so the window is [2026-10-29, 2026-11-04].
+function dated(offsetDays: number): string {
+  const date = new Date(2026, 10, 4 + offsetDays);
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+test('counts planned and done by due date across exactly the seven-day window', () => {
+  const result = recent7DayCompletion(
+    [
+      task({ id: 'd-6', status: 'done', due: dated(-6) }),
+      task({ id: 'd-3', status: 'done', due: dated(-3) }),
+      task({ id: 'd-1', due: dated(-1) }),
+      task({ id: 'd0', due: dated(0) }),
+      task({ id: 'd-7', status: 'done', due: dated(-7) }),
+      task({ id: 'future', status: 'done', due: dated(1) })
+    ],
+    today
+  );
+
+  // The day seven days back and anything in the future stay outside the
+  // window, so the sample is 4 planned / 2 done — below the threshold.
+  expect(result).toBeNull();
+});
+
+test('a due date on the oldest in-window day counts, the day before it does not', () => {
+  const inWindow = recent7DayCompletion(
+    [
+      task({ id: 'first', status: 'done', due: dated(-6) }),
+      task({ id: 'b', status: 'done', due: dated(-5) }),
+      task({ id: 'c', status: 'done', due: dated(-4) }),
+      task({ id: 'd', status: 'done', due: dated(-1) }),
+      task({ id: 'last', status: 'done', due: dated(0) })
+    ],
+    today
+  );
+  expect(inWindow).toEqual({ planned: 5, done: 5, percent: 100 });
+
+  // Moving the oldest task one day earlier drops it from the window.
+  const shifted = recent7DayCompletion(
+    [
+      task({ id: 'first', status: 'done', due: dated(-7) }),
+      task({ id: 'b', status: 'done', due: dated(-5) }),
+      task({ id: 'c', status: 'done', due: dated(-4) }),
+      task({ id: 'd', status: 'done', due: dated(-1) }),
+      task({ id: 'last', status: 'done', due: dated(0) })
+    ],
+    today
+  );
+  expect(shifted).toBeNull();
+});
+
+test('undated backlog never counts as planned, and skipped counts as neither', () => {
+  const result = recent7DayCompletion(
+    [
+      task({ id: 'done-a', status: 'done', due: dated(-2) }),
+      task({ id: 'done-b', status: 'done', due: dated(-2) }),
+      task({ id: 'done-c', status: 'done', due: dated(-1) }),
+      task({ id: 'done-d', status: 'done', due: dated(-1) }),
+      task({ id: 'open', due: dated(-1) }),
+      task({ id: 'skipped-a', status: 'skipped', due: dated(-1) }),
+      task({ id: 'skipped-b', status: 'skipped', due: dated(0) }),
+      task({ id: 'undated', status: 'done' })
+    ],
+    today
+  );
+
+  // planned = 5 (four done + one open), skipped and undated invisible.
+  expect(result).toEqual({ planned: 5, done: 4, percent: 80 });
+});
+
+test('in-progress counts as planned but not done, and percent rounds to a whole number', () => {
+  const result = recent7DayCompletion(
+    [
+      task({ id: 'a', status: 'done', due: dated(-3) }),
+      task({ id: 'b', status: 'in-progress', due: dated(-3) }),
+      task({ id: 'c', status: 'done', due: dated(-2) }),
+      task({ id: 'd', status: 'pending', due: dated(-1) }),
+      task({ id: 'e', status: 'done', due: dated(0) }),
+      task({ id: 'f', status: 'done', due: dated(0) })
+    ],
+    today
+  );
+
+  // 4 done of 6 planned = 66.67% → 67; the in-progress task is not done.
+  expect(result).toEqual({ planned: 6, done: 4, percent: 67 });
+});
+
+test('returns null below the five-item sample threshold', () => {
+  const four = recent7DayCompletion(
+    [
+      task({ id: 'a', status: 'done', due: dated(-2) }),
+      task({ id: 'b', status: 'done', due: dated(-2) }),
+      task({ id: 'c', status: 'done', due: dated(-1) }),
+      task({ id: 'd', status: 'pending', due: dated(0) })
+    ],
+    today
+  );
+  expect(four).toBeNull();
+
+  const five = recent7DayCompletion(
+    [
+      task({ id: 'a', status: 'done', due: dated(-2) }),
+      task({ id: 'b', status: 'done', due: dated(-2) }),
+      task({ id: 'c', status: 'done', due: dated(-1) }),
+      task({ id: 'd', status: 'pending', due: dated(0) }),
+      task({ id: 'e', status: 'pending', due: dated(0) })
+    ],
+    today
+  );
+  expect(five).toEqual({ planned: 5, done: 3, percent: 60 });
 });
