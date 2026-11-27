@@ -1862,6 +1862,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
               reviews={reviews}
               tasks={tasks}
               attempts={practiceAttempts}
+              sets={practiceSets}
               dueMistakes={practiceDue}
               knowledgeTopics={knowledgeTopics}
               onOpenSidebar={openSidebar}

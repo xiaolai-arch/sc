@@ -6,6 +6,7 @@ import {
   type DeletePracticeSetInput,
   type ExportMistakeSheetInput,
   type ExportMistakeSheetResult,
+  normalizePracticeDurationMs,
   type PracticeAttempt,
   type PracticeConfidence,
   type PracticeMistake,
@@ -501,6 +502,9 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
         throw new Error('Invalid answer choice');
       }
       const confidence = optionalConfidence(input.confidence);
+      // 服务端归一化兜底: the pane already caps at 60 s, but a bad client value
+      // is clamped or dropped here rather than stored (never an error).
+      const durationMs = normalizePracticeDurationMs(input.durationMs);
       await ensureSeeded();
       const found = await findQuestion(questionId);
       if (found === null) throw new Error(`Question not found: ${questionId}`);
@@ -521,6 +525,7 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
           questionId,
           choice,
           ...(confidence !== undefined ? { confidence } : {}),
+          ...(durationMs !== undefined ? { durationMs } : {}),
           correct,
           answeredAt
         };
@@ -585,6 +590,8 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
       if (typeof input.selfCorrect !== 'boolean') throw new Error('selfCorrect is required');
       const correct = input.selfCorrect;
       const confidence = optionalConfidence(input.confidence);
+      // Same 服务端归一化兜底 as the choice path: clamp to the cap, drop junk.
+      const durationMs = normalizePracticeDurationMs(input.durationMs);
       await ensureSeeded();
       const found = await findQuestion(questionId);
       if (found === null) throw new Error(`Question not found: ${questionId}`);
@@ -607,6 +614,7 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
           choice: 0,
           response,
           ...(confidence !== undefined ? { confidence } : {}),
+          ...(durationMs !== undefined ? { durationMs } : {}),
           correct,
           answeredAt
         };

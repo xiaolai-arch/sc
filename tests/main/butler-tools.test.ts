@@ -1216,8 +1216,34 @@ test('get_practice_overview reports per-subject sets, attempts, accuracy and mis
   ]);
 });
 
-test('get_practice_overview says practice data is unavailable without a service', async () => {
+test('get_practice_overview reads attempts with and without durationMs alike (iter33 P1)', async () => {
+  const now = new Date('2026-11-21T12:00:00.000Z');
+  const practice = overviewPractice({
+    sets: [overviewSet('ms1', '数学')],
+    attempts: [
+      // iter33 P1: 新记录带用时；旧记录与错题复习不带——两条都要能读。
+      { ...attempt('a1', 'ms1', true, '2026-11-17T09:00:00.000Z'), durationMs: 8000 },
+      attempt('a2', 'ms1', false, '2026-11-18T09:00:00.000Z')
+    ],
+    mistakes: []
+  });
+
   const result = await executeButlerTool(
+    { id: 'po-dur', name: 'get_practice_overview', arguments: {} },
+    tools,
+    { workspace: workspaceService, workspaceId: 'ws-exam', practice, now: () => now }
+  );
+
+  expect(result.ok).toBe(true);
+  const payload = JSON.parse(result.content) as {
+    result: { available: boolean; subjects: Array<{ subject: string; attemptCount: number; accuracy: number }> };
+  };
+  expect(payload.result.available).toBe(true);
+  // 概览口径不变：计数与正确率仍按全量 attempt，与用时无关。
+  expect(payload.result.subjects[0]).toMatchObject({ subject: '数学', attemptCount: 2, accuracy: 50 });
+});
+
+test('get_practice_overview says practice data is unavailable without a service', async () => {  const result = await executeButlerTool(
     { id: 'po2', name: 'get_practice_overview', arguments: {} },
     tools,
     {

@@ -12,9 +12,33 @@ import type {
 import type { Workspace } from '../../src/shared/workspace';
 import { LearningPane } from '../../src/renderer/shell/LearningPane';
 import { MistakeBook } from '../../src/renderer/shell/PracticePanels';
+import { FluencyTrend } from '../../src/renderer/shell/FluencyTrend';
+import { fluencyTrend } from '../../src/renderer/shell/fluency-trend';
+import { AUTO_RECALL_MS } from '../../src/shared/practice';
 import { pickOption } from './select-option';
 
 type PaneProps = Parameters<typeof LearningPane>[0];
+
+/**
+ * 用时流畅度 fixture factory: a correct choice attempt on ps1/q1 by default,
+ * with optional durationMs — absent means a legacy / mistake-review attempt.
+ */
+function timedAttempt(
+  id: string,
+  answeredAt: string,
+  opts: { correct?: boolean; durationMs?: number; questionId?: string; setId?: string } = {}
+): PracticeAttempt {
+  return {
+    id,
+    workspaceId: 'kaoyan',
+    setId: opts.setId ?? 'ps1',
+    questionId: opts.questionId ?? 'q1',
+    choice: 1,
+    ...(opts.durationMs !== undefined ? { durationMs: opts.durationMs } : {}),
+    correct: opts.correct ?? true,
+    answeredAt
+  };
+}
 
 const workspace: Workspace = {
   id: 'kaoyan',
@@ -369,7 +393,8 @@ describe('short-answer (free recall) practice UI', () => {
     expect(onSubmitShortAnswer).toHaveBeenCalledWith({
       questionId: 'sq1',
       response: '极限是 1',
-      selfCorrect: true
+      selfCorrect: true,
+      durationMs: expect.any(Number)
     });
     expect(await screen.findByText('回答正确')).toBeInTheDocument();
   });
@@ -387,7 +412,8 @@ describe('short-answer (free recall) practice UI', () => {
       expect(onSubmitShortAnswer).toHaveBeenCalledWith({
         questionId: 'sq1',
         response: '极限是 0',
-        selfCorrect: false
+        selfCorrect: false,
+        durationMs: expect.any(Number)
       })
     );
     expect(await screen.findByText('回答错误')).toBeInTheDocument();
@@ -557,7 +583,11 @@ describe('interleaved mixed practice', () => {
     await user.click(screen.getByRole('button', { name: 'B. 1' }));
     await user.click(screen.getByRole('button', { name: '检查答案' }));
     await waitFor(() =>
-      expect(onSubmitAnswer).toHaveBeenCalledWith({ questionId: 'q1', choice: 1 })
+      expect(onSubmitAnswer).toHaveBeenCalledWith({
+        questionId: 'q1',
+        choice: 1,
+        durationMs: expect.any(Number)
+      })
     );
   });
 
@@ -633,7 +663,11 @@ describe('confidence picker while answering', () => {
     await user.click(screen.getByRole('button', { name: '检查答案' }));
 
     await waitFor(() => expect(onSubmitAnswer).toHaveBeenCalledTimes(1));
-    expect(onSubmitAnswer).toHaveBeenCalledWith({ questionId: 'q1', choice: 1 });
+    expect(onSubmitAnswer).toHaveBeenCalledWith({
+      questionId: 'q1',
+      choice: 1,
+      durationMs: expect.any(Number)
+    });
   });
 
   it('keeps the marks mutually exclusive and sends the picked one', async () => {
@@ -657,6 +691,7 @@ describe('confidence picker while answering', () => {
     expect(onSubmitAnswer).toHaveBeenCalledWith({
       questionId: 'q1',
       choice: 1,
+      durationMs: expect.any(Number),
       confidence: 'unsure'
     });
   });
@@ -699,6 +734,7 @@ describe('confidence picker while answering', () => {
         questionId: 'sq1',
         response: '极限是 0',
         selfCorrect: false,
+        durationMs: expect.any(Number),
         confidence: 'sure'
       })
     );
@@ -1061,7 +1097,11 @@ describe('whole-paper simulation (整卷模拟)', () => {
       await clickButton('B. 1');
       await clickButton('检查答案');
       await act(async () => {});
-      expect(onSubmitAnswer).toHaveBeenCalledWith({ questionId: 'q1', choice: 1 });
+      expect(onSubmitAnswer).toHaveBeenCalledWith({
+        questionId: 'q1',
+        choice: 1,
+        durationMs: expect.any(Number)
+      });
       expect(screen.queryByText('回答正确')).not.toBeInTheDocument();
       expect(screen.queryByText('回答错误')).not.toBeInTheDocument();
       expect(screen.queryByText(/已加入错题本/)).not.toBeInTheDocument();
@@ -1085,7 +1125,8 @@ describe('whole-paper simulation (整卷模拟)', () => {
       expect(onSubmitShortAnswer).toHaveBeenCalledWith({
         questionId: 'sq2',
         response: '极限是 1',
-        selfCorrect: false
+        selfCorrect: false,
+        durationMs: expect.any(Number)
       });
       expect(
         screen.getByText('整卷完成：正确 0 / 2 题，用时 0 秒。错题已记入错题本。')
@@ -1273,5 +1314,357 @@ describe('whole-paper simulation (整卷模拟)', () => {
     expect(screen.queryByRole('timer')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '整卷模拟' })).toBeInTheDocument();
     expect(screen.getByText('另一套练习')).toBeInTheDocument();
+  });
+});
+
+describe('answer timing (iter33 P1, 口径 B)', () => {
+  const shortSet: PracticeSet = {
+    id: 'ps-short',
+    workspaceId: 'kaoyan',
+    title: '简答练习',
+    subject: '数学',
+    questions: [
+      {
+        id: 'sq1',
+        kind: 'short',
+        prompt: '用自己的话说明第一个重要极限。',
+        options: [],
+        answer: 0,
+        referenceAnswer: 'x→0 时 sin x / x 的极限是 1。',
+        explanation: ''
+      }
+    ]
+  };
+  const twoChoiceSet: PracticeSet = {
+    ...practiceSet,
+    questions: [
+      practiceSet.questions[0],
+      { ...practiceSet.questions[0], id: 'q2', prompt: '第二题？' }
+    ]
+  };
+  const paperChoiceSet: PracticeSet = {
+    id: 'ps-paper',
+    workspaceId: 'kaoyan',
+    title: '整卷练习',
+    subject: '数学',
+    questions: [
+      practiceSet.questions[0],
+      { ...practiceSet.questions[0], id: 'q2', prompt: '第二题？' }
+    ]
+  };
+
+  function okChoice(questionId: string): SubmitAnswerResult {
+    return {
+      questionId,
+      setId: 'ps1',
+      workspaceId: 'kaoyan',
+      choice: 1,
+      correct: true,
+      answer: 1,
+      explanation: '第一个重要极限。',
+      attempt: {
+        id: `pa-${questionId}`,
+        workspaceId: 'kaoyan',
+        setId: 'ps1',
+        questionId,
+        choice: 1,
+        correct: true,
+        answeredAt: '2026-11-27T09:00:00.000Z'
+      },
+      mistake: null
+    };
+  }
+
+  function okShort(): SubmitAnswerResult {
+    return {
+      questionId: 'sq1',
+      setId: 'ps-short',
+      workspaceId: 'kaoyan',
+      choice: 0,
+      correct: true,
+      answer: 0,
+      explanation: '',
+      attempt: {
+        id: 'pa-short',
+        workspaceId: 'kaoyan',
+        setId: 'ps-short',
+        questionId: 'sq1',
+        choice: 0,
+        response: '极限是 1',
+        correct: true,
+        answeredAt: '2026-11-27T09:00:00.000Z'
+      },
+      mistake: null
+    };
+  }
+
+  /** Freeze Date.now so measured durations are exact; per-test advance() moves it. */
+  let nowMs: number;
+  beforeEach(() => {
+    nowMs = Date.parse('2026-11-27T09:00:00.000');
+    vi.spyOn(Date, 'now').mockImplementation(() => nowMs);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+  function advance(ms: number) {
+    nowMs += ms;
+  }
+
+  it('measures 呈现→提交 exactly and caps the client at 60 s (验收 6)', async () => {
+    const user = userEvent.setup();
+    const onSubmitAnswer = vi.fn(async (): Promise<SubmitAnswerResult> => okChoice('q1'));
+    renderPane({ set: twoChoiceSet, onSubmitAnswer });
+
+    await user.click(screen.getByRole('button', { name: 'B. 1' }));
+    advance(8000);
+    await user.click(screen.getByRole('button', { name: '检查答案' }));
+    await waitFor(() => expect(onSubmitAnswer).toHaveBeenCalledTimes(1));
+    expect(onSubmitAnswer).toHaveBeenCalledWith({ questionId: 'q1', choice: 1, durationMs: 8000 });
+
+    // 下一题的时钟从零起算；70 秒后提交 → 客户端 60 秒封顶。
+    await user.click(screen.getByRole('button', { name: '下一题' }));
+    await user.click(screen.getByRole('button', { name: 'A. 0' }));
+    advance(70_000);
+    await user.click(screen.getByRole('button', { name: '检查答案' }));
+    await waitFor(() => expect(onSubmitAnswer).toHaveBeenCalledTimes(2));
+    expect(onSubmitAnswer).toHaveBeenLastCalledWith({
+      questionId: 'q2',
+      choice: 0,
+      durationMs: 60_000
+    });
+  });
+
+  it('runs the short clock to the self-assessment click (口径 B, item 67)', async () => {
+    const user = userEvent.setup();
+    const onSubmitShortAnswer = vi.fn(async (): Promise<SubmitAnswerResult> => okShort());
+    renderPane({ set: shortSet, onSubmitShortAnswer });
+
+    await user.type(screen.getByLabelText('用你自己的话回答'), '极限是 1');
+    advance(5000);
+    await user.click(screen.getByRole('button', { name: '提交' }));
+    // 口径 B：reveal 不停表——读参考答案的 3 秒也计入，落盘点击才是终点。
+    advance(3000);
+    await user.click(screen.getByRole('button', { name: '答对了' }));
+
+    await waitFor(() => expect(onSubmitShortAnswer).toHaveBeenCalledTimes(1));
+    expect(onSubmitShortAnswer).toHaveBeenCalledWith({
+      questionId: 'sq1',
+      response: '极限是 1',
+      selfCorrect: true,
+      durationMs: 8000
+    });
+  });
+
+  it('keeps the answering UI free of any per-question timer (验收 10)', async () => {
+    const user = userEvent.setup();
+    renderPane({ set: twoChoiceSet, onSubmitAnswer: vi.fn(async () => okChoice('q1')) });
+
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'B. 1' }));
+    await user.click(screen.getByRole('button', { name: '检查答案' }));
+    await waitFor(() => expect(screen.getByText('回答正确')).toBeInTheDocument());
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+    // 数据照记、压迫不给：只有整卷模拟的卷级倒计时用 role="timer"（既有整卷测试回归）。
+  });
+
+  it('records per-question durationMs in whole-paper mode, uncoupled from the paper budget (验收 11)', async () => {
+    const user = userEvent.setup();
+    const onSubmitAnswer = vi.fn(async (): Promise<SubmitAnswerResult> => okChoice('q1'));
+    renderPane({ set: paperChoiceSet, onSubmitAnswer });
+
+    await user.click(screen.getByRole('button', { name: '整卷模拟' }));
+    const minutesInput = screen.getByLabelText('总时长（分钟）');
+    await user.clear(minutesInput);
+    await user.type(minutesInput, '10');
+    await user.click(screen.getByRole('button', { name: '确认开始' }));
+    // 卷级倒计时照常显示——iter32 P2a 行为不变，预算是 WholePaperSession 自己的字段。
+    expect(screen.getByRole('timer')).toHaveTextContent('10:00');
+
+    await user.click(screen.getByRole('button', { name: 'B. 1' }));
+    advance(5000);
+    await user.click(screen.getByRole('button', { name: '检查答案' }));
+    await waitFor(() => expect(onSubmitAnswer).toHaveBeenCalledTimes(1));
+    // 每题 attempt 按本规范带用时（5 秒），与 10 分钟的卷预算无关、不混用。
+    expect(onSubmitAnswer).toHaveBeenCalledWith({ questionId: 'q1', choice: 1, durationMs: 5000 });
+  });
+});
+
+describe('fluency stats (用时流畅度, iter33 P1)', () => {
+  // 2026-11-27 是 11-23（周一）当周的周五。
+  const today = new Date('2026-11-27T12:00:00');
+
+  it('counts only the first same-day answer per question (验收 8)', () => {
+    const attempts = [
+      timedAttempt('pa1', '2026-11-27T09:00:00', { durationMs: 8000 }),
+      timedAttempt('pa2', '2026-11-27T09:05:00', { durationMs: 4000 }),
+      timedAttempt('pa3', '2026-11-27T09:10:00', { questionId: 'q2', durationMs: 6000 }),
+      timedAttempt('pa4', '2026-11-27T09:15:00', { questionId: 'q3', durationMs: 9000 })
+    ];
+    const data = fluencyTrend(attempts, today);
+    expect(data.sets).toHaveLength(1);
+    const set = data.sets[0]!;
+    // 同题同日两次作答（8s 对、4s 对）→ 统计只计第一次。
+    expect(set.records.map((record) => record.attempt.id)).toEqual(['pa1', 'pa3', 'pa4']);
+    expect(set.medianMs).toBe(8000);
+    // 原始 attempt 全量保留——统计侧不丢数据。
+    expect(attempts).toHaveLength(4);
+  });
+
+  it('dedups per local day, so the same question counts once per day', () => {
+    const data = fluencyTrend(
+      [
+        timedAttempt('pa1', '2026-11-26T09:00:00', { durationMs: 8000 }),
+        timedAttempt('pa2', '2026-11-27T09:00:00', { durationMs: 4000 }),
+        timedAttempt('pa3', '2026-11-27T09:05:00', { questionId: 'q2', durationMs: 6000 }),
+        timedAttempt('pa4', '2026-11-27T09:10:00', { questionId: 'q3', durationMs: 9000 })
+      ],
+      today
+    );
+    expect(data.sets[0]!.records.map((record) => record.attempt.id)).toEqual([
+      'pa1',
+      'pa2',
+      'pa3',
+      'pa4'
+    ]);
+  });
+
+  it('grades 自动召回 / 对了但慢, wrong answers in neither tier (验收 9)', () => {
+    const set = fluencyTrend(
+      [
+        timedAttempt('pa1', '2026-11-27T09:00:00', { durationMs: 8000 }),
+        // 边界：恰好 >= AUTO_RECALL_MS 计「对了但慢」。
+        timedAttempt('pa2', '2026-11-27T09:05:00', { questionId: 'q2', durationMs: AUTO_RECALL_MS }),
+        timedAttempt('pa3', '2026-11-27T09:10:00', {
+          questionId: 'q3',
+          correct: false,
+          durationMs: 5000
+        }),
+        timedAttempt('pa4', '2026-11-27T09:15:00', { questionId: 'q4', durationMs: 12000 })
+      ],
+      today
+    ).sets[0]!;
+    expect(set.autoRecall).toBe(1);
+    expect(set.slowCorrect).toBe(2);
+    expect(set.autoRecallShare).toBeCloseTo(1 / 3, 5);
+    // 中位用时覆盖答错记录的用时：median(8000, 10000, 5000, 12000) = 9000。
+    expect(set.medianMs).toBe(9000);
+  });
+
+  it('shows a set only from 3 valid records up (spec 默认 6)', () => {
+    const thin = fluencyTrend(
+      [
+        timedAttempt('pa1', '2026-11-27T09:00:00', { durationMs: 8000 }),
+        timedAttempt('pa2', '2026-11-27T09:05:00', { questionId: 'q2', durationMs: 6000 })
+      ],
+      today
+    );
+    expect(thin.hasData).toBe(false);
+    expect(thin.sets).toEqual([]);
+
+    const full = fluencyTrend(
+      [
+        timedAttempt('pb1', '2026-11-27T09:00:00', { durationMs: 8000 }),
+        timedAttempt('pb2', '2026-11-27T09:05:00', { questionId: 'q2', durationMs: 6000 }),
+        timedAttempt('pb3', '2026-11-27T09:10:00', { questionId: 'q3', durationMs: 9000 })
+      ],
+      today
+    );
+    expect(full.hasData).toBe(true);
+    expect(full.sets[0]!.records).toHaveLength(3);
+  });
+
+  it('treats attempts without durationMs as absent, not errors (验收 7)', () => {
+    const set = fluencyTrend(
+      [
+        // 无用时（旧记录/错题复习）：占自己的去重槽、不产生记录，也绝不报错。
+        timedAttempt('pa1', '2026-11-27T09:00:00', { questionId: 'q4' }),
+        timedAttempt('pa2', '2026-11-27T09:05:00', { durationMs: 8000 }),
+        timedAttempt('pa3', '2026-11-27T09:10:00', { questionId: 'q2', durationMs: 6000 }),
+        timedAttempt('pa4', '2026-11-27T09:15:00', { questionId: 'q3', durationMs: 9000 })
+      ],
+      today
+    ).sets[0]!;
+    expect(set.records.map((record) => record.attempt.id)).toEqual(['pa2', 'pa3', 'pa4']);
+    expect(set.medianMs).toBe(8000);
+  });
+
+  it('a duration-less first-of-day answer holds the dedup slot (每日第一次口径)', () => {
+    const set = fluencyTrend(
+      [
+        timedAttempt('pa1', '2026-11-27T09:00:00'),
+        timedAttempt('pa2', '2026-11-27T09:05:00', { durationMs: 4000 }),
+        timedAttempt('pa3', '2026-11-27T09:10:00', { questionId: 'q2', durationMs: 8000 }),
+        timedAttempt('pa4', '2026-11-27T09:15:00', { questionId: 'q3', durationMs: 9000 }),
+        timedAttempt('pa5', '2026-11-27T09:20:00', { questionId: 'q4', durationMs: 7000 })
+      ],
+      today
+    ).sets[0]!;
+    expect(set.records.map((record) => record.attempt.id)).toEqual(['pa3', 'pa4', 'pa5']);
+  });
+
+  it('buckets weekly medians onto the same Monday weeks as the accuracy trend', () => {
+    // 2026-11-27（周五）当周周一是 11-23；11-19/11-20 属 11-16 当周；11-11 属 11-09 当周。
+    const set = fluencyTrend(
+      [
+        timedAttempt('pa1', '2026-11-23T09:00:00', { durationMs: 8000 }),
+        timedAttempt('pa2', '2026-11-24T09:00:00', { questionId: 'q2', durationMs: 16000 }),
+        timedAttempt('pa3', '2026-11-20T09:00:00', { questionId: 'q3', durationMs: 60000 }),
+        timedAttempt('pa4', '2026-11-19T09:00:00', { questionId: 'q4', durationMs: 2000 }),
+        timedAttempt('pa5', '2026-11-11T09:00:00', { questionId: 'q5', durationMs: 1000 })
+      ],
+      today
+    ).sets[0]!;
+    expect(set.weekMedians).toHaveLength(8);
+    expect(set.weekMedians[7]).toBe(12000);
+    expect(set.weekMedians[6]).toBe(31000);
+    expect(set.weekMedians[5]).toBe(1000);
+    expect(set.weekMedians[0]).toBeNull();
+  });
+});
+
+describe('FluencyTrend section (用时流畅度呈现, iter33 P1)', () => {
+  const today = new Date('2026-11-27T12:00:00');
+
+  it('shows per-set median trend and auto-recall share once the gate is met (验收 10)', () => {
+    render(
+      <FluencyTrend
+        attempts={[
+          timedAttempt('pa1', '2026-11-27T09:00:00', { durationMs: 8000 }),
+          timedAttempt('pa2', '2026-11-27T09:05:00', { questionId: 'q2', durationMs: 16000 }),
+          timedAttempt('pa3', '2026-11-27T09:10:00', {
+            questionId: 'q3',
+            correct: false,
+            durationMs: 5000
+          })
+        ]}
+        sets={[practiceSet]}
+        today={today}
+      />
+    );
+
+    expect(screen.getByRole('region', { name: '用时流畅度' })).toBeInTheDocument();
+    expect(screen.getByText('极限基础')).toBeInTheDocument();
+    expect(screen.getByText(/中位用时 8 秒/)).toBeInTheDocument();
+    expect(screen.getByText(/自动召回 50%/)).toBeInTheDocument();
+    // 每周的柱子以 60 秒封顶为满高，aria 直接可读。
+    expect(screen.getByRole('img', { name: '中位用时 8 秒' })).toBeInTheDocument();
+    expect(screen.getAllByRole('img', { name: '该周无有效用时记录' })).toHaveLength(7);
+  });
+
+  it('keeps sets below the record gate out and shows the empty state', () => {
+    render(
+      <FluencyTrend
+        attempts={[
+          timedAttempt('pa1', '2026-11-27T09:00:00', { durationMs: 8000 }),
+          timedAttempt('pa2', '2026-11-27T09:05:00', { questionId: 'q2', durationMs: 6000 })
+        ]}
+        sets={[practiceSet]}
+        today={today}
+      />
+    );
+
+    expect(screen.queryByText('极限基础')).not.toBeInTheDocument();
+    expect(screen.getByText(/还没有足够的用时记录/)).toBeInTheDocument();
   });
 });
