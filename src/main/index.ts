@@ -185,6 +185,13 @@ function openSection(target: 'review' | 'settings'): void {
 }
 
 app.whenReady().then(async () => {
+  // P2 打包自测引导（item 61 批次 3/5，验收 11 手测通道；最小可逆，P3 正式
+  // 装配时连同 src/main/runtime/pi-selftest.ts 一起移除）。正常启动永不进入。
+  if (process.env['ASAKI_RUNTIME_PI_SELFTEST'] === '1') {
+    const { runPiSelfTest } = await import('./runtime/pi-selftest');
+    await runPiSelfTest();
+    return;
+  }
   const context = await createAppContext({
     userDataPath: app.getPath('userData'),
     defaultVaultPath: join(app.getPath('documents'), DEFAULT_VAULT_DIRECTORY),
