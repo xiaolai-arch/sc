@@ -41,12 +41,13 @@ import { BUTLER_TOOL_LEVELS } from './butler-bridge';
  * |---|---|
  * | `text` | `text.delta` |
  * | `narration` | `text.delta`（工具调用前的模型叙述也是模型文本） |
+ * | `references` | `references`（缝④：本次回答参考的记录，原样透传 `items`） |
  * | `tool-result`（ok=true） | `tool.committed`；确认级工具再补 `service.receipt` |
  * | `tool-result`（ok=false） | `tool.failed`（reason=`failed`） |
  * | `error` | 不映射为事件；结束时引擎抛错 → 运行「失败」 |
  * | `done`（canceled） | 不映射；取消终态由 `RunController.cancel` 合成 `run.finished` |
  * | `done`（其余） | 缝③：全程零 delta 且 `done.text` 非空 → 先补发一条 `text.delta`（全文一次成段）；`run.finished` 仍由控制器合成 |
- * | `references` / `reasoning` / `retry` / `tool-start` | v1 契约无对应类型，不映射（报告写明） |
+ * | `reasoning` / `retry` / `tool-start` | v1 契约无对应类型，不映射（报告写明） |
  */
 
 export interface LegacyEngineOptions {
@@ -91,6 +92,10 @@ export class LegacyEngine implements EnginePort {
         case 'narration':
           textDeltaCount += 1;
           context.emit({ type: 'text.delta', text: event.text });
+          return;
+        case 'references':
+          // 缝④：本次回答参考的记录原样透传（场景三引用来源）。
+          context.emit({ type: 'references', items: event.items });
           return;
         case 'tool-result': {
           if (event.ok) {
@@ -141,7 +146,7 @@ export class LegacyEngine implements EnginePort {
           return;
         }
         default:
-          // references / reasoning / retry / tool-start：v1 不映射。
+          // reasoning / retry / tool-start：v1 不映射。
           return;
       }
     };

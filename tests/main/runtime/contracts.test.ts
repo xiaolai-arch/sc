@@ -479,3 +479,65 @@ test('RunJournal.append 拒绝序号倒退（防控制器缺陷静默损坏日�
     await dispose();
   }
 });
+
+test('e531（P4 批）：journal.append 失败仍扇出订阅者，错误显式暴露在 getRun().journalError', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'asaki-runtime-journalfail-'));
+  try {
+    const journal = new RunJournal({ dirPath: dir, now });
+    // 让第二条 append（text.delta）失败：run.started 正常落盘，用于对照。
+    let calls = 0;
+    const failingAppend = async (runId: string, event: RunEvent): Promise<void> => {
+      calls += 1;
+      if (calls === 2) throw new Error('磁盘满（注入）');
+      await journal.append(runId, event);
+    };
+    const flakyJournal: RunJournal = Object.create(journal) as RunJournal;
+    flakyJournal.append = failingAppend;
+    const engine = new FakeEngine({
+      steps: [
+        { type: 'emit', event: { type: 'text.delta', text: '第一条。' } },
+        { type: 'receipt', detail: '完成' }
+      ]
+    });
+    const gateway = new ToolGateway();
+    const controller = new RunController({ engines: [engine], gateway, journal: flakyJournal });
+    const seen: RunEvent[] = [];
+    controller.subscribe('run-1', (event) => seen.push(event));
+    const handle = controller.start(makeRequest());
+    expect(await handle.done).toBe('completed');
+    // 落盘失败的那条（text.delta）仍扇出给订阅者（扇出不因落盘失败被吞）。
+    expect(seen.map((event) => event.type)).toContain('text.delta');
+    expect(seen.at(-1)?.type).toBe('run.finished');
+    // 错误不吞：快照携带失败文案；其余事件照常落盘（缺的正是失败那条）。
+    const snapshot = controller.getRun('run-1');
+    expect(snapshot?.journalError).toBe('磁盘满（注入）');
+    const journaled = await journal.readRun('run-1');
+    expect(journaled.map((event) => event.type)).toEqual([
+      'run.started',
+      'service.receipt',
+      'run.finished'
+    ]);
+    // seq 缺口即落盘失败那条（补读按 seq 对齐）。
+    expect(journaled.map((event) => event.seq)).toEqual([1, 3, 4]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('F3 双时钟绑定：butler.now 与 request.now 不同日 → start 抛错，不产生运行', async () => {
+  const { controller, dispose } = await makeHarness([new FakeEngine({ steps: [] })]);
+  try {
+    const otherDay = (): Date => new Date(2026, 10, 26, 23, 59, 0); // 前一天
+    expect(() =>
+      controller.start(makeRequest(), { butler: { workspace: {} as ButlerToolContext['workspace'], now: otherDay } })
+    ).toThrow(/双时钟不一致/);
+    // 同日不同毫秒（合法）：照常启动。
+    const sameDay = (): Date => new Date(2026, 10, 27, 9, 30, 0);
+    const handle = controller.start(makeRequest({ runId: 'run-ok' }), {
+      butler: { workspace: {} as ButlerToolContext['workspace'], now: sameDay }
+    });
+    expect(await handle.done).toBe('completed');
+  } finally {
+    await dispose();
+  }
+});

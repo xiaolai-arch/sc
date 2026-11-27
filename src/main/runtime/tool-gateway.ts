@@ -1,5 +1,7 @@
 import type { ButlerToolContext } from '../butler/tools';
+import { BUTLER_REFERENCE_LABELS, type ButlerReference } from '../../shared/butler-stream';
 import type {
+  ApprovalCandidate,
   EngineEvent,
   RunBudget,
   ToolFailureReason,
@@ -23,6 +25,20 @@ export type ToolBehaviorLevel = 'query' | 'confirm';
 
 export const TOOL_BEHAVIOR_LEVELS: readonly ToolBehaviorLevel[] = ['query', 'confirm'];
 
+/** 审批候选形状 = 契约里的 `ApprovalCandidate`（网关与引擎共用一张表）。 */
+export type GatewayApprovalCandidate = ApprovalCandidate;
+
+/**
+ * 同名歧义探测（验收 17）：确认级工具可在批准前声明一个候选探测钩子。返回
+ * 多于一个候选 → 审批事件附带候选、批准必须带选择；返回 null/≤1 个 → 照常
+ * 审批。钩子抛错按工具失败处理（不静默放行）。网关不解释候选的业务含义，
+ * 只在批准带选择时把选中 id pin 回参数 `id`（见 invoke 内的候选选择语义）。
+ */
+export type ApprovalCandidatesProbe = (
+  input: Record<string, unknown>,
+  context: ButlerToolContext
+) => Promise<GatewayApprovalCandidate[] | null> | GatewayApprovalCandidate[] | null;
+
 /** One registry entry. `level` is mandatory: a tool without a declared behavior level must be refused at call time. */
 export interface GatewayToolEntry {
   name: string;
@@ -30,6 +46,7 @@ export interface GatewayToolEntry {
   description: string;
   parameters: Record<string, unknown>;
   execute(input: Record<string, unknown>, context: ButlerToolContext): Promise<unknown>;
+  approvalCandidates?: ApprovalCandidatesProbe;
 }
 
 /** Model-visible shape engines derive their tool lists from. */
@@ -47,12 +64,18 @@ export interface GatewaySessionOptions {
   emit(event: EngineEvent): void;
   budget?: RunBudget;
   signal?: AbortSignal;
+  /** 只读运行（验收 22）：确认级（写入类）调用一律拒绝，记 tool.failed。 */
+  readOnly?: boolean;
 }
 
 export interface GatewayRunSession extends RuntimeToolHandle {
   readonly runId: string;
-  /** Client verb target: resolves the oldest pending approval; false when none is pending. */
-  decide(decision: 'approved' | 'rejected'): boolean;
+  /**
+   * Client verb target: resolves the oldest pending approval; false when none is pending.
+   * `selection` only applies when the approval carried candidates (验收 17): the
+   * approval is pinned to that candidate id; an unknown id keeps the approval pending.
+   */
+  decide(decision: 'approved' | 'rejected', options?: { selection?: string }): boolean;
   /** Controller-side cancel: refuses any further work and resolves pending approvals as cancelled. */
   abortPending(): void;
 }
@@ -60,7 +83,10 @@ export interface GatewayRunSession extends RuntimeToolHandle {
 interface PendingApproval {
   invocationId: string;
   tool: string;
-  resolve(decision: 'approved' | 'rejected'): void;
+  /** 候选 id 集合；null = 本次审批无候选（不需选择）。 */
+  candidateIds: Set<string> | null;
+  /** 批准带候选时 resolve 附带选中 id（invoke 侧 pin 回参数）。 */
+  resolve(decision: 'approved' | 'rejected', selection?: string): void;
 }
 
 function describeError(error: unknown): string {
@@ -104,6 +130,44 @@ function canonicalJson(value: unknown): string {
 function dedupKey(runId: string, tool: string, args: Record<string, unknown>): string {
   const scope = typeof args['workspaceId'] === 'string' ? args['workspaceId'] : '';
   return `${runId}\u0000${tool}\u0000${canonicalJson(args)}\u0000${scope}`;
+}
+
+/**
+ * Schema 层拒绝未声明参数（验收 23：旧 `resolve_commitment` 携带 `newDue` 的
+ * 旁路必须被拒）。工具 schema 声明 `additionalProperties: false` 时，出现
+ * `properties` 之外的参数即拒；`additionalProperties: true` 或未声明则放行。
+ * 只校验顶层键——嵌套对象的 schema 由工具执行体自行校验（与旧执行器一致）。
+ */
+function undeclaredArguments(tool: GatewayToolEntry, args: Record<string, unknown>): string | null {
+  const schema = tool.parameters;
+  const declared = schema['properties'];
+  if (typeof declared !== 'object' || declared === null) return null;
+  if (schema['additionalProperties'] !== false) return null;
+  const allowed = new Set(Object.keys(declared as Record<string, unknown>));
+  for (const key of Object.keys(args)) {
+    if (args[key] === undefined) continue;
+    if (!allowed.has(key)) return key;
+  }
+  return null;
+}
+
+/** `references` 结果提取：仅当工具返回值是对象且携带合法的 references 数组。 */
+function referencesOf(result: unknown): ButlerReference[] | null {
+  if (typeof result !== 'object' || result === null || Array.isArray(result)) return null;
+  const raw = (result as { references?: unknown }).references;
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const items: ButlerReference[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return null;
+    const record = entry as Record<string, unknown>;
+    const id = record['id'];
+    const kind = record['kind'];
+    const title = record['title'];
+    if (typeof id !== 'string' || typeof title !== 'string') return null;
+    if (typeof kind !== 'string' || !(kind in BUTLER_REFERENCE_LABELS)) return null;
+    items.push(entry as ButlerReference);
+  }
+  return items;
 }
 
 export class ToolGateway {
@@ -185,9 +249,18 @@ export class ToolGateway {
 
     const session: GatewayRunSession = {
       runId,
-      decide(decision): boolean {
+      decide(decision, options_): boolean {
         const current = pending;
         if (!current) return false;
+        // 候选审批（验收 17）：批准必须选中一个候选；未选择/未知 id → 仍待选，
+        // 不落盘。选中 id 直接写入本次调用参数（批准本身带着选择 resolve）。
+        if (decision === 'approved' && current.candidateIds) {
+          const selection = options_?.selection;
+          if (typeof selection !== 'string' || !current.candidateIds.has(selection)) return false;
+          pending = null;
+          current.resolve(decision, selection);
+          return true;
+        }
         pending = null;
         current.resolve(decision);
         return true;
@@ -220,6 +293,15 @@ export class ToolGateway {
         if (!options.butler) {
           return refuse(name, invocationId, 'failed', '本次运行未接入工具执行上下文。');
         }
+        if (tool.level === 'confirm' && options.readOnly) {
+          // 验收 22（场景三）：只读运行的任何写入类调用都被拒，记 tool.failed。
+          return refuse(
+            name,
+            invocationId,
+            'permission',
+            '本次运行只读，不能修改学习库。'
+          );
+        }
         if (tool.level === 'confirm' && options.butler.permissions?.write === false) {
           // Permission gate kept at parity with the legacy `executeButlerTool`.
           return refuse(
@@ -234,6 +316,17 @@ export class ToolGateway {
           args = normalizeArguments(rawArgs ?? {});
         } catch (error) {
           return refuse(name, invocationId, 'failed', describeError(error));
+        }
+        const undeclared = undeclaredArguments(tool, args);
+        if (undeclared !== null) {
+          // 验收 23：JSON Schema 声明 additionalProperties:false 时，多余参数即拒
+          // ——旧 resolve_commitment 携带 newDue 的旁路在此被堵死（不写盘）。
+          return refuse(
+            name,
+            invocationId,
+            'unknown-arg',
+            `工具 ${name} 不接受参数「${undeclared}」。`
+          );
         }
         if (tool.level === 'confirm') {
           const keys = committed.get(runId) as Set<string>;
@@ -254,18 +347,37 @@ export class ToolGateway {
         }
 
         if (tool.level === 'confirm') {
+          // 同名歧义（验收 17）：批准前探测候选；多于一个 → 审批附带候选，批准
+          // 必须选中一个，选中 id pin 回本次调用的参数 `id`（选择进入去重键与
+          // 审计参数，不可经旧工具调用替代）。
+          let candidates: GatewayApprovalCandidate[] | null = null;
+          if (tool.approvalCandidates) {
+            try {
+              const probed = await tool.approvalCandidates(args, options.butler);
+              if (Array.isArray(probed) && probed.length > 1) candidates = probed;
+            } catch (error) {
+              return refuse(name, invocationId, 'failed', describeError(error));
+            }
+          }
           // 审批绑定这一次操作 + 项目 + 参数：没有批准缓存，参数变了就是新审批。
-          const decision = await new Promise<'approved' | 'rejected'>((resolve) => {
+          const decided = await new Promise<{
+            decision: 'approved' | 'rejected';
+            selection?: string;
+          }>((resolveDecision) => {
             pending = {
               invocationId,
               tool: name,
-              resolve
+              candidateIds: candidates
+                ? new Set(candidates.map((candidate) => candidate.id))
+                : null,
+              resolve: (decision, selection) => resolveDecision({ decision, selection })
             };
             options.emit({
               type: 'approval.requested',
               invocationId,
               tool: name,
-              params: args
+              params: args,
+              ...(candidates ? { candidates } : {})
             });
           });
           pending = null;
@@ -274,8 +386,23 @@ export class ToolGateway {
               emitEvent: false
             });
           }
-          if (decision === 'rejected') {
+          if (decided.decision === 'rejected') {
             return refuse(name, invocationId, 'rejected', `用户未批准调用 ${name}。`);
+          }
+          if (decided.selection !== undefined) {
+            // 候选选择进入执行参数：工具据此定位到被选中的记录（验收 17）。
+            // 选择改变了最终参数（id pin）→ 去重键随之改变，必须在执行前按最终
+            // 参数再查一次，否则「选中同一候选」重复调用会绕过早先的检查。
+            args = { ...args, id: decided.selection };
+            const keys = committed.get(runId) as Set<string>;
+            if (keys.has(dedupKey(runId, name, args))) {
+              return refuse(
+                name,
+                invocationId,
+                'duplicate',
+                `重复调用已提交的工具：${name}（同一运行中相同参数与选择只会执行一次）`
+              );
+            }
           }
         }
 
@@ -293,6 +420,12 @@ export class ToolGateway {
             (committed.get(runId) as Set<string>).add(dedupKey(runId, name, args));
           }
           options.emit({ type: 'tool.committed', invocationId, tool: name });
+          // 缝④：工具返回值携带合法 references 数组 → 发 references 事件
+          // （两条引擎路径同一缝，引擎侧不再重复映射）。
+          const references = referencesOf(result);
+          if (references) {
+            options.emit({ type: 'references', items: references });
+          }
           return { ok: true, result, invocationId };
         } catch (error) {
           // 验收 5：失败不进去重键——同参重试放行。失败回执进事件流（模型可见）。

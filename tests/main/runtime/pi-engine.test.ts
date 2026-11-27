@@ -533,3 +533,56 @@ test('缝③：已发过 delta → 终局消息的正文不补发不重复', asy
     await dispose();
   }
 });
+
+test('缝④（P4 批）：工具返回值带 references → pi 路径经同一网关缝发 references 事件', async () => {
+  const stub = stubWorkspace();
+  const dir = await mkdtemp(join(tmpdir(), 'asaki-runtime-pi-refs-'));
+  try {
+    const journal = new RunJournal({ dirPath: join(dir, 'runtime-runs'), now });
+    const gateway = new ToolGateway();
+    registerButlerTools(gateway);
+    // 只读探针工具：返回值携带合法 references 数组（weekly_review 的返回形状）。
+    gateway.register({
+      name: 'source_probe',
+      level: 'query',
+      description: '返回本周记录来源（测试缝④）。',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+      async execute() {
+        return {
+          weekStart: '2026-11-23',
+          references: [
+            { id: 'task-1', kind: 'task', title: '读懂外刊', workspaceId: 'ws-exam' },
+            { id: 'cm-1', kind: 'commitment', title: '背单词', detail: '到期 2026-11-28' }
+          ]
+        };
+      }
+    });
+    const engine = makeEngine(gateway, [
+      { toolCalls: [{ id: 's1', name: 'source_probe', arguments: {} }] },
+      { finalText: '本周来源已核对。' }
+    ]);
+    const controller = new RunController({ engines: [engine], gateway, journal });
+    const collector = collect(controller, 'run-1');
+    const handle = controller.start(makeRequest(), { butler: butlerContext(stub.service) });
+    expect(await handle.done).toBe('completed');
+    const committedIndex = collector.events.findIndex(
+      (event) => event.type === 'tool.committed' && (event as { tool: string }).tool === 'source_probe'
+    );
+    expect(committedIndex).toBeGreaterThan(0);
+    const references = collector.events[committedIndex + 1];
+    expect(references).toMatchObject({
+      type: 'references',
+      items: [
+        { id: 'task-1', kind: 'task', title: '读懂外刊', workspaceId: 'ws-exam' },
+        { id: 'cm-1', kind: 'commitment', title: '背单词', detail: '到期 2026-11-28' }
+      ]
+    });
+    // 事件序号连续（references 与其他事件同一盖章路径）。
+    const seqs = collector.events.map((event) => event.seq);
+    for (let index = 1; index < seqs.length; index += 1) {
+      expect(seqs[index]).toBe(seqs[index - 1]! + 1);
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

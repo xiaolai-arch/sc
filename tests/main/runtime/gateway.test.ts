@@ -258,12 +258,12 @@ test('去重键含项目范围：不同 workspaceId 的同形参数不算重复'
   expect(calls).toHaveLength(2);
 });
 
-test('19 个管家工具全部经网关注册为薄包装，标级表与新增两个工具齐备', () => {
+test('管家工具全部经网关注册为薄包装，标级表与新增工具齐备', () => {
   const gateway = new ToolGateway();
   registerButlerTools(gateway);
   const legacy = createButlerTools();
-  expect(legacy).toHaveLength(19);
-  expect(gateway.names()).toHaveLength(21); // 19 旧 + plan_preview + commit_plan
+  expect(legacy).toHaveLength(20); // 19 旧 + reschedule_commitment（spec P3/P4 收敛批）
+  expect(gateway.names()).toHaveLength(23); // 20 旧 + plan_preview + commit_plan + weekly_review
   const definitions = new Map<string, GatewayToolDefinitionView>(
     gateway.definitions().map((definition) => [definition.name, definition])
   );
@@ -280,6 +280,9 @@ test('19 个管家工具全部经网关注册为薄包装，标级表与新增�
   }
   expect(definitions.get('plan_preview')?.level).toBe('query');
   expect(definitions.get('commit_plan')?.level).toBe('confirm');
+  // 场景二/三（P4 批）：改期是确认级；周总结是只读查询级。
+  expect(definitions.get('reschedule_commitment')?.level).toBe('confirm');
+  expect(definitions.get('weekly_review')?.level).toBe('query');
 });
 
 test('薄包装委托同一实现函数：plan_workspace 别名条目调用旧执行体', async () => {
@@ -512,4 +515,161 @@ test('RunEvent 工具回执可还原为 RunEvent 形状（事件载荷字段齐�
   });
   const asRunEvent = committed as unknown as Partial<RunEvent>;
   expect(asRunEvent.seq).toBeUndefined(); // 引擎事件不带序号；序号由 RunController 盖章
+});
+
+test('验收 23（schema 层）：additionalProperties:false 的工具拒绝未声明参数（多余参数即拒）', async () => {
+  const gateway = new ToolGateway();
+  const calls: unknown[] = [];
+  gateway.register({
+    ...spyEntry('resolve_commitment', { calls }),
+    parameters: {
+      type: 'object',
+      properties: { id: { type: 'string' }, outcome: { type: 'string' } },
+      additionalProperties: false
+    }
+  });
+  const { session, events } = makeSession(gateway);
+  // 旧式旁路：携带已从 schema 移除的 newDue → 网关拒绝，不进执行体、无审批。
+  const outcome = await session.invoke('resolve_commitment', {
+    id: 'cm-1',
+    outcome: 'done',
+    newDue: '2026-12-04'
+  });
+  expect(outcome).toMatchObject({ ok: false, reason: 'unknown-arg' });
+  expect(outcome.error).toContain('newDue');
+  expect(calls).toHaveLength(0);
+  expect(events).toEqual([
+    { type: 'tool.failed', invocationId: outcome.invocationId, tool: 'resolve_commitment', reason: 'unknown-arg', error: outcome.error }
+  ]);
+  // 未声明 additionalProperties:false 的工具不触发该拒绝（向后兼容）。
+  const open = new ToolGateway();
+  const openCalls: unknown[] = [];
+  open.register(spyEntry('loose_tool', { level: 'query', calls: openCalls }));
+  const openSession = makeSession(open).session;
+  const loose = await openSession.invoke('loose_tool', { anything: 1 });
+  expect(loose.ok).toBe(true);
+  expect(openCalls).toEqual([{ anything: 1 }]);
+});
+
+test('验收 17（网关）：候选审批——批准必须带候选 id，选中 id pin 回参数并进去重键', async () => {
+  const gateway = new ToolGateway();
+  const calls: unknown[] = [];
+  gateway.register({
+    ...spyEntry('reschedule_commitment', { calls }),
+    approvalCandidates: (input) =>
+      typeof input['text'] === 'string' && input['text'] === '背单词'
+        ? [
+            { id: 'cm-a', label: '背单词', detail: '到期 2026-11-28' },
+            { id: 'cm-b', label: '背单词', detail: '到期 2026-12-01' }
+          ]
+        : null
+  });
+  const { session, events } = makeSession(gateway);
+  const promise = session.invoke('reschedule_commitment', { text: '背单词', newDue: '2026-12-04' });
+  // 候选探测是异步钩子：让一个宏任务过去，审批事件才落进 events。
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const requested = events.at(-1) as Extract<EngineEvent, { type: 'approval.requested' }>;
+  expect(requested.candidates?.map((candidate) => candidate.id).sort()).toEqual(['cm-a', 'cm-b']);
+  // 空手批准/未知 id 都不成立（仍待选）。
+  expect(session.decide('approved')).toBe(false);
+  expect(session.decide('approved', { selection: 'cm-z' })).toBe(false);
+  // 拒绝仍随时可用。
+  expect(session.decide('rejected')).toBe(true);
+  const rejected = await promise;
+  expect(rejected).toMatchObject({ ok: false, reason: 'rejected' });
+
+  // 第二次：选中 cm-b → 执行参数被 pin 上 id=cm-b。
+  const second = session.invoke('reschedule_commitment', { text: '背单词', newDue: '2026-12-04' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(events.at(-1)).toMatchObject({ type: 'approval.requested' });
+  expect(session.decide('approved', { selection: 'cm-b' })).toBe(true);
+  const outcome = await second;
+  expect(outcome.ok).toBe(true);
+  // 去重键用 pin 后的参数：执行体只被调用一次，参数含选中的 id（选择进入审计）。
+  expect(calls).toEqual([{ text: '背单词', newDue: '2026-12-04', id: 'cm-b' }]);
+
+  // 同一选择再提一次：批准后按 pin 后的最终参数去重 → duplicate，执行体不再跑。
+  const third = session.invoke('reschedule_commitment', { text: '背单词', newDue: '2026-12-04' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(session.decide('approved', { selection: 'cm-b' })).toBe(true);
+  const dup = await third;
+  expect(dup).toMatchObject({ ok: false, reason: 'duplicate' });
+  expect(calls).toHaveLength(1);
+});
+
+test('缝④ references：工具返回值携带合法 references 数组 → 网关发 references 事件；非法形状不发生', async () => {
+  const gateway = new ToolGateway();
+  gateway.register({
+    ...spyEntry('weekly_review', { level: 'query' }),
+    async execute() {
+      return {
+        weekStart: '2026-11-23',
+        references: [
+          { id: 'task-1', kind: 'task', title: '读懂外刊', workspaceId: 'ws-1' },
+          { id: 'cm-1', kind: 'commitment', title: '背单词', detail: '到期 2026-11-28' }
+        ]
+      };
+    }
+  });
+  const { session, events } = makeSession(gateway);
+  const outcome = await session.invoke('weekly_review', {});
+  expect(outcome.ok).toBe(true);
+  expect(events).toHaveLength(2);
+  expect(events[0]).toMatchObject({ type: 'tool.committed', tool: 'weekly_review' });
+  expect(events[1]).toMatchObject({
+    type: 'references',
+    items: [
+      { id: 'task-1', kind: 'task', title: '读懂外刊', workspaceId: 'ws-1' },
+      { id: 'cm-1', kind: 'commitment', title: '背单词', detail: '到期 2026-11-28' }
+    ]
+  });
+
+  // 非法形状（kind 未知名 / 非数组）→ 不发 references 事件，不影响提交。
+  const bad = new ToolGateway();
+  bad.register({
+    ...spyEntry('noisy_tool', { level: 'query' }),
+    async execute() {
+      return { references: [{ id: 'x', kind: 'mystery-kind', title: 't' }] };
+    }
+  });
+  const { session: badSession, events: badEvents } = makeSession(bad);
+  const badOutcome = await badSession.invoke('noisy_tool', {});
+  expect(badOutcome.ok).toBe(true);
+  expect(badEvents.map((event) => event.type)).toEqual(['tool.committed']);
+
+  const worse = new ToolGateway();
+  worse.register({
+    ...spyEntry('strange_tool', { level: 'query' }),
+    async execute() {
+      return { references: 'not-an-array' };
+    }
+  });
+  const { session: strangeSession, events: strangeEvents } = makeSession(worse);
+  const strangeOutcome = await strangeSession.invoke('strange_tool', {});
+  expect(strangeOutcome.ok).toBe(true);
+  expect(strangeEvents.map((event) => event.type)).toEqual(['tool.committed']);
+});
+
+test('验收 22（网关）：只读运行拒绝确认级调用（reason=permission），查询级放行', async () => {
+  const gateway = new ToolGateway();
+  const writes: unknown[] = [];
+  gateway.register(spyEntry('write_note', { calls: writes }));
+  gateway.register(spyEntry('weekly_review', { level: 'query' }));
+  const events: EngineEvent[] = [];
+  const session = gateway.createSession({
+    runId: 'run-ro',
+    butler: butlerStub(),
+    readOnly: true,
+    emit: (event) => events.push(event)
+  });
+  const writeOutcome = await session.invoke('write_note', { title: 'x' });
+  expect(writeOutcome).toMatchObject({ ok: false, reason: 'permission' });
+  expect(writeOutcome.error).toContain('只读');
+  expect(writes).toHaveLength(0);
+  expect(events).toEqual([
+    { type: 'tool.failed', invocationId: writeOutcome.invocationId, tool: 'write_note', reason: 'permission', error: writeOutcome.error }
+  ]);
+  const readOutcome = await session.invoke('weekly_review', {});
+  expect(readOutcome.ok).toBe(true);
+  expect(events).toHaveLength(2);
 });

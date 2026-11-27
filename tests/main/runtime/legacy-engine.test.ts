@@ -669,6 +669,7 @@ test('映射健壮性：ButlerStreamEvent 全类型经 run() 有分支、不抛�
     expect(await handle.done).toBe('failed');
     expect(collector.events.map((event) => event.type)).toEqual([
       'run.started',
+      'references', // references：缝④，原样透传（P4 批起映射）
       'text.delta', // narration
       'text.delta', // text
       'tool.committed', // tool-result(ok) create_task
@@ -677,7 +678,7 @@ test('映射健壮性：ButlerStreamEvent 全类型经 run() 有分支、不抛�
       'run.finished'
     ]);
     expect((collector.events.at(-1) as { error?: string }).error).toContain('模型断开');
-    // references / reasoning / tool-start / retry / done 没有产生任何事件。
+    // reasoning / tool-start / retry / done 没有产生任何事件（references 现已映射）。
   } finally {
     await dispose();
   }
@@ -756,6 +757,34 @@ test('缝③：done（canceled）不补发——取消终态由控制器合成',
     expect(await handle.done).toBe('completed');
     expect(collector.events.map((event) => event.type)).toEqual(['run.started', 'run.finished']);
     expect(collector.events.some((event) => event.type === 'text.delta')).toBe(false);
+  } finally {
+    await dispose();
+  }
+});
+
+test('缝④（P4 批）：ButlerStreamEvent.references → RunEvent.references，items 原样透传', async () => {
+  const items = [
+    { id: 'task-9', kind: 'task' as const, title: '读懂外刊', workspaceId: 'ws-1' },
+    { id: 'cm-1', kind: 'commitment' as const, title: '背单词', detail: '到期 2026-11-28' }
+  ];
+  const butler = scriptedButler([
+    { type: 'references', items },
+    { type: 'text', text: '本周完成 1 项。' },
+    { type: 'done', text: '本周完成 1 项。' }
+  ]);
+  const engine = new LegacyEngine({ butler });
+  const { controller, dispose } = await makeHarness([engine]);
+  try {
+    const collector = collect(controller, 'run-1');
+    const handle = controller.start(makeRequest(), { butler: butlerContext() });
+    expect(await handle.done).toBe('completed');
+    const references = collector.events.find((event) => event.type === 'references');
+    expect(references).toMatchObject({ type: 'references', items });
+    // 事件序号仍严格递增（references 也是被盖章的 RunEvent）。
+    const seqs = collector.events.map((event) => event.seq);
+    for (let index = 1; index < seqs.length; index += 1) {
+      expect(seqs[index]).toBe(seqs[index - 1]! + 1);
+    }
   } finally {
     await dispose();
   }
