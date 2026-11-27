@@ -1,6 +1,28 @@
-import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import type { AssistantMessage, ToolCall, Usage } from '@earendil-works/pi-ai';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
+
+/**
+ * 上游流工厂的惰性加载（P4 批修：打包产物自测通道的 ESM 装载缺陷）。
+ *
+ * pi-fake-model 曾对 `@earendil-works/pi-ai` 做**值导入**
+ * （`import { createAssistantMessageEventStream }`）。pi-ai 是 ESM-only（exports
+ * 只有 import 条件），electron-vite 打包后该静态导入被降级为 CJS `require`，
+ * 在 Electron 主进程装载 pi-selftest chunk 时即抛
+ * `No "exports" main defined`——验收 11 的自测通道在打包产物里根本起不来
+ * （P2 的打包证据 JSON 因此从未入库；F6 补档时实跑复现）。与 pi-engine.ts
+ * 同一修法：唯一的动态 `import()` + 模块级缓存，类型引用保持 `import type`。
+ */
+let streamFactory: (typeof import('@earendil-works/pi-ai'))['createAssistantMessageEventStream'] | null =
+  null;
+async function loadStreamFactory(): Promise<
+  (typeof import('@earendil-works/pi-ai'))['createAssistantMessageEventStream']
+> {
+  if (!streamFactory) {
+    const piAi = await import('@earendil-works/pi-ai');
+    streamFactory = piAi.createAssistantMessageEventStream;
+  }
+  return streamFactory;
+}
 
 /**
  * 脚本化假模型（spec 测试表 P2 行「单测用 Fake」的注入件）。
@@ -98,6 +120,7 @@ export function scriptedPiModel(rounds: ScriptedPiRound[]): StreamFn {
       typeof scripted === 'function'
         ? await (scripted as () => ScriptedPiRoundData | Promise<ScriptedPiRoundData>)()
         : scripted;
+    const createAssistantMessageEventStream = await loadStreamFactory();
     const stream = createAssistantMessageEventStream();
     const signal = options?.signal;
     void (async () => {
