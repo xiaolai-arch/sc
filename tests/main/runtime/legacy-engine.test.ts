@@ -18,6 +18,7 @@ import { ToolGateway } from '../../../src/main/runtime/tool-gateway';
 import type { RunEvent, RunRequest } from '../../../src/main/runtime/contracts';
 import type { ButlerStreamEvent } from '../../../src/shared/butler-stream';
 import type { WorkspacePlanner } from '../../../src/shared/planning';
+import type { ButlerService } from '../../../src/shared/workspace';
 import type {
   Workspace,
   WorkspaceService,
