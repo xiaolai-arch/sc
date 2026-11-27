@@ -809,10 +809,15 @@ function requireSubmitShortAnswer(value: unknown): SubmitShortAnswerInput {
   const response = requireString(input.response, '回答内容');
   if (typeof input.selfCorrect !== 'boolean') throw new Error('自评参数无效。');
   const confidence = optionalConfidence(input.confidence);
+  // 对照检查点自查的勾选；非数组一律视为没有，交给服务端对齐题目检查点。
+  const checkpointHits = Array.isArray(input.checkpointHits) ? input.checkpointHits : undefined;
   return {
     questionId,
     response,
     selfCorrect: input.selfCorrect,
+    ...(checkpointHits !== undefined
+      ? { checkpointHits: checkpointHits as boolean[] }
+      : {}),
     ...(confidence !== undefined ? { confidence } : {})
   };
 }

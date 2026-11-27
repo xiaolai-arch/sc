@@ -18,6 +18,7 @@ import type {
   PracticeMistake,
   PracticeSet
 } from '../../src/shared/practice';
+import { alignCheckpointHits, normalizeCheckpoints } from '../../src/shared/practice';
 import { serializeNote } from '../../src/main/vault/note';
 
 let root: string;
@@ -1110,6 +1111,237 @@ test('submitShortAnswer records the response and a mistake through the scheduler
     due: '2026-11-04'
   });
   expect(right.due).toBe('2026-11-04');
+});
+
+// --- Checkpoints (P2a 对照检查点自查) --------------------------------------
+
+test('createSet keeps 2-3 checkpoints on short questions and drops thin or stray lists', async () => {
+  const service = at('2026-11-01');
+  const created = await service.createSet({
+    workspaceId: 'kaoyan',
+    title: '检查点小测',
+    questions: [
+      {
+        kind: 'short',
+        prompt: '说明第一个重要极限。',
+        referenceAnswer: 'x→0 时 sin x / x 的极限是 1。由夹逼准则保证。',
+        checkpoints: ['极限值是 1', '用到了夹逼准则']
+      },
+      // 超 3 条保留前 3。
+      {
+        kind: 'short',
+        prompt: '四条只留前三。',
+        referenceAnswer: '一二三四。',
+        checkpoints: ['一', '二', '三', '四']
+      },
+      // 填 1 条 → 字段省略（<2 视为无）。
+      {
+        kind: 'short',
+        prompt: '单条视为无。',
+        referenceAnswer: '参考答案。',
+        checkpoints: ['只有一条']
+      },
+      // 空串丢弃后只剩 1 条 → 同样视为无。
+      {
+        kind: 'short',
+        prompt: '空串不算数。',
+        referenceAnswer: '参考答案。',
+        checkpoints: ['', '   ', '只剩一条']
+      },
+      // choice 题：给了也丢弃。
+      {
+        prompt: '选择题不带检查点。',
+        options: ['甲', '乙'],
+        answer: 0,
+        checkpoints: ['一', '二']
+      }
+    ]
+  });
+
+  expect(created.questions[0]?.checkpoints).toEqual(['极限值是 1', '用到了夹逼准则']);
+  expect(created.questions[1]?.checkpoints).toEqual(['一', '二', '三']);
+  expect(created.questions[2]?.checkpoints).toBeUndefined();
+  expect(created.questions[3]?.checkpoints).toBeUndefined();
+  expect(created.questions[4]?.checkpoints).toBeUndefined();
+});
+
+test('checkpoints round-trip through the vault and stay readable as plain markdown', async () => {
+  const service = at('2026-11-01');
+  const created = await service.createSet({
+    workspaceId: 'kaoyan',
+    title: '检查点小测',
+    questions: [
+      {
+        kind: 'short',
+        prompt: '说明第一个重要极限。',
+        referenceAnswer: 'x→0 时 sin x / x 的极限是 1。',
+        checkpoints: ['极限值是 1', '用到了夹逼准则']
+      },
+      { kind: 'short', prompt: '无检查点的简答。', referenceAnswer: '答案。' }
+    ]
+  });
+
+  // 明文可读：frontmatter 里逐条可见（临时 vault 探针）。
+  const raw = await fs.readFile(
+    join(root, 'workspaces', 'kaoyan', 'practice', 'sets', `${created.id}.md`),
+    'utf8'
+  );
+  expect(raw).toContain('checkpoints:');
+  expect(raw).toContain('极限值是 1');
+  expect(raw).toContain('用到了夹逼准则');
+
+  const loaded = await at('2026-11-02').getSet(created.id);
+  expect(loaded?.questions[0]?.checkpoints).toEqual(['极限值是 1', '用到了夹逼准则']);
+  // 无检查点的题不出现字段，旧文件零迁移。
+  expect(loaded?.questions[1]?.checkpoints).toBeUndefined();
+
+  // 没有检查点的集合序列化输出与旧实现逐字节一致。
+  const legacy: PracticeSet = {
+    id: 'ps-legacy',
+    workspaceId: 'kaoyan',
+    title: '旧集合',
+    subject: '',
+    questions: [
+      {
+        id: 'q1',
+        kind: 'short',
+        prompt: '旧题。',
+        options: [],
+        answer: 0,
+        referenceAnswer: '旧答案。',
+        explanation: ''
+      }
+    ],
+    createdAt: '2026-11-01T09:00:00.000Z',
+    updatedAt: '2026-11-01T09:00:00.000Z'
+  };
+  const serialized = serializePracticeSetFile(legacy);
+  expect(serialized).not.toContain('checkpoints');
+  expect(serializePracticeSetFile(parsePracticeSetFile(serialized, 'kaoyan', 'ps-legacy')!)).toBe(
+    serialized
+  );
+});
+
+test('submitShortAnswer aligns checkpointHits with the question checkpoints (3 vs 2 negative case)', async () => {
+  const service = at('2026-11-01');
+  const created = await service.createSet({
+    workspaceId: 'kaoyan',
+    title: '检查点小测',
+    questions: [
+      {
+        kind: 'short',
+        prompt: '三条检查点的题。',
+        referenceAnswer: '一。二。三。',
+        checkpoints: ['一', '二', '三']
+      }
+    ]
+  });
+  const questionId = created.questions[0]!.id;
+
+  // 只勾了前两条 → 入盘对齐为 3 条，缺失记未勾。
+  const first = await service.submitShortAnswer({
+    questionId,
+    response: '一和二。',
+    selfCorrect: true,
+    checkpointHits: [true, false]
+  });
+  expect(first.correct).toBe(true);
+  expect(first.attempt.checkpointHits).toEqual([true, false, false]);
+
+  // 漏勾不给分也不扣分：selfCorrect 照旧是唯一判分来源。
+  const second = await service.submitShortAnswer({
+    questionId,
+    response: '都没勾。',
+    selfCorrect: true,
+    checkpointHits: [false, false, false]
+  });
+  expect(second.correct).toBe(true);
+  expect(second.attempt.checkpointHits).toEqual([false, false, false]);
+
+  // 没带 hits（旧调用方）→ 视为全部未勾，仍写入字段。
+  const third = await service.submitShortAnswer({
+    questionId,
+    response: '没走自查。',
+    selfCorrect: false
+  });
+  expect(third.correct).toBe(false);
+  expect(third.attempt.checkpointHits).toEqual([false, false, false]);
+
+  // 明文可读：attempt 文件 frontmatter 里逐条可见。
+  const attemptRaw = await fs.readFile(
+    join(root, 'workspaces', 'kaoyan', 'practice', 'attempts', '2026-11-01.md'),
+    'utf8'
+  );
+  expect(attemptRaw).toContain('checkpointHits');
+  expect(attemptRaw).toContain('true');
+});
+
+test('submitShortAnswer writes no checkpointHits for questions without checkpoints', async () => {
+  const service = at('2026-11-01');
+  const created = await service.createSet({
+    workspaceId: 'kaoyan',
+    title: '普通简答',
+    questions: [{ kind: 'short', prompt: '无检查点。', referenceAnswer: '答案。' }]
+  });
+  const questionId = created.questions[0]!.id;
+
+  // 多余的 hits 也无处安放：题目没有 checkpoints → 字段省略。
+  const result = await service.submitShortAnswer({
+    questionId,
+    response: '答案。',
+    selfCorrect: true,
+    checkpointHits: [true, true]
+  });
+  expect(result.attempt.checkpointHits).toBeUndefined();
+
+  const attemptRaw = await fs.readFile(
+    join(root, 'workspaces', 'kaoyan', 'practice', 'attempts', '2026-11-01.md'),
+    'utf8'
+  );
+  expect(attemptRaw).not.toContain('checkpointHits');
+});
+
+test('checkpoint helpers normalize on read and align hits at stats time', () => {
+  // normalizeCheckpoints：空串丢弃、超 3 截前 3、<2 视为无。
+  expect(normalizeCheckpoints(['a', 'b'])).toEqual(['a', 'b']);
+  expect(normalizeCheckpoints(['', '  ', 'a', 'b'])).toEqual(['a', 'b']);
+  expect(normalizeCheckpoints(['一', '二', '三', '四'])).toEqual(['一', '二', '三']);
+  expect(normalizeCheckpoints(['one'])).toBeUndefined();
+  expect(normalizeCheckpoints([])).toBeUndefined();
+  expect(normalizeCheckpoints('x')).toBeUndefined();
+  expect(normalizeCheckpoints(undefined)).toBeUndefined();
+
+  const checkpoints = ['一', '二', '三'];
+  // 不等长按索引截断对齐，缺失视为未勾。
+  expect(alignCheckpointHits([true, false], checkpoints)).toEqual([true, false, false]);
+  expect(alignCheckpointHits([true, false, true, true], checkpoints)).toEqual([true, false, true]);
+  expect(alignCheckpointHits(undefined, checkpoints)).toEqual([false, false, false]);
+  // 非布尔项按未勾读，不炸整条记录。
+  expect(alignCheckpointHits(['yes', true, 1], checkpoints)).toEqual([false, true, false]);
+  // 题目没有 checkpoints → 永远无字段。
+  expect(alignCheckpointHits([true], undefined)).toBeUndefined();
+  expect(alignCheckpointHits(undefined, [])).toBeUndefined();
+
+  // 落盘侧保留原始数组，读回不丢；对齐只发生在统计时。
+  const raw = serializeAttemptFile('2026-11-01', [
+    {
+      id: 'pa-cp',
+      workspaceId: 'kaoyan',
+      setId: 'ps1',
+      questionId: 'q2',
+      choice: 0,
+      response: '答案。',
+      checkpointHits: [true, false],
+      correct: true,
+      answeredAt: '2026-11-01T09:10:00.000Z'
+    }
+  ]);
+  expect(parseAttemptFile(raw)[0]?.checkpointHits).toEqual([true, false]);
+  expect(alignCheckpointHits(parseAttemptFile(raw)[0]?.checkpointHits, ['一', '二', '三'])).toEqual([
+    true,
+    false,
+    false
+  ]);
 });
 
 test('a short mistake resolves after a spaced correct self-assessment', async () => {

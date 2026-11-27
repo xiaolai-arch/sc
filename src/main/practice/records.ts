@@ -2,6 +2,7 @@ import type { NoteMeta } from '../../shared/types';
 import { parseNote, serializeNote } from '../vault/note';
 import { isLocalDate } from '../../shared/date';
 import {
+  normalizeCheckpoints,
   normalizePracticeDurationMs,
   type PracticeAttempt,
   type PracticeConfidence,
@@ -11,7 +12,7 @@ import {
   type PracticeSet,
   type PracticeSetSource
 } from '../../shared/practice';
-import { asBoolean, asFiniteNumber, asRecord, asString, asStringArray } from '../workspace/records/coerce';
+import { asBoolean, asBooleanArray, asFiniteNumber, asRecord, asString, asStringArray } from '../workspace/records/coerce';
 
 function asInt(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) ? value : undefined;
@@ -50,8 +51,19 @@ export function coerceQuestion(value: unknown): PracticeQuestion | null {
   if (kind === 'short') {
     const referenceAnswer = asString(record.referenceAnswer);
     if (!referenceAnswer || referenceAnswer.trim() === '') return null;
+    // Hand-edited garbage collapses to no checkpoints; 2-3 clean entries stay.
+    const checkpoints = normalizeCheckpoints(record.checkpoints);
     // The shape keeps `options`/`answer` for compatibility; they are unused.
-    return { id, kind, prompt, options: [], answer: 0, referenceAnswer, explanation };
+    return {
+      id,
+      kind,
+      prompt,
+      options: [],
+      answer: 0,
+      referenceAnswer,
+      ...(checkpoints !== undefined ? { checkpoints } : {}),
+      explanation
+    };
   }
   const options = asStringArray(record.options);
   if (options.length < 2) return null;
@@ -148,6 +160,7 @@ export function serializePracticeSetFile(set: PracticeSet): string {
       ...(question.referenceAnswer !== undefined
         ? { referenceAnswer: question.referenceAnswer }
         : {}),
+      ...(question.checkpoints !== undefined ? { checkpoints: [...question.checkpoints] } : {}),
       explanation: question.explanation
     }))
   };
@@ -199,6 +212,9 @@ export function parseAttemptFile(raw: string): PracticeAttempt[] {
     // hand-edited or legacy entry can never poison the fluent stats; a record
     // without the field simply stays without it.
     const durationMs = normalizePracticeDurationMs(record.durationMs);
+    // Kept raw here; stats align it with the question's checkpoints via
+    // `alignCheckpointHits` (truncated, missing = unchecked).
+    const checkpointHits = asBooleanArray(record.checkpointHits);
     attempts.push({
       id,
       workspaceId,
@@ -208,6 +224,7 @@ export function parseAttemptFile(raw: string): PracticeAttempt[] {
       ...(response !== undefined ? { response } : {}),
       ...(confidence !== undefined ? { confidence } : {}),
       ...(durationMs !== undefined ? { durationMs } : {}),
+      ...(checkpointHits.length > 0 ? { checkpointHits } : {}),
       correct: asBoolean(record.correct, false),
       answeredAt
     });

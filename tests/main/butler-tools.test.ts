@@ -1012,6 +1012,105 @@ test('create_practice_set accepts a mixed choice/short list', async () => {
   });
 });
 
+test('create_practice_set passes short-question checkpoints through and drops stray ones', async () => {
+  const { createSet, service } = practiceStub();
+  const result = await executeButlerTool(
+    {
+      id: 'p5',
+      name: 'create_practice_set',
+      arguments: {
+        title: '检查点小测',
+        questions: [
+          {
+            kind: 'short',
+            prompt: '用自己的话说明第一个重要极限。',
+            referenceAnswer: 'x→0 时 sin x / x 的极限是 1。',
+            checkpoints: ['答出了极限值是 1', '提到了 x→0 这个条件', '', '   ']
+          },
+          { kind: 'short', prompt: '只有一条检查点。', referenceAnswer: '答案。', checkpoints: ['只有一条'] },
+          { prompt: '选择题不收检查点。', options: ['甲', '乙'], answer: 1, checkpoints: ['一', '二'] },
+          { kind: 'short', prompt: '没给检查点也可以。', referenceAnswer: '答案。' }
+        ]
+      }
+    },
+    tools,
+    {
+      workspace: workspaceWithName('考研'),
+      workspaceId: 'ws-exam',
+      practice: service,
+      now: () => new Date('2026-11-21T09:00:00.000Z')
+    }
+  );
+
+  expect(result.ok).toBe(true);
+  // 建模集路径：checkpoints 随题写入，2-3 条生效；空串丢弃；1 条视为无；
+  // choice 题与未提供的短答题零检查点。
+  expect(createSet).toHaveBeenCalledWith({
+    workspaceId: 'ws-exam',
+    title: '检查点小测',
+    source: 'model',
+    questions: [
+      {
+        kind: 'short',
+        prompt: '用自己的话说明第一个重要极限。',
+        referenceAnswer: 'x→0 时 sin x / x 的极限是 1。',
+        checkpoints: ['答出了极限值是 1', '提到了 x→0 这个条件']
+      },
+      { kind: 'short', prompt: '只有一条检查点。', referenceAnswer: '答案。' },
+      { prompt: '选择题不收检查点。', options: ['甲', '乙'], answer: 1 },
+      { kind: 'short', prompt: '没给检查点也可以。', referenceAnswer: '答案。' }
+    ]
+  });
+});
+
+test('create_practice_set schema carries the checkpoint instruction and nothing else changes', () => {
+  const tool = createButlerTools().find((entry) => entry.name === 'create_practice_set');
+  if (!tool) throw new Error('create_practice_set tool is missing');
+  const items = (
+    tool.parameters.properties.questions as {
+      items: { properties: Record<string, unknown>; required: string[] };
+    }
+  ).items;
+  // The checkpoints property is the only addition, appended after the
+  // pre-existing properties; required stays untouched.
+  expect(Object.keys(items.properties)).toEqual([
+    'kind',
+    'prompt',
+    'options',
+    'answer',
+    'referenceAnswer',
+    'explanation',
+    'checkpoints'
+  ]);
+  expect(items.required).toEqual(['prompt']);
+  // The instruction appears only in the new property and states the
+  // short-only, sentence-level, 2-3 rule.
+  const checkpoints = items.properties.checkpoints as { type: string; description: string };
+  expect(checkpoints.type).toBe('array');
+  expect(checkpoints.description).toContain('仅短答题');
+  expect(checkpoints.description).toContain('2-3 条句子级检查点');
+  expect(checkpoints.description).toContain('答到了吗');
+  expect(checkpoints.description).toContain('不要提供');
+  // 其余建集提示词逐字节不变：literal snapshots of the pre-P2a strings.
+  expect(tool.description).toBe(
+    '出 3-10 道题组成一份练习集，写入学习页的练习模块。用户说「考考我 / 出几道题 / 测测我 / 帮我复习」时，从用户学过的内容出题。选择题设 kind 为 choice（或省略 kind），answer 是正确选项的下标（从 0 开始）；短答题请把 kind 设为 short 并给 referenceAnswer（参考答案），让用户用自己的话作答。'
+  );
+  expect((items.properties.kind as { description: string }).description).toBe(
+    '题型：choice 选择题（默认）或 short 短答题'
+  );
+  expect((items.properties.prompt as { description: string }).description).toBe('题干');
+  expect((items.properties.options as { description: string }).description).toBe(
+    '选择题的 2-6 个选项；短答题省略'
+  );
+  expect((items.properties.answer as { description: string }).description).toBe(
+    '选择题正确选项的下标，从 0 开始的整数；短答题省略'
+  );
+  expect((items.properties.referenceAnswer as { description: string }).description).toBe(
+    '短答题的参考答案；短答题必填'
+  );
+  expect((items.properties.explanation as { description: string }).description).toBe('解析，可选');
+});
+
 test('create_practice_set rejects a short question missing referenceAnswer', async () => {
   const short = { kind: 'short', prompt: '用自己的话说明夹逼准则。' };
   const other = quizQuestions()[0];

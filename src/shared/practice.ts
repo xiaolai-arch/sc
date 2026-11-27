@@ -34,7 +34,47 @@ export interface PracticeQuestion {
   answer: number;
   /** Short questions only: the model answer shown after recall. */
   referenceAnswer?: string;
+  /**
+   * Short questions only: 2-3 sentence-level self-check points the learner
+   * ticks against their own recall BEFORE seeing the reference answer. The
+   * checkpoints are a mirror, not a judge — they never score, never schedule
+   * and never call a model. Absent means the question has none, which keeps
+   * its answering flow identical to the two-step baseline.
+   */
+  checkpoints?: string[];
   explanation: string;
+}
+
+/** Upper bound for `PracticeQuestion.checkpoints`; more are dropped on read. */
+export const MAX_CHECKPOINTS = 3;
+
+/**
+ * Tolerant read/write shape for `checkpoints`: drops empty and whitespace-only
+ * entries, keeps at most 2-3 verbatim strings, and treats fewer than 2 as no
+ * checkpoints at all (the whole field is then absent). One definition so the
+ * butler tool, the vault reader and the answer flow cannot drift apart.
+ */
+export function normalizeCheckpoints(value: unknown): string[] | undefined {
+  const list = Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '')
+    : [];
+  const kept = list.slice(0, MAX_CHECKPOINTS);
+  return kept.length >= 2 ? kept : undefined;
+}
+
+/**
+ * Aligns a `checkpointHits` value with a question's checkpoints: indexes beyond
+ * the input count as unchecked (缺失视为未勾), a longer input is truncated, and
+ * a question without checkpoints yields undefined so no field is ever written.
+ * Non-boolean entries read as unchecked rather than failing the attempt.
+ */
+export function alignCheckpointHits(
+  hits: unknown,
+  checkpoints: readonly string[] | undefined
+): boolean[] | undefined {
+  if (checkpoints === undefined || checkpoints.length === 0) return undefined;
+  const values = Array.isArray(hits) ? hits : [];
+  return checkpoints.map((_, index) => values[index] === true);
 }
 
 /**
@@ -106,6 +146,13 @@ export interface PracticeAttempt {
    * ignores it — 用时不影响调度 (Anki 口径).
    */
   durationMs?: number;
+  /**
+   * Short questions with checkpoints only: the learner's per-checkpoint self
+   * ticks, aligned with the question's `checkpoints` at stats time by
+   * `alignCheckpointHits` (truncated/extended, missing = unchecked). Absent on
+   * every other attempt, so files written before this field keep their shape.
+   */
+  checkpointHits?: boolean[];
   correct: boolean;
   answeredAt: string;
 }
@@ -195,6 +242,12 @@ export interface SubmitShortAnswerInput {
   response: string;
   /** Self-assessment: true = 答对了, false = 没答对. */
   selfCorrect: boolean;
+  /**
+   * The checkpoint self-ticks from the 对照检查点自查 step, aligned with the
+   * question's checkpoints by the service (`alignCheckpointHits`). Absent for
+   * questions without checkpoints.
+   */
+  checkpointHits?: boolean[];
   /** Optional pre-answer confidence, recorded with the attempt. */
   confidence?: PracticeConfidence;
   /**
@@ -233,6 +286,12 @@ export interface CreatePracticeQuestionInput {
   answer?: number;
   /** Short questions only, required and non-empty for them. */
   referenceAnswer?: string;
+  /**
+   * Short questions only: 2-3 sentence-level checkpoints. Anything fewer than
+   * 2 (after dropping empties) is treated as no checkpoints and omitted; more
+   * than 3 keeps the first 3. Hand-made sets may leave it out entirely.
+   */
+  checkpoints?: string[];
   explanation?: string;
 }
 

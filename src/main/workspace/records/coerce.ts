@@ -11,6 +11,11 @@ export function asStringArray(value: unknown): string[] {
   return value.filter((entry): entry is string => typeof entry === 'string');
 }
 
+export function asBooleanArray(value: unknown): boolean[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is boolean => typeof entry === 'boolean');
+}
+
 export function asBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
 }

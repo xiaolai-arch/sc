@@ -20,6 +20,7 @@ import type {
   CreatePracticeQuestionInput,
   PracticeService
 } from '../../shared/practice';
+import { normalizeCheckpoints } from '../../shared/practice';
 import type { WorkspacePlanner } from '../../shared/planning';
 import { busyDayMinutes } from '../planning';
 import type { LongPlanService } from '../../shared/plans';
@@ -1154,7 +1155,13 @@ export function createButlerTools(): ButlerToolDefinition[] {
                   type: 'string',
                   description: '短答题的参考答案；短答题必填'
                 },
-                explanation: { type: 'string', description: '解析，可选' }
+                explanation: { type: 'string', description: '解析，可选' },
+                checkpoints: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description:
+                    '仅短答题（kind 为 short 且有 referenceAnswer）提供：从参考答案里拆出 2-3 条句子级检查点，每条对应参考答案中的一句话，供学习者对答案前自查「答到了吗」。选择题和没有参考答案的短答题不要提供本字段。'
+                }
               },
               required: ['prompt'],
               additionalProperties: false
@@ -1572,10 +1579,15 @@ function requiredPracticeQuestions(
       if (typeof referenceAnswerValue !== 'string' || referenceAnswerValue.trim() === '') {
         throw new ToolInputError(`第 ${index + 1} 题是短答题，必须提供参考答案 referenceAnswer。`);
       }
+      // Sentence-level checkpoints are prompt-guided, never enforced or
+      // synthesized here: a missing or thin list simply means none. Choice
+      // questions and referenceAnswer-less short questions get none at all.
+      const checkpoints = normalizeCheckpoints(question['checkpoints']);
       return {
         kind: 'short',
         prompt,
         referenceAnswer: referenceAnswerValue,
+        ...(checkpoints !== undefined ? { checkpoints } : {}),
         ...(explanation ? { explanation } : {})
       };
     }
