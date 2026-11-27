@@ -55,6 +55,7 @@
 
 - 字段落两处：类型 `WorkspaceTask` 增 `nextStep?: string`（`src/shared/workspace.ts:118`）；任务 md 记录读写同步——`src/main/workspace/records/tasks.ts` 的 `TaskRecord`/`parseTaskFile`（`:81`）/`serializeTaskFile`（`:89`）/`toWorkspaceTask`（`:110`）映射补字段。**不要新建 `src/shared/tasks.ts`**（该文件不存在）。单行，≤80 字符，写入时 trim，空串视为未设置不序列化；旧任务零迁移。
 - 三个显式写入口：任务卡内联编辑；butler `update_task` 工具增 `nextStep` 参数（schema 增补，其余不变）；专注停止/放弃流——会话绑定了任务时，提供一行「下一步」输入（可跳过）。
+- **写入口共四处**（原三处 + `create_task`，2026-11-27 item 67 裁定）：任务卡 / `update_task` / 专注流 / `create_task`。不变量（单行、≤80 码点、空串删键）只在唯一收紧点 `normalizeTaskNextStep`（`src/shared/workspace.ts`）执行；四条写入路径（`createTask`/`updateWorkspaceTask`/`parse` 的 `coerceTask`）全部经它，新增入口不得绕过。
 - 展示：任务卡与任务列表有则显示；**晨间行优先级规则（本批起生效）**：今天首个未完成任务带 `nextStep` → 晨间恢复行改用 `{taskTitle} 的下一步已经记好：{nextStep}——从它开始？`（「首个未完成」按今日任务列表既有排序取第一个）；否则回落 P0 的复盘 `tomorrow` 行（含 staleness 变体）；都无 → 空串。**晨间恢复行永远最多一行**，不叠加。
 - 晚间复盘**不**自动写任务 nextStep（复盘的 `tomorrow` 由 P0 递回，两者职责分开：复盘级 vs 任务级）。
 

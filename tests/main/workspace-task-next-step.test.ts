@@ -109,6 +109,69 @@ test('updateWorkspaceTask sets, replaces, truncates and clears the next step (�
   expect(emptyClears.nextStep).toBeUndefined();
 });
 
+test('createTask applies the same one-line tightening as updateWorkspaceTask (第四写入口)', async () => {
+  const service = createWorkspaceService(root);
+  const today = formatLocalDate(new Date());
+  const overlong = '一'.repeat(MAX_TASK_NEXT_STEP_LENGTH + 20);
+  const multiline = '  先抄例题\n再做错题\r\n  再对答案  ';
+
+  // Create path: the same overlong / multi-line input the update test feeds in.
+  const createdLong = await service.createTask({
+    workspaceId: 'kaoyan',
+    title: '创建-超长',
+    subject: '数学',
+    durationMin: 30,
+    acceptance: '',
+    nextStep: overlong
+  });
+  const createdMulti = await service.createTask({
+    workspaceId: 'kaoyan',
+    title: '创建-多行',
+    subject: '英语',
+    durationMin: 30,
+    acceptance: '',
+    nextStep: multiline
+  });
+
+  // Update path: identical inputs through updateWorkspaceTask on plain tasks.
+  const plainLong = await service.createTask({
+    workspaceId: 'kaoyan',
+    title: '更新-超长',
+    subject: '数学',
+    durationMin: 30,
+    acceptance: ''
+  });
+  const plainMulti = await service.createTask({
+    workspaceId: 'kaoyan',
+    title: '更新-多行',
+    subject: '英语',
+    durationMin: 30,
+    acceptance: ''
+  });
+  await service.updateWorkspaceTask({ taskId: plainLong.id, nextStep: overlong });
+  await service.updateWorkspaceTask({ taskId: plainMulti.id, nextStep: multiline });
+
+  // Create returns the tightened value, exactly the normalizer's output.
+  expect(createdLong.nextStep).toBe(normalizeTaskNextStep(overlong));
+  expect([...(createdLong.nextStep ?? '')]).toHaveLength(MAX_TASK_NEXT_STEP_LENGTH);
+  expect(createdMulti.nextStep).toBe(normalizeTaskNextStep(multiline));
+  expect(createdMulti.nextStep).toBe('先抄例题 再做错题 再对答案');
+
+  // What landed on disk is the same view for both paths.
+  const tasks = parseTaskFile(await fs.readFile(taskFilePath('kaoyan', today), 'utf8'));
+  const stored = (id: string) => tasks.find((entry) => entry.id === id)?.nextStep;
+  expect(stored(createdLong.id)).toBe(normalizeTaskNextStep(overlong));
+  expect(stored(createdLong.id)).toBe(stored(plainLong.id));
+  expect(stored(createdMulti.id)).toBe(normalizeTaskNextStep(multiline));
+  expect(stored(createdMulti.id)).toBe(stored(plainMulti.id));
+
+  // And a reopened vault reads back the same tightened line.
+  const reopened = await createWorkspaceService(root).getWorkspaceSnapshot('kaoyan');
+  const readBack = (id: string) => reopened.tasks.find((entry) => entry.id === id)?.nextStep;
+  expect(readBack(createdLong.id)).toBe(normalizeTaskNextStep(overlong));
+  expect(readBack(createdMulti.id)).toBe('先抄例题 再做错题 再对答案');
+});
+
 test('a legacy task without a next step keeps its bytes (零迁移)', async () => {
   const service = createWorkspaceService(root);
   const today = formatLocalDate(new Date());
