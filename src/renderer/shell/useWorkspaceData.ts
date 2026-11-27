@@ -51,7 +51,6 @@ import type {
   UpdateLongPlanInput,
   UpdateLongPlanItemInput
 } from '../../shared/plans';
-import type { WorkspacePlan } from '../../shared/planning';
 import type { SearchResult } from '../../shared/search';
 import type { ReviewAnswers } from '../../shared/types';
 import type {
@@ -125,7 +124,6 @@ export type WorkspaceData = WorkspaceDataState & {
   reviewPracticeMistake: (input: ReviewMistakeInput) => Promise<SubmitAnswerResult>;
   resolvePracticeMistake: (input: SetMistakeResolvedInput) => Promise<PracticeMistake>;
   exportMistakeSheet: (input: ExportMistakeSheetInput) => Promise<ExportMistakeSheetResult>;
-  generatePlan: (workspaceId: string) => Promise<WorkspacePlan>;
   searchWorkspace: (workspaceId: string, query: string, limit?: number) => Promise<SearchResult[]>;
   searchAll: (query: string, limit?: number) => Promise<SearchResult[]>;
   send: (input: SendMessageInput) => Promise<SendMessageResult>;
@@ -674,29 +672,6 @@ export function useWorkspaceData(): WorkspaceData {
     []
   );
 
-  const generatePlan = useCallback(async (workspaceId: string) => {
-    const api = apiOrThrow();
-    const plan = await api.planWorkspace({ workspaceId });
-    // Regenerating the same goal must not duplicate tasks already in the workspace.
-    const snapshot = await api.getWorkspaceSnapshot(workspaceId);
-    const existing = new Set(snapshot.tasks.map((task) => task.title.trim()));
-    const created = await Promise.all(
-      plan.tasks
-        .filter((task) => !existing.has(task.title.trim()))
-        .map((task) =>
-          api.createTask({
-            workspaceId,
-            title: task.title,
-            subject: task.subject,
-            durationMin: task.durationMin,
-            acceptance: task.acceptance
-          })
-        )
-    );
-    setState((current) => ({ ...current, tasks: [...created, ...current.tasks] }));
-    return plan;
-  }, []);
-
   const searchWorkspace = useCallback(
     async (workspaceId: string, query: string, limit?: number) =>
       apiOrThrow().searchWorkspace({ workspaceId, query, ...(limit !== undefined ? { limit } : {}) }),
@@ -935,7 +910,6 @@ export function useWorkspaceData(): WorkspaceData {
     reviewPracticeMistake,
     resolvePracticeMistake,
     exportMistakeSheet,
-    generatePlan,
     searchWorkspace,
     searchAll,
     send,
