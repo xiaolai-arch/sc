@@ -72,6 +72,14 @@ type LearningPaneProps = {
   onExportMistakeSheet?: (
     input: ExportMistakeSheetInput
   ) => Promise<ExportMistakeSheetResult>;
+  /** Saves the learner's own one-line 错因 on a mistake. */
+  onSaveMistakeCause?: (mistake: PracticeMistake, cause: string) => Promise<PracticeMistake>;
+  /** 清空已掌握: moves resolved mistakes into the archive file. */
+  onClearResolvedMistakes?: () => Promise<void>;
+  /** Archived records for the restore picker. */
+  onListArchivedMistakes?: () => Promise<PracticeMistake[]>;
+  /** Moves one archived record back into the mistake book. */
+  onRestoreMistake?: (mistake: PracticeMistake) => Promise<void>;
   onOpenChat: () => void;
   onOpenNote: (id: string) => void;
 };
@@ -116,6 +124,10 @@ export function LearningPane({
   onCreateSet,
   onReviewSet,
   onExportMistakeSheet,
+  onSaveMistakeCause,
+  onClearResolvedMistakes,
+  onListArchivedMistakes,
+  onRestoreMistake,
   onOpenChat,
   onOpenNote
 }: LearningPaneProps) {
@@ -314,6 +326,14 @@ export function LearningPane({
   const dueIds = new Set((dueMistakes ?? []).map((mistake) => mistake.id));
   const mistakeBookWorkspaceId =
     workspace?.id ?? set?.workspaceId ?? mistakes[0]?.workspaceId ?? '';
+  // Subject per mistake for the sheet's aggregate line, resolved through the
+  // practice set it belongs to (the mistake record stores no subject). A set
+  // that cannot be found simply contributes no entry (rendered 未分类).
+  const mistakeSubjects: Record<string, string> = {};
+  for (const mistake of mistakes) {
+    const subject = sets?.find((entry) => entry.id === mistake.setId)?.subject;
+    if (subject !== undefined && subject.trim() !== '') mistakeSubjects[mistake.id] = subject;
+  }
   /** One question, one set: the book never bulk-imports. */
   async function makeSetFromMistake(mistake: PracticeMistake) {
     if (!onCreateSet) return;
@@ -343,6 +363,7 @@ export function LearningPane({
       workspaceId={mistakeBookWorkspaceId}
       dueIds={dueIds}
       strict={strictMastery === true}
+      subjects={mistakeSubjects}
       {...(onReviewMistake ? { onReview: onReviewMistake } : {})}
       {...(onReviewAllMistakes ? { onReviewAll: onReviewAllMistakes } : {})}
       {...(onResolveMistake ? { onResolve: onResolveMistake } : {})}
@@ -353,6 +374,10 @@ export function LearningPane({
               onExportMistakeSheet({ workspaceId: mistakeBookWorkspaceId, dueOnly: false })
           }
         : {})}
+      {...(onSaveMistakeCause ? { onSaveCause: onSaveMistakeCause } : {})}
+      {...(onClearResolvedMistakes ? { onClearResolved: onClearResolvedMistakes } : {})}
+      {...(onListArchivedMistakes ? { onListArchived: onListArchivedMistakes } : {})}
+      {...(onRestoreMistake ? { onRestore: onRestoreMistake } : {})}
     />
   );
 
