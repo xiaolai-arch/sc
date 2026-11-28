@@ -595,6 +595,37 @@ describe('mistake review sheet', () => {
     expect(screen.queryByRole('button', { name: '复制清单' })).not.toBeInTheDocument();
   });
 
+  it('exports the whole practice set to Anki and shows the path and the one-off note', async () => {
+    // The set entry exists because the mistake book can only export what was
+    // already missed; a fresh set has no way out otherwise (iter34 P2).
+    const user = userEvent.setup();
+    const onExportAnkiSet = vi.fn(async () => ({
+      path: 'workspaces/kaoyan/practice/exports/ps1-2026-11-02.tsv',
+      count: practiceSet.questions.length,
+      date: '2026-11-02'
+    }));
+    renderPane({ set: practiceSet, onExportAnkiSet });
+
+    await user.click(screen.getByRole('button', { name: '导出到 Anki' }));
+
+    await waitFor(() =>
+      expect(onExportAnkiSet).toHaveBeenCalledWith({ workspaceId: 'kaoyan', setId: 'ps1' })
+    );
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent('workspaces/kaoyan/practice/exports/ps1-2026-11-02.tsv');
+    // The spec's one-off sentence, verbatim.
+    expect(
+      screen.getByText(
+        '这是一次性文件，导入 Anki 后不会自动更新；数据仍以 vault 里的 markdown 为准。'
+      )
+    ).toBeInTheDocument();
+  });
+
+  it('hides the set export action when no handler is wired', () => {
+    renderPane({ set: practiceSet });
+    expect(screen.queryByRole('button', { name: '导出到 Anki' })).not.toBeInTheDocument();
+  });
+
   it('exports the sheet and shows the saved path in a polite live region', async () => {
     const user = userEvent.setup();
     const onExportMistakeSheet = vi.fn(async () => savedResult);
