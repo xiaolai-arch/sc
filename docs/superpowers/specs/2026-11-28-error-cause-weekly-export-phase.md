@@ -19,7 +19,7 @@
 
 | 批次 | 内容 | 依赖 |
 |---|---|---|
-| **P0 错因一行 + 顽疾可见 + 变薄** | `PracticeMistake.cause?: string`（可选一行，≤40 字）；错题本与复习单渲染错因行；复习单顶部按科目聚合行（n≥2 才出现）；`priority===3` 渲染「顽疾」标记、`correctStreak≥2` 自动洗白（零新增状态：两字段都已在库）；错题本加「清空已掌握」→ resolved 错题**可逆移动**到 `practice/mistakes-archive.md` | 无 |
+| **P0 错因一行 + 顽疾可见 + 变薄** | `PracticeMistake.cause?: string`（可选一行，≤40 字）；错题本与复习单渲染错因行；复习单顶部按科目聚合行（n≥2 才出现）；`wrongCount≥2 && correctStreak<2` 渲染「顽疾」标记、连对 2 次自动洗白（零新增状态：两字段都已在库，**priority 不参与判据**）；错题本加「清空已掌握」→ resolved 错题**可逆移动**到 `practice/mistakes-archive.md` | 无 |
 | **P1 周数据口径修正** | 周统计分母与 `recent7DayCompletion` 同规则（无日期积压不计入 N）；周正确率按「每题每日只计首次」去重；练习样本 n<5 只显题数不显百分比 | 无 |
 | **P2 Anki 兼容 TSV 导出** | vault `workspaces/<id>/practice/exports/<set>-YYYY-MM-DD.tsv`，带 `#separator:tab` / `#html:true` / `#columns` / `#tags column` / `#deck` 头部；**不导出调度字段** | 无（与 P0 同 practice 侧，见冲突节） |
 | **P3 考研三阶段 + 一次性阶段验收问句** | `Workspace.phase?: '基础'|'强化'|'冲刺'`；切换后的第一次周复盘问一次该阶段验收问题，点过不再问；**不做自动进度判定** | 已上线三块能力（P0 错题本 / iter33 整卷+用时 / 自测） |
@@ -37,8 +37,10 @@ P3 与 P2 无共享文件，可并行；P0 与 P2 都落 `practice-service.ts` �
 
 ### ② 顽疾标记 + 自动洗白
 
-- 标记条件：`priority === 3`（已在库，`practice-service.ts:233` 封顶 3）。标记文案 `顽疾`（中性：题的属性，不是人的评价）。
-- 洗白：`correctStreak >= 2` 时错题本渲染不再显示标记（**不改数据**——priority 自有升降逻辑 `:253` 照旧；洗白只是渲染条件 `priority===3 && correctStreak<2`）。这样无需新增状态、无迁移、无新写入路径。
+- **判据只用 `wrongCount` 与 `correctStreak`，不用 `priority`**。原因（sc-review 2026-11-28 阻断 1，已实测）：`practice-service.ts:232-233` 答错写 `correctStreak: 0` 且 `priority: Math.min(3, priority+1)`，`:253-254` 答对写 `priority: Math.max(0, priority-1)` 且 `correctStreak: correctStreak+1`——两字段同步反向，**`priority===3` 时必然 `correctStreak===0`**，原设计（`priority===3 && correctStreak>=2` 洗白）恒不可达。
+- 标记条件：`wrongCount >= 2 && correctStreak < 2`（「错第二次起升格」，对应知乎 ③「二次以上错题……将错题升级，并做上记号」）。文案 `顽疾`（中性：题的属性，不是人的评价）。
+- 洗白：连对 2 次（`correctStreak >= 2`）即不再显示——**纯渲染条件，不改任何数据**（`wrongCount` 只增不减，`priority` 与 `correctStreak` 的升降逻辑一字不动）。因此零迁移、无新写入路径。
+- 存活性（真实序列可构造）：错 → 错（`2/0`，标记出现）→ 对（`2/1`，仍在）→ 对（`2/2`，消失）；之后再错则 streak 归零、标记复现。见验收 4。
 - 渲染位置：错题本行状态区（`PracticePanels.tsx:162` 同行）与复习单尾行（`practice-sheet.ts:78`）。
 
 ### ③ 按科目聚合行
@@ -51,6 +53,7 @@ P3 与 P2 无共享文件，可并行；P0 与 P2 都落 `practice-service.ts` �
 
 - 动作：错题本页「清空已掌握」按钮（显式点击，**无自动删除**）。
 - 行为：把 `status === 'resolved'` 的错题从 `practice/mistakes.md` **移出**，追加写入 `workspaces/<id>/practice/mistakes-archive.md`（保留全部字段 + 追加 `archivedAt` 本地日期）；mistakes.md 只剩 active。
+- **类型**：`PracticeMistake` 增 `archivedAt?: string`（可选，与 `stabilityDays` 同法；`serializeMistakesFile` 直接展开对象，缺类型会 TS 报错）。两文件同 schema，注释写明「archive 记录多一个 `archivedAt`」。
 - 可逆：提供「从归档恢复」列出 archive 记录并可移回（移回时 `status` 恢复为 `resolved`，不自动改回 active——不替用户判断）。
 - 归档文件格式沿用 mistakes.md 的序列化（同一 `serializeMistakesFile` 结构），**明文可读**，进备份目录（`workspaces/` 整目录本就在备份范围）。
 - 幂等/安全：archive 文件不存在则创建并写 frontmatter 头；重复点「清空」时 archive 已有同 id 记录则不重复追加（以 id 去重，保留首条 `archivedAt`）。
@@ -71,17 +74,26 @@ P3 与 P2 无共享文件，可并行；P0 与 P2 都落 `practice-service.ts` �
 ### ② 周正确率去重
 
 - `weekAttempts` 去重键 `(questionId, 本地日期)`，保留当日**首次**作答；`answered` / `correct` / `accuracy` 全部基于去重后集合。
-- 与 iter33 P1 的「流畅度统计每日只计第一次」同一条规则（Anki True Retention），但**互不复用实现**：iter33 口径作用于单题历史统计，本项作用于周聚合，各自独立可测。
+- 与 iter33 P1 的「流畅度统计每日只计第一次」同一条规则（Anki True Retention），但**互不复用实现**：iter33 口径作用于单题历史统计，本项作用于周聚合，各自独立可测。若将来有人合并这两处，先核对生效窗口与去重键是否等价（一个是单题历史、一个是周聚合，去重键相同但聚合面不同）。
 
 ### ③ 小样本不报百分比
 
-- `answered < 5` 时：`accuracy = null`（沿 `recent7DayCompletion` 的 planned<5→null 先例 `weekly-stats.ts:147`）。
-- 提示文案：flags 行改 `- 练习：本周目前 N 题（样本不足暂不计正确率）`；`weeklyRecapLine`（`check-ins/prompt.ts:237-248`）在 `accuracy === null` 时不拼「正确率 X%」段。
-- `hasWeeklyNumbers` 逻辑不变（answered>0 仍有数据可报）。
+**不改 `accuracy` 字段本身**（sc-review 2026-11-28 阻断 2）：`accuracy` 是共享字段，`WeeklyOverview.tsx:26`、`weeklyRecapLine`（`check-ins/prompt.ts:246`）都在读；把它改成 `answered<5 → null` 会让语义分叉（`hasWeeklyNumbers` 仍真、stats 段仍在、但百分比缺一块），且 `WeeklyOverview` 的 `null` 分支现在是「—」（`answered===0` 专用）。
+
+- 新增显式展示标记：`WeeklyOverview` 增 `accuracyReliable: boolean`（`answered >= 5`），`accuracy` 保持原值不变（`answered===0 ? null : correct/answered`，`weekly-stats.ts:110` 一字不动）。
+- `answered > 0 && !accuracyReliable` 时三处消费方：
+  - `WeeklyOverview` 的「答题正确率」stat 值改为 **`${answered} 题（样本不足）`**（逐字，与提示行同一句，避免两处措辞漂移）；
+  - `weeklyRecapLine`（`prompt.ts:237-248`）不拼「正确率 X%」段（一段都不拼，不是拼空）；
+  - flags 行改 `- 练习：本周目前 N 题（样本不足暂不计正确率）`。
+- `answered >= 5` 或 `answered === 0`：三处行为与 1.3.0 **逐字节一致**（负例必须覆盖 `answered===0`——那时 `accuracy` 已是 null、`accuracyReliable` 为 false，但文案必须仍走原分支）。
+- `hasWeeklyNumbers` 不变（`answered > 0` 仍算有数据）；`WeeklyOverview` 一行不改的路径由验收 15 锁死。
 
 ### ④ 口径变更的一次性说明
 
-- 周复盘在**第一次**输出新口径时附一句 `（从本周起，积压任务不计入完成率分母）`。存储沿用一次性的前端轻量 prefs 先例（iter32 P3 `asaki:exam-writing-asked:*`，`Workspace.tsx:194-198`），key `asaki:weekly-scope-noted:v1`，读过即写。
+- 周复盘在**第一次**输出新口径时附一句 `（从本周起，积压任务不计入完成率分母）`。
+- **存储位置（sc-review 非阻断 1）**：文案由 main 进程 `check-ins/prompt.ts` 生成，而 iter32 P3 的先例 `asaki:exam-writing-asked:*` 在 **renderer localStorage**（`Workspace.tsx:194-198`）——main 读不到，照抄会撞墙。本项改存 `AppSettings` 的可选标记 `weeklyScopeNoted?: true`（`src/shared/types.ts:151` 的 AppSettings，沿 `strictMastery?: boolean` 先例：缺省不序列化、旧设置文件逐字节往返）。
+- 写入时机：该句**真正随周复盘消息发出**时置 `true`；下一次及以后不带。口径不再变动后此标记永久保留（无清理逻辑）。
+- 说明：这与 iter32「一次性提醒不进共享设置」的原则局部相左——理由是那条先例的文案在 renderer 拼、本条的文案在 main 拼；跨进程传 renderer 状态要新增 IPC，代价高于一个可选布尔。已记入「已定 7」。
 
 ## P2 细则（Anki 兼容 TSV 导出）
 
@@ -101,10 +113,10 @@ P3 与 P2 无共享文件，可并行；P0 与 P2 都落 `practice-service.ts` �
   1. 正面：题目 prompt（单选题把 `A. ...` 选项按行列出）
   2. 背面：正确答案（choice 取 `optionLetter(answer)`；short 取 `referenceAnswer`）
   3. 解析：`explanation`；**错题导出时若有 `cause`，追加一行 `错因：…`**
-  4. 标签：错题导出给 `错因` / `顽疾`（`priority===3 && correctStreak<2`）/ `科目:<subject>`；练习集导出给 `科目:<subject>`
+  4. 标签：错题导出给 `错因` / `顽疾`（`wrongCount>=2 && correctStreak<2`）/ `科目:<subject>`；练习集导出给 `科目:<subject>`
 - 编码与转义：**UTF-8 无 BOM**；单元格内换行 → `<br>`（`#html:true` 下 Anki 原生识别）；单元格内 Tab → 全角空格替换（避免列错位）；不引入引号包裹（TSV 无引号语义，Anki 按 Tab 切）。
 - **不导出调度字段**：wrongCount / correctStreak / priority / intervalDays / stabilityDays / difficulty / due 一律不出现在文件里（照 Anki 分享剥离调度口径）。测试用 grep 断言。
-- 文件首行必须是 `#` 头（Anki 要求 header 在文件顶部，之前不得有空行）。
+- 文件首行必须是 `#` 头（Anki 要求 header 在文件顶部，之前不得有空行）。`#deck:` 后的科目名按单元格同一规则清洗（Tab → 全角空格、换行剔除），否则会破坏头部行。
 - 导出不判定成功/失败——写完即返回路径；路径回显在 UI（「已导出 12 题到 workspaces/…/exports/x.tsv」）。
 - 说明句（UI 一行，逐字）：`这是一次性文件，导入 Anki 后不会自动更新；数据仍以 vault 里的 markdown 为准。`
 
@@ -121,7 +133,7 @@ P3 与 P2 无共享文件，可并行；P0 与 P2 都落 `practice-service.ts` �
 - 触发：`phase` 被设置为某个值**之后**的第一次周复盘（weekly 检查）——问句拼在复盘消息末尾，确定性文案（不交模型改写，同 `freshStartCheckInLine` 机制）。
 - 文案（逐字，按阶段）：
   - 基础 → `基础阶段收尾时可以这样验收：不翻书，能用 2-3 句话概括每章的核心主题吗？要不要现在就试一章？`
-  - 强化 → `强化阶段收尾时可以这样验收：用一套近年真题限时练一遍吗？我帮你记各题型的用时和正确率。`
+  - 强化 → `强化阶段收尾时可以这样验收：用一套近年真题限时练一遍吗？我帮你记各题型的用时和正确率，结果都在本周复盘里。`
   - 冲刺 → `冲刺阶段收尾时可以这样验收：对照错题记录，检查所有错题对应的知识点都掌握了吗？要打开错题本一起过一遍吗？`
 - 一次性：记 `phaseAskedAt`（`Workspace` 字段，ISO 本地日期；写入时机 = 问句真正发出时）。已有 `phaseAskedAt` 则不再问——**切换阶段重置**：`phase` 变更时清空 `phaseAskedAt`（新阶段问新问题）。
 - **不做自动进度判定**（不判落后/超前，不出「你落后 1 周」；3a 的 ±1 周规则由阿咲在对话里依据已有完成率数据说，不进硬逻辑）。
@@ -153,10 +165,10 @@ P3 与 P2 无共享文件，可并行；P0 与 P2 都落 `practice-service.ts` �
 1. 错题补一句错因后，mistakes.md 落 `cause` 字段；错题本行与复习单 section 各显示 `错因：…` 一行。
 2. 无错因的错题：错题本与复习单渲染与 1.3.0 **逐字节一致**（负例：字段缺省、空串、纯空白三种输入都不产生错因行、字段不落盘）。
 3. 输入 45 字错因 → 落盘截断为 40 字（按码点计），无省略号；输入 40 字整 → 原样。
-4. `priority===3 && correctStreak<2` → 错题本行与复习单尾行出现 `顽疾` 标记；`priority===3 && correctStreak>=2` → 标记不出现；`priority===2` 任何时候不出现（三态用例）。
-5. 洗白不改数据：连对 2 次后 priority 与 correctStreak 的落盘值与升降逻辑一致（`practice-service.ts:233/:253` 回归），仅渲染条件变化。
+4. 顽疾三态**用真实提交序列构造**（不捏造 fixture）：同一题 错→错 → `wrongCount=2, correctStreak=0`，标记出现；再 对 → `2/1`，仍出现；再 对 → `2/2`，消失；再 错 → 标记复现且 `wrongCount=3, correctStreak=0`。另：`wrongCount=1` 任何时候不出现（四态序列断言）。
+5. 洗白不改数据：上述序列每一步的落盘值等于 `practice-service.ts:219`（wrongCount 累加）`:232-233`（答错）`:253-254`（答对）既有逻辑的产出（回归断言），仅渲染条件变化；priority 的升降与标记无因果关系（构造 `priority=3, wrongCount=1` 与 `priority=0, wrongCount=2` 两种状态，标记只由后两者决定）。
 6. 复习单聚合行：错题来自 2 个科目 → 顶部出现 `数学 8 · 英语 3`；单一科目或 `未分类` 占全部 → 无聚合行（负例）。
-7. 聚合计数 = 本次导出内容条数（含 dueOnly 过滤后一致）。
+7. 聚合计数 = 本次复习单导出的条目数（与 `buildMistakeSheet` 收到的 mistakes 数组长度相等；`dueOnly` 只属于既有 `exportMistakeSheet`（`practice-service.ts:863`），**新增的 Anki TSV 导出不做 dueOnly 过滤，导出全部 active 错题**——两项导出互不共用过滤参数）。
 8. 「清空已掌握」：resolved 错题从 mistakes.md 移出、出现在 mistakes-archive.md（字段不丢 + `archivedAt` 有值）；mistakes.md 只剩 active。
 9. 归档幂等：连点两次，archive 无重复 id；archive 文件不存在时创建并带 frontmatter 头。
 10. 从归档恢复：记录回到 mistakes.md 且 `status` 仍为 `resolved`；archive 里对应条目移除。
@@ -166,15 +178,15 @@ P3 与 P2 无共享文件，可并行；P0 与 P2 都落 `practice-service.ts` �
 12. 一周有 3 件本周 due（2 done）+ 5 件无日期积压 → 任务行显示 `2/3`，并出现 `另有积压 5 件（不计入完成率）`；与 `recent7DayCompletion` 对同一 fixture 的 planned/done 一致（同规则断言）。
 13. 无积压时：无「另有积压」行，其余与改动前逐字节一致。
 14. 周正确率去重：同题同日答 3 次（错、错、对）→ 计 1 题、按首次（错）计；不同日各一次 → 各计一次。
-15. `answered` 去重后 <5 → `accuracy === null`，提示行为 `- 练习：本周目前 N 题（样本不足暂不计正确率）`；`weeklyRecapLine` 不拼正确率段；`answered >= 5` → 照旧显示百分比。
-16. 口径变更说明只出现一次：首次周复盘带「（从本周起，积压任务不计入完成率分母）」，第二次起不带（prefs key 写入断言）。
+15. 小样本三处一致（`accuracy` 字段保持原值不变，只看新标记 `accuracyReliable`）：`answered=3` → `WeeklyOverview` 的「答题正确率」值显示 `3 题（样本不足）`（逐字）、`weeklyRecapLine` 不含「正确率」段、flags 行为 `- 练习：本周目前 3 题（样本不足暂不计正确率）`。另两条负例：`answered=5` → 三处与 1.3.0 逐字节一致（显示百分比）；`answered=0` → 三处与 1.3.0 逐字节一致（`WeeklyOverview` 显示「—」、recap 无正确率段、flags 为 `本周还没有做题`）。
+16. 口径变更说明只出现一次且跨重启有效：首次周复盘带「（从本周起，积压任务不计入完成率分母）」，第二次起不带；`weeklyScopeNoted` 落 AppSettings（state.json）而非 localStorage——重启后仍不再出现（断言 state.json 该键为 true、localStorage 无相关键）。未写时旧设置文件逐字节往返不变。
 17. 口径改动不动数据：同一 fixture 改造前后 tasks/attempts 的落盘文件逐字节相同（只改展示）。
 
 **P2**
 18. 导出练习集 → 生成 `practice/exports/<setId>-YYYY-MM-DD.tsv`；首行为 `#separator:tab`，其后 `#html:true`、`#columns:…`、`#tags column:4`、`#deck:<科目>`（顺序断言）。
 19. 文件为 UTF-8 **无 BOM**（读首字节断言 `23 20 73` 即 `# s`）；单元格内换行导出为 `<br>`；单元格内 Tab 被替换（构造含 Tab 的解析，断言列数恒为 4）。
 20. 调度字段零泄漏：对导出文件 grep `wrongCount|correctStreak|priority|intervalDays|stabilityDays|difficulty|due` 零命中。
-21. 错题导出带 `错因` / `顽疾` / `科目:` 标签；`cause` 存在时第 3 列含 `错因：…` 行；洗白态（correctStreak>=2）不带 `顽疾` 标签。
+21. 错题导出带 `错因` / `顽疾` / `科目:` 标签；`cause` 存在时第 3 列含 `错因：…` 行；洗白态（`correctStreak>=2`）不带 `顽疾` 标签（用验收 4 的真实序列构造）。
 22. 同日重复导出覆盖同一路径（文件 mtime 变、目录内仍只有一个文件）。
 23. 未导出时一切照旧（逐字节回归：无导出操作不产生 exports 目录或文件）。
 
@@ -204,7 +216,7 @@ P3 与 P2 无共享文件，可并行；P0 与 P2 都落 `practice-service.ts` �
 ## 给 builder 的默认决定（评审可推翻）
 
 1. 错因超长截断到 40 码点、不加省略号（错题本是用户自己的话）。
-2. 顽疾洗白只改渲染条件、不改数据（`priority===3 && correctStreak<2`），零迁移。
+2. 顽疾洗白只改渲染条件、不改数据（`wrongCount>=2 && correctStreak<2`），零迁移；priority 不参与标记判据。
 3. 归档 `archivedAt` 用本地日期 `YYYY-MM-DD`（与 `due`/`reviewedAt` 一致的日期形态）。
 4. 聚合行格式用 `·` 分隔、科目顺序按计数降序、同数按科目名排序（确定性）。
 5. TSV 的 `<br>` 只替换 `\n` 与 `\r\n`，不替换裸 `\r`（后者极少见，直接剔除）。
@@ -215,7 +227,7 @@ P3 与 P2 无共享文件，可并行；P0 与 P2 都落 `practice-service.ts` �
 ## 风险
 
 - **错因行成为自我批评入口**：placeholder 必须写概念级示例（「导数链没拆完」而非「太粗心」）；顽疾标记用中性名词（题的属性）。评审请把这两处措辞。
-- **P1 口径变化让老用户发现数字变了**：一次性说明句（`asaki:weekly-scope-noted:v1`）只为周复盘出现；若用户从不打开周复盘则永不见——可接受（口径变好，无损失方）。
+- **P1 口径变化让老用户发现数字变了**：一次性说明句（`weeklyScopeNoted`，state.json）只为周复盘出现；若用户从不打开周复盘则永不见——可接受（口径变好，无损失方）。
 - **P0 与 P2 同文件冲突**：已列依赖节，派单必须声明。
 - **导出文件被误当同步**：UI 说明句已逐字给定；导出不写任何「已备份/已同步」文案。
 - **阶段成为新打卡压力**：只在切换后问一次、无自动判定；若评审认为问句仍有压力，改文案即可，不改机制。
@@ -229,3 +241,4 @@ P3 与 P2 无共享文件，可并行；P0 与 P2 都落 `practice-service.ts` �
 4. 批次顺序 P0 → P1 → P3，P2 可与 P0 并行但须声明文件相交；P3 依赖已上线三块能力。
 5. 报告引用链：`xiaolai/iter34-research` @ `ae209b9`，报告 cherry-pick 至本分支保持引用可解析。
 6. 团队边界：本分支不推 origin；合入由 sc-release 收口。
+7. 2026-11-28 sc-review 首轮评审折叠：①**阻断 1**——原「`priority===3 && correctStreak>=2` 洗白」恒不可达（两字段在 `practice-service.ts:231/:253` 同步反向），改判据为 `wrongCount>=2 && correctStreak<2`，验收 4 改真实提交序列；②**阻断 2**——不改共享 `accuracy` 字段，新增 `accuracyReliable` 展示标记，三处消费方文案锁死，含 `answered===0` 负例；③非阻断 1——一次性说明句改存 `AppSettings.weeklyScopeNoted`（main 进程读不到 renderer localStorage，iter32 先例不适用；与「提醒不进共享设置」原则局部相左，理由：文案在 main 拼）；④非阻断 2——Anki TSV 导出不做 dueOnly 过滤（与既有复习单导出是两条路径）；⑤非阻断 3——`PracticeMistake.archivedAt?: string` 进类型；⑥非阻断 4——`#deck:` 科目名清洗；强化阶段问句补「结果都在本周复盘里」。
