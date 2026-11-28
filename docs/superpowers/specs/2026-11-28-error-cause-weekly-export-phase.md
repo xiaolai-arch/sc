@@ -81,6 +81,7 @@ P3 与 P2 无共享文件，可并行；P0 与 P2 都落 `practice-service.ts` �
 **不改 `accuracy` 字段本身**（sc-review 2026-11-28 阻断 2）：`accuracy` 是共享字段，`WeeklyOverview.tsx:26`、`weeklyRecapLine`（`check-ins/prompt.ts:246`）都在读；把它改成 `answered<5 → null` 会让语义分叉（`hasWeeklyNumbers` 仍真、stats 段仍在、但百分比缺一块），且 `WeeklyOverview` 的 `null` 分支现在是「—」（`answered===0` 专用）。
 
 - 新增显式展示标记：`WeeklyOverview` 增 `accuracyReliable: boolean`（`answered >= 5`），`accuracy` 保持原值不变（`answered===0 ? null : correct/answered`，`weekly-stats.ts:110` 一字不动）。
+- **同样进 `WeeklyOverviewLike`**（`check-ins/prompt.ts:32-40`，现只有 tasksDone/tasksTotal/focusMinutes/answered/correct/reviewedDays/dueMistakes，无 accuracy、无本标记）：不补这一项，prompt 侧的 `weeklyRecapLine` / `weeklyStatsLines` 无从判断，会照旧 `answered>0` 就拼百分比。字段为必填 boolean（由 `buildWeeklyOverview` 一并产出），旧调用方需同步——这是编译期就会暴露的缺口，不留可选。
 - `answered > 0 && !accuracyReliable` 时三处消费方：
   - `WeeklyOverview` 的「答题正确率」stat 值改为 **`${answered} 题（样本不足）`**（逐字，与提示行同一句，避免两处措辞漂移）；
   - `weeklyRecapLine`（`prompt.ts:237-248`）不拼「正确率 X%」段（一段都不拼，不是拼空）；
