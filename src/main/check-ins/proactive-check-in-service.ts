@@ -27,6 +27,7 @@ import {
   tomorrowCheckInLine,
   weekAvailabilityQuestion,
   weeklyHonestLines,
+  weeklyScopeNoteFor,
   type BackupStatusLike,
   type CheckInTrigger,
   type CommitmentLike,
@@ -100,6 +101,12 @@ export interface ProactiveCheckInOptions {
    * Absent keeps the review byte-identical and runs nothing.
    */
   autoBackup?: AutoBackupRunner | null;
+  /**
+   * Records that the one-time scope sentence (iter34 P1) has been spoken, so
+   * the next Sunday review does not repeat it. Called only after the message
+   * carrying the sentence has durably landed; absent leaves settings alone.
+   */
+  markWeeklyScopeNoted?: () => Promise<void>;
   /**
    * Clears the pending auto-backup failure reason after the review that spoke
    * it has landed, so the three-layer copy is said exactly once.
@@ -198,6 +205,7 @@ export class ProactiveCheckInService {
   private readonly getResume: (() => Promise<ResumeFacts | null>) | undefined;
   private readonly consumeResume: (() => Promise<void>) | undefined;
   private readonly autoBackup: AutoBackupRunner | null;
+  private readonly markWeeklyScopeNoted: (() => Promise<void>) | undefined;
   private readonly consumeBackupError: (() => Promise<void>) | undefined;
   private readonly onConversationChanged: ((conversationId: string) => void) | undefined;
   private readonly now: () => Date;
@@ -217,6 +225,7 @@ export class ProactiveCheckInService {
     this.getResume = options.getResume;
     this.consumeResume = options.consumeResume;
     this.autoBackup = options.autoBackup ?? null;
+    this.markWeeklyScopeNoted = options.markWeeklyScopeNoted;
     this.consumeBackupError = options.consumeBackupError;
     this.onConversationChanged = options.onConversationChanged;
     this.now = options.now ?? (() => new Date());
@@ -265,9 +274,15 @@ export class ProactiveCheckInService {
         kind: 'check-in',
         title: checkInTitle(trigger, date)
       }));
-    // Weekly numbers are read once and shared by the model prompt and the
+    // The weekly numbers are read once and shared by the model prompt and the
     // deterministic template, so both quote the same figures.
     const weeklyStats = trigger === 'weekly' ? await this.weeklyStats(date) : null;
+    // The one-time scope sentence (iter34 P1) rides on the first review that
+    // actually quotes numbers, and is recorded only after the message lands.
+    const scopeNote =
+      trigger === 'weekly'
+        ? weeklyScopeNoteFor(weeklyStats, settings.weeklyScopeNoted)
+        : '';
     // The honest receipt is read next to the numbers, keyed to the same date.
     const weeklyHonest = trigger === 'weekly' ? await this.weeklyHonestFor(date) : null;
     // The promise revisit belongs to the morning only; a day without one keeps
@@ -292,7 +307,8 @@ export class ProactiveCheckInService {
       resume,
       settings.backup ?? null,
       reviewRecovery,
-      tomorrowBridgeFacts
+      tomorrowBridgeFacts,
+      scopeNote
     );
     // The due-mistake digest is a deterministic line on the morning message
     // only; it is computed once here so text and the surfaced body agree.
@@ -321,6 +337,11 @@ export class ProactiveCheckInService {
     // the honest failure mode for a write that could not be recorded.
     if (resume && this.consumeResume) {
       await this.consumeResume().catch(() => undefined);
+    }
+    if (scopeNote !== '' && this.markWeeklyScopeNoted) {
+      // The sentence landed: record it so no later review repeats it. A failed
+      // write would say it once more — the honest failure mode, like resume.
+      await this.markWeeklyScopeNoted().catch(() => undefined);
     }
     if (trigger === 'weekly') {
       // The failure copy landed: clear the pending reason so the next review
@@ -412,7 +433,8 @@ export class ProactiveCheckInService {
     resume: ResumeFacts | null = null,
     backup: BackupStatusLike | null = null,
     reviewRecovery: ReviewRecoveryLike | null = null,
-    tomorrowBridge: TomorrowBridgeLike | null = null
+    tomorrowBridge: TomorrowBridgeLike | null = null,
+    scopeNote: string = ''
   ): Promise<string> {
     const composed = await this.composeBase(
       trigger,
@@ -423,7 +445,8 @@ export class ProactiveCheckInService {
       commitment,
       backup,
       reviewRecovery,
-      tomorrowBridge
+      tomorrowBridge,
+      scopeNote
     );
     // The mute-resume sentence is deterministic and never handed to the model,
     // so it appears exactly once by construction: appended here, to whichever
@@ -442,7 +465,8 @@ export class ProactiveCheckInService {
     commitment: CommitmentLike | null = null,
     backup: BackupStatusLike | null = null,
     reviewRecovery: ReviewRecoveryLike | null = null,
-    tomorrowBridge: TomorrowBridgeLike | null = null
+    tomorrowBridge: TomorrowBridgeLike | null = null,
+    scopeNote: string = ''
   ): Promise<string> {
     const template = buildCheckInTemplate(
       context,
@@ -453,7 +477,8 @@ export class ProactiveCheckInService {
       commitment,
       backup,
       reviewRecovery,
-      tomorrowBridge
+      tomorrowBridge,
+      scopeNote
     );
     if (!this.modelClient) return template;
     try {
@@ -485,6 +510,7 @@ export class ProactiveCheckInService {
           ...weeklyHonestLines(weeklyHonest),
           ...(age && !composed.includes('上次备份') ? [age] : []),
           ...failures,
+          ...(scopeNote ? [scopeNote] : []),
           ...(availability ? [availability] : [])
         ];
         return tail.length === 0 ? composed : `${composed}\n${tail.join('\n')}`;

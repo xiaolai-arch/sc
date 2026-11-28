@@ -10,11 +10,19 @@ export interface WeeklyOverview {
   weekEnd: string;
   tasksDone: number;
   tasksTotal: number;
+  /**
+   * Undated tasks still open (`pending` / `in-progress`). They are excluded
+   * from `tasksTotal`, so the completion rate can never be dragged down by a
+   * standing backlog; this count keeps them visible in the recap instead.
+   */
+  backlogCount: number;
   focusMinutes: number;
   answered: number;
   correct: number;
   /** `correct / answered`, or null before the first answer. */
   accuracy: number | null;
+  /** `answered >= 5`: below that, no percentage is reported to the user. */
+  accuracyReliable: boolean;
   reviewedDays: number;
   dueMistakes: number;
   learningTopics: number;
@@ -57,9 +65,15 @@ function localDateOf(isoTimestamp: string): string {
 /**
  * Summarises the Monday-based week containing `today`.
  *
- * Tasks without a due date belong to the current week's backlog; dated tasks
- * count when their due date falls inside the week. Focus minutes only sum
- * completed tasks' recorded `actualMin`.
+ * Tasks count only when their due date falls inside the week — undated
+ * backlog is not part of the week's plan, the same rule `recent7DayCompletion`
+ * uses, so a standing backlog cannot drag the completion rate down forever.
+ * `backlogCount` reports those open undated tasks separately. Focus minutes
+ * only sum completed tasks' recorded `actualMin`.
+ *
+ * Answers follow Anki's True Retention rule: each question counts once per
+ * local day, by its earliest answer that day, so re-answering the same card
+ * neither inflates nor depresses the week's accuracy.
  */
 export function weeklyOverview({
   tasks,
@@ -76,23 +90,53 @@ export function weeklyOverview({
   );
   const todayKey = formatLocalDate(today);
 
+  // The completion denominator: dated work only, the same rule
+  // `recent7DayCompletion` uses (a standing backlog cannot drag the rate down).
   const weekTasks = tasks.filter(
-    (task) => task.due === undefined || (task.due >= startKey && task.due <= endKey)
+    (task) => task.due !== undefined && task.due >= startKey && task.due <= endKey
   );
+  const backlogCount = tasks.filter(
+    (task) =>
+      task.due === undefined &&
+      (task.status === 'pending' || task.status === 'in-progress')
+  ).length;
   const doneTasks = weekTasks.filter((task) => task.status === 'done');
-  const focusMinutes = doneTasks.reduce(
-    (total, task) =>
-      typeof task.actualMin === 'number' && task.actualMin > 0
-        ? total + task.actualMin
-        : total,
-    0
-  );
+  // Focus minutes keep the 1.3.0 scope: undated completed work still counts
+  // (it belongs to the current week, per `studyHeatmap`), so this line stays
+  // byte-identical and only the completion rate changes.
+  const focusMinutes = tasks
+    .filter(
+      (task) =>
+        task.status === 'done' &&
+        (task.due === undefined || (task.due >= startKey && task.due <= endKey))
+    )
+    .reduce(
+      (total, task) =>
+        typeof task.actualMin === 'number' && task.actualMin > 0
+          ? total + task.actualMin
+          : total,
+      0
+    );
 
-  const weekAttempts = attempts.filter((attempt) => {
+  // One entry per (question, local day), keeping that day's earliest answer.
+  // The comparison is explicit so the result never depends on input order.
+  const firstByQuestionDay = new Map<string, PracticeAttempt>();
+  for (const attempt of attempts) {
     const date = localDateOf(attempt.answeredAt);
-    return date >= startKey && date <= todayKey;
-  });
+    if (date < startKey || date > todayKey) continue;
+    const key = `${attempt.questionId}|${date}`;
+    const kept = firstByQuestionDay.get(key);
+    if (
+      kept === undefined ||
+      attempt.answeredAt < kept.answeredAt ||
+      (attempt.answeredAt === kept.answeredAt && attempt.id < kept.id)
+    ) {
+      firstByQuestionDay.set(key, attempt);
+    }
+  }
+  const weekAttempts = [...firstByQuestionDay.values()];
   const correct = weekAttempts.filter((attempt) => attempt.correct).length;
+  const answered = weekAttempts.length;
 
   const learning = topics.filter((topic) => topic.status === 'learning');
   const weakest = [...learning].sort(
@@ -104,10 +148,12 @@ export function weeklyOverview({
     weekEnd: endKey,
     tasksDone: doneTasks.length,
     tasksTotal: weekTasks.length,
+    backlogCount,
     focusMinutes,
-    answered: weekAttempts.length,
+    answered,
     correct,
-    accuracy: weekAttempts.length === 0 ? null : correct / weekAttempts.length,
+    accuracy: answered === 0 ? null : correct / answered,
+    accuracyReliable: answered >= 5,
     reviewedDays: reviewedDaysThisWeek(reviews, today),
     dueMistakes: dueMistakes.filter((mistake) => mistake.status === 'active').length,
     learningTopics: learning.length,

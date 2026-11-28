@@ -494,6 +494,69 @@ test('rejects a non-boolean strictMastery', async () => {
   expect((await service.get()).strictMastery).toBeUndefined();
 });
 
+test('weeklyScopeNoted is absent by default, survives other writes, and round-trips once set', async () => {
+  const dir = await tempDir();
+  try {
+    const filePath = join(dir, 'state.json');
+    const store = new JsonStateStore({
+      filePath,
+      createDefault: () => createDefaultAppState('/tmp/scope-vault')
+    });
+    const service = new SettingsService(store);
+
+    // Absent until the sentence has been spoken.
+    expect((await service.get()).weeklyScopeNoted).toBeUndefined();
+    let before = '';
+    try {
+      before = await readFile(filePath, 'utf8');
+    } catch {
+      // A read leaves no file behind; either way the key is not present.
+    }
+    expect(before).not.toContain('weeklyScopeNoted');
+
+    await service.markWeeklyScopeNoted();
+    const raw = await readFile(filePath, 'utf8');
+    expect(raw).toContain('"weeklyScopeNoted": true');
+    expect((await service.get()).weeklyScopeNoted).toBe(true);
+
+    // A later ordinary settings write must not erase the flag.
+    await service.update({ displayName: '阿咲' });
+    expect((await service.get()).weeklyScopeNoted).toBe(true);
+    expect(await readFile(filePath, 'utf8')).toContain('"weeklyScopeNoted": true');
+
+    // Re-reading from disk (a restart) still reports it as set.
+    const reopened = new SettingsService(
+      new JsonStateStore({
+        filePath,
+        createDefault: () => createDefaultAppState('/tmp/scope-vault')
+      })
+    );
+    expect((await reopened.get()).weeklyScopeNoted).toBe(true);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('legacy settings without weeklyScopeNoted round-trip byte-identically', async () => {
+  const dir = await tempDir();
+  try {
+    const filePath = join(dir, 'state.json');
+    const defaults = createDefaultSettings('/tmp/legacy-vault');
+    const legacy = `${JSON.stringify({ onboarded: true, settings: defaults }, null, 2)}\n`;
+    await writeFile(filePath, legacy, 'utf8');
+
+    const store = new JsonStateStore({
+      filePath,
+      createDefault: () => createDefaultAppState('/tmp/ignored')
+    });
+    const service = new SettingsService(store);
+    expect((await service.get()).weeklyScopeNoted).toBeUndefined();
+    expect(await readFile(filePath, 'utf8')).toBe(legacy);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('trims the accountability name and rejects one that is too long or multiline', async () => {
   const { service } = memorySettings();
 

@@ -9,6 +9,7 @@ import {
   tomorrowCheckInLine,
   WEEK_AVAILABILITY_QUESTION,
   weekAvailabilityQuestion,
+  weeklyScopeNoteFor,
   type BackupStatusLike,
   type TomorrowBridgeLike,
   type WeeklyOverviewLike
@@ -98,9 +99,11 @@ const WEEKLY_TEMPLATE_BEFORE_STATS =
 const stats: WeeklyOverviewLike = {
   tasksDone: 3,
   tasksTotal: 5,
+  backlogCount: 0,
   focusMinutes: 135,
   answered: 6,
   correct: 5,
+  accuracyReliable: true,
   reviewedDays: 4,
   dueMistakes: 2
 };
@@ -124,14 +127,43 @@ test('the weekly prompt quotes the week numbers for a known fixture', () => {
   expect(prompt.indexOf('本周数据：')).toBeLessThan(prompt.indexOf('请用中文写一条 3-5 句'));
 });
 
-test('the recap block never exceeds six lines', () => {
+test('the recap block never exceeds seven lines', () => {
   const prompt = buildCheckInPrompt(context, 'weekly', DATE, stats);
   const block = prompt.slice(
     prompt.indexOf('本周数据：'),
     prompt.indexOf('请用中文写一条 3-5 句')
   );
   const lines = block.split('\n').filter((line) => line.trim() !== '');
-  expect(lines.length).toBeLessThanOrEqual(6);
+  expect(lines.length).toBeLessThanOrEqual(7);
+});
+
+test('a backlog adds exactly one line, without touching the completion rate (验收 12/13)', () => {
+  // 3 due this week (2 done) plus 5 undated backlog items.
+  const withBacklog: WeeklyOverviewLike = {
+    ...stats,
+    tasksDone: 2,
+    tasksTotal: 3,
+    backlogCount: 5
+  };
+  const prompt = buildCheckInPrompt(context, 'weekly', DATE, withBacklog);
+  expect(prompt).toContain(
+    [
+      '本周数据：',
+      '- 任务完成：2/3 个',
+      '- 另有积压 5 件（不计入完成率）',
+      '- 专注：135 分钟',
+      '- 练习：6 题，答对 5 题（正确率 83%）',
+      '- 复盘：4 天',
+      '- 到期错题：2 道'
+    ].join('\n')
+  );
+
+  // No backlog means no extra line: the block is byte-identical to before.
+  const noBacklog = buildCheckInPrompt(context, 'weekly', DATE, stats);
+  expect(noBacklog).not.toContain('另有积压');
+  expect(noBacklog).toContain(
+    ['本周数据：', '- 任务完成：3/5 个', '- 专注：135 分钟'].join('\n')
+  );
 });
 
 test('no stats leaves the weekly prompt byte-identical to the pre-change fixture', () => {
@@ -145,9 +177,11 @@ test('an all-zero week also leaves the weekly prompt byte-identical', () => {
   const zeros: WeeklyOverviewLike = {
     tasksDone: 0,
     tasksTotal: 0,
+    backlogCount: 0,
     focusMinutes: 0,
     answered: 0,
     correct: 0,
+    accuracyReliable: false,
     reviewedDays: 0,
     dueMistakes: 0
   };
@@ -177,6 +211,91 @@ test('the recap line omits accuracy before the first answer', () => {
   );
 });
 
+// --- small-sample honesty (iter34 P1 ③, 验收 15) -----------------------------
+
+const SMALL: WeeklyOverviewLike = {
+  ...stats,
+  answered: 3,
+  correct: 1,
+  accuracyReliable: false
+};
+
+test('below five answers the prompt quotes a count, never a percentage (验收 15)', () => {
+  const prompt = buildCheckInPrompt(context, 'weekly', DATE, SMALL);
+  expect(prompt).toContain('- 练习：本周目前 3 题（样本不足暂不计正确率）');
+  // No percentage segment anywhere: the parenthesised 正确率 form is absent.
+  expect(prompt).not.toContain('（正确率');
+  expect(prompt).not.toContain('答对');
+});
+
+test('below five answers the recap line drops the accuracy segment entirely (验收 15)', () => {
+  expect(buildCheckInTemplate(context, 'weekly', DATE, SMALL)).toBe(
+    `本周完成 3 个任务 · 专注 135 分钟\n${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`
+  );
+});
+
+test('five answers keep all three places byte-identical to 1.3.0 (验收 15 negative)', () => {
+  const five: WeeklyOverviewLike = {
+    ...stats,
+    answered: 5,
+    correct: 4,
+    accuracyReliable: true
+  };
+  expect(buildCheckInPrompt(context, 'weekly', DATE, five)).toContain(
+    '- 练习：5 题，答对 4 题（正确率 80%）'
+  );
+  expect(buildCheckInTemplate(context, 'weekly', DATE, five)).toBe(
+    `本周完成 3 个任务 · 专注 135 分钟 · 正确率 80%\n${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`
+  );
+});
+
+test('zero answers keep all three places byte-identical to 1.3.0 (验收 15 negative)', () => {
+  const zero: WeeklyOverviewLike = {
+    ...stats,
+    answered: 0,
+    correct: 0,
+    accuracyReliable: false
+  };
+  const prompt = buildCheckInPrompt(context, 'weekly', DATE, zero);
+  expect(prompt).toContain('- 练习：本周还没有做题');
+  expect(prompt).not.toContain('样本不足');
+  expect(prompt).not.toContain('正确率');
+  expect(buildCheckInTemplate(context, 'weekly', DATE, zero)).toBe(
+    `本周完成 3 个任务 · 专注 135 分钟\n${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`
+  );
+});
+
+// --- the one-time scope sentence (iter34 P1 ④, 验收 16) ----------------------
+
+const SCOPE_NOTE = '（从本周起，积压任务不计入完成率分母）';
+
+test('the scope sentence rides once and is suppressed by the stored flag', () => {
+  // weeklyScopeNoteFor returns the sentence until it has been spoken.
+  expect(weeklyScopeNoteFor(stats, undefined)).toBe(SCOPE_NOTE);
+  expect(weeklyScopeNoteFor(stats, false)).toBe(SCOPE_NOTE);
+  expect(weeklyScopeNoteFor(stats, true)).toBe('');
+  // An empty week has no numbers to explain.
+  expect(weeklyScopeNoteFor(null, undefined)).toBe('');
+  expect(
+    weeklyScopeNoteFor(
+      { tasksDone: 0, tasksTotal: 0, backlogCount: 0, focusMinutes: 0, answered: 0, correct: 0, accuracyReliable: false, reviewedDays: 0, dueMistakes: 0 },
+      undefined
+    )
+  ).toBe('');
+});
+
+test('the weekly template carries the scope sentence last before the question', () => {
+  const weekly = buildCheckInTemplate(context, 'weekly', DATE, stats, null, null, null, null, null, SCOPE_NOTE);
+  expect(weekly).toBe(
+    `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE_BEFORE_STATS}\n${SCOPE_NOTE}\n${WEEK_AVAILABILITY_QUESTION}`
+  );
+  // Absent keeps the bytes untouched.
+  expect(buildCheckInTemplate(context, 'weekly', DATE, stats)).toBe(
+    buildCheckInTemplate(context, 'weekly', DATE, stats, null, null, null, null, null, '')
+  );
+});
+
+
 test('the weekly template asks the availability question exactly once, last', () => {
   const weekly = buildCheckInTemplate(context, 'weekly', DATE, stats, {
     calibration: '有把握但错 2 道 · 没把握但对 1 道',
@@ -197,9 +316,11 @@ test('the weekly template is unchanged without stats or with an all-zero week', 
     buildCheckInTemplate(context, 'weekly', DATE, {
       tasksDone: 0,
       tasksTotal: 0,
+      backlogCount: 0,
       focusMinutes: 0,
       answered: 0,
       correct: 0,
+      accuracyReliable: false,
       reviewedDays: 0,
       dueMistakes: 0
     })

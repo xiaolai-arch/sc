@@ -60,9 +60,16 @@ const workspaceService = {
   submitReview: async () => undefined
 } as unknown as WorkspaceService;
 
+/**
+ * App settings for a fixture. `weeklyScopeNoted: true` by default: these
+ * fixtures describe an existing install whose one-time scope sentence was
+ * already spoken, so weekly bytes stay comparable to 1.3.0. Tests for the
+ * sentence itself pass `weeklyScopeNoted: false` explicitly.
+ */
 function settings(overrides: Partial<AppSettings> = {}): AppSettings {
   const base = createDefaultSettings('/tmp/vault');
   return {
+    weeklyScopeNoted: true,
     ...base,
     ...overrides,
     notifications: { ...base.notifications, ...(overrides.notifications ?? {}) },
@@ -1195,12 +1202,16 @@ const WEEKLY_TEMPLATE =
 const AVAILABILITY_QUESTION =
   '下周哪几天会特别满？回我一句就行，那几天我只给你排一件小事。';
 
+const SCOPE_NOTE = '（从本周起，积压任务不计入完成率分母）';
+
 const weeklyStats = {
   tasksDone: 3,
   tasksTotal: 5,
+  backlogCount: 0,
   focusMinutes: 135,
   answered: 6,
   correct: 5,
+  accuracyReliable: true,
   reviewedDays: 4,
   dueMistakes: 2
 };
@@ -1323,9 +1334,11 @@ test('keeps the weekly message unchanged for an all-zero week', async () => {
       getWeeklyOverview: async () => ({
         tasksDone: 0,
         tasksTotal: 0,
+        backlogCount: 0,
         focusMinutes: 0,
         answered: 0,
         correct: 0,
+        accuracyReliable: false,
         reviewedDays: 0,
         dueMistakes: 0
       }),
@@ -1340,6 +1353,71 @@ test('keeps the weekly message unchanged for an all-zero week', async () => {
     expect(conversation?.messages[0]?.text).toBe(
       `${WEEKLY_TEMPLATE}\n${AVAILABILITY_QUESTION}`
     );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the one-time scope sentence rides the first weekly review, then is recorded (验收 16)', async () => {
+  const { dir, value } = await store();
+  try {
+    let noted = false;
+    let marked = 0;
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getWeeklyOverview: async () => weeklyStats,
+      getSettings: async () => settings({ weeklyScopeNoted: noted ? true : undefined }),
+      markWeeklyScopeNoted: async () => {
+        noted = true;
+        marked += 1;
+      },
+      now: () => NOW
+    });
+
+    await service.check('weekly', '2026-11-01');
+    const first = await value.get((await value.list())[0]!.id);
+    expect(first?.messages[0]?.text).toBe(
+      `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE}\n${SCOPE_NOTE}\n${AVAILABILITY_QUESTION}`
+    );
+    expect(marked).toBe(1);
+
+    // A later week with the flag now set carries no sentence.
+    await service.check('weekly', '2026-11-08');
+    const second = await value.get(
+      (await value.list()).find((entry) => entry.title.includes('11-08'))!.id
+    );
+    expect(second?.messages[0]?.text).toBe(
+      `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE}\n${AVAILABILITY_QUESTION}`
+    );
+    expect(marked).toBe(1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a week with no numbers never speaks the scope sentence', async () => {
+  const { dir, value } = await store();
+  try {
+    let marked = 0;
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getSettings: async () => settings({ weeklyScopeNoted: undefined }),
+      markWeeklyScopeNoted: async () => {
+        marked += 1;
+      },
+      now: () => NOW
+    });
+
+    await service.check('weekly', '2026-11-01');
+    const conversation = await value.get((await value.list())[0]!.id);
+    expect(conversation?.messages[0]?.text).toBe(
+      `${WEEKLY_TEMPLATE}\n${AVAILABILITY_QUESTION}`
+    );
+    expect(marked).toBe(0);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
