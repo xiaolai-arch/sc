@@ -82,6 +82,8 @@ P3 与 P2 无共享文件，可并行；P0 与 P2 都落 `practice-service.ts` �
 
 - 新增显式展示标记：`WeeklyOverview` 增 `accuracyReliable: boolean`（`answered >= 5`），`accuracy` 保持原值不变（`answered===0 ? null : correct/answered`，`weekly-stats.ts:110` 一字不动）。
 - **同样进 `WeeklyOverviewLike`**（`check-ins/prompt.ts:32-40`，现只有 tasksDone/tasksTotal/focusMinutes/answered/correct/reviewedDays/dueMistakes，无 accuracy、无本标记）：不补这一项，prompt 侧的 `weeklyRecapLine` / `weeklyStatsLines` 无从判断，会照旧 `answered>0` 就拼百分比。字段为必填 boolean（由 `buildWeeklyOverview` 一并产出），旧调用方需同步——这是编译期就会暴露的缺口，不留可选。
+- **两个类型必须同一次提交里加字段**（`src/shared/weekly-stats.ts` 的 `WeeklyOverview` 与 `src/main/check-ins/prompt.ts` 的 `WeeklyOverviewLike`）——分开提交会留下中间态编译红。
+- 投影链无需手工同步（sc-review 2026-11-28 核对）：`readWeeklyOverview`（`src/main/context.ts:547`）直接返回 `WeeklyOverview`，经 `proactive-check-in-service.ts` 纯透传交 `buildCheckInTemplate`，结构类型兼容；只要 `weeklyOverview()` 产出该字段即可。
 - `answered > 0 && !accuracyReliable` 时三处消费方：
   - `WeeklyOverview` 的「答题正确率」stat 值改为 **`${answered} 题（样本不足）`**（逐字，与提示行同一句，避免两处措辞漂移）；
   - `weeklyRecapLine`（`prompt.ts:237-248`）不拼「正确率 X%」段（一段都不拼，不是拼空）；
