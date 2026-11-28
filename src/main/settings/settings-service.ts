@@ -75,7 +75,7 @@ function normalizeSettings(settings: AppSettings): AppSettings {
       : createDefaultSettings('').displayName;
   // `strictMastery` is opt-in, so it is only carried (and later serialized)
   // when literally true. Absent, false or a junk value all mean the default.
-  const { strictMastery, accountabilityName, backup, ...rest } = settings;
+  const { strictMastery, weeklyScopeNoted, accountabilityName, backup, ...rest } = settings;
   // The accountability name is local-only and off by default: only a valid,
   // non-empty name is carried, so a settings file written before this feature
   // (or after a clear) round-trips byte-identically.
@@ -89,6 +89,9 @@ function normalizeSettings(settings: AppSettings): AppSettings {
     ...rest,
     displayName,
     ...(strictMastery === true ? { strictMastery: true } : {}),
+    // The one-time scope sentence has been said: only literal `true` is kept,
+    // so an older settings file (without the key) stays byte-identical.
+    ...(weeklyScopeNoted === true ? { weeklyScopeNoted: true as const } : {}),
     ...(carriedName ? { accountabilityName: carriedName } : {}),
     ...(carriedBackup ? { backup: carriedBackup } : {}),
     notifications: normalizeNotifications(settings.notifications)
@@ -474,6 +477,12 @@ function mergeSettings(current: AppSettings, patch: unknown): AppSettings {
       : validateStrictMastery(patch.strictMastery);
   const withStrictMastery =
     strictMastery === true ? { ...next, strictMastery: true } : next;
+  // The one-time scope sentence is not a user-facing patch key, but every
+  // settings write must carry it forward or the sentence would repeat.
+  const withScope =
+    current.weeklyScopeNoted === true
+      ? { ...withStrictMastery, weeklyScopeNoted: true as const }
+      : withStrictMastery;
   // The accountability name is stored only when non-empty, so an empty patch
   // clears it (and the key) rather than writing a blank string.
   const accountabilityName =
@@ -482,8 +491,8 @@ function mergeSettings(current: AppSettings, patch: unknown): AppSettings {
       : validateAccountabilityName(patch.accountabilityName);
   const withAccountability =
     accountabilityName === undefined
-      ? withStrictMastery
-      : { ...withStrictMastery, accountabilityName };
+      ? withScope
+      : { ...withScope, accountabilityName };
   // The backup block merges field-by-field: a patch toggling the age line
   // must not erase the recorded last-backup facts, and a state write from the
   // export flow must not erase the toggle. An empty patch keeps whatever is
@@ -527,5 +536,18 @@ export class SettingsService {
       settings: mergeSettings(normalizeSettings(current.settings), patch)
     }));
     return structuredClone(normalizeSettings(next.settings));
+  }
+
+  /**
+   * Records that the Sunday review has spoken the one-time scope sentence
+   * (iter34 P1). Deliberately not a `SettingsPatch` key: the renderer never
+   * sets it, and it must survive every later settings write, so it is written
+   * straight into the stored document like the backup facts.
+   */
+  async markWeeklyScopeNoted(): Promise<void> {
+    await this.state.update((current: AppState) => ({
+      ...current,
+      settings: { ...current.settings, weeklyScopeNoted: true as const }
+    }));
   }
 }

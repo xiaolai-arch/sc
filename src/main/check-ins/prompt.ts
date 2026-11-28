@@ -32,9 +32,13 @@ export interface WeeklyHonestLike {
 export interface WeeklyOverviewLike {
   tasksDone: number;
   tasksTotal: number;
+  /** Undated tasks still open; shown as a separate line, never in the rate. */
+  backlogCount: number;
   focusMinutes: number;
   answered: number;
   correct: number;
+  /** `answered >= 5`; below that the recap quotes a count, not a percentage. */
+  accuracyReliable: boolean;
   reviewedDays: number;
   dueMistakes: number;
 }
@@ -48,9 +52,6 @@ export interface TaskNextStepLike {
   title: string;
   nextStep?: string;
 }
-
-/** Upper bound for the `本周数据：` block, header line included. */
-const MAX_WEEKLY_STATS_LINES = 6;
 
 /**
  * The promise a check-in may ask about; the caller only resolves the oldest
@@ -208,6 +209,39 @@ function accuracyPercent(overview: WeeklyOverviewLike): number {
   return Math.round((overview.correct / overview.answered) * 100);
 }
 
+/** True when a percentage would mislead: some answers, but too few to trust. */
+function accuracyTooSmall(overview: WeeklyOverviewLike): boolean {
+  return overview.answered > 0 && !overview.accuracyReliable;
+}
+
+/**
+ * The one-time sentence that explains the new completion scope (iter34 P1).
+ * Appended to the Sunday review only until `weeklyScopeNoted` is set, so a
+ * reader who studies one week's numbers is told once that undated backlog is
+ * no longer in the denominator. Deterministic, never model-written.
+ */
+export const WEEKLY_SCOPE_NOTE = '（从本周起，积压任务不计入完成率分母）';
+
+/**
+ * `WEEKLY_SCOPE_NOTE` until it has been spoken once, then ''. `noted` is the
+ * stored `AppSettings.weeklyScopeNoted`; only literal `true` suppresses it.
+ */
+export function weeklyScopeNoteLine(noted: boolean | undefined): string {
+  return noted === true ? '' : WEEKLY_SCOPE_NOTE;
+}
+
+/**
+ * The scope sentence to append to this week's review, or '' when the week has
+ * no numbers to explain (an empty week keeps its previous bytes).
+ */
+export function weeklyScopeNoteFor(
+  overview: WeeklyOverviewLike | null | undefined,
+  noted: boolean | undefined
+): string {
+  if (!overview || !hasWeeklyNumbers(overview)) return '';
+  return weeklyScopeNoteLine(noted);
+}
+
 /**
  * The prompt's weekly recap block, or [] when there is nothing to recap. The
  * section is bounded so it can never crowd out the tasks and memory sections.
@@ -217,22 +251,32 @@ function weeklyStatsLines(
 ): string[] {
   if (!overview || !hasWeeklyNumbers(overview)) return [];
   const practiceLine =
-    overview.answered > 0
-      ? `- 练习：${overview.answered} 题，答对 ${overview.correct} 题（正确率 ${accuracyPercent(overview)}%）`
-      : '- 练习：本周还没有做题';
+    overview.answered === 0
+      ? '- 练习：本周还没有做题'
+      : accuracyTooSmall(overview)
+        ? `- 练习：本周目前 ${overview.answered} 题（样本不足暂不计正确率）`
+        : `- 练习：${overview.answered} 题，答对 ${overview.correct} 题（正确率 ${accuracyPercent(overview)}%）`;
+  // The block's size is its own array length: every optional line is either
+  // present or absent here, never trimmed afterwards, so a new line can never
+  // silently lose the last one to a stale cap. The size test is the net.
   return [
     '本周数据：',
     `- 任务完成：${overview.tasksDone}/${overview.tasksTotal} 个`,
+    ...(overview.backlogCount > 0
+      ? [`- 另有积压 ${overview.backlogCount} 件（不计入完成率）`]
+      : []),
     `- 专注：${overview.focusMinutes} 分钟`,
     practiceLine,
     `- 复盘：${overview.reviewedDays} 天`,
     `- 到期错题：${overview.dueMistakes} 道`
-  ].slice(0, MAX_WEEKLY_STATS_LINES);
+  ];
 }
 
 /**
  * `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%` for the template message,
- * or null when the week has no numbers so the message stays unchanged.
+ * or null when the week has no numbers so the message stays unchanged. Below
+ * five answers the accuracy segment is left out entirely rather than quoted
+ * as a fact.
  */
 function weeklyRecapLine(
   overview: WeeklyOverviewLike | null | undefined
@@ -242,7 +286,9 @@ function weeklyRecapLine(
     `本周完成 ${overview.tasksDone} 个任务`,
     `专注 ${overview.focusMinutes} 分钟`
   ];
-  if (overview.answered > 0) parts.push(`正确率 ${accuracyPercent(overview)}%`);
+  if (overview.answered > 0 && overview.accuracyReliable) {
+    parts.push(`正确率 ${accuracyPercent(overview)}%`);
+  }
   return parts.join(' · ');
 }
 
@@ -503,7 +549,8 @@ export function buildCheckInTemplate(
   commitment: CommitmentLike | null = null,
   backup: BackupStatusLike | null = null,
   reviewRecovery: ReviewRecoveryLike | null = null,
-  tomorrowBridge: TomorrowBridgeLike | null = null
+  tomorrowBridge: TomorrowBridgeLike | null = null,
+  weeklyScopeNote: string = ''
 ): string {
   const tasks = activeTasks(context);
   if (trigger === 'weekly') {
@@ -526,10 +573,15 @@ export function buildCheckInTemplate(
     const withAge = age ? `${withHonest}\n${age}` : withHonest;
     const withFailures =
       failures.length === 0 ? withAge : `${withAge}\n${failures.join('\n')}`;
+    // The one-time scope sentence (iter34 P1) explains the new completion
+    // denominator. Code-owned and spoken once; absent keeps the bytes.
+    const withScope = weeklyScopeNote
+      ? `${withFailures}\n${weeklyScopeNote}`
+      : withFailures;
     // The availability question is the last line, and only when there is at
     // least one workspace; otherwise the message keeps its previous bytes.
     const availability = weekAvailabilityQuestion(context);
-    return availability ? `${withFailures}\n${availability}` : withFailures;
+    return availability ? `${withScope}\n${availability}` : withScope;
   }
   if (trigger === 'behind') {
     // Byte-identical to the scheduler fallback so both compose one nudge.

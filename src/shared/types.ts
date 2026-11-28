@@ -164,6 +164,13 @@ export interface AppSettings {
    */
   strictMastery?: boolean;
   /**
+   * Set once the Sunday review has said the one-time sentence explaining the
+   * new completion scope (undated backlog no longer in the denominator).
+   * Only `true` is serialized, so a settings file written before this key
+   * round-trips byte-identically and the sentence survives restarts.
+   */
+  weeklyScopeNoted?: true;
+  /**
    * A real person the user names for themselves (friend, colleague, family),
    * stored only on this machine. The app never contacts them; reminders may
    * state one fact such as `你告诉过 A 的时间是 2026-11-20`. Trimmed, at most

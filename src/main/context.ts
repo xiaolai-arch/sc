@@ -802,6 +802,9 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       // awaited by it; the spoken failure reason is cleared the same way.
       autoBackup,
       consumeBackupError: () => clearBackupError(settings),
+      // The one-time scope sentence (iter34 P1): recorded once its message has
+      // landed, so the next Sunday review stays quiet about the new scope.
+      markWeeklyScopeNoted: () => settings.markWeeklyScopeNoted(),
       // The sidebar refresh: the entry point broadcasts it to open windows.
       ...(options.onConversationChanged
         ? { onConversationChanged: options.onConversationChanged }

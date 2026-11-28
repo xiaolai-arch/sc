@@ -19,7 +19,12 @@ function task(overrides: Partial<WorkspaceTask> = {}): WorkspaceTask {
   };
 }
 
-function attempt(date: string, correct: boolean, id = date + correct): PracticeAttempt {
+function attempt(
+  date: string,
+  correct: boolean,
+  id = date + correct,
+  overrides: Partial<PracticeAttempt> = {}
+): PracticeAttempt {
   return {
     id,
     workspaceId: 'kaoyan',
@@ -27,7 +32,8 @@ function attempt(date: string, correct: boolean, id = date + correct): PracticeA
     questionId: 'q1',
     choice: correct ? 1 : 0,
     correct,
-    answeredAt: `${date}T09:00:00.000Z`
+    answeredAt: `${date}T09:00:00.000Z`,
+    ...overrides
   };
 }
 
@@ -85,7 +91,7 @@ test('reports the Monday-based week that contains today', () => {
   expect(overview()).toMatchObject({ weekStart: '2026-11-02', weekEnd: '2026-11-08' });
 });
 
-test('counts tasks due this week plus undated work, and sums completed focus minutes', () => {
+test('counts only tasks due this week, and reports undated backlog separately', () => {
   const result = overview({
     tasks: [
       task({ id: 'done-this-week', status: 'done', due: '2026-11-03', actualMin: 50 }),
@@ -96,11 +102,91 @@ test('counts tasks due this week plus undated work, and sums completed focus min
     ]
   });
 
+  // Only dated-in-week tasks build the completion plan; the undated done task
+  // still adds its focus minutes (the 1.3.0 专注 scope is unchanged) but can
+  // never enter this week's denominator, and being done it is not backlog.
   expect(result).toMatchObject({
-    tasksDone: 2,
-    tasksTotal: 3,
+    tasksDone: 1,
+    tasksTotal: 2,
+    backlogCount: 0,
     focusMinutes: 75
   });
+});
+
+test('undated backlog never enters the denominator, and matches recent7DayCompletion', () => {
+  // 3 tasks due this week (2 done) + 5 open undated ones (验收 12) plus two
+  // more dated-in-window tasks so the 7-day sample reaches its threshold.
+  const tasks = [
+    task({ id: 'due-done-a', status: 'done', due: dated(-2) }),
+    task({ id: 'due-done-b', status: 'done', due: dated(-1) }),
+    task({ id: 'due-done-c', status: 'done', due: dated(0) }),
+    task({ id: 'due-open-a', due: dated(0) }),
+    task({ id: 'due-open-b', due: dated(0) }),
+    ...[1, 2, 3, 4, 5].map((n) => task({ id: `backlog-${n}` }))
+  ];
+  const result = overview({ tasks });
+  expect(result).toMatchObject({ tasksDone: 3, tasksTotal: 5, backlogCount: 5 });
+
+  // The same rule recent7DayCompletion applies: a standing backlog cannot drag
+  // the rate down, so the denominators agree on this fixture.
+  const sevenDay = recent7DayCompletion(tasks, today);
+  expect(sevenDay).not.toBeNull();
+  expect(result.tasksTotal).toBe(sevenDay!.planned);
+  expect(result.tasksDone).toBe(sevenDay!.done);
+});
+
+test('a skipped due task counts in neither the denominator nor done, matching recent7DayCompletion', () => {
+  // Same rule as above, now with skipped tasks in and out of the week: the
+  // second rule `recent7DayCompletion` applies (`status === 'skipped'`).
+  const tasks = [
+    task({ id: 'due-done-a', status: 'done', due: dated(-2) }),
+    task({ id: 'due-done-b', status: 'done', due: dated(-1) }),
+    task({ id: 'due-done-c', status: 'done', due: dated(0) }),
+    task({ id: 'due-open-a', due: dated(0) }),
+    task({ id: 'due-open-b', due: dated(0) }),
+    // Dated inside the week but skipped: never planned, never done.
+    task({ id: 'skipped-week', status: 'skipped', due: dated(-1), actualMin: 30 }),
+    task({ id: 'skipped-today', status: 'skipped', due: dated(0) }),
+    // Undated and skipped: not backlog either.
+    task({ id: 'skipped-undated', status: 'skipped' }),
+    ...[1, 2, 3, 4, 5].map((n) => task({ id: `backlog-${n}` }))
+  ];
+
+  const result = overview({ tasks });
+  expect(result).toMatchObject({
+    tasksDone: 3,
+    tasksTotal: 5,
+    backlogCount: 5,
+    // The skipped task's minutes never reach the focus sum.
+    focusMinutes: 0
+  });
+
+  const sevenDay = recent7DayCompletion(tasks, today);
+  expect(sevenDay).not.toBeNull();
+  expect(result.tasksTotal).toBe(sevenDay!.planned);
+  expect(result.tasksDone).toBe(sevenDay!.done);
+
+  // A week holding only skipped due work has nothing planned at all.
+  const onlySkipped = overview({
+    tasks: [task({ id: 'skipped', status: 'skipped', due: '2026-11-04' })]
+  });
+  expect(onlySkipped).toMatchObject({ tasksDone: 0, tasksTotal: 0 });
+});
+
+test('backlog counts only open undated tasks, never done or skipped (验收 13)', () => {
+  const result = overview({
+    tasks: [
+      task({ id: 'open', due: '2026-11-04' }),
+      task({ id: 'undated-pending' }),
+      task({ id: 'undated-progress', status: 'in-progress' }),
+      task({ id: 'undated-done', status: 'done' }),
+      task({ id: 'undated-skipped', status: 'skipped' })
+    ]
+  });
+  expect(result.backlogCount).toBe(2);
+
+  const none = overview({ tasks: [task({ id: 'only-dated', due: '2026-11-04' })] });
+  expect(none.backlogCount).toBe(0);
 });
 
 test('measures answer accuracy from attempts answered this week', () => {
@@ -119,6 +205,80 @@ test('measures answer accuracy from attempts answered this week', () => {
 
   expect(result).toMatchObject({ answered: 3, correct: 2 });
   expect(result.accuracy).toBeCloseTo(2 / 3);
+});
+
+test('deduplicates by question and local day, keeping the first answer (验收 14)', () => {
+  // Same question, same day: wrong, wrong, right → one question, counted wrong.
+  const sameDay = overview({
+    attempts: [
+      attempt('2026-11-02', false, 'a1', { answeredAt: '2026-11-02T08:00:00.000Z' }),
+      attempt('2026-11-02', false, 'a2', { answeredAt: '2026-11-02T09:00:00.000Z' }),
+      attempt('2026-11-02', true, 'a3', { answeredAt: '2026-11-02T10:00:00.000Z' })
+    ]
+  });
+  expect(sameDay).toMatchObject({ answered: 1, correct: 0 });
+  expect(sameDay.accuracy).toBe(0);
+
+  // Different days each count once, even with repeats on each day.
+  const acrossDays = overview({
+    attempts: [
+      attempt('2026-11-02', true, 'b1', { answeredAt: '2026-11-02T08:00:00.000Z' }),
+      attempt('2026-11-02', false, 'b2', { answeredAt: '2026-11-02T09:00:00.000Z' }),
+      attempt('2026-11-03', false, 'b3', { answeredAt: '2026-11-03T08:00:00.000Z' }),
+      attempt('2026-11-03', true, 'b4', { answeredAt: '2026-11-03T09:00:00.000Z' })
+    ]
+  });
+  expect(acrossDays).toMatchObject({ answered: 2, correct: 1 });
+});
+
+test('the first-answer rule does not depend on input order', () => {
+  const ordered = [
+    attempt('2026-11-02', false, 'first', { answeredAt: '2026-11-02T08:00:00.000Z' }),
+    attempt('2026-11-02', true, 'second', { answeredAt: '2026-11-02T09:00:00.000Z' })
+  ];
+  const shuffled = [ordered[1]!, ordered[0]!];
+
+  const a = overview({ attempts: ordered });
+  const b = overview({ attempts: shuffled });
+  expect(a).toMatchObject({ answered: 1, correct: 0 });
+  expect(b).toMatchObject({ answered: 1, correct: 0 });
+});
+
+test('the overview is read-only: inputs are never mutated (验收 17)', () => {
+  const tasks = [
+    task({ id: 'due-done', status: 'done', due: '2026-11-03', actualMin: 30 }),
+    task({ id: 'backlog' }),
+    task({ id: 'skipped', status: 'skipped', due: '2026-11-04' })
+  ];
+  const attempts = [
+    attempt('2026-11-02', true, 'a1', { answeredAt: '2026-11-02T08:00:00.000Z' }),
+    attempt('2026-11-02', false, 'a2', { answeredAt: '2026-11-02T09:00:00.000Z' })
+  ];
+  const before = JSON.stringify({ tasks, attempts });
+  overview({ tasks, attempts });
+  // The scope change is display-only: it never rewrites the source records.
+  expect(JSON.stringify({ tasks, attempts })).toBe(before);
+});
+
+test('accuracyReliable flips at five answers and never changes accuracy itself', () => {
+  const four = overview({
+    attempts: [1, 2, 3, 4].map((n) =>
+      attempt('2026-11-02', true, `q${n}`, { questionId: `q${n}` })
+    )
+  });
+  expect(four).toMatchObject({ answered: 4, accuracyReliable: false });
+  expect(four.accuracy).toBe(1);
+
+  const five = overview({
+    attempts: [1, 2, 3, 4, 5].map((n) =>
+      attempt('2026-11-02', true, `q${n}`, { questionId: `q${n}` })
+    )
+  });
+  expect(five).toMatchObject({ answered: 5, accuracyReliable: true });
+
+  const none = overview({ attempts: [] });
+  expect(none).toMatchObject({ answered: 0, accuracyReliable: false });
+  expect(none.accuracy).toBeNull();
 });
 
 test('counts review days, due mistakes and knowledge topics', () => {

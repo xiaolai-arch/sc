@@ -25,7 +25,9 @@ export function WeeklyOverview({ overview }: WeeklyOverviewProps) {
   const accuracy =
     overview.accuracy === null
       ? '—'
-      : `${Math.round(overview.accuracy * 100)}%（${overview.correct}/${overview.answered}）`;
+      : !overview.accuracyReliable
+        ? `${overview.answered} 题（样本不足）`
+        : `${Math.round(overview.accuracy * 100)}%（${overview.correct}/${overview.answered}）`;
 
   return (
     <section className="mb-4 rounded-2xl border border-gray-200/70 bg-white px-4 py-3.5 dark:border-white/10 dark:bg-[#1c1c1e]">
