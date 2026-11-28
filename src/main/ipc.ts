@@ -2,7 +2,7 @@ import { isAbsolute } from 'node:path';
 import { isLocalDateTime } from '../shared/date';
 import { isTaskRepeat } from '../shared/recurrence';
 import type { AppSettings } from '../shared/types';
-import { MAX_TASK_CUE_LENGTH, REMINDER_STATES, isTargetDate, taskCueLength, type ReminderState } from '../shared/workspace';
+import { MAX_TASK_CUE_LENGTH, REMINDER_STATES, isExamPhase, isTargetDate, taskCueLength, type ExamPhase, type ReminderState } from '../shared/workspace';
 import type {
   BackupDirectoryStatus,
   BackupResult,
@@ -379,6 +379,14 @@ function requireUpdateWorkspace(value: unknown): UpdateWorkspaceInput {
     else if (isTargetDate(input.targetDate)) targetDate = input.targetDate;
     else throw new Error('目标日期需为 YYYY-MM-DD 格式的日期。');
   }
+  // The exam stage (iter34 P3); null clears it, and only the three labels are
+  // accepted here. Whether the project is an exam is the service's call.
+  let phase: ExamPhase | null | undefined;
+  if (input.phase !== undefined) {
+    if (input.phase === null) phase = null;
+    else if (isExamPhase(input.phase)) phase = input.phase;
+    else throw new Error('考研阶段需为 基础 / 强化 / 冲刺 之一。');
+  }
   return {
     workspaceId: requireString(input.workspaceId, '项目 ID'),
     ...(input.name !== undefined ? { name: requireString(input.name, '项目名称') } : {}),
@@ -386,7 +394,8 @@ function requireUpdateWorkspace(value: unknown): UpdateWorkspaceInput {
     ...(input.description !== undefined ? { description: description ?? '' } : {}),
     ...(checkIn !== undefined ? { checkIn: checkIn as 'daily' | 'off' } : {}),
     ...(availableMinutes !== undefined ? { availableMinutes } : {}),
-    ...(targetDate !== undefined ? { targetDate } : {})
+    ...(targetDate !== undefined ? { targetDate } : {}),
+    ...(phase !== undefined ? { phase } : {})
   };
 }
 

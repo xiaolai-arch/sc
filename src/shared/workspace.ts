@@ -9,6 +9,21 @@ export type WorkspaceTaskStatus = TaskStatus;
 /** Whether proactive check-ins include this project; undefined means daily. */
 export type WorkspaceCheckIn = 'daily' | 'off';
 
+/**
+ * The three stages of exam preparation (iter34 P3): 基础 → 强化 → 冲刺. A label
+ * the user sets, never a computed judgement — nothing derives progress from
+ * it. Stored only on exam projects.
+ */
+export type ExamPhase = '基础' | '强化' | '冲刺';
+
+/** The phase values in stage order; the only three that may be stored. */
+export const EXAM_PHASES: readonly ExamPhase[] = ['基础', '强化', '冲刺'];
+
+/** True only for the three stored phase labels; anything else is unset. */
+export function isExamPhase(value: unknown): value is ExamPhase {
+  return typeof value === 'string' && (EXAM_PHASES as readonly string[]).includes(value);
+}
+
 /** Range the UI and vault accept for the daily minute budget. */
 export const MIN_DAILY_AVAILABLE_MINUTES = 5;
 export const MAX_DAILY_AVAILABLE_MINUTES = 24 * 60;
@@ -75,6 +90,17 @@ export interface Workspace {
    * `YYYY-MM-DD` date. Absent means no target date has been set.
    */
   targetDate?: string;
+  /**
+   * Exam stage (iter34 P3), set by the user on an exam project only. Absent
+   * means no stage chosen; a value never implies progress beyond its label.
+   */
+  phase?: ExamPhase;
+  /**
+   * Local `YYYY-MM-DD` of the Sunday review that asked this phase's one-time
+   * acceptance question. Written only when that question actually went out;
+   * cleared whenever `phase` changes, so each stage is asked about once.
+   */
+  phaseAskedAt?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -328,6 +354,17 @@ export interface UpdateWorkspaceInput {
   availableMinutes?: number;
   /** Local `YYYY-MM-DD` target date; null clears it, omit to keep it. */
   targetDate?: string | null;
+  /**
+   * Exam stage; null clears it, omit to keep it. Refused on non-exam projects
+   * (exam projects only, iter34 P3). A changed value clears `phaseAskedAt`.
+   */
+  phase?: ExamPhase | null;
+  /**
+   * Main-process only: the local `YYYY-MM-DD` of the Sunday review that spoke
+   * this stage's question. Written right after the message lands; not an
+   * IPC-exposed field (the renderer only sets `phase`).
+   */
+  phaseAskedAt?: string;
 }
 
 export interface WorkspaceOnboardingInput {
