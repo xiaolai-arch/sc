@@ -160,6 +160,45 @@ export interface PracticeAttempt {
 export type PracticeMistakeStatus = 'active' | 'resolved';
 
 /**
+ * Upper bound for `PracticeMistake.cause`, counted in Unicode code points (so a
+ * surrogate pair is one character). A longer cause is truncated, never marked
+ * with an ellipsis: the cause is the learner's own sentence about a concept,
+ * and a clipped word is less misleading than a trailing symbol the learner did
+ * not write (iter34 P0 default decision 1).
+ */
+export const MAX_CAUSE_CODE_POINTS = 40;
+
+/**
+ * The one normalization for a stored or submitted `cause`: trim, drop an empty
+ * or whitespace-only value (absent means 未填), and cut to
+ * `MAX_CAUSE_CODE_POINTS` code points. Shared by the answer path, the butler
+ * tool and the vault reader so the three cannot drift apart.
+ */
+export function normalizeCause(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (trimmed === '') return undefined;
+  const codePoints = Array.from(trimmed);
+  return codePoints.length > MAX_CAUSE_CODE_POINTS
+    ? codePoints.slice(0, MAX_CAUSE_CODE_POINTS).join('')
+    : trimmed;
+}
+
+/**
+ * 顽疾 (a stubborn item) is a *property of the question*, never of the person:
+ * it has been wrong at least twice and has not been answered correctly twice in
+ * a row since. `priority` deliberately takes no part — it moves in lockstep
+ * with `correctStreak` (`practice-service.ts`), so an `priority===3`-based rule
+ * could never be washed out. Display only: nothing about this function changes
+ * what is stored.
+ */
+export function isStubbornMistake(
+  mistake: Pick<PracticeMistake, 'wrongCount' | 'correctStreak'>
+): boolean {
+  return mistake.wrongCount >= 2 && mistake.correctStreak < 2;
+}
+
+/**
  * The one clause a strict-mode surface states, verbatim, so the setting reads
  * the same wherever the mastery rule is printed. It is never shown when the
  * setting is off.
@@ -202,6 +241,20 @@ export interface PracticeMistake {
   correctStreak: number;
   priority: number;
   intervalDays: number;
+  /**
+   * The learner's own one-line 错因 — which concept, and why it went wrong
+   * (iter34 P0). Optional: absent means 未填 and renders nothing. The vault
+   * stores it trimmed and cut to `MAX_CAUSE_CODE_POINTS` code points
+   * (`normalizeCause`). Never model-generated and never preset.
+   */
+  cause?: string;
+  /**
+   * Local date (`YYYY-MM-DD`) a resolved mistake was moved to
+   * `practice/mistakes-archive.md`. Absent on every record in `mistakes.md`;
+   * the archive file uses the same schema plus this field, so the two files can
+   * be read by the same parser (iter34 P0 ④).
+   */
+  archivedAt?: string;
   /**
    * Current memory stability in days — what `intervalDays` grows from on a
    * successful review. Optional: records written before evidence-based
@@ -338,6 +391,33 @@ export interface SetMistakeResolvedInput {
   resolved: boolean;
 }
 
+/**
+ * Writes the learner's own one-line 错因 on a mistake (iter34 P0 ①). The value
+ * is trimmed and cut to 40 code points (`normalizeCause`); an empty or
+ * whitespace-only value clears the field instead of storing a blank line.
+ */
+export interface SetMistakeCauseInput {
+  mistakeId: string;
+  cause: string;
+}
+
+/** Moves this workspace's resolved mistakes to `practice/mistakes-archive.md`. */
+export interface ArchiveResolvedMistakesInput {
+  workspaceId: string;
+}
+
+export interface ArchiveResolvedMistakesResult {
+  /** Records newly appended to the archive (0 when everything was already there). */
+  archived: number;
+  /** Vault-relative POSIX path of the archive file. */
+  path: string;
+}
+
+/** One archived record back into `mistakes.md`; it stays `resolved`. */
+export interface RestoreArchivedMistakeInput {
+  mistakeId: string;
+}
+
 /** Writes a printable review sheet for the workspace's active mistakes. */
 export interface ExportMistakeSheetInput {
   workspaceId: string;
@@ -372,6 +452,16 @@ export interface PracticeService {
   reviewMistake?(input: ReviewMistakeInput): Promise<SubmitAnswerResult>;
   /** Marks a mistake resolved (mastered) or active again without answering. */
   setMistakeResolved?(input: SetMistakeResolvedInput): Promise<PracticeMistake>;
+  /** Writes (or, with a blank value, clears) the learner's own one-line 错因. */
+  setMistakeCause?(input: SetMistakeCauseInput): Promise<PracticeMistake>;
+  /** Explicit 清空已掌握: moves each resolved mistake to the archive file. */
+  archiveResolvedMistakes?(
+    input: ArchiveResolvedMistakesInput
+  ): Promise<ArchiveResolvedMistakesResult>;
+  /** Records currently in `practice/mistakes-archive.md`, newest first. */
+  listArchivedMistakes?(workspaceId: string): Promise<PracticeMistake[]>;
+  /** Moves one archived record back into `mistakes.md` (status stays resolved). */
+  restoreArchivedMistake?(input: RestoreArchivedMistakeInput): Promise<PracticeMistake>;
   getMistakes(workspaceId: string): Promise<PracticeMistake[]>;
   getDue(workspaceId: string, date: string): Promise<PracticeMistake[]>;
   /** Attempt history, oldest first. Useful for review/analytics. */
