@@ -49,6 +49,8 @@ import type {
   CreatePracticeQuestionInput,
   CreatePracticeSetInput,
   DeletePracticeSetInput,
+  ExportAnkiMistakesInput,
+  ExportAnkiSetInput,
   ExportMistakeSheetInput,
   PracticeConfidence,
   RestoreArchivedMistakeInput,
@@ -203,7 +205,10 @@ export const IPC_CHANNELS = {
   setPracticeMistakeCause: 'study-coach:practice:set-mistake-cause',
   archiveResolvedPracticeMistakes: 'study-coach:practice:archive-resolved-mistakes',
   listArchivedPracticeMistakes: 'study-coach:practice:list-archived-mistakes',
-  restorePracticeMistake: 'study-coach:practice:restore-mistake'
+  restorePracticeMistake: 'study-coach:practice:restore-mistake',
+  // iter34 P2: Anki TSV exports are appended so existing channel order holds.
+  exportAnkiSet: 'study-coach:practice:export-anki-set',
+  exportAnkiMistakes: 'study-coach:practice:export-anki-mistakes'
 } as const;
 
 /** Streaming uses a separate request/event pair so the request map stays stable. */
@@ -1049,6 +1054,19 @@ function requireSetMistakeResolved(value: unknown): SetMistakeResolvedInput {
   };
 }
 
+function requireExportAnkiSet(value: unknown): ExportAnkiSetInput {
+  const input = requireObject(value, '导出到 Anki');
+  return {
+    workspaceId: requireString(input.workspaceId, '项目 ID'),
+    setId: requireString(input.setId, '练习集 ID')
+  };
+}
+
+function requireExportAnkiMistakes(value: unknown): ExportAnkiMistakesInput {
+  const input = requireObject(value, '导出到 Anki');
+  return { workspaceId: requireString(input.workspaceId, '项目 ID') };
+}
+
 function requireExportMistakeSheet(value: unknown): ExportMistakeSheetInput {
   const input = requireObject(value, '导出复习单');
   const workspaceId = requireString(input.workspaceId, '项目 ID');
@@ -1785,6 +1803,16 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
       if (!api.restorePracticeMistake) throw new Error('当前存储不支持恢复归档错题。');
       return api.restorePracticeMistake(parsed);
     },
+    exportAnkiSet: async (input) => {
+      const parsed = requireExportAnkiSet(input);
+      if (!api.exportAnkiSet) throw new Error('当前存储不支持导出到 Anki。');
+      return api.exportAnkiSet(parsed);
+    },
+    exportAnkiMistakes: async (input) => {
+      const parsed = requireExportAnkiMistakes(input);
+      if (!api.exportAnkiMistakes) throw new Error('当前存储不支持导出到 Anki。');
+      return api.exportAnkiMistakes(parsed);
+    },
     getFocusSnapshot: async () => api.getFocusSnapshot(),
     setFocusSnapshot: async (input) => api.setFocusSnapshot(requireFocusSnapshotSet(input))
   };
@@ -2204,6 +2232,8 @@ export function createStudyCoachBridge(
     listArchivedPracticeMistakes: (workspaceId) =>
       call(IPC_CHANNELS.listArchivedPracticeMistakes, workspaceId),
     restorePracticeMistake: (input) => call(IPC_CHANNELS.restorePracticeMistake, input),
+    exportAnkiSet: (input) => call(IPC_CHANNELS.exportAnkiSet, input),
+    exportAnkiMistakes: (input) => call(IPC_CHANNELS.exportAnkiMistakes, input),
     submitPracticeShortAnswer: (input) =>
       call(IPC_CHANNELS.submitPracticeShortAnswer, input),
     listPendingCommitments: (input) => call(IPC_CHANNELS.listPendingCommitments, input),

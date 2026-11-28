@@ -595,6 +595,37 @@ describe('mistake review sheet', () => {
     expect(screen.queryByRole('button', { name: '复制清单' })).not.toBeInTheDocument();
   });
 
+  it('exports the whole practice set to Anki and shows the path and the one-off note', async () => {
+    // The set entry exists because the mistake book can only export what was
+    // already missed; a fresh set has no way out otherwise (iter34 P2).
+    const user = userEvent.setup();
+    const onExportAnkiSet = vi.fn(async () => ({
+      path: 'workspaces/kaoyan/practice/exports/ps1-2026-11-02.tsv',
+      count: practiceSet.questions.length,
+      date: '2026-11-02'
+    }));
+    renderPane({ set: practiceSet, onExportAnkiSet });
+
+    await user.click(screen.getByRole('button', { name: '导出到 Anki' }));
+
+    await waitFor(() =>
+      expect(onExportAnkiSet).toHaveBeenCalledWith({ workspaceId: 'kaoyan', setId: 'ps1' })
+    );
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent('workspaces/kaoyan/practice/exports/ps1-2026-11-02.tsv');
+    // The spec's one-off sentence, verbatim.
+    expect(
+      screen.getByText(
+        '这是一次性文件，导入 Anki 后不会自动更新；数据仍以 vault 里的 markdown 为准。'
+      )
+    ).toBeInTheDocument();
+  });
+
+  it('hides the set export action when no handler is wired', () => {
+    renderPane({ set: practiceSet });
+    expect(screen.queryByRole('button', { name: '导出到 Anki' })).not.toBeInTheDocument();
+  });
+
   it('exports the sheet and shows the saved path in a polite live region', async () => {
     const user = userEvent.setup();
     const onExportMistakeSheet = vi.fn(async () => savedResult);
@@ -737,6 +768,27 @@ describe('interleaved mixed practice', () => {
         durationMs: expect.any(Number)
       })
     );
+  });
+
+  it('hides the Anki export in a mixed session, where no set exists on disk', async () => {
+    // `mix` is synthesised (`mix-<subject>`); `exportAnkiSet` looks the id up
+    // among the workspace's real sets and would fail every time. The button
+    // must not be offered while a mix is showing.
+    const user = userEvent.setup();
+    const onExportAnkiSet = vi.fn(async () => ({
+      path: 'workspaces/kaoyan/practice/exports/ps1-2026-11-02.tsv',
+      count: 1,
+      date: '2026-11-02'
+    }));
+    renderPane({ set: practiceSet, sets: [practiceSet, secondSet], onExportAnkiSet });
+
+    // A real set showing: the entry is there.
+    expect(screen.getByRole('button', { name: '导出到 Anki' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '交错混练' }));
+    expect(screen.getByText('交错混练 · 数学')).toBeInTheDocument();
+    // Mixed: gone.
+    expect(screen.queryByRole('button', { name: '导出到 Anki' })).not.toBeInTheDocument();
   });
 
   it('shows the source of the second set on the next mixed question', async () => {

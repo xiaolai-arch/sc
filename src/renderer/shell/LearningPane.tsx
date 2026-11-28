@@ -11,6 +11,8 @@ import type { Workspace, WorkspaceNote } from '../../shared/workspace';
 import type {
   CreatePracticeSetInput,
   ExportMistakeSheetInput,
+  ExportAnkiResult,
+  ExportAnkiSetInput,
   ExportMistakeSheetResult,
   PracticeAttempt,
   PracticeConfidence,
@@ -72,6 +74,10 @@ type LearningPaneProps = {
   onExportMistakeSheet?: (
     input: ExportMistakeSheetInput
   ) => Promise<ExportMistakeSheetResult>;
+  /** Writes an Anki-importable TSV of every active mistake (iter34 P2). */
+  onExportAnkiMistakes?: () => Promise<ExportAnkiResult>;
+  /** Writes an Anki-importable TSV of one practice set (iter34 P2). */
+  onExportAnkiSet?: (input: ExportAnkiSetInput) => Promise<ExportAnkiResult>;
   /** Saves the learner's own one-line 错因 on a mistake. */
   onSaveMistakeCause?: (mistake: PracticeMistake, cause: string) => Promise<PracticeMistake>;
   /** 清空已掌握: moves resolved mistakes into the archive file. */
@@ -124,6 +130,8 @@ export function LearningPane({
   onCreateSet,
   onReviewSet,
   onExportMistakeSheet,
+  onExportAnkiMistakes,
+  onExportAnkiSet,
   onSaveMistakeCause,
   onClearResolvedMistakes,
   onListArchivedMistakes,
@@ -151,6 +159,14 @@ export function LearningPane({
   const [confidence, setConfidence] = useState<PracticeConfidence | undefined>(undefined);
   const [score, setScore] = useState(0);
   const [finished, setFinished] = useState(false);
+  // Anki export of this set (iter34 P2): its own busy/path/error trio, so a
+  // failed export never disturbs the answering state above.
+  const [exportingSet, setExportingSet] = useState(false);
+  const [setExportPath, setSetExportPath] = useState<string | null>(null);
+  // The service's count (rows actually written), not the on-screen question
+  // count: the two can differ and the message should match the file.
+  const [setExportCount, setSetExportCount] = useState(0);
+  const [setExportError, setSetExportError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   /** Quiet confirmation after a mistake becomes a one-question set. */
@@ -374,6 +390,7 @@ export function LearningPane({
               onExportMistakeSheet({ workspaceId: mistakeBookWorkspaceId, dueOnly: false })
           }
         : {})}
+      {...(onExportAnkiMistakes ? { onExportAnki: onExportAnkiMistakes } : {})}
       {...(onSaveMistakeCause ? { onSaveCause: onSaveMistakeCause } : {})}
       {...(onClearResolvedMistakes ? { onClearResolved: onClearResolvedMistakes } : {})}
       {...(onListArchivedMistakes ? { onListArchived: onListArchivedMistakes } : {})}
@@ -596,6 +613,28 @@ export function LearningPane({
     resetAnswerState();
   }
 
+  /**
+   * Anki export of the whole set (iter34 P2). The mistake book exports only
+   * what has already been missed, so a brand-new set would have no way out
+   * otherwise — this is the entry that makes "carry your data away" true for
+   * sets the learner never got wrong.
+   */
+  async function exportSetToAnki() {
+    if (!onExportAnkiSet || exportingSet) return;
+    setExportingSet(true);
+    setSetExportPath(null);
+    setSetExportError(null);
+    try {
+      const result = await onExportAnkiSet({ workspaceId: activeSet.workspaceId, setId: activeSet.id });
+      setSetExportPath(result.path);
+      setSetExportCount(result.count);
+    } catch (cause) {
+      setSetExportError(friendlyErrorMessage(cause, '导出到 Anki 失败，请重试。'));
+    } finally {
+      setExportingSet(false);
+    }
+  }
+
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col bg-white dark:bg-[#0f0f10]">
       <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-gray-200/70 px-4 dark:border-white/10 md:px-6">
@@ -615,12 +654,43 @@ export function LearningPane({
           />
         </div>
         <div className="flex items-center gap-2">
+          {/* Hidden in a mixed session: `mix` is a synthesised set
+              (`mix-<subject>`) with no practice set on disk, so an export
+              would fail every time — a mix is not "one set" to carry away. */}
+          {onExportAnkiSet && mix === null ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={exportingSet}
+              onClick={() => void exportSetToAnki()}
+            >
+              {exportingSet ? '正在导出…' : '导出到 Anki'}
+            </Button>
+          ) : null}
           {createButton}
           <Button size="sm" variant="secondary" onClick={onOpenChat}>
             问阿咲
           </Button>
         </div>
       </header>
+      {setExportPath ? (
+        <div className="shrink-0 border-b border-gray-200/70 px-4 py-2 dark:border-white/10 md:px-6">
+          <p role="status" aria-live="polite" className="text-[11px] text-gray-400 dark:text-[#8e8e93]">
+            已导出 {setExportCount} 题到 {setExportPath}
+          </p>
+          {/* Verbatim spec line: an export is a one-off file, the vault stays the source. */}
+          <p className="mt-1 text-[11px] leading-5 text-gray-400 dark:text-[#8e8e93]">
+            这是一次性文件，导入 Anki 后不会自动更新；数据仍以 vault 里的 markdown 为准。
+          </p>
+        </div>
+      ) : null}
+      {setExportError ? (
+        <div className="shrink-0 border-b border-gray-200/70 px-4 py-2 dark:border-white/10 md:px-6">
+          <p role="alert" className="text-[11px] text-[#d70015] dark:text-[#ff7b72]">
+            {setExportError}
+          </p>
+        </div>
+      ) : null}
 
       {paper !== null && paper.ended === null ? (
         <div className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-gray-200/70 px-4 dark:border-white/10 md:px-6">

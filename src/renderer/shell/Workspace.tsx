@@ -277,6 +277,8 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     reviewPracticeMistake,
     resolvePracticeMistake,
     exportMistakeSheet,
+    exportAnkiMistakes,
+    exportAnkiSet,
     savePracticeMistakeCause,
     archiveResolvedMistakes,
     listArchivedMistakes,
@@ -2205,6 +2207,10 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
                   onSubmitAnswer={submitPracticeAnswer}
                   onSubmitShortAnswer={submitPracticeShortAnswer}
                   onExportMistakeSheet={exportMistakeSheet}
+                  onExportAnkiMistakes={() =>
+                    exportAnkiMistakes({ workspaceId: mistakeBookProjectId })
+                  }
+                  onExportAnkiSet={exportAnkiSet}
                   onSaveMistakeCause={(mistake, cause) =>
                     savePracticeMistakeCause({ mistakeId: mistake.id, cause })
                   }

@@ -67,6 +67,9 @@ import type {
   CreatePracticeQuestionInput,
   CreatePracticeSetInput,
   DeletePracticeSetInput,
+  ExportAnkiMistakesInput,
+  ExportAnkiResult,
+  ExportAnkiSetInput,
   ExportMistakeSheetInput,
   ExportMistakeSheetResult,
   PracticeAttempt,
@@ -1640,6 +1643,35 @@ export function createMockApi(
       ).length;
       return {
         path: `workspaces/${input.workspaceId}/practice/review-sheets/${date}.md`,
+        count,
+        date
+      };
+    },
+
+    async exportAnkiSet(input: ExportAnkiSetInput): Promise<ExportAnkiResult> {
+      requireWorkspace(input.workspaceId);
+      const date = today();
+      const set = state.practiceSets.find(
+        (entry) => entry.workspaceId === input.workspaceId && entry.id === input.setId
+      );
+      if (!set) throw new Error('练习集不存在');
+      // No vault in the browser prototype; the file the renderer offers for
+      // download is built by the same shared builder, so the row count matches.
+      return {
+        path: `workspaces/${input.workspaceId}/practice/exports/${input.setId}-${date}.tsv`,
+        count: set.questions.length,
+        date
+      };
+    },
+
+    async exportAnkiMistakes(input: ExportAnkiMistakesInput): Promise<ExportAnkiResult> {
+      requireWorkspace(input.workspaceId);
+      const date = today();
+      const count = state.practiceMistakes.filter(
+        (entry) => entry.workspaceId === input.workspaceId && entry.status === 'active'
+      ).length;
+      return {
+        path: `workspaces/${input.workspaceId}/practice/exports/mistakes-${date}.tsv`,
         count,
         date
       };
