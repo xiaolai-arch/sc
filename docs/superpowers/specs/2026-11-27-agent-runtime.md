@@ -259,10 +259,10 @@
 
 
 **运行期工程（v2 增量；24–29 为 2026-11-28 新增，编号续接、不改动 1–23）**
-24. **journal 恢复幂等**（v2 第二节，规范见「RunJournal · 崩溃恢复语义」）：同一个未终态 run 文件连续两次 `recover()`——第一次返回该 runId 并追加 `run.interrupted`，**第二次返回空数组且文件末行 seq 不再增长**。第二个断言是关键：只断言「返回空」会漏掉「仍然重复追加」的实现。另加一条：以 `run.interrupted` 结尾的文件不被再次追加。**当前实现不满足**（`run-journal.ts:111` 只认 `run.finished`）——本条是待落地缺口，验收写成红灯再修绿。
+24. **journal 恢复幂等**（v2 第二节，规范见「RunJournal · 崩溃恢复语义」）：同一个未终态 run 文件连续两次 `recover()`——第一次返回该 runId 并追加 `run.interrupted`，**第二次返回空数组且文件末行 seq 不再增长**。第二个断言是关键：只断言「返回空」会漏掉「仍然重复追加」的实现。另加一条：以 `run.interrupted` 结尾的文件不被再次追加。**当前实现不满足**（`run-journal.ts:111` 只认 `run.finished`）——本条是待落地缺口，**需 P0 批次落地**，现阶段写到测试里就是红灯（先红后绿），不是已绿。
 25. **改期复活已结案承诺**（2026-11-28 主人裁定 A，规范见「改期与「复活」语义」）：种一条 `status:'done'` 且带 `resolvedAt` 的承诺 → `resolve({ id, newDue: <明天> })` 后读盘断言 `status==='open'`、**`resolvedAt` 已不存在**（`not.toHaveProperty`，不是断言为空串）、`due` 为新日期。再补一条 dropped 起点的同样断言。落点：`tests/main/commitments.test.ts`（现有 `resolve newDue moves the promise without closing it` 只覆盖 open 起点，`:172-177`）。
 26. **复活只由 `newDue` 触发**（同裁定的负向锁定）：一条 `done` 承诺 → `resolve({ id, outcome: 'dropped' })` 后 `due` **逐字符不变**，`status==='dropped'`、`resolvedAt` 是新的。目的：锁死「改期与结掉是两条语义」，防止日后把 `newDue` 顺手接进 outcome 分支。
-27. **`commit_plan` 走领域查重**（v2 第三节）：同一 `runId` 的 `commit_plan` 调两次同参（第一次成功后模拟崩溃重试，绕过网关 per-run 去重）→ vault 里该计划项**只有一条任务**（按 `planId`+`planItemId` 命中返回已有任务，`create-workspace-service.ts:521-530`）。断言方式：直接调 `commit_plan` 的执行体两次（不经网关去重），数磁盘上的任务文件。**当前实现不满足**（`plan-tools.ts:174-187` 不传这两个字段）——同为待落地缺口。
+27. **`commit_plan` 走领域查重**（v2 第三节）：同一 `runId` 的 `commit_plan` 调两次同参（第一次成功后模拟崩溃重试，绕过网关 per-run 去重）→ vault 里该计划项**只有一条任务**（按 `planId`+`planItemId` 命中返回已有任务，`create-workspace-service.ts:521-530`）。断言方式：直接调 `commit_plan` 的执行体两次（不经网关去重），数磁盘上的任务文件。**当前实现不满足**（`plan-tools.ts:174-187` 不传这两个字段）——同为待落地缺口，**需 P0 批次落地**，现阶段为红灯。
 28. **数据边界：跨项目承诺不出机**（2026-11-28 主人裁定 A，规范见「ContextBuilder 数据边界」）：临时 vault 建项目 A/B，各写一条 open 承诺 + 一条无归属的全局承诺；运行 `workspaceIds=[A]`，捕获 `streamFn` 实参并序列化 → 断言**含 A 的承诺原文与全局承诺原文**、**不含 B 的承诺原文**。配套负例：出站载荷不含 vault 绝对路径、不含 `sk-` 形串。**注意**：本条只对 Runtime 路径成立；Legacy 不经 ContextBuilder，对拍测试按各自口径断言（见该节「连带项」）。
 29. **设置页两句数据去向文案**（2026-11-28 主人裁定 A）：`settings.test.tsx` 类落点，四个渲染态断言——① `anthropic` provider 面板展开 → 见到第一句逐字文案；② `openai-compatible` → 见到；③ `ollama` → **见不到**（本机，别用「非 local-cli」近似）；④ `local-cli` + `nativeTools=true` → 见到第二句；⑤ `local-cli` + `nativeTools` 关闭 → 见不到第二句。文案逐字照「设置页数据去向文案」表。
 
@@ -300,7 +300,7 @@
 - `pi-agent-core` 在打包 Electron 里的兼容性：已实测通过（`docs/pi-selftest-evidence/`，验收 11 三步），但**每次升级 pi pin 都要按「打包产物里的 fetch 行为」复验**（见「引擎适配器 · 升级复验条件」），开发机 Node 跑通不算。
 - **未达标在线上跑了多久**：验收 24（恢复幂等）与 27（`commit_plan` 查重）是已写进规范的缺口、实现未做。它们的危险不是「功能缺失」，而是**静默错误**——恢复幂等缺口让 journal 每次启动多一条 marker（日志失真），查重缺口让崩溃重试多建一条任务（用户数据失真）。派新一批时把它们当 P0 优先，别排在「有空再说」。
 - 双引擎对照期维护两套调试入口的成本；对照期结束判据已量化为 L1–L6（见「Legacy 退役判据」）。**若判据时钟迟迟不走（生产一直不切 Pi），Legacy 会无限滞留**——这是本 spec 最大的结构性风险，退役判据的「不适用 vs 未达标」区分就是为暴露它而设。
-- **渲染层零审批 UI 是当前最大的产品缺口**：Runtime 的确认级工具在 renderer 没有落脚点，生产聊天又没切 RunController——意味着 v1 的「确认级」目前只在测试与 selftest 里存在。切流那一批必须与审批卡同批，否则一旦切流，确认级工具会卡在等待永不到来的批准。
+- **v1 当前状态（交付判断的直接事实，不是顺带一提）**：runtime 只在测试与自测钩子中被装配，生产聊天仍走 Legacy 直执行；渲染层没有任何审批 UI。切流前必须完成审批 UI 与生产装配，**二者都不是本 spec 的批次产物**。没有审批 UI 就没有「模型不能自授权限」这条的兑现路径；没有切 RunController 就没有对外的 runtime。
 - 云端模型的数据出机边界：v2 已补条款（「ContextBuilder 数据边界」），但**ContextBuilder 尚未实现**——现在 PiEngine 只收静态 systemPrompt。写 ContextBuilder 之前，Pi 路径的出站载荷实际上没有集中约束点。
 
 ## 已定（不再翻转的裁决）
