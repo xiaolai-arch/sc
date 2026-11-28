@@ -24,7 +24,9 @@ import { normalizeCheckpoints } from '../../shared/practice';
 import type { WorkspacePlanner } from '../../shared/planning';
 import { busyDayMinutes } from '../planning';
 import type { LongPlanService } from '../../shared/plans';
+import { isExamPhase, type ExamPhase } from '../../shared/workspace';
 import type {
+  Workspace,
   WorkspaceKind,
   WorkspaceService,
   WorkspaceTaskStatus
@@ -563,6 +565,12 @@ export function createButlerTools(): ButlerToolDefinition[] {
             minimum: 5,
             maximum: 1440,
             description: '用户每天可用的分钟数；用户说「每天只有一小时」时传 60'
+          },
+          phase: {
+            type: 'string',
+            enum: ['基础', '强化', '冲刺'],
+            description:
+              '考研备考阶段（仅备考项目可用）：基础 / 强化 / 冲刺。用户说自己进入某个阶段时传对应值。'
           }
         },
         additionalProperties: false
@@ -580,13 +588,36 @@ export function createButlerTools(): ButlerToolDefinition[] {
         const goal = optionalString(input, 'goal');
         const description = optionalString(input, 'description');
         const availableMinutes = optionalNumber(input, 'availableMinutes');
+        const rawPhase = input['phase'];
+        let phase: ExamPhase | undefined;
+        if (rawPhase !== undefined) {
+          if (!isExamPhase(rawPhase)) {
+            throw new ToolInputError('参数 phase 必须是 基础 / 强化 / 冲刺 之一。');
+          }
+          // The tool can name any project; the stored kind decides whether the
+          // stage is meaningful. Reading it here makes the refusal explicit in
+          // the tool's own words instead of surfacing a raw service error.
+          let target: Workspace;
+          try {
+            target = (await context.workspace.getWorkspaceSnapshot(workspaceId)).workspace;
+          } catch {
+            throw new ToolInputError(`项目不存在：${workspaceId}`);
+          }
+          if (target.kind !== 'exam') {
+            throw new ToolInputError('只有备考项目可以设置 phase（基础 / 强化 / 冲刺）。');
+          }
+          phase = rawPhase;
+        }
         if (
           name === undefined &&
           goal === undefined &&
           description === undefined &&
-          availableMinutes === undefined
+          availableMinutes === undefined &&
+          phase === undefined
         ) {
-          throw new ToolInputError('至少提供 name / goal / description / availableMinutes 之一。');
+          throw new ToolInputError(
+            '至少提供 name / goal / description / availableMinutes / phase 之一。'
+          );
         }
         return update.call(context.workspace, {
           workspaceId,
@@ -595,7 +626,8 @@ export function createButlerTools(): ButlerToolDefinition[] {
           ...(description !== undefined ? { description } : {}),
           ...(availableMinutes !== undefined
             ? { availableMinutes: Math.round(availableMinutes) }
-            : {})
+            : {}),
+          ...(phase !== undefined ? { phase } : {})
         });
       }
     },

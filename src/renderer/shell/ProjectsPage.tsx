@@ -6,6 +6,7 @@ import type {
   CreateTaskInput,
   DeleteNoteInput,
   DeleteTaskInput,
+  ExamPhase,
   UpdateWorkspaceInput,
   UpdateWorkspaceNoteInput,
   UpdateWorkspaceTaskInput,
@@ -13,6 +14,7 @@ import type {
   WorkspaceNote,
   WorkspaceTask
 } from '../../shared/workspace';
+import { EXAM_PHASES, isExamPhase } from '../../shared/workspace';
 import { PageFrame } from './PageFrame';
 import { PlanSection, RecordsSection } from './ProjectSections';
 import type { FocusSession } from './focus-timer';
@@ -220,6 +222,19 @@ export function ProjectsPage({
     }
   }
 
+  // An empty value clears the stage; a chosen label is saved as-is. Only exam
+  // projects render this picker, so a non-exam project can never be sent one.
+  async function savePhase(value: string) {
+    if (!workspace) return;
+    setWorkspaceError(null);
+    try {
+      const phase: ExamPhase | null = isExamPhase(value) ? value : null;
+      await onUpdateWorkspace({ workspaceId: workspace.id, phase });
+    } catch (cause) {
+      setWorkspaceError(friendlyErrorMessage(cause, '保存失败，请重试。'));
+    }
+  }
+
   return (
     <PageFrame
       title="项目"
@@ -254,6 +269,14 @@ export function ProjectsPage({
                   {profile ? (
                     <span className="shrink-0 rounded-full bg-[#f5f5f7] px-2.5 py-1 text-[11px] text-gray-500 dark:bg-white/[0.08] dark:text-[#a1a1a6]">
                       {profile.weaknesses.length} 个薄弱点
+                    </span>
+                  ) : null}
+                  {workspace?.phase ? (
+                    <span
+                      data-testid="workspace-phase-tag"
+                      className="shrink-0 rounded-full bg-[#0071e3]/10 px-2.5 py-1 text-[11px] text-[#0071e3] dark:bg-[#0a84ff]/20 dark:text-[#4da3ff]"
+                    >
+                      {workspace.phase}阶段
                     </span>
                   ) : null}
                 </div>
@@ -433,6 +456,31 @@ export function ProjectsPage({
                     </button>
                   ) : null}
                 </div>
+              </div>
+            ) : null}
+            {workspace && workspace.kind === 'exam' && !editingWorkspace ? (
+              <div className="mt-4 flex items-center justify-between gap-2 border-t border-gray-100 pt-3 dark:border-white/[0.08]">
+                <label
+                  htmlFor="workspace-phase"
+                  className="text-[12px] text-gray-500 dark:text-[#a1a1a6]"
+                >
+                  备考阶段
+                </label>
+                <Select
+                  id="workspace-phase"
+                  aria-label="备考阶段"
+                  size="sm"
+                  fullWidth={false}
+                  value={workspace.phase ?? ''}
+                  onChange={(event) => void savePhase(event.target.value)}
+                >
+                  <option value="">未设置</option>
+                  {EXAM_PHASES.map((phase) => (
+                    <option key={phase} value={phase}>
+                      {phase}
+                    </option>
+                  ))}
+                </Select>
               </div>
             ) : null}
             {workspace ? (
