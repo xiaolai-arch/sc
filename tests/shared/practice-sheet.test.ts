@@ -151,3 +151,134 @@ describe('buildMistakeSheet', () => {
     expect(buildMistakeSheet({ ...input, strict: false })).toBe(loose);
   });
 });
+
+describe('iter34 P0 错因 / 顽疾 / 科目聚合行', () => {
+  it('renders 错因 under 解析 only when the cause exists, else byte-identical', () => {
+    const withCause = buildMistakeSheet({
+      workspaceId: 'kaoyan',
+      date: '2026-11-02',
+      mistakes: [mistake({ cause: '导数链没拆完' })]
+    });
+    expect(withCause).toContain('解析：第一个重要极限。\n错因：导数链没拆完\n');
+
+    // Every absent shape renders exactly what 1.3.0 wrote.
+    const baseline = buildMistakeSheet({ workspaceId: 'kaoyan', date: '2026-11-02', mistakes: [mistake()] });
+    expect(withCause).not.toBe(baseline);
+    for (const value of [undefined, '', '   ']) {
+      const sheet = buildMistakeSheet({
+        workspaceId: 'kaoyan',
+        date: '2026-11-02',
+        mistakes: [{ ...mistake(), cause: value } as PracticeMistake]
+      });
+      expect(sheet).toBe(baseline);
+      expect(sheet).not.toContain('错因');
+    }
+  });
+
+  it('adds 顽疾 to the state line only under wrongCount>=2 && correctStreak<2', () => {
+    const stubborn = buildMistakeSheet({
+      workspaceId: 'kaoyan',
+      date: '2026-11-02',
+      mistakes: [mistake({ wrongCount: 2, correctStreak: 0 })]
+    });
+    expect(stubborn).toContain('错 2 次 · 优先级 2 · 下次复习 2026-11-05 · 顽疾');
+
+    const washed = buildMistakeSheet({
+      workspaceId: 'kaoyan',
+      date: '2026-11-02',
+      mistakes: [mistake({ wrongCount: 2, correctStreak: 2 })]
+    });
+    expect(washed).not.toContain('顽疾');
+
+    // A high priority on a once-wrong item never makes it 顽疾.
+    const once = buildMistakeSheet({
+      workspaceId: 'kaoyan',
+      date: '2026-11-02',
+      mistakes: [mistake({ wrongCount: 1, priority: 3 })]
+    });
+    expect(once).not.toContain('顽疾');
+
+    // Low priority but two wrongs still does.
+    const lowPriority = buildMistakeSheet({
+      workspaceId: 'kaoyan',
+      date: '2026-11-02',
+      mistakes: [mistake({ wrongCount: 2, priority: 0, correctStreak: 1 })]
+    });
+    expect(lowPriority).toContain('顽疾');
+  });
+
+  it('puts the per-subject summary under the title when 2+ subjects exist', () => {
+    const a = mistake({ id: 'a' });
+    const b = mistake({ id: 'b' });
+    const c = mistake({ id: 'c' });
+    const sheet = buildMistakeSheet({
+      workspaceId: 'kaoyan',
+      date: '2026-11-02',
+      mistakes: [a, b, c],
+      subjects: { a: '数学', b: '英语', c: '数学' }
+    });
+    // Count descending (数学 2 before 英语 1), ` · ` separator.
+    expect(sheet).toContain('# 错题复习单 · 2026-11-02\n\n数学 2 · 英语 1\n\n## 1.');
+    // Counts equal the rendered sections.
+    expect(sheet.split('## ').length - 1).toBe(3);
+  });
+
+  it('orders equal counts by subject name', () => {
+    const sheet = buildMistakeSheet({
+      workspaceId: 'kaoyan',
+      date: '2026-11-02',
+      mistakes: [mistake({ id: 'a' }), mistake({ id: 'b' })],
+      subjects: { a: '英语', b: '数学' }
+    });
+    expect(sheet).toContain('数学 1 · 英语 1');
+  });
+
+  it('renders no summary for one subject, all-未分类, or no subjects map', () => {
+    const one = buildMistakeSheet({
+      workspaceId: 'kaoyan',
+      date: '2026-11-02',
+      mistakes: [mistake({ id: 'a' }), mistake({ id: 'b' })],
+      subjects: { a: '数学', b: '数学' }
+    });
+    expect(one).not.toMatch(/# 错题复习单 · 2026-11-02\n\n数学/);
+    expect(one).toContain('# 错题复习单 · 2026-11-02\n\n## 1.');
+
+    const uncategorized = buildMistakeSheet({
+      workspaceId: 'kaoyan',
+      date: '2026-11-02',
+      mistakes: [mistake({ id: 'a' }), mistake({ id: 'b' })],
+      subjects: {}
+    });
+    expect(uncategorized).not.toContain('未分类');
+
+    // No map at all: byte-identical to the no-summary form.
+    const noMap = buildMistakeSheet({
+      workspaceId: 'kaoyan',
+      date: '2026-11-02',
+      mistakes: [mistake({ id: 'a' }), mistake({ id: 'b' })]
+    });
+    expect(noMap).toBe(uncategorized);
+  });
+
+  it('未分类 does not count as a second subject: one real subject + uncategorized renders nothing', () => {
+    // 未分类 alone never satisfies n≥2. The spec's own example (数学 8 · 英语 3)
+    // is covered above; this pins the boundary.
+    const oneReal = buildMistakeSheet({
+      workspaceId: 'kaoyan',
+      date: '2026-11-02',
+      mistakes: [mistake({ id: 'a' }), mistake({ id: 'b' })],
+      subjects: { a: '数学' }
+    });
+    expect(oneReal).not.toContain('未分类');
+    expect(oneReal).not.toMatch(/# 错题复习单 · 2026-11-02\n\n数学/);
+
+    // Three real subjects plus an uncategorized bucket: shown, with the bucket.
+    const threeReal = buildMistakeSheet({
+      workspaceId: 'kaoyan',
+      date: '2026-11-02',
+      mistakes: ['a', 'b', 'c', 'd'].map((id) => mistake({ id })),
+      subjects: { a: '数学', b: '数学', c: '英语', d: '政治' }
+    });
+    expect(threeReal).toContain('数学 2 · 英语 1 · 政治 1');
+  });
+});

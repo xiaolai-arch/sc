@@ -45,12 +45,15 @@ import type {
   WorkspaceOnboardingInput
 } from '../shared/workspace';
 import type {
+  ArchiveResolvedMistakesInput,
   CreatePracticeQuestionInput,
   CreatePracticeSetInput,
   DeletePracticeSetInput,
   ExportMistakeSheetInput,
   PracticeConfidence,
+  RestoreArchivedMistakeInput,
   ReviewMistakeInput,
+  SetMistakeCauseInput,
   SetMistakeResolvedInput,
   SubmitAnswerInput,
   SubmitShortAnswerInput,
@@ -194,7 +197,13 @@ export const IPC_CHANNELS = {
   // iter33 P2b①: the single focus-snapshot slot (get for the restore prompt,
   // set at state transitions; null clears). Appended last, same reason.
   getFocusSnapshot: 'study-coach:focus-snapshot:get',
-  setFocusSnapshot: 'study-coach:focus-snapshot:set'
+  setFocusSnapshot: 'study-coach:focus-snapshot:set',
+  // iter34 P0: 错因一行 + 可逆归档. Appended last so every existing channel
+  // keeps its position (the bridge round-trip test pins the order).
+  setPracticeMistakeCause: 'study-coach:practice:set-mistake-cause',
+  archiveResolvedPracticeMistakes: 'study-coach:practice:archive-resolved-mistakes',
+  listArchivedPracticeMistakes: 'study-coach:practice:list-archived-mistakes',
+  restorePracticeMistake: 'study-coach:practice:restore-mistake'
 } as const;
 
 /** Streaming uses a separate request/event pair so the request map stays stable. */
@@ -1052,6 +1061,25 @@ function requireExportMistakeSheet(value: unknown): ExportMistakeSheetInput {
   };
 }
 
+function requireSetMistakeCause(value: unknown): SetMistakeCauseInput {
+  const input = requireObject(value, '保存错因');
+  // An empty / whitespace-only cause is a legitimate "clear it" request, so the
+  // value must be a string but is not required to be non-empty; the service
+  // trims and drops a blank one.
+  if (typeof input.cause !== 'string') throw new Error('错因必须是文字。');
+  return { mistakeId: requireString(input.mistakeId, '错题 ID'), cause: input.cause };
+}
+
+function requireArchiveResolvedMistakes(value: unknown): ArchiveResolvedMistakesInput {
+  const input = requireObject(value, '清空已掌握');
+  return { workspaceId: requireString(input.workspaceId, '项目 ID') };
+}
+
+function requireRestoreArchivedMistake(value: unknown): RestoreArchivedMistakeInput {
+  const input = requireObject(value, '恢复归档错题');
+  return { mistakeId: requireString(input.mistakeId, '错题 ID') };
+}
+
 function requireSynthesizeMemory(value: unknown): SynthesizeMemoryInput {
   const input = requireObject(value, '生成记忆');
   requireString(input.workspaceId, '项目 ID');
@@ -1737,6 +1765,26 @@ export function createIpcHandlers(api: StudyCoachApi): IpcHandlerMap {
       if (!api.exportMistakeSheet) throw new Error('当前存储不支持导出复习单。');
       return api.exportMistakeSheet(parsed);
     },
+    setPracticeMistakeCause: async (input) => {
+      const parsed = requireSetMistakeCause(input);
+      if (!api.setPracticeMistakeCause) throw new Error('当前存储不支持保存错因。');
+      return api.setPracticeMistakeCause(parsed);
+    },
+    archiveResolvedPracticeMistakes: async (input) => {
+      const parsed = requireArchiveResolvedMistakes(input);
+      if (!api.archiveResolvedPracticeMistakes) throw new Error('当前存储不支持清空已掌握。');
+      return api.archiveResolvedPracticeMistakes(parsed);
+    },
+    listArchivedPracticeMistakes: async (input) => {
+      const workspaceId = requireString(input, '项目 ID');
+      if (!api.listArchivedPracticeMistakes) throw new Error('当前存储不支持读取归档。');
+      return api.listArchivedPracticeMistakes(workspaceId);
+    },
+    restorePracticeMistake: async (input) => {
+      const parsed = requireRestoreArchivedMistake(input);
+      if (!api.restorePracticeMistake) throw new Error('当前存储不支持恢复归档错题。');
+      return api.restorePracticeMistake(parsed);
+    },
     getFocusSnapshot: async () => api.getFocusSnapshot(),
     setFocusSnapshot: async (input) => api.setFocusSnapshot(requireFocusSnapshotSet(input))
   };
@@ -2150,6 +2198,12 @@ export function createStudyCoachBridge(
     reviewPracticeMistake: (input) => call(IPC_CHANNELS.reviewPracticeMistake, input),
     setPracticeMistakeResolved: (input) => call(IPC_CHANNELS.setPracticeMistakeResolved, input),
     exportMistakeSheet: (input) => call(IPC_CHANNELS.exportMistakeSheet, input),
+    setPracticeMistakeCause: (input) => call(IPC_CHANNELS.setPracticeMistakeCause, input),
+    archiveResolvedPracticeMistakes: (input) =>
+      call(IPC_CHANNELS.archiveResolvedPracticeMistakes, input),
+    listArchivedPracticeMistakes: (workspaceId) =>
+      call(IPC_CHANNELS.listArchivedPracticeMistakes, workspaceId),
+    restorePracticeMistake: (input) => call(IPC_CHANNELS.restorePracticeMistake, input),
     submitPracticeShortAnswer: (input) =>
       call(IPC_CHANNELS.submitPracticeShortAnswer, input),
     listPendingCommitments: (input) => call(IPC_CHANNELS.listPendingCommitments, input),

@@ -30,6 +30,8 @@ import type {
   UpdateMemoryInput
 } from '../../shared/memory';
 import type {
+  ArchiveResolvedMistakesInput,
+  ArchiveResolvedMistakesResult,
   CreatePracticeSetInput,
   DeletePracticeSetInput,
   ExportMistakeSheetInput,
@@ -37,7 +39,9 @@ import type {
   PracticeAttempt,
   PracticeMistake,
   PracticeSet,
+  RestoreArchivedMistakeInput,
   ReviewMistakeInput,
+  SetMistakeCauseInput,
   SetMistakeResolvedInput,
   SubmitAnswerInput,
   SubmitAnswerResult,
@@ -124,6 +128,12 @@ export type WorkspaceData = WorkspaceDataState & {
   reviewPracticeMistake: (input: ReviewMistakeInput) => Promise<SubmitAnswerResult>;
   resolvePracticeMistake: (input: SetMistakeResolvedInput) => Promise<PracticeMistake>;
   exportMistakeSheet: (input: ExportMistakeSheetInput) => Promise<ExportMistakeSheetResult>;
+  savePracticeMistakeCause: (input: SetMistakeCauseInput) => Promise<PracticeMistake>;
+  archiveResolvedMistakes: (
+    input: ArchiveResolvedMistakesInput
+  ) => Promise<ArchiveResolvedMistakesResult>;
+  listArchivedMistakes: (workspaceId: string) => Promise<PracticeMistake[]>;
+  restoreArchivedMistake: (input: RestoreArchivedMistakeInput) => Promise<PracticeMistake>;
   searchWorkspace: (workspaceId: string, query: string, limit?: number) => Promise<SearchResult[]>;
   searchAll: (query: string, limit?: number) => Promise<SearchResult[]>;
   send: (input: SendMessageInput) => Promise<SendMessageResult>;
@@ -672,6 +682,77 @@ export function useWorkspaceData(): WorkspaceData {
     []
   );
 
+  const savePracticeMistakeCause = useCallback(
+    async (input: SetMistakeCauseInput) => {
+      const api = apiOrThrow();
+      if (!api.setPracticeMistakeCause) throw new Error('当前存储不支持保存错因。');
+      const mistake = await api.setPracticeMistakeCause(input);
+      // The row's own copy updates through the returned record; the due list is
+      // reloaded so a later getDue stays in step with the vault.
+      const fresh = await loadPractice(api, [mistake.workspaceId]);
+      setState((current) => ({
+        ...current,
+        practiceMistakes: replaceWorkspaceSlice(
+          current.practiceMistakes,
+          fresh.practiceMistakes,
+          mistake.workspaceId
+        )
+      }));
+      return mistake;
+    },
+    []
+  );
+
+  const archiveResolvedMistakes = useCallback(
+    async (input: ArchiveResolvedMistakesInput) => {
+      const api = apiOrThrow();
+      if (!api.archiveResolvedPracticeMistakes) throw new Error('当前存储不支持清空已掌握。');
+      const result = await api.archiveResolvedPracticeMistakes(input);
+      // The book only lists active mistakes, so a reload simply drops the ones
+      // that just moved into the archive file.
+      const fresh = await loadPractice(api, [input.workspaceId]);
+      setState((current) => ({
+        ...current,
+        practiceMistakes: replaceWorkspaceSlice(
+          current.practiceMistakes,
+          fresh.practiceMistakes,
+          input.workspaceId
+        ),
+        practiceDue: replaceWorkspaceSlice(
+          current.practiceDue,
+          fresh.practiceDue,
+          input.workspaceId
+        )
+      }));
+      return result;
+    },
+    []
+  );
+
+  const listArchivedMistakes = useCallback(async (workspaceId: string) => {
+    const api = apiOrThrow();
+    if (!api.listArchivedPracticeMistakes) throw new Error('当前存储不支持读取归档。');
+    return api.listArchivedPracticeMistakes(workspaceId);
+  }, []);
+
+  const restoreArchivedMistake = useCallback(async (input: RestoreArchivedMistakeInput) => {
+    const api = apiOrThrow();
+    if (!api.restorePracticeMistake) throw new Error('当前存储不支持恢复归档错题。');
+    const mistake = await api.restorePracticeMistake(input);
+    const fresh = await loadPractice(api, [mistake.workspaceId]);
+    setState((current) => ({
+      ...current,
+      // A restored record is `resolved`, so it never enters the active book;
+      // reloading keeps the other slices honest either way.
+      practiceMistakes: replaceWorkspaceSlice(
+        current.practiceMistakes,
+        fresh.practiceMistakes,
+        mistake.workspaceId
+      )
+    }));
+    return mistake;
+  }, []);
+
   const searchWorkspace = useCallback(
     async (workspaceId: string, query: string, limit?: number) =>
       apiOrThrow().searchWorkspace({ workspaceId, query, ...(limit !== undefined ? { limit } : {}) }),
@@ -910,6 +991,10 @@ export function useWorkspaceData(): WorkspaceData {
     reviewPracticeMistake,
     resolvePracticeMistake,
     exportMistakeSheet,
+    savePracticeMistakeCause,
+    archiveResolvedMistakes,
+    listArchivedMistakes,
+    restoreArchivedMistake,
     searchWorkspace,
     searchAll,
     send,

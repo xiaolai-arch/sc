@@ -17,6 +17,8 @@ import type {
   UpdateMemoryInput
 } from './memory';
 import type {
+  ArchiveResolvedMistakesInput,
+  ArchiveResolvedMistakesResult,
   CreatePracticeSetInput,
   DeletePracticeSetInput,
   ExportMistakeSheetInput,
@@ -24,7 +26,9 @@ import type {
   PracticeAttempt,
   PracticeMistake,
   PracticeSet,
+  RestoreArchivedMistakeInput,
   ReviewMistakeInput,
+  SetMistakeCauseInput,
   SetMistakeResolvedInput,
   SubmitAnswerInput,
   SubmitAnswerResult,
@@ -103,6 +107,16 @@ export interface PracticeApi {
   listPracticeAttempts(workspaceId: string): Promise<PracticeAttempt[]>;
   /** Writes a printable review sheet for the workspace's active mistakes. */
   exportMistakeSheet?(input: ExportMistakeSheetInput): Promise<ExportMistakeSheetResult>;
+  /** Writes (or, with a blank value, clears) the learner's own one-line 错因. */
+  setPracticeMistakeCause?(input: SetMistakeCauseInput): Promise<PracticeMistake>;
+  /** 清空已掌握: moves this workspace's resolved mistakes to the archive file. */
+  archiveResolvedPracticeMistakes?(
+    input: ArchiveResolvedMistakesInput
+  ): Promise<ArchiveResolvedMistakesResult>;
+  /** Records currently in `practice/mistakes-archive.md`, newest first. */
+  listArchivedPracticeMistakes?(workspaceId: string): Promise<PracticeMistake[]>;
+  /** Moves one archived record back into `mistakes.md`; status stays resolved. */
+  restorePracticeMistake?(input: RestoreArchivedMistakeInput): Promise<PracticeMistake>;
 }
 
 /** Renderer-facing memory contract (vault-backed memory + learner profile). */

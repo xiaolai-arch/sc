@@ -1360,6 +1360,26 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       if (!practice.exportMistakeSheet) throw new Error('当前存储不支持导出复习单。');
       return practice.exportMistakeSheet(input);
     },
+    async setPracticeMistakeCause(input) {
+      const practice = (await getServices()).practice;
+      if (!practice.setMistakeCause) throw new Error('当前存储不支持保存错因。');
+      return practice.setMistakeCause(input);
+    },
+    async archiveResolvedPracticeMistakes(input) {
+      const practice = (await getServices()).practice;
+      if (!practice.archiveResolvedMistakes) throw new Error('当前存储不支持清空已掌握。');
+      return practice.archiveResolvedMistakes(input);
+    },
+    async listArchivedPracticeMistakes(workspaceId) {
+      const practice = (await getServices()).practice;
+      if (!practice.listArchivedMistakes) throw new Error('当前存储不支持读取归档。');
+      return practice.listArchivedMistakes(workspaceId);
+    },
+    async restorePracticeMistake(input) {
+      const practice = (await getServices()).practice;
+      if (!practice.restoreArchivedMistake) throw new Error('当前存储不支持恢复归档错题。');
+      return practice.restoreArchivedMistake(input);
+    },
     async listMemory(workspaceId) {
       return (await getServices()).memory.list(workspaceId);
     },

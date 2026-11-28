@@ -119,9 +119,11 @@ export function summarizeMistakeSubjects(
 }
 
 /**
- * The one summary line, or null when it should not appear: fewer than two
- * distinct subjects, or nothing but `未分类`. The line itself joins the
- * `summarizeMistakeSubjects` pairs with ` · `.
+ * The one summary line, or null when it should not appear. `未分类` never
+ * counts as one of the two subjects: the line needs at least two *real*
+ * subjects, so a single subject (even with some uncategorized leftovers) or
+ * nothing but `未分类` renders nothing. When it does show, an `未分类` bucket
+ * with records is included alongside the real ones.
  */
 export function mistakeSubjectSummaryLine(
   mistakes: readonly PracticeMistake[],
@@ -129,9 +131,8 @@ export function mistakeSubjectSummaryLine(
 ): string | null {
   if (subjects === undefined) return null;
   const counts = summarizeMistakeSubjects(mistakes, subjects);
-  if (counts.length < 2) return null;
-  // `未分类` is not a real subject: all-uncategorized renders nothing.
-  if (counts.every(([subject]) => subject === UNCATEGORIZED_SUBJECT)) return null;
+  const real = counts.filter(([subject]) => subject !== UNCATEGORIZED_SUBJECT);
+  if (real.length < 2) return null;
   return counts.map(([subject, count]) => `${subject} ${count}`).join(' · ');
 }
 
