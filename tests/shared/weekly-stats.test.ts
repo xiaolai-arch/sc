@@ -206,6 +206,22 @@ test('the first-answer rule does not depend on input order', () => {
   expect(b).toMatchObject({ answered: 1, correct: 0 });
 });
 
+test('the overview is read-only: inputs are never mutated (验收 17)', () => {
+  const tasks = [
+    task({ id: 'due-done', status: 'done', due: '2026-11-03', actualMin: 30 }),
+    task({ id: 'backlog' }),
+    task({ id: 'skipped', status: 'skipped', due: '2026-11-04' })
+  ];
+  const attempts = [
+    attempt('2026-11-02', true, 'a1', { answeredAt: '2026-11-02T08:00:00.000Z' }),
+    attempt('2026-11-02', false, 'a2', { answeredAt: '2026-11-02T09:00:00.000Z' })
+  ];
+  const before = JSON.stringify({ tasks, attempts });
+  overview({ tasks, attempts });
+  // The scope change is display-only: it never rewrites the source records.
+  expect(JSON.stringify({ tasks, attempts })).toBe(before);
+});
+
 test('accuracyReliable flips at five answers and never changes accuracy itself', () => {
   const four = overview({
     attempts: [1, 2, 3, 4].map((n) =>
@@ -227,7 +243,8 @@ test('accuracyReliable flips at five answers and never changes accuracy itself',
   expect(none.accuracy).toBeNull();
 });
 
-test('counts review days, due mistakes and knowledge topics', () => {  const result = overview({
+test('counts review days, due mistakes and knowledge topics', () => {
+  const result = overview({
     reviews: [
       { date: '2026-11-02' },
       { date: '2026-11-02' },

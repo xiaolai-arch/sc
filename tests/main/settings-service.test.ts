@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDefaultAppState } from '../../src/main/context';
@@ -534,6 +534,30 @@ test('weeklyScopeNoted is absent by default, survives other writes, and round-tr
     expect((await reopened.get()).weeklyScopeNoted).toBe(true);
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('weeklyScopeNoted lives in state.json, never in renderer localStorage (验收 16)', async () => {
+  // The sentence is composed in the main process, so renderer-only storage
+  // would be invisible to it (the iter32 localStorage precedent does not
+  // apply). Scan every renderer source for the key.
+  const root = new URL('../../src/renderer/', import.meta.url);
+  const pending = [root];
+  const files: URL[] = [];
+  while (pending.length > 0) {
+    const dir = pending.pop()!;
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const next = new URL(entry.name + (entry.isDirectory() ? '/' : ''), dir);
+      if (entry.isDirectory()) pending.push(next);
+      else if (/\.(ts|tsx)$/.test(entry.name)) files.push(next);
+    }
+  }
+  expect(files.length).toBeGreaterThan(0);
+  for (const file of files) {
+    const source = await readFile(file, 'utf8');
+    expect(source, `${file.pathname} must not read weeklyScopeNoted`).not.toContain(
+      'weeklyScopeNoted'
+    );
   }
 });
 
