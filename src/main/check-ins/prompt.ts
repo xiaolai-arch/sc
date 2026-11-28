@@ -5,6 +5,7 @@ import {
   isLocalDateTimeSeconds,
   localDaysBetween
 } from '../../shared/date';
+import type { ExamPhase, Workspace } from '../../shared/workspace';
 import type { TomorrowBridgeFacts } from '../../shared/review-stats';
 import {
   buildBehindScheduleNotification,
@@ -191,6 +192,67 @@ export function morningRecoveryLine(
   tomorrowBridge: TomorrowBridgeLike | null | undefined
 ): string {
   return nextStepCheckInLine(firstTask) || tomorrowCheckInLine(tomorrowBridge);
+}
+
+/**
+ * The one-time acceptance question for each exam stage (iter34 P3 ②), word for
+ * word from the spec. Each line closes a stage by naming one concrete check
+ * the learner can do now, built on an already-shipped ability (self-testing,
+ * timed past papers with per-question timing, the mistake book). Appended to
+ * the Sunday review at most once per stage, never handed to the model.
+ */
+export const PHASE_ACCEPTANCE_QUESTIONS: Record<ExamPhase, string> = {
+  基础:
+    '基础阶段收尾时可以这样验收：不翻书，能用 2-3 句话概括每章的核心主题吗？要不要现在就试一章？',
+  强化:
+    '强化阶段收尾时可以这样验收：用一套近年真题限时练一遍吗？我帮你记各题型的用时和正确率，结果都在本周复盘里。',
+  冲刺:
+    '冲刺阶段收尾时可以这样验收：对照错题记录，检查所有错题对应的知识点都掌握了吗？要打开错题本一起过一遍吗？'
+};
+
+/**
+ * The workspace whose exam stage acceptance question has not gone out yet
+ * (iter34 P3 ②). The service composes the code-owned sentence; `workspaceId`
+ * names where `phaseAskedAt` goes once the review carrying it has landed.
+ */
+export interface PendingPhaseAsk {
+  workspaceId: string;
+  phase: ExamPhase;
+}
+
+/**
+ * The first exam project with a stage nobody has been asked about yet, or null.
+ * Only exam projects count (a stage can only be stored there), and a recorded
+ * `phaseAskedAt` means that stage's one question has already been delivered.
+ * At most one ask per review: with several pending projects, the first in the
+ * given order speaks and the rest wait for later weeks.
+ */
+export function pendingPhaseAsk(
+  workspaces: ReadonlyArray<
+    Pick<Workspace, 'id' | 'kind' | 'phase' | 'phaseAskedAt'>
+  >
+): PendingPhaseAsk | null {
+  for (const entry of workspaces) {
+    if (entry.kind !== 'exam' || !entry.phase || entry.phaseAskedAt) continue;
+    return { workspaceId: entry.id, phase: entry.phase };
+  }
+  return null;
+}
+
+/**
+ * The phase acceptance question for this week's review, or '' when there is
+ * nothing to ask. `phase` absent means no stage chosen; a stored
+ * `phaseAskedAt` means this stage's question was already delivered once (it is
+ * cleared when the stage changes, so a new stage asks again). Code-owned and
+ * spoken once — the caller records `phaseAskedAt` only after the message lands.
+ */
+export function phaseAcceptanceQuestion(
+  phase: ExamPhase | undefined,
+  phaseAskedAt: string | undefined
+): string {
+  if (!phase) return '';
+  if (phaseAskedAt) return '';
+  return PHASE_ACCEPTANCE_QUESTIONS[phase] ?? '';
 }
 
 /** True when the week has at least one number worth telling the user. */
@@ -566,6 +628,11 @@ export interface CheckInTemplateInput {
   tomorrowBridge?: TomorrowBridgeLike | null;
   /** The one-time completion-scope sentence (iter34 P1); '' appends nothing. */
   weeklyScopeNote?: string;
+  /**
+   * The one-time stage acceptance question (iter34 P3 ②), for the Sunday
+   * review only; '' appends nothing. Built by `phaseAcceptanceQuestion`.
+   */
+  phaseAsk?: string;
 }
 
 export function buildCheckInTemplate({
@@ -578,7 +645,8 @@ export function buildCheckInTemplate({
   backup = null,
   reviewRecovery = null,
   tomorrowBridge = null,
-  weeklyScopeNote = ''
+  weeklyScopeNote = '',
+  phaseAsk = ''
 }: CheckInTemplateInput): string {
   const tasks = activeTasks(context);
   if (trigger === 'weekly') {
@@ -606,10 +674,14 @@ export function buildCheckInTemplate({
     const withScope = weeklyScopeNote
       ? `${withFailures}\n${weeklyScopeNote}`
       : withFailures;
+    // The stage acceptance question (iter34 P3) ends the review: at most one,
+    // once per stage. Absent for every project without a stage, so those
+    // messages keep the bytes they had before this feature.
+    const withPhaseAsk = phaseAsk ? `${withScope}\n${phaseAsk}` : withScope;
     // The availability question is the last line, and only when there is at
     // least one workspace; otherwise the message keeps its previous bytes.
     const availability = weekAvailabilityQuestion(context);
-    return availability ? `${withScope}\n${availability}` : withScope;
+    return availability ? `${withPhaseAsk}\n${availability}` : withPhaseAsk;
   }
   if (trigger === 'behind') {
     // Byte-identical to the scheduler fallback so both compose one nudge.

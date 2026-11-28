@@ -2440,3 +2440,181 @@ test('the evening check-in never reads the tomorrow bridge', async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+// --- the one-time stage acceptance question (iter34 P3, 验收 25/26) ----------
+
+const PHASE_QUESTION = {
+  基础:
+    '基础阶段收尾时可以这样验收：不翻书，能用 2-3 句话概括每章的核心主题吗？要不要现在就试一章？',
+  强化:
+    '强化阶段收尾时可以这样验收：用一套近年真题限时练一遍吗？我帮你记各题型的用时和正确率，结果都在本周复盘里。',
+  冲刺:
+    '冲刺阶段收尾时可以这样验收：对照错题记录，检查所有错题对应的知识点都掌握了吗？要打开错题本一起过一遍吗？'
+} as const;
+
+type PhaseQuestionStage = keyof typeof PHASE_QUESTION;
+
+test('the first Sunday review asks the stage question and records the day (验收 25)', async () => {
+  const { dir, value } = await store();
+  try {
+    const markPhaseAsked = vi.fn(async () => undefined);
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getPendingPhaseAsk: async () => ({ workspaceId: 'ws-exam', phase: '基础' }),
+      markPhaseAsked,
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    const notification = await service.check('weekly', '2026-11-01');
+    expect(notification).not.toBeNull();
+    const text = (await value.get(notification!.conversationId!))!.messages[0]!.text;
+    expect(text).toBe(
+      [`${WEEKLY_TEMPLATE}`, PHASE_QUESTION['基础'], AVAILABILITY_QUESTION].join('\n')
+    );
+    // Recorded only after the message landed, with the review's own date.
+    expect(markPhaseAsked).toHaveBeenCalledWith('ws-exam', '2026-11-01');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the second Sunday review stays silent once the stage was asked (验收 25)', async () => {
+  const { dir, value } = await store();
+  try {
+    const markPhaseAsked = vi.fn(async () => undefined);
+    // The provider reflects the stored phaseAskedAt: after the first review it
+    // has nothing pending, so this is the same fixture a real second Sunday sees.
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getPendingPhaseAsk: async () => null,
+      markPhaseAsked,
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+
+    const notification = await service.check('weekly', '2026-11-08');
+    const text = (await value.get(notification!.conversationId!))!.messages[0]!.text;
+    expect(text).toBe([WEEKLY_TEMPLATE, AVAILABILITY_QUESTION].join('\n'));
+    expect(text).not.toContain('阶段收尾时');
+    expect(markPhaseAsked).not.toHaveBeenCalled();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('each stage asks its own question when the stage changes (验收 26)', async () => {
+  for (const phase of Object.keys(PHASE_QUESTION) as PhaseQuestionStage[]) {
+    const { dir, value } = await store();
+    try {
+      const service = new ProactiveCheckInService({
+        conversationStore: value,
+        workspaceService,
+        modelClient: null,
+        getPendingPhaseAsk: async () => ({ workspaceId: 'ws-exam', phase }),
+        getSettings: async () => settings(),
+        now: () => NOW
+      });
+      const notification = await service.check('weekly', '2026-11-01');
+      const text = (await value.get(notification!.conversationId!))!.messages[0]!.text;
+      expect(text).toContain(PHASE_QUESTION[phase]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('the stage question rides a model-written review too, exactly once', async () => {
+  const { dir, value } = await store();
+  try {
+    const client = new FakeModelClient(['周日好，这一周辛苦了。']);
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: client,
+      getPendingPhaseAsk: async () => ({ workspaceId: 'ws-exam', phase: '强化' }),
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+    const notification = await service.check('weekly', '2026-11-01');
+    const text = (await value.get(notification!.conversationId!))!.messages[0]!.text;
+    expect(text).toBe(
+      ['周日好，这一周辛苦了。', PHASE_QUESTION['强化'], AVAILABILITY_QUESTION].join('\n')
+    );
+    // Code-owned: the model saw neither the question nor its subject.
+    expect(client.calls[0]!.messages[0]!.content).not.toContain('阶段收尾时');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('no stage fact keeps the weekly review byte-identical and asks nothing (验收 27)', async () => {
+  const { dir, value } = await store();
+  try {
+    const markPhaseAsked = vi.fn(async () => undefined);
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getPendingPhaseAsk: async () => null,
+      markPhaseAsked,
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+    const notification = await service.check('weekly', '2026-11-01');
+    const text = (await value.get(notification!.conversationId!))!.messages[0]!.text;
+    expect(text).toBe([WEEKLY_TEMPLATE, AVAILABILITY_QUESTION].join('\n'));
+    expect(markPhaseAsked).not.toHaveBeenCalled();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a failing stage provider leaves the review byte-identical, never throwing', async () => {
+  const { dir, value } = await store();
+  try {
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getPendingPhaseAsk: async () => {
+        throw new Error('vault unreadable');
+      },
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+    const notification = await service.check('weekly', '2026-11-01');
+    const text = (await value.get(notification!.conversationId!))!.messages[0]!.text;
+    expect(text).toBe([WEEKLY_TEMPLATE, AVAILABILITY_QUESTION].join('\n'));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the stage question is weekly-only: the morning never asks it', async () => {
+  const { dir, value } = await store();
+  try {
+    const getPendingPhaseAsk = vi.fn(async () => ({
+      workspaceId: 'ws-exam',
+      phase: '基础' as const
+    }));
+    const service = new ProactiveCheckInService({
+      conversationStore: value,
+      workspaceService,
+      modelClient: null,
+      getPendingPhaseAsk,
+      getSettings: async () => settings(),
+      now: () => NOW
+    });
+    const notification = await service.check('morning', '2026-11-01');
+    const text = (await value.get(notification!.conversationId!))!.messages[0]!.text;
+    expect(text).not.toContain('阶段收尾时');
+    expect(getPendingPhaseAsk).not.toHaveBeenCalled();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
