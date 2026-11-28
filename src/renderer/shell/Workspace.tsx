@@ -2209,9 +2209,7 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
                     savePracticeMistakeCause({ mistakeId: mistake.id, cause })
                   }
                   onClearResolvedMistakes={() =>
-                    archiveResolvedMistakes({ workspaceId: mistakeBookProjectId }).then(
-                      () => undefined
-                    )
+                    archiveResolvedMistakes({ workspaceId: mistakeBookProjectId })
                   }
                   onListArchivedMistakes={() => listArchivedMistakes(mistakeBookProjectId)}
                   onRestoreMistake={(mistake) =>

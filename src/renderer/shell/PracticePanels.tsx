@@ -33,7 +33,7 @@ type MistakeBookProps = {
   /** Saves the learner's own one-line 错因 (trimmed server-side). */
   onSaveCause?: (mistake: PracticeMistake, cause: string) => Promise<PracticeMistake | void>;
   /** 清空已掌握: moves resolved mistakes to the archive file. */
-  onClearResolved?: () => Promise<void>;
+  onClearResolved?: () => Promise<{ archived: number } | void>;
   /** 从归档恢复: lists archived records for the restore picker. */
   onListArchived?: () => Promise<PracticeMistake[]>;
   onRestore?: (mistake: PracticeMistake) => Promise<void>;
@@ -383,7 +383,17 @@ export function MistakeBook({
     setExportError(null);
     setRestoreNotice(null);
     try {
-      await onClearResolved();
+      const result = await onClearResolved();
+      // The book lists active mistakes only, so a successful clear changes
+      // nothing on screen; say what happened instead of leaving silence.
+      const moved = result !== undefined ? result.archived : undefined;
+      setRestoreNotice(
+        moved !== undefined
+          ? moved > 0
+            ? `已归档 ${moved} 道已掌握错题（可从归档恢复）`
+            : '没有新的已掌握错题可归档'
+          : null
+      );
     } catch (cause) {
       setExportError(friendlyErrorMessage(cause, '清空已掌握失败，请重试。'));
     } finally {

@@ -75,7 +75,7 @@ type LearningPaneProps = {
   /** Saves the learner's own one-line 错因 on a mistake. */
   onSaveMistakeCause?: (mistake: PracticeMistake, cause: string) => Promise<PracticeMistake>;
   /** 清空已掌握: moves resolved mistakes into the archive file. */
-  onClearResolvedMistakes?: () => Promise<void>;
+  onClearResolvedMistakes?: () => Promise<{ archived: number }>;
   /** Archived records for the restore picker. */
   onListArchivedMistakes?: () => Promise<PracticeMistake[]>;
   /** Moves one archived record back into the mistake book. */

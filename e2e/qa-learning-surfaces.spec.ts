@@ -184,6 +184,37 @@ ${WORKSPACE_ID} · 数学 · 2 题
 `
   );
 
+  // A second practice set in another subject, so the 复习单 summary line has
+  // two real buckets (数学 + 政治) regardless of when the suite runs.
+  await writeVaultFile(
+    vault,
+    `${workspaceDir}/practice/sets/ps-pol.md`,
+    `---
+type: qa
+source: user
+kind: practice-set
+id: ps-pol
+workspaceId: ${WORKSPACE_ID}
+title: 政治演练
+subject: 政治
+created: '2026-01-01T00:00'
+updated: '2026-01-01T00:00'
+questions:
+  - id: q-pol
+    prompt: '矛盾的两种基本属性是？'
+    options:
+      - '普遍性和特殊性'
+      - '同一性和斗争性'
+    answer: 1
+    explanation: '同一性和斗争性。'
+---
+
+# 政治演练
+
+${WORKSPACE_ID} · 政治 · 1 题
+`
+  );
+
   // Accuracy fixture: every answer is dated today, so it always lands in the
   // current (rightmost) trend week regardless of when the suite runs.
   // 5 answers, 4 correct → 最近 8 周做 5 题 · 正确率 80%, with no earlier
@@ -259,6 +290,45 @@ entries:
     createdAt: '${today}T09:30'
     updatedAt: '${today}T09:30'
     lastAnsweredAt: '${today}T09:30'
+  - id: pm-pol
+    workspaceId: ${WORKSPACE_ID}
+    setId: ps-pol
+    questionId: q-pol
+    prompt: '矛盾的两种基本属性是？'
+    options:
+      - '普遍性和特殊性'
+      - '同一性和斗争性'
+    answer: 1
+    explanation: '同一性和斗争性。'
+    wrongCount: 1
+    correctStreak: 0
+    priority: 1
+    intervalDays: 1
+    due: '${today}'
+    status: active
+    createdAt: '${today}T09:31'
+    updatedAt: '${today}T09:31'
+    lastAnsweredAt: '${today}T09:31'
+  - id: pm-done
+    workspaceId: ${WORKSPACE_ID}
+    setId: ${SET_ID}
+    questionId: q-trend
+    prompt: '已掌握错题：正确率趋势展示几周？'
+    options:
+      - '4 周'
+      - '8 周'
+    answer: 1
+    explanation: '正确率趋势按最近 8 周汇总。'
+    cause: '记混了窗口长度'
+    wrongCount: 2
+    correctStreak: 2
+    priority: 0
+    intervalDays: 8
+    due: '${localDate(TARGET_OFFSET_DAYS)}'
+    status: resolved
+    createdAt: '${today}T09:30'
+    updatedAt: '${today}T09:40'
+    lastAnsweredAt: '${today}T09:40'
 ---
 
 # ${WORKSPACE_ID} 错题本
@@ -413,8 +483,8 @@ test.describe('learning surfaces (heatmap, accuracy trend, mistake sheet, countd
       // The seeded set is auto-selected and the seeded mistake is listed as
       // due today.
       await expect(page.getByRole('heading', { name: MISTAKE_PROMPT })).toBeVisible();
-      await expect(page.getByText(/错题本 · 1 道待复习/)).toBeVisible();
-      await expect(page.getByText('今天到期 1 道')).toBeVisible();
+      await expect(page.getByText(/错题本 · 2 道待复习/)).toBeVisible();
+      await expect(page.getByText('今天到期 2 道')).toBeVisible();
 
       await page.getByRole('button', { name: '导出复习单' }).click();
       const relativePath = `workspaces/${WORKSPACE_ID}/practice/review-sheets/${today}.md`;
@@ -430,6 +500,75 @@ test.describe('learning surfaces (heatmap, accuracy trend, mistake sheet, countd
       expect(sheet).toContain('答案：A');
       expect(sheet).toContain(`解析：${MISTAKE_EXPLANATION}`);
       expect(sheet).toContain(`错 1 次 · 优先级 1 · 下次复习 ${today}`);
+
+      expect(pageErrors).toEqual([]);
+    } finally {
+      await launched.close();
+    }
+  });
+
+  test('错因/顽疾/科目聚合行/可逆归档', async () => {
+    const { launched, today } = await launchSeeded();
+    const { page, environment } = launched;
+    const pageErrors: string[] = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+
+    try {
+      await expect(page.getByText(GREETING)).toBeVisible();
+      await page.getByRole('button', { name: '全部项目' }).click();
+      await expect(page.locator('header').getByText('项目', { exact: true })).toBeVisible();
+      await page.getByRole('button', { name: '练习', exact: true }).click();
+      await expect(page.getByText(/错题本 · 2 道待复习/)).toBeVisible();
+
+      // ① 错因 one-liner: type into the inline editor and save.
+      await page.getByRole('button', { name: `补一句错因：${MISTAKE_PROMPT}` }).click();
+      const causeInput = page.getByLabel(`错因：${MISTAKE_PROMPT}`);
+      await expect(causeInput).toHaveAttribute('placeholder', '哪个概念、为什么（例：导数链没拆完）');
+      await causeInput.fill('不知道热力图窗口多久');
+      await page.getByRole('button', { name: '保存', exact: true }).click();
+      await expect(page.getByText('错因：不知道热力图窗口多久')).toBeVisible();
+
+      const mistakesRaw = await readFile(
+        join(environment.vault, 'workspaces', WORKSPACE_ID, 'practice', 'mistakes.md'),
+        'utf8'
+      );
+      expect(mistakesRaw).toContain('cause: 不知道热力图窗口多久');
+
+      // ② 复习单: two subjects ⇒ summary line; the active record itself is not
+      // 顽疾 (wrongCount 1) so the mark must be absent.
+      await page.getByRole('button', { name: '导出复习单' }).click();
+      const sheetRel = `workspaces/${WORKSPACE_ID}/practice/review-sheets/${today}.md`;
+      await expect(page.getByText(`已保存：${sheetRel}`)).toBeVisible();
+      const sheet = await readFile(join(environment.vault, ...sheetRel.split('/')), 'utf8');
+      expect(sheet).toContain('数学 1 · 政治 1');
+      expect(sheet).toContain('错因：不知道热力图窗口多久');
+      expect(sheet).not.toContain('顽疾');
+
+      // ③ 清空已掌握: the resolved seeded record moves to the archive file.
+      await page.getByRole('button', { name: '清空已掌握' }).click();
+      await expect(page.getByText('已归档 1 道已掌握错题（可从归档恢复）')).toBeVisible();
+      const archiveRel = `workspaces/${WORKSPACE_ID}/practice/mistakes-archive.md`;
+      const archive = await readFile(join(environment.vault, ...archiveRel.split('/')), 'utf8');
+      expect(archive).toContain('id: pm-done');
+      expect(archive).toContain(`archivedAt: '${today}'`);
+      expect(archive).toContain('cause: 记混了窗口长度');
+      const mistakesAfter = await readFile(
+        join(environment.vault, 'workspaces', WORKSPACE_ID, 'practice', 'mistakes.md'),
+        'utf8'
+      );
+      expect(mistakesAfter).not.toContain('id: pm-done');
+
+      // ④ 从归档恢复: the record returns to mistakes.md, still resolved.
+      await page.getByRole('button', { name: '从归档恢复' }).click();
+      await expect(page.getByText('归档 · 1 道已掌握')).toBeVisible();
+      await page.getByRole('button', { name: '从归档恢复：已掌握错题：正确率趋势展示几周？' }).click();
+      await expect(page.getByText('已恢复到错题本：已掌握错题：正确率趋势展示几周？')).toBeVisible();
+      const restored = await readFile(
+        join(environment.vault, 'workspaces', WORKSPACE_ID, 'practice', 'mistakes.md'),
+        'utf8'
+      );
+      expect(restored).toContain('id: pm-done');
+      expect(restored).toMatch(/id: pm-done[\s\S]*?status: resolved/);
 
       expect(pageErrors).toEqual([]);
     } finally {

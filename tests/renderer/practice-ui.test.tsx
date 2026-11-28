@@ -1908,7 +1908,7 @@ describe('iter34 P0 mistake book surfaces', () => {
       <MistakeBook
         mistakes={[mistake(1)]}
         workspaceId="kaoyan"
-        onClearResolved={vi.fn(async () => undefined)}
+        onClearResolved={vi.fn(async () => ({ archived: 0 }))}
         onListArchived={vi.fn(async () => [])}
         onRestore={vi.fn(async () => undefined)}
         onReview={() => undefined}
@@ -1928,7 +1928,7 @@ describe('iter34 P0 mistake book surfaces', () => {
         workspaceId="kaoyan"
         onListArchived={vi.fn(async () => [archivedMistake])}
         onRestore={onRestore}
-        onClearResolved={vi.fn(async () => undefined)}
+        onClearResolved={vi.fn(async () => ({ archived: 0 }))}
         onReview={() => undefined}
       />
     );
@@ -1962,5 +1962,35 @@ describe('iter34 P0 mistake book surfaces', () => {
     await user.click(screen.getByRole('button', { name: '复制清单' }));
     const text = String(writeText.mock.calls[0]?.[0]);
     expect(text).toContain('\n数学 1 · 英语 1\n');
+  });
+});
+
+describe('iter34 P0 清空已掌握 feedback', () => {
+  it('reports how many records were archived', async () => {
+    const user = userEvent.setup();
+    render(
+      <MistakeBook
+        mistakes={[mistake(1)]}
+        workspaceId="kaoyan"
+        onClearResolved={vi.fn(async () => ({ archived: 2 }))}
+        onReview={() => undefined}
+      />
+    );
+    await user.click(screen.getByRole('button', { name: '清空已掌握' }));
+    expect(await screen.findByText('已归档 2 道已掌握错题（可从归档恢复）')).toBeInTheDocument();
+  });
+
+  it('says so honestly when there was nothing to archive', async () => {
+    const user = userEvent.setup();
+    render(
+      <MistakeBook
+        mistakes={[mistake(1)]}
+        workspaceId="kaoyan"
+        onClearResolved={vi.fn(async () => ({ archived: 0 }))}
+        onReview={() => undefined}
+      />
+    );
+    await user.click(screen.getByRole('button', { name: '清空已掌握' }));
+    expect(await screen.findByText('没有新的已掌握错题可归档')).toBeInTheDocument();
   });
 });
