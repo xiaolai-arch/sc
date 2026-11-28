@@ -135,6 +135,44 @@ test('undated backlog never enters the denominator, and matches recent7DayComple
   expect(result.tasksDone).toBe(sevenDay!.done);
 });
 
+test('a skipped due task counts in neither the denominator nor done, matching recent7DayCompletion', () => {
+  // Same rule as above, now with skipped tasks in and out of the week: the
+  // second rule `recent7DayCompletion` applies (`status === 'skipped'`).
+  const tasks = [
+    task({ id: 'due-done-a', status: 'done', due: dated(-2) }),
+    task({ id: 'due-done-b', status: 'done', due: dated(-1) }),
+    task({ id: 'due-done-c', status: 'done', due: dated(0) }),
+    task({ id: 'due-open-a', due: dated(0) }),
+    task({ id: 'due-open-b', due: dated(0) }),
+    // Dated inside the week but skipped: never planned, never done.
+    task({ id: 'skipped-week', status: 'skipped', due: dated(-1), actualMin: 30 }),
+    task({ id: 'skipped-today', status: 'skipped', due: dated(0) }),
+    // Undated and skipped: not backlog either.
+    task({ id: 'skipped-undated', status: 'skipped' }),
+    ...[1, 2, 3, 4, 5].map((n) => task({ id: `backlog-${n}` }))
+  ];
+
+  const result = overview({ tasks });
+  expect(result).toMatchObject({
+    tasksDone: 3,
+    tasksTotal: 5,
+    backlogCount: 5,
+    // The skipped task's minutes never reach the focus sum.
+    focusMinutes: 0
+  });
+
+  const sevenDay = recent7DayCompletion(tasks, today);
+  expect(sevenDay).not.toBeNull();
+  expect(result.tasksTotal).toBe(sevenDay!.planned);
+  expect(result.tasksDone).toBe(sevenDay!.done);
+
+  // A week holding only skipped due work has nothing planned at all.
+  const onlySkipped = overview({
+    tasks: [task({ id: 'skipped', status: 'skipped', due: '2026-11-04' })]
+  });
+  expect(onlySkipped).toMatchObject({ tasksDone: 0, tasksTotal: 0 });
+});
+
 test('backlog counts only open undated tasks, never done or skipped (验收 13)', () => {
   const result = overview({
     tasks: [

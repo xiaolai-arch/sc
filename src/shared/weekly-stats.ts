@@ -65,11 +65,11 @@ function localDateOf(isoTimestamp: string): string {
 /**
  * Summarises the Monday-based week containing `today`.
  *
- * Tasks count only when their due date falls inside the week — undated
- * backlog is not part of the week's plan, the same rule `recent7DayCompletion`
- * uses, so a standing backlog cannot drag the completion rate down forever.
- * `backlogCount` reports those open undated tasks separately. Focus minutes
- * only sum completed tasks' recorded `actualMin`.
+ * Tasks count only when their due date falls inside the week and they are not
+ * skipped — `recent7DayCompletion`'s two rules, so a standing backlog or a
+ * skipped task cannot drag the completion rate down forever. `backlogCount`
+ * reports the open undated tasks separately. Focus minutes only sum completed
+ * tasks' recorded `actualMin`.
  *
  * Answers follow Anki's True Retention rule: each question counts once per
  * local day, by its earliest answer that day, so re-answering the same card
@@ -90,10 +90,16 @@ export function weeklyOverview({
   );
   const todayKey = formatLocalDate(today);
 
-  // The completion denominator: dated work only, the same rule
-  // `recent7DayCompletion` uses (a standing backlog cannot drag the rate down).
+  // The completion denominator: dated work only, the same two rules
+  // `recent7DayCompletion` uses — undated backlog is never part of a week's
+  // plan, and a skipped task counts neither as planned nor as done (so a
+  // skipped due task cannot drag the completion rate down).
   const weekTasks = tasks.filter(
-    (task) => task.due !== undefined && task.due >= startKey && task.due <= endKey
+    (task) =>
+      task.due !== undefined &&
+      task.due >= startKey &&
+      task.due <= endKey &&
+      task.status !== 'skipped'
   );
   const backlogCount = tasks.filter(
     (task) =>

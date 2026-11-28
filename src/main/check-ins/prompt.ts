@@ -53,9 +53,6 @@ export interface TaskNextStepLike {
   nextStep?: string;
 }
 
-/** Upper bound for the `本周数据：` block, header line included. */
-const MAX_WEEKLY_STATS_LINES = 7;
-
 /**
  * The promise a check-in may ask about; the caller only resolves the oldest
  * open promise that is due, so this stays at most one line.
@@ -259,6 +256,9 @@ function weeklyStatsLines(
       : accuracyTooSmall(overview)
         ? `- 练习：本周目前 ${overview.answered} 题（样本不足暂不计正确率）`
         : `- 练习：${overview.answered} 题，答对 ${overview.correct} 题（正确率 ${accuracyPercent(overview)}%）`;
+  // The block's size is its own array length: every optional line is either
+  // present or absent here, never trimmed afterwards, so a new line can never
+  // silently lose the last one to a stale cap. The size test is the net.
   return [
     '本周数据：',
     `- 任务完成：${overview.tasksDone}/${overview.tasksTotal} 个`,
@@ -269,7 +269,7 @@ function weeklyStatsLines(
     practiceLine,
     `- 复盘：${overview.reviewedDays} 天`,
     `- 到期错题：${overview.dueMistakes} 道`
-  ].slice(0, MAX_WEEKLY_STATS_LINES);
+  ];
 }
 
 /**

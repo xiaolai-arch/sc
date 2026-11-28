@@ -127,14 +127,20 @@ test('the weekly prompt quotes the week numbers for a known fixture', () => {
   expect(prompt.indexOf('本周数据：')).toBeLessThan(prompt.indexOf('请用中文写一条 3-5 句'));
 });
 
-test('the recap block never exceeds seven lines', () => {
-  const prompt = buildCheckInPrompt(context, 'weekly', DATE, stats);
+test('the recap block keeps all its lines, the last one included', () => {
+  // The block's size is the array's own length, so every optional line shows.
+  // This is the regression net: a future line must not push 到期错题 out.
+  const full: WeeklyOverviewLike = { ...stats, backlogCount: 4 };
+  const prompt = buildCheckInPrompt(context, 'weekly', DATE, full);
   const block = prompt.slice(
     prompt.indexOf('本周数据：'),
     prompt.indexOf('请用中文写一条 3-5 句')
   );
   const lines = block.split('\n').filter((line) => line.trim() !== '');
-  expect(lines.length).toBeLessThanOrEqual(7);
+  // Header + completion + backlog + focus + practice + review + mistakes.
+  expect(lines).toHaveLength(7);
+  expect(lines[0]).toBe('本周数据：');
+  expect(lines[lines.length - 1]).toBe('- 到期错题：2 道');
 });
 
 test('a backlog adds exactly one line, without touching the completion rate (验收 12/13)', () => {
