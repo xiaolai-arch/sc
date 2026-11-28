@@ -468,18 +468,18 @@ export class ProactiveCheckInService {
     tomorrowBridge: TomorrowBridgeLike | null = null,
     scopeNote: string = ''
   ): Promise<string> {
-    const template = buildCheckInTemplate(
+    const template = buildCheckInTemplate({
       context,
       trigger,
       date,
-      weeklyStats,
-      weeklyHonest,
+      stats: weeklyStats,
+      honest: weeklyHonest,
       commitment,
       backup,
       reviewRecovery,
       tomorrowBridge,
-      scopeNote
-    );
+      weeklyScopeNote: scopeNote
+    });
     if (!this.modelClient) return template;
     try {
       const composed = await this.composeWithModel(

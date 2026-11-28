@@ -204,14 +204,24 @@ test('the morning prompt ignores weekly stats and stays byte-identical', () => {
 });
 
 test('the weekly template prepends one deterministic recap line', () => {
-  expect(buildCheckInTemplate(context, 'weekly', DATE, stats)).toBe(
+  expect(buildCheckInTemplate({
+    context,
+    trigger: 'weekly',
+    date: DATE,
+    stats
+  })).toBe(
     `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`
   );
 });
 
 test('the recap line omits accuracy before the first answer', () => {
   expect(
-    buildCheckInTemplate(context, 'weekly', DATE, { ...stats, answered: 0, correct: 0 })
+    buildCheckInTemplate({
+      context,
+      trigger: 'weekly',
+      date: DATE,
+      stats: { ...stats, answered: 0, correct: 0 }
+    })
   ).toBe(
     `本周完成 3 个任务 · 专注 135 分钟\n${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`
   );
@@ -235,7 +245,12 @@ test('below five answers the prompt quotes a count, never a percentage (验收 1
 });
 
 test('below five answers the recap line drops the accuracy segment entirely (验收 15)', () => {
-  expect(buildCheckInTemplate(context, 'weekly', DATE, SMALL)).toBe(
+  expect(buildCheckInTemplate({
+    context,
+    trigger: 'weekly',
+    date: DATE,
+    stats: SMALL
+  })).toBe(
     `本周完成 3 个任务 · 专注 135 分钟\n${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`
   );
 });
@@ -250,7 +265,12 @@ test('five answers keep all three places byte-identical to 1.3.0 (验收 15 nega
   expect(buildCheckInPrompt(context, 'weekly', DATE, five)).toContain(
     '- 练习：5 题，答对 4 题（正确率 80%）'
   );
-  expect(buildCheckInTemplate(context, 'weekly', DATE, five)).toBe(
+  expect(buildCheckInTemplate({
+    context,
+    trigger: 'weekly',
+    date: DATE,
+    stats: five
+  })).toBe(
     `本周完成 3 个任务 · 专注 135 分钟 · 正确率 80%\n${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`
   );
 });
@@ -266,7 +286,12 @@ test('zero answers keep all three places byte-identical to 1.3.0 (验收 15 nega
   expect(prompt).toContain('- 练习：本周还没有做题');
   expect(prompt).not.toContain('样本不足');
   expect(prompt).not.toContain('正确率');
-  expect(buildCheckInTemplate(context, 'weekly', DATE, zero)).toBe(
+  expect(buildCheckInTemplate({
+    context,
+    trigger: 'weekly',
+    date: DATE,
+    stats: zero
+  })).toBe(
     `本周完成 3 个任务 · 专注 135 分钟\n${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`
   );
 });
@@ -291,35 +316,81 @@ test('the scope sentence rides once and is suppressed by the stored flag', () =>
 });
 
 test('the weekly template carries the scope sentence last before the question', () => {
-  const weekly = buildCheckInTemplate(context, 'weekly', DATE, stats, null, null, null, null, null, SCOPE_NOTE);
+  const weekly = buildCheckInTemplate({
+    context,
+    trigger: 'weekly',
+    date: DATE,
+    stats,
+    honest: null,
+    commitment: null,
+    backup: null,
+    reviewRecovery: null,
+    tomorrowBridge: null,
+    weeklyScopeNote: SCOPE_NOTE
+  });
   expect(weekly).toBe(
     `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE_BEFORE_STATS}\n${SCOPE_NOTE}\n${WEEK_AVAILABILITY_QUESTION}`
   );
   // Absent keeps the bytes untouched.
-  expect(buildCheckInTemplate(context, 'weekly', DATE, stats)).toBe(
-    buildCheckInTemplate(context, 'weekly', DATE, stats, null, null, null, null, null, '')
+  expect(buildCheckInTemplate({
+    context,
+    trigger: 'weekly',
+    date: DATE,
+    stats
+  })).toBe(
+    buildCheckInTemplate({
+      context,
+      trigger: 'weekly',
+      date: DATE,
+      stats,
+      honest: null,
+      commitment: null,
+      backup: null,
+      reviewRecovery: null,
+      tomorrowBridge: null,
+      weeklyScopeNote: ''
+    })
   );
 });
 
 
 test('the weekly template asks the availability question exactly once, last', () => {
-  const weekly = buildCheckInTemplate(context, 'weekly', DATE, stats, {
+  const weekly = buildCheckInTemplate({
+    context,
+    trigger: 'weekly',
+    date: DATE,
+    stats,
+    honest: {
     calibration: '有把握但错 2 道 · 没把握但对 1 道',
     nextStep: '下周先练「三角函数」的到期错题（3 道）'
+  }
   });
   expect(weekly.split(WEEK_AVAILABILITY_QUESTION)).toHaveLength(2);
   expect(weekly.endsWith(WEEK_AVAILABILITY_QUESTION)).toBe(true);
 });
 
 test('the weekly template is unchanged without stats or with an all-zero week', () => {
-  expect(buildCheckInTemplate(context, 'weekly', DATE, null)).toBe(
+  expect(buildCheckInTemplate({
+    context,
+    trigger: 'weekly',
+    date: DATE,
+    stats: null
+  })).toBe(
     `${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`
   );
-  expect(buildCheckInTemplate(context, 'weekly', DATE)).toBe(
+  expect(buildCheckInTemplate({
+    context,
+    trigger: 'weekly',
+    date: DATE
+  })).toBe(
     `${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`
   );
   expect(
-    buildCheckInTemplate(context, 'weekly', DATE, {
+    buildCheckInTemplate({
+      context,
+      trigger: 'weekly',
+      date: DATE,
+      stats: {
       tasksDone: 0,
       tasksTotal: 0,
       backlogCount: 0,
@@ -329,20 +400,49 @@ test('the weekly template is unchanged without stats or with an all-zero week', 
       accuracyReliable: false,
       reviewedDays: 0,
       dueMistakes: 0
+    }
     })
   ).toBe(`${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`);
 });
 
 test('morning, evening and behind templates ignore weekly stats', () => {
-  const morning = buildCheckInTemplate(context, 'morning', DATE, stats);
-  const evening = buildCheckInTemplate(context, 'evening', DATE, stats);
+  const morning = buildCheckInTemplate({
+    context,
+    trigger: 'morning',
+    date: DATE,
+    stats
+  });
+  const evening = buildCheckInTemplate({
+    context,
+    trigger: 'evening',
+    date: DATE,
+    stats
+  });
   expect(morning).toBe('早上好。今天有 1 个任务，先做「极限基础」怎么样？做完告诉我一声。');
   expect(evening).toBe('晚上好。今天还有 1 个任务没完成，最卡的是哪一步？');
-  expect(buildCheckInTemplate(context, 'morning', DATE, stats)).toBe(
-    buildCheckInTemplate(context, 'morning', DATE)
+  expect(buildCheckInTemplate({
+    context,
+    trigger: 'morning',
+    date: DATE,
+    stats
+  })).toBe(
+    buildCheckInTemplate({
+      context,
+      trigger: 'morning',
+      date: DATE
+    })
   );
-  expect(buildCheckInTemplate(context, 'evening', DATE, stats)).toBe(
-    buildCheckInTemplate(context, 'evening', DATE)
+  expect(buildCheckInTemplate({
+    context,
+    trigger: 'evening',
+    date: DATE,
+    stats
+  })).toBe(
+    buildCheckInTemplate({
+      context,
+      trigger: 'evening',
+      date: DATE
+    })
   );
 });
 
@@ -364,13 +464,25 @@ test('the cue never leaks into the morning, evening or behind templates', () => 
     ...context,
     tasks: [{ ...task, cue: '晚饭后', due: DATE }]
   };
-  expect(buildCheckInTemplate(cued, 'morning', DATE)).toBe(
+  expect(buildCheckInTemplate({
+    context: cued,
+    trigger: 'morning',
+    date: DATE
+  })).toBe(
     '早上好。今天有 1 个任务，先做「极限基础」怎么样？做完告诉我一声。'
   );
-  expect(buildCheckInTemplate(cued, 'evening', DATE)).toBe(
+  expect(buildCheckInTemplate({
+    context: cued,
+    trigger: 'evening',
+    date: DATE
+  })).toBe(
     '晚上好。今天还有 1 个任务没完成，最卡的是哪一步？'
   );
-  expect(buildCheckInTemplate(cued, 'behind', DATE)).toBe(
+  expect(buildCheckInTemplate({
+    context: cued,
+    trigger: 'behind',
+    date: DATE
+  })).toBe(
     '今天还有 1 个任务没完成，下一项是「极限基础」。要不要一起调整一下今天的安排？'
   );
 });
@@ -381,7 +493,13 @@ const honest = {
 };
 
 test('the weekly template ends with the two honest lines', () => {
-  expect(buildCheckInTemplate(context, 'weekly', DATE, stats, honest)).toBe(
+  expect(buildCheckInTemplate({
+    context,
+    trigger: 'weekly',
+    date: DATE,
+    stats,
+    honest
+  })).toBe(
     [
       '本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%',
       WEEKLY_TEMPLATE_BEFORE_STATS,
@@ -393,7 +511,13 @@ test('the weekly template ends with the two honest lines', () => {
 });
 
 test('honest lines stand alone when the week has no recap numbers', () => {
-  expect(buildCheckInTemplate(context, 'weekly', DATE, null, honest)).toBe(
+  expect(buildCheckInTemplate({
+    context,
+    trigger: 'weekly',
+    date: DATE,
+    stats: null,
+    honest
+  })).toBe(
     [
       WEEKLY_TEMPLATE_BEFORE_STATS,
       '有把握但错 2 道 · 没把握但对 1 道',
@@ -405,17 +529,29 @@ test('honest lines stand alone when the week has no recap numbers', () => {
 
 test('only the non-null honest line is appended', () => {
   expect(
-    buildCheckInTemplate(context, 'weekly', DATE, null, {
+    buildCheckInTemplate({
+      context,
+      trigger: 'weekly',
+      date: DATE,
+      stats: null,
+      honest: {
       calibration: null,
       nextStep: '下周先练「三角函数」的到期错题（3 道）'
+    }
     })
   ).toBe(
     `${WEEKLY_TEMPLATE_BEFORE_STATS}\n下一步：下周先练「三角函数」的到期错题（3 道）\n${WEEK_AVAILABILITY_QUESTION}`
   );
   expect(
-    buildCheckInTemplate(context, 'weekly', DATE, null, {
+    buildCheckInTemplate({
+      context,
+      trigger: 'weekly',
+      date: DATE,
+      stats: null,
+      honest: {
       calibration: '有把握但错 2 道 · 没把握但对 1 道',
       nextStep: null
+    }
     })
   ).toBe(
     `${WEEKLY_TEMPLATE_BEFORE_STATS}\n有把握但错 2 道 · 没把握但对 1 道\n${WEEK_AVAILABILITY_QUESTION}`
@@ -423,13 +559,25 @@ test('only the non-null honest line is appended', () => {
 });
 
 test('no honest facts leaves the weekly template byte-identical', () => {
-  expect(buildCheckInTemplate(context, 'weekly', DATE, stats, null)).toBe(
+  expect(buildCheckInTemplate({
+    context,
+    trigger: 'weekly',
+    date: DATE,
+    stats,
+    honest: null
+  })).toBe(
     `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`
   );
   expect(
-    buildCheckInTemplate(context, 'weekly', DATE, stats, {
+    buildCheckInTemplate({
+      context,
+      trigger: 'weekly',
+      date: DATE,
+      stats,
+      honest: {
       calibration: null,
       nextStep: null
+    }
     })
   ).toBe(
     `本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%\n${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`
@@ -466,12 +614,24 @@ test('the accountability clause trails the honest lines exactly once', () => {
   const clause = '你说过要做「写完第三章」，你告诉过 小林 的时间是 2026-11-20';
   const withClause = { ...honest, accountability: clause };
 
-  const weekly = buildCheckInTemplate(context, 'weekly', DATE, stats, withClause);
+  const weekly = buildCheckInTemplate({
+    context,
+    trigger: 'weekly',
+    date: DATE,
+    stats,
+    honest: withClause
+  });
   expect(weekly.split(clause)).toHaveLength(2);
   // The clause ends before the deterministic availability question.
   expect(weekly.endsWith(`${clause}\n${WEEK_AVAILABILITY_QUESTION}`)).toBe(true);
   expect(weekly).toBe(
-    buildCheckInTemplate(context, 'weekly', DATE, stats, honest).replace(
+    buildCheckInTemplate({
+      context,
+      trigger: 'weekly',
+      date: DATE,
+      stats,
+      honest
+    }).replace(
       WEEK_AVAILABILITY_QUESTION,
       `${clause}\n${WEEK_AVAILABILITY_QUESTION}`
     )
@@ -480,8 +640,20 @@ test('the accountability clause trails the honest lines exactly once', () => {
   // An empty or null clause keeps the message byte-identical.
   for (const accountability of [undefined, null, '']) {
     expect(
-      buildCheckInTemplate(context, 'weekly', DATE, stats, { ...honest, accountability })
-    ).toBe(buildCheckInTemplate(context, 'weekly', DATE, stats, honest));
+      buildCheckInTemplate({
+        context,
+        trigger: 'weekly',
+        date: DATE,
+        stats,
+        honest: { ...honest, accountability }
+      })
+    ).toBe(buildCheckInTemplate({
+      context,
+      trigger: 'weekly',
+      date: DATE,
+      stats,
+      honest
+    }));
   }
 });
 
@@ -563,17 +735,31 @@ test('a promise never enters the evening, behind or weekly prompts', () => {
 
 test('the morning template appends the exact promise line', () => {
   expect(
-    buildCheckInTemplate(context, 'morning', DATE, null, null, {
+    buildCheckInTemplate({
+      context,
+      trigger: 'morning',
+      date: DATE,
+      stats: null,
+      honest: null,
+      commitment: {
       text: '背 20 个单词',
       due: '2026-11-07'
+    }
     })
   ).toBe(
     '早上好。今天有 1 个任务，先做「极限基础」怎么样？做完告诉我一声。\n昨天你说要做「背 20 个单词」，做了吗？没做的话，挪到今天还是先放一放？'
   );
   expect(
-    buildCheckInTemplate(context, 'morning', DATE, null, null, {
+    buildCheckInTemplate({
+      context,
+      trigger: 'morning',
+      date: DATE,
+      stats: null,
+      honest: null,
+      commitment: {
       text: '背 20 个单词',
       due: DATE
+    }
     })
   ).toBe(
     '早上好。今天有 1 个任务，先做「极限基础」怎么样？做完告诉我一声。\n你说今天要做「背 20 个单词」，做了吗？'
@@ -581,13 +767,27 @@ test('the morning template appends the exact promise line', () => {
 });
 
 test('no due promise leaves the morning template byte-identical', () => {
-  expect(buildCheckInTemplate(context, 'morning', DATE, null, null, null)).toBe(
+  expect(buildCheckInTemplate({
+    context,
+    trigger: 'morning',
+    date: DATE,
+    stats: null,
+    honest: null,
+    commitment: null
+  })).toBe(
     '早上好。今天有 1 个任务，先做「极限基础」怎么样？做完告诉我一声。'
   );
   expect(
-    buildCheckInTemplate(context, 'morning', DATE, null, null, {
+    buildCheckInTemplate({
+      context,
+      trigger: 'morning',
+      date: DATE,
+      stats: null,
+      honest: null,
+      commitment: {
       text: '背 20 个单词',
       due: '2026-11-09'
+    }
     })
   ).toBe('早上好。今天有 1 个任务，先做「极限基础」怎么样？做完告诉我一声。');
 });
@@ -595,12 +795,26 @@ test('no due promise leaves the morning template byte-identical', () => {
 test('the empty-plan morning template also carries the promise line', () => {
   const empty: ButlerContext = { ...context, tasks: [] };
   expect(
-    buildCheckInTemplate(empty, 'morning', DATE, null, null, {
+    buildCheckInTemplate({
+      context: empty,
+      trigger: 'morning',
+      date: DATE,
+      stats: null,
+      honest: null,
+      commitment: {
       text: '背 20 个单词',
       due: DATE
+    }
     })
   ).toBe('早上好。今天还没有安排任务，想先做点什么？\n你说今天要做「背 20 个单词」，做了吗？');
-  expect(buildCheckInTemplate(empty, 'morning', DATE, null, null, null)).toBe(
+  expect(buildCheckInTemplate({
+    context: empty,
+    trigger: 'morning',
+    date: DATE,
+    stats: null,
+    honest: null,
+    commitment: null
+  })).toBe(
     '早上好。今天还没有安排任务，想先做点什么？'
   );
 });
@@ -652,15 +866,15 @@ test('backupAgeLine is off by default and needs a real check-in date', () => {
 const AGE_LINE = '上次导出备份是 3 天前（11月5日）。';
 
 test('the weekly template appends the age line after the honest receipt', () => {
-  const withHonest = buildCheckInTemplate(
+  const withHonest = buildCheckInTemplate({
     context,
-    'weekly',
-    DATE,
+    trigger: 'weekly',
+    date: DATE,
     stats,
     honest,
-    null,
-    { ageLineEnabled: true, lastBackupAt: '2026-11-05T14:32:10' }
-  );
+    commitment: null,
+    backup: { ageLineEnabled: true, lastBackupAt: '2026-11-05T14:32:10' }
+  });
   expect(withHonest).toBe(
     [
       '本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%',
@@ -674,15 +888,15 @@ test('the weekly template appends the age line after the honest receipt', () => 
   expect(withHonest.split(AGE_LINE)).toHaveLength(2);
 
   // Without honest facts the age line still sits before the question.
-  const withoutHonest = buildCheckInTemplate(
+  const withoutHonest = buildCheckInTemplate({
     context,
-    'weekly',
-    DATE,
-    null,
-    null,
-    null,
-    { ageLineEnabled: true, lastBackupAt: '2026-11-05T14:32:10' }
-  );
+    trigger: 'weekly',
+    date: DATE,
+    stats: null,
+    honest: null,
+    commitment: null,
+    backup: { ageLineEnabled: true, lastBackupAt: '2026-11-05T14:32:10' }
+  });
   expect(withoutHonest).toBe(
     `${WEEKLY_TEMPLATE_BEFORE_STATS}\n${AGE_LINE}\n${WEEK_AVAILABILITY_QUESTION}`
   );
@@ -690,30 +904,78 @@ test('the weekly template appends the age line after the honest receipt', () => 
 
 test('the weekly template names a missing record once, before the question', () => {
   expect(
-    buildCheckInTemplate(context, 'weekly', DATE, null, null, null, BACKUP_ON)
+    buildCheckInTemplate({
+      context,
+      trigger: 'weekly',
+      date: DATE,
+      stats: null,
+      honest: null,
+      commitment: null,
+      backup: BACKUP_ON
+    })
   ).toBe(`${WEEKLY_TEMPLATE_BEFORE_STATS}\n还没有导出备份。\n${WEEK_AVAILABILITY_QUESTION}`);
 });
 
 test('a same-day export leaves the weekly template byte-identical', () => {
   const enabled = { ageLineEnabled: true, lastBackupAt: `${DATE}T09:15:00` };
-  expect(buildCheckInTemplate(context, 'weekly', DATE, null, null, null, enabled)).toBe(
+  expect(buildCheckInTemplate({
+    context,
+    trigger: 'weekly',
+    date: DATE,
+    stats: null,
+    honest: null,
+    commitment: null,
+    backup: enabled
+  })).toBe(
     `${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`
   );
-  expect(buildCheckInTemplate(context, 'weekly', DATE, null, null, null, enabled)).toBe(
-    buildCheckInTemplate(context, 'weekly', DATE)
+  expect(buildCheckInTemplate({
+    context,
+    trigger: 'weekly',
+    date: DATE,
+    stats: null,
+    honest: null,
+    commitment: null,
+    backup: enabled
+  })).toBe(
+    buildCheckInTemplate({
+      context,
+      trigger: 'weekly',
+      date: DATE
+    })
   );
 });
 
 test('the switch off keeps the weekly template byte-identical', () => {
   const withRecord = { ageLineEnabled: false, lastBackupAt: '2026-11-05T14:32:10' };
   expect(
-    buildCheckInTemplate(context, 'weekly', DATE, null, null, null, withRecord)
-  ).toBe(buildCheckInTemplate(context, 'weekly', DATE));
+    buildCheckInTemplate({
+      context,
+      trigger: 'weekly',
+      date: DATE,
+      stats: null,
+      honest: null,
+      commitment: null,
+      backup: withRecord
+    })
+  ).toBe(buildCheckInTemplate({
+    context,
+    trigger: 'weekly',
+    date: DATE
+  }));
 });
 
 test('an enabled switch with no record names the gap even with honest facts', () => {
   expect(
-    buildCheckInTemplate(context, 'weekly', DATE, stats, honest, null, BACKUP_ON)
+    buildCheckInTemplate({
+      context,
+      trigger: 'weekly',
+      date: DATE,
+      stats,
+      honest,
+      commitment: null,
+      backup: BACKUP_ON
+    })
   ).toBe(
     [
       '本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%',
@@ -729,8 +991,20 @@ test('an enabled switch with no record names the gap even with honest facts', ()
 test('the age line never enters the other triggers or the model prompt', () => {
   const enabled = { ageLineEnabled: true, lastBackupAt: '2026-11-05T14:32:10' };
   for (const trigger of ['morning', 'evening', 'behind'] as const) {
-    expect(buildCheckInTemplate(context, trigger, DATE, null, null, null, enabled)).toBe(
-      buildCheckInTemplate(context, trigger, DATE)
+    expect(buildCheckInTemplate({
+      context,
+      trigger,
+      date: DATE,
+      stats: null,
+      honest: null,
+      commitment: null,
+      backup: enabled
+    })).toBe(
+      buildCheckInTemplate({
+        context,
+        trigger,
+        date: DATE
+      })
     );
   }
   const prompt = buildCheckInPrompt(context, 'weekly', DATE, stats, honest);
@@ -756,46 +1030,70 @@ test('backupFailureLines builds the three-layer copy from a pending reason', () 
 });
 
 test('the weekly template appends the failure copy after the age line, before the question', () => {
-  const both = buildCheckInTemplate(
+  const both = buildCheckInTemplate({
     context,
-    'weekly',
-    DATE,
-    null,
-    null,
-    null,
-    { ageLineEnabled: true, lastBackupAt: '2026-11-05T14:32:10', lastBackupError: FAILURE_REASON }
-  );
+    trigger: 'weekly',
+    date: DATE,
+    stats: null,
+    honest: null,
+    commitment: null,
+    backup: { ageLineEnabled: true, lastBackupAt: '2026-11-05T14:32:10', lastBackupError: FAILURE_REASON }
+  });
   expect(both).toBe(
     `${WEEKLY_TEMPLATE_BEFORE_STATS}\n${AGE_LINE}\n${FAILURE_COPY}\n${WEEK_AVAILABILITY_QUESTION}`
   );
   expect(both.split('自动备份没有成功')).toHaveLength(2);
 
   // A pending failure without the age switch sits in the same slot.
-  const failureOnly = buildCheckInTemplate(
+  const failureOnly = buildCheckInTemplate({
     context,
-    'weekly',
-    DATE,
-    null,
-    null,
-    null,
-    { lastBackupError: FAILURE_REASON }
-  );
+    trigger: 'weekly',
+    date: DATE,
+    stats: null,
+    honest: null,
+    commitment: null,
+    backup: { lastBackupError: FAILURE_REASON }
+  });
   expect(failureOnly).toBe(
     `${WEEKLY_TEMPLATE_BEFORE_STATS}\n${FAILURE_COPY}\n${WEEK_AVAILABILITY_QUESTION}`
   );
 
   // No pending reason keeps the template at its previous bytes.
   const clean = { ageLineEnabled: false, lastBackupError: '' };
-  expect(buildCheckInTemplate(context, 'weekly', DATE, null, null, null, clean)).toBe(
-    buildCheckInTemplate(context, 'weekly', DATE)
+  expect(buildCheckInTemplate({
+    context,
+    trigger: 'weekly',
+    date: DATE,
+    stats: null,
+    honest: null,
+    commitment: null,
+    backup: clean
+  })).toBe(
+    buildCheckInTemplate({
+      context,
+      trigger: 'weekly',
+      date: DATE
+    })
   );
 });
 
 test('the failure copy never enters the other triggers or the model prompt', () => {
   const pending = { lastBackupError: FAILURE_REASON };
   for (const trigger of ['morning', 'evening', 'behind'] as const) {
-    expect(buildCheckInTemplate(context, trigger, DATE, null, null, null, pending)).toBe(
-      buildCheckInTemplate(context, trigger, DATE)
+    expect(buildCheckInTemplate({
+      context,
+      trigger,
+      date: DATE,
+      stats: null,
+      honest: null,
+      commitment: null,
+      backup: pending
+    })).toBe(
+      buildCheckInTemplate({
+        context,
+        trigger,
+        date: DATE
+      })
     );
   }
   const prompt = buildCheckInPrompt(context, 'weekly', DATE, stats, honest);
@@ -807,7 +1105,11 @@ test('the failure copy never enters the other triggers or the model prompt', () 
 const NO_WORKSPACE: ButlerContext = { ...context, workspaces: [] };
 
 test('the weekly template asks which days next week are packed', () => {
-  const weekly = buildCheckInTemplate(context, 'weekly', DATE);
+  const weekly = buildCheckInTemplate({
+    context,
+    trigger: 'weekly',
+    date: DATE
+  });
   expect(weekly.endsWith(WEEK_AVAILABILITY_QUESTION)).toBe(true);
   expect(weekly).toBe(
     `${WEEKLY_TEMPLATE_BEFORE_STATS}\n${WEEK_AVAILABILITY_QUESTION}`
@@ -815,10 +1117,20 @@ test('the weekly template asks which days next week are packed', () => {
 });
 
 test('no workspace leaves the weekly template byte-identical', () => {
-  expect(buildCheckInTemplate(NO_WORKSPACE, 'weekly', DATE)).toBe(
+  expect(buildCheckInTemplate({
+    context: NO_WORKSPACE,
+    trigger: 'weekly',
+    date: DATE
+  })).toBe(
     WEEKLY_TEMPLATE_BEFORE_STATS
   );
-  expect(buildCheckInTemplate(NO_WORKSPACE, 'weekly', DATE, stats, honest)).toBe(
+  expect(buildCheckInTemplate({
+    context: NO_WORKSPACE,
+    trigger: 'weekly',
+    date: DATE,
+    stats,
+    honest
+  })).toBe(
     [
       '本周完成 3 个任务 · 专注 135 分钟 · 正确率 83%',
       WEEKLY_TEMPLATE_BEFORE_STATS,
@@ -841,7 +1153,13 @@ test('the question never enters the model prompt or other triggers', () => {
     WEEK_AVAILABILITY_QUESTION
   );
   for (const trigger of ['morning', 'evening', 'behind'] as const) {
-    expect(buildCheckInTemplate(context, trigger, DATE, stats, honest)).not.toContain(
+    expect(buildCheckInTemplate({
+      context,
+      trigger,
+      date: DATE,
+      stats,
+      honest
+    })).not.toContain(
       WEEK_AVAILABILITY_QUESTION
     );
   }
@@ -911,23 +1229,32 @@ const PROMISE_YESTERDAY = '昨天你说要做「背 20 个单词」，做了吗�
 
 test('the morning template appends the fresh-start line after the greeting', () => {
   expect(
-    buildCheckInTemplate(context, 'morning', DATE, null, null, null, null, {
+    buildCheckInTemplate({
+      context,
+      trigger: 'morning',
+      date: DATE,
+      stats: null,
+      honest: null,
+      commitment: null,
+      backup: null,
+      reviewRecovery: {
       freshStart: true
+    }
     })
   ).toBe(`${MORNING_BASE}\n${FRESH_START_LINE}`);
 });
 
 test('the fresh-start line precedes the promise line when both fire, in that order', () => {
-  const template = buildCheckInTemplate(
+  const template = buildCheckInTemplate({
     context,
-    'morning',
-    DATE,
-    null,
-    null,
-    { text: '背 20 个单词', due: '2026-11-07' },
-    null,
-    { freshStart: true }
-  );
+    trigger: 'morning',
+    date: DATE,
+    stats: null,
+    honest: null,
+    commitment: { text: '背 20 个单词', due: '2026-11-07' },
+    backup: null,
+    reviewRecovery: { freshStart: true }
+  });
   expect(template).toBe([MORNING_BASE, FRESH_START_LINE, PROMISE_YESTERDAY].join('\n'));
   expect(template.indexOf(FRESH_START_LINE)).toBeLessThan(template.indexOf(PROMISE_YESTERDAY));
   // Each line appears exactly once.
@@ -938,16 +1265,16 @@ test('the fresh-start line precedes the promise line when both fire, in that ord
 test('the empty-plan morning template keeps the same fixed order', () => {
   const empty: ButlerContext = { ...context, tasks: [] };
   expect(
-    buildCheckInTemplate(
-      empty,
-      'morning',
-      DATE,
-      null,
-      null,
-      { text: '背 20 个单词', due: DATE },
-      null,
-      { freshStart: true }
-    )
+    buildCheckInTemplate({
+      context: empty,
+      trigger: 'morning',
+      date: DATE,
+      stats: null,
+      honest: null,
+      commitment: { text: '背 20 个单词', due: DATE },
+      backup: null,
+      reviewRecovery: { freshStart: true }
+    })
   ).toBe(
     [
       '早上好。今天还没有安排任务，想先做点什么？',
@@ -958,18 +1285,49 @@ test('the empty-plan morning template keeps the same fixed order', () => {
 });
 
 test('an absent or negative fresh-start fact keeps the morning template byte-identical', () => {
-  expect(buildCheckInTemplate(context, 'morning', DATE, null, null, null, null, null)).toBe(
+  expect(buildCheckInTemplate({
+    context,
+    trigger: 'morning',
+    date: DATE,
+    stats: null,
+    honest: null,
+    commitment: null,
+    backup: null,
+    reviewRecovery: null
+  })).toBe(
     MORNING_BASE
   );
   expect(
-    buildCheckInTemplate(context, 'morning', DATE, null, null, null, null, { freshStart: false })
+    buildCheckInTemplate({
+      context,
+      trigger: 'morning',
+      date: DATE,
+      stats: null,
+      honest: null,
+      commitment: null,
+      backup: null,
+      reviewRecovery: { freshStart: false }
+    })
   ).toBe(MORNING_BASE);
-  expect(buildCheckInTemplate(context, 'morning', DATE)).toBe(MORNING_BASE);
+  expect(buildCheckInTemplate({
+    context,
+    trigger: 'morning',
+    date: DATE
+  })).toBe(MORNING_BASE);
   // With a promise due, a negative fact changes nothing either.
   const commitment = { text: '背 20 个单词', due: '2026-11-07' };
   expect(
-    buildCheckInTemplate(context, 'morning', DATE, null, null, commitment, null, {
+    buildCheckInTemplate({
+      context,
+      trigger: 'morning',
+      date: DATE,
+      stats: null,
+      honest: null,
+      commitment,
+      backup: null,
+      reviewRecovery: {
       freshStart: false
+    }
     })
   ).toBe(`${MORNING_BASE}\n${PROMISE_YESTERDAY}`);
 });
@@ -984,8 +1342,21 @@ test('the fresh-start line never enters the model prompt', () => {
 test('no other trigger carries the fresh-start line', () => {
   for (const trigger of ['weekly', 'evening', 'behind'] as const) {
     expect(
-      buildCheckInTemplate(context, trigger, DATE, null, null, null, null, { freshStart: true })
-    ).toBe(buildCheckInTemplate(context, trigger, DATE));
+      buildCheckInTemplate({
+        context,
+        trigger,
+        date: DATE,
+        stats: null,
+        honest: null,
+        commitment: null,
+        backup: null,
+        reviewRecovery: { freshStart: true }
+      })
+    ).toBe(buildCheckInTemplate({
+      context,
+      trigger,
+      date: DATE
+    }));
   }
 });
 
@@ -1145,42 +1516,82 @@ test('absent or empty facts keep the empty line', () => {
 });
 
 test('the morning template appends exactly one bridge line, stale or not', () => {
-  const regular = buildCheckInTemplate(
-    context, 'morning', DATE, null, null, null, null, null, { tomorrow: STEP, stale: false }
-  );
+  const regular = buildCheckInTemplate({
+    context,
+    trigger: 'morning',
+    date: DATE,
+    stats: null,
+    honest: null,
+    commitment: null,
+    backup: null,
+    reviewRecovery: null,
+    tomorrowBridge: { tomorrow: STEP, stale: false }
+  });
   expect(regular).toBe(`${MORNING_BASE}\n${LINE_A}`);
   expect(regular.split(LINE_A)).toHaveLength(2);
-  const stale = buildCheckInTemplate(
-    context, 'morning', DATE, null, null, null, null, null, { tomorrow: STEP, stale: true }
-  );
+  const stale = buildCheckInTemplate({
+    context,
+    trigger: 'morning',
+    date: DATE,
+    stats: null,
+    honest: null,
+    commitment: null,
+    backup: null,
+    reviewRecovery: null,
+    tomorrowBridge: { tomorrow: STEP, stale: true }
+  });
   expect(stale).toBe(`${MORNING_BASE}\n${LINE_B}`);
   expect(stale).not.toContain('你在复盘里写下');
 });
 
 test('the bridge line stacks after the fresh-start and promise lines, in that order', () => {
-  const all = buildCheckInTemplate(
+  const all = buildCheckInTemplate({
     context,
-    'morning',
-    DATE,
-    null,
-    null,
-    { text: '背 20 个单词', due: '2026-11-07' },
-    null,
-    { freshStart: true },
-    { tomorrow: STEP, stale: false }
-  );
+    trigger: 'morning',
+    date: DATE,
+    stats: null,
+    honest: null,
+    commitment: { text: '背 20 个单词', due: '2026-11-07' },
+    backup: null,
+    reviewRecovery: { freshStart: true },
+    tomorrowBridge: { tomorrow: STEP, stale: false }
+  });
   expect(all).toBe([MORNING_BASE, FRESH_START_LINE, PROMISE_YESTERDAY, LINE_A].join('\n'));
 });
 
 test('no bridge fact keeps the morning template byte-identical', () => {
-  expect(buildCheckInTemplate(context, 'morning', DATE)).toBe(MORNING_BASE);
+  expect(buildCheckInTemplate({
+    context,
+    trigger: 'morning',
+    date: DATE
+  })).toBe(MORNING_BASE);
   expect(
-    buildCheckInTemplate(context, 'morning', DATE, null, null, null, null, null, null)
+    buildCheckInTemplate({
+      context,
+      trigger: 'morning',
+      date: DATE,
+      stats: null,
+      honest: null,
+      commitment: null,
+      backup: null,
+      reviewRecovery: null,
+      tomorrowBridge: null
+    })
   ).toBe(MORNING_BASE);
   expect(
-    buildCheckInTemplate(context, 'morning', DATE, null, null, null, null, null, {
+    buildCheckInTemplate({
+      context,
+      trigger: 'morning',
+      date: DATE,
+      stats: null,
+      honest: null,
+      commitment: null,
+      backup: null,
+      reviewRecovery: null,
+      tomorrowBridge: {
       tomorrow: '',
       stale: false
+    }
     })
   ).toBe(MORNING_BASE);
 });
@@ -1189,8 +1600,22 @@ test('no other trigger carries the bridge line, and the model never sees it', ()
   const facts: TomorrowBridgeLike = { tomorrow: STEP, stale: false };
   for (const trigger of ['weekly', 'evening', 'behind'] as const) {
     expect(
-      buildCheckInTemplate(context, trigger, DATE, null, null, null, null, null, facts)
-    ).toBe(buildCheckInTemplate(context, trigger, DATE));
+      buildCheckInTemplate({
+        context,
+        trigger,
+        date: DATE,
+        stats: null,
+        honest: null,
+        commitment: null,
+        backup: null,
+        reviewRecovery: null,
+        tomorrowBridge: facts
+      })
+    ).toBe(buildCheckInTemplate({
+      context,
+      trigger,
+      date: DATE
+    }));
   }
   // Like the fresh-start line the bridge is code-owned: the prompt builder
   // takes no such input, so no call site can leak it into a model prompt.
@@ -1244,44 +1669,48 @@ test('the morning template speaks the task line in place of the review line', ()
     ...context,
     tasks: [taskWithNextStep()]
   };
-  const template = buildCheckInTemplate(
-    withStep,
-    'morning',
-    DATE,
-    null,
-    null,
-    null,
-    null,
-    null,
-    { tomorrow: STEP, stale: false }
-  );
+  const template = buildCheckInTemplate({
+    context: withStep,
+    trigger: 'morning',
+    date: DATE,
+    stats: null,
+    honest: null,
+    commitment: null,
+    backup: null,
+    reviewRecovery: null,
+    tomorrowBridge: { tomorrow: STEP, stale: false }
+  });
   expect(template).toBe([MORNING_BASE, TASK_LINE].join('\n'));
   expect(template).not.toContain(LINE_A);
 });
 
 test('a first task without a next step keeps the P0 review line', () => {
   // The review's tomorrow stands in exactly as before (P0 baseline bytes).
-  const template = buildCheckInTemplate(
+  const template = buildCheckInTemplate({
     context,
-    'morning',
-    DATE,
-    null,
-    null,
-    null,
-    null,
-    null,
-    { tomorrow: STEP, stale: false }
-  );
+    trigger: 'morning',
+    date: DATE,
+    stats: null,
+    honest: null,
+    commitment: null,
+    backup: null,
+    reviewRecovery: null,
+    tomorrowBridge: { tomorrow: STEP, stale: false }
+  });
   expect(template).toBe([MORNING_BASE, LINE_A].join('\n'));
 });
 
 test('no next step and no bridge keeps the morning template byte-identical', () => {
-  expect(buildCheckInTemplate(context, 'morning', DATE)).toBe(MORNING_BASE);
-  const withStep = buildCheckInTemplate(
-    { ...context, tasks: [taskWithNextStep()] },
-    'morning',
-    DATE
-  );
+  expect(buildCheckInTemplate({
+    context,
+    trigger: 'morning',
+    date: DATE
+  })).toBe(MORNING_BASE);
+  const withStep = buildCheckInTemplate({
+    context: { ...context, tasks: [taskWithNextStep()] },
+    trigger: 'morning',
+    date: DATE
+  });
   // A recorded step with no bridge still speaks the task line.
   expect(withStep).toBe([MORNING_BASE, TASK_LINE].join('\n'));
 });
@@ -1289,8 +1718,16 @@ test('no next step and no bridge keeps the morning template byte-identical', () 
 test('no other trigger carries the task line (验收 22)', () => {
   const withStep: ButlerContext = { ...context, tasks: [taskWithNextStep()] };
   for (const trigger of ['weekly', 'evening', 'behind'] as const) {
-    expect(buildCheckInTemplate(withStep, trigger, DATE)).toBe(
-      buildCheckInTemplate(context, trigger, DATE)
+    expect(buildCheckInTemplate({
+      context: withStep,
+      trigger,
+      date: DATE
+    })).toBe(
+      buildCheckInTemplate({
+        context,
+        trigger,
+        date: DATE
+      })
     );
   }
 });

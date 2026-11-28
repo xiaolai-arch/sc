@@ -540,18 +540,46 @@ export function buildCheckInPrompt(
   ].join('\n');
 }
 
-export function buildCheckInTemplate(
-  context: ButlerContext,
-  trigger: CheckInTrigger,
+/**
+ * Everything the composed (deterministic) check-in message may use. An object
+ * instead of the ten positional parameters this function used to take: each
+ * optional fact already had a `| null` at the call sites, so named fields are
+ * the honest shape — and a new fact (iter34 P3's `phaseAsk`) no longer needs a
+ * new tail position whose meaning depends on the count of earlier arguments.
+ */
+export interface CheckInTemplateInput {
+  context: ButlerContext;
+  trigger: CheckInTrigger;
+  /** Local `YYYY-MM-DD`; '' when the caller has no date. */
+  date?: string;
+  /** The week's numbers, for the Sunday review only. */
+  stats?: WeeklyOverviewLike | null;
+  /** The honest receipt, for the Sunday review only. */
+  honest?: WeeklyHonestLike | null;
+  /** The promise revisit, for the morning only. */
+  commitment?: CommitmentLike | null;
+  /** Backup facts; the age line and failure copy ride the Sunday review. */
+  backup?: BackupStatusLike | null;
+  /** The fresh-start fact, for the morning only. */
+  reviewRecovery?: ReviewRecoveryLike | null;
+  /** The tomorrow bridge, for the morning only. */
+  tomorrowBridge?: TomorrowBridgeLike | null;
+  /** The one-time completion-scope sentence (iter34 P1); '' appends nothing. */
+  weeklyScopeNote?: string;
+}
+
+export function buildCheckInTemplate({
+  context,
+  trigger,
   date = '',
-  weeklyOverview: WeeklyOverviewLike | null = null,
-  weeklyHonest: WeeklyHonestLike | null = null,
-  commitment: CommitmentLike | null = null,
-  backup: BackupStatusLike | null = null,
-  reviewRecovery: ReviewRecoveryLike | null = null,
-  tomorrowBridge: TomorrowBridgeLike | null = null,
-  weeklyScopeNote: string = ''
-): string {
+  stats: weeklyOverview = null,
+  honest: weeklyHonest = null,
+  commitment = null,
+  backup = null,
+  reviewRecovery = null,
+  tomorrowBridge = null,
+  weeklyScopeNote = ''
+}: CheckInTemplateInput): string {
   const tasks = activeTasks(context);
   if (trigger === 'weekly') {
     const question =
