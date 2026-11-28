@@ -238,3 +238,49 @@ test('archived file stays plaintext under workspaces/<id>/practice', async () =>
   expect(archiveRaw).toContain('## ');
   expect(archiveRaw).toContain('错误次数');
 });
+
+test('1.3.0 mistake files round-trip byte-identically (no cause/archivedAt added)', async () => {
+  // A file written before iter34 carries neither field; reading and rewriting
+  // it must not introduce one, so nothing changes for existing vaults until the
+  // learner uses the new actions.
+  const legacy = `---
+type: qa
+source: user
+kind: practice-mistakes
+workspaceId: kaoyan
+updated: '2026-11-01T09:00:00.000Z'
+entries:
+  - id: pm-legacy
+    workspaceId: kaoyan
+    setId: ps1
+    questionId: q1
+    prompt: 旧题
+    options:
+      - A
+      - B
+    answer: 0
+    explanation: 旧解析
+    wrongCount: 1
+    correctStreak: 0
+    priority: 1
+    intervalDays: 1
+    due: '2026-11-02'
+    status: active
+    createdAt: '2026-11-01T09:00:00.000Z'
+    updatedAt: '2026-11-01T09:00:00.000Z'
+    lastAnsweredAt: '2026-11-01T09:00:00.000Z'
+---
+
+# kaoyan 错题本
+`;
+  await fs.mkdir(join(root, 'workspaces', 'kaoyan', 'practice'), { recursive: true });
+  await fs.writeFile(mistakesPath(), legacy, 'utf8');
+  const parsed = parseMistakesFile(legacy);
+  expect(parsed[0]?.cause).toBeUndefined();
+  expect(parsed[0]?.archivedAt).toBeUndefined();
+
+  const { serializeMistakesFile } = await import('../../src/main/practice/records');
+  const rewritten = serializeMistakesFile('kaoyan', parsed, '2026-11-02T09:00:00.000Z');
+  expect(rewritten).not.toContain('cause:');
+  expect(rewritten).not.toContain('archivedAt:');
+});
