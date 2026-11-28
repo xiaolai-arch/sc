@@ -62,6 +62,8 @@ import {
   type AgentPermissions
 } from '../src/shared/attachments';
 import type {
+  ArchiveResolvedMistakesInput,
+  ArchiveResolvedMistakesResult,
   CreatePracticeQuestionInput,
   CreatePracticeSetInput,
   DeletePracticeSetInput,
@@ -72,14 +74,16 @@ import type {
   PracticeMistake,
   PracticeQuestion,
   PracticeSet,
+  RestoreArchivedMistakeInput,
   ReviewMistakeInput,
+  SetMistakeCauseInput,
   SetMistakeResolvedInput,
   SubmitAnswerInput,
   SubmitAnswerResult,
   SubmitShortAnswerInput,
   UpdatePracticeSetInput
 } from '../src/shared/practice';
-import { PRACTICE_INTERVALS } from '../src/shared/practice';
+import { PRACTICE_INTERVALS, normalizeCause } from '../src/shared/practice';
 import { formatLocalDate } from '../src/shared/date';
 import { isTaskRepeat, nextRepeatDate } from '../src/shared/recurrence';import type {
   CreateMemoryInput,
@@ -141,6 +145,8 @@ interface MockState {
   practiceSets: PracticeSet[];
   practiceAttempts: PracticeAttempt[];
   practiceMistakes: PracticeMistake[];
+  /** Records moved out of the mistake book by 清空已掌握 (iter34 P0 ④). */
+  practiceArchive: PracticeMistake[];
   plans: LongPlan[];
   knowledgeTopics: KnowledgeTopic[];
   knowledgeNotes: Record<string, KnowledgeNote>;
@@ -261,7 +267,8 @@ function seedWorkspaceData() {
       (set): PracticeSet => ({ ...structuredClone(set), createdAt: now, updatedAt: now })
     ),
     practiceAttempts: [] as PracticeAttempt[],
-    practiceMistakes: [] as PracticeMistake[]
+    practiceMistakes: [] as PracticeMistake[],
+    practiceArchive: [] as PracticeMistake[]
   };
 }
 
@@ -337,6 +344,9 @@ function readState(storage: Storage | null): MockState {
       practiceMistakes: Array.isArray(parsed.practiceMistakes)
         ? parsed.practiceMistakes
         : seeded.practiceMistakes,
+      practiceArchive: Array.isArray(parsed.practiceArchive)
+        ? parsed.practiceArchive
+        : seeded.practiceArchive,
       plans: Array.isArray(parsed.plans) ? (parsed.plans as LongPlan[]) : [],
       knowledgeTopics: Array.isArray(parsed.knowledgeTopics)
         ? (parsed.knowledgeTopics as KnowledgeTopic[])
@@ -970,6 +980,7 @@ export function createMockApi(
         state.practiceSets = [];
         state.practiceAttempts = [];
         state.practiceMistakes = [];
+        state.practiceArchive = [];
       }
       state.onboarded = true;
       persist();
@@ -1730,6 +1741,76 @@ export function createMockApi(
       return structuredClone(current);
     },
 
+    async setPracticeMistakeCause(
+      input: SetMistakeCauseInput
+    ): Promise<PracticeMistake> {
+      const current = state.practiceMistakes.find((entry) => entry.id === input.mistakeId);
+      if (!current) throw new Error('错题不存在');
+      const cause = normalizeCause(input.cause);
+      if (cause === undefined) delete current.cause;
+      else current.cause = cause;
+      current.updatedAt = new Date().toISOString();
+      persist();
+      return structuredClone(current);
+    },
+
+    async archiveResolvedPracticeMistakes(
+      input: ArchiveResolvedMistakesInput
+    ): Promise<ArchiveResolvedMistakesResult> {
+      requireWorkspace(input.workspaceId);
+      const day = formatLocalDate(new Date());
+      const resolved = state.practiceMistakes.filter(
+        (entry) => entry.workspaceId === input.workspaceId && entry.status === 'resolved'
+      );
+      const known = new Set(state.practiceArchive.map((entry) => entry.id));
+      const additions = resolved
+        .filter((entry) => !known.has(entry.id))
+        .map((entry) => ({ ...entry, archivedAt: day }));
+      state.practiceArchive = [...state.practiceArchive, ...additions];
+      state.practiceMistakes = state.practiceMistakes.filter(
+        (entry) =>
+          !(entry.workspaceId === input.workspaceId && entry.status === 'resolved')
+      );
+      persist();
+      return {
+        archived: additions.length,
+        path: `workspaces/${input.workspaceId}/practice/mistakes-archive.md`
+      };
+    },
+
+    async listArchivedPracticeMistakes(workspaceId: string): Promise<PracticeMistake[]> {
+      requireWorkspace(workspaceId);
+      return structuredClone(
+        state.practiceArchive
+          .filter((entry) => entry.workspaceId === workspaceId)
+          .sort(
+            (a, b) =>
+              (b.archivedAt ?? '').localeCompare(a.archivedAt ?? '') ||
+              a.id.localeCompare(b.id)
+          )
+      );
+    },
+
+    async restorePracticeMistake(
+      input: RestoreArchivedMistakeInput
+    ): Promise<PracticeMistake> {
+      const index = state.practiceArchive.findIndex((entry) => entry.id === input.mistakeId);
+      if (index < 0) throw new Error('归档错题不存在');
+      const archived = state.practiceArchive[index];
+      const { archivedAt: _archivedAt, ...restored } = archived;
+      const record: PracticeMistake = { ...restored, status: 'resolved' };
+      state.practiceArchive = state.practiceArchive.filter(
+        (entry) => entry.id !== input.mistakeId
+      );
+      const existing = state.practiceMistakes.findIndex(
+        (entry) => entry.id === input.mistakeId
+      );
+      if (existing >= 0) state.practiceMistakes[existing] = record;
+      else state.practiceMistakes = [...state.practiceMistakes, record];
+      persist();
+      return structuredClone(record);
+    },
+
     async listPracticeAttempts(workspaceId: string): Promise<PracticeAttempt[]> {
       requireWorkspace(workspaceId);
       return structuredClone(
@@ -2127,6 +2208,9 @@ export function createMockApi(
         (entry) => entry.workspaceId !== workspaceId
       );
       state.practiceMistakes = state.practiceMistakes.filter(
+        (entry) => entry.workspaceId !== workspaceId
+      );
+      state.practiceArchive = state.practiceArchive.filter(
         (entry) => entry.workspaceId !== workspaceId
       );
       state.plans = state.plans.filter((entry) => entry.workspaceId !== workspaceId);

@@ -4,6 +4,7 @@ import { friendlyErrorMessage } from '../../shared/errors';
 import { buildMistakeSheet } from '../../shared/practice-sheet';
 import {
   STRICT_MASTERY_NOTE,
+  isStubbornMistake,
   type CreatePracticeQuestionInput,
   type CreatePracticeSetInput,
   type ExportMistakeSheetResult,
@@ -20,6 +21,8 @@ type MistakeBookProps = {
   dueIds?: ReadonlySet<string>;
   /** Opt-in stricter mastery: states the rule once; off renders nothing extra. */
   strict?: boolean;
+  /** Subject per mistake id, for the copy button's aggregate line. */
+  subjects?: Readonly<Record<string, string>>;
   onReview?: (mistake: PracticeMistake) => void;
   onReviewAll?: () => void;
   onResolve?: (mistake: PracticeMistake) => void;
@@ -27,6 +30,13 @@ type MistakeBookProps = {
   onMakeSet?: (mistake: PracticeMistake) => void;
   /** Writes the printable sheet to the vault; its path is shown afterwards. */
   onExport?: () => Promise<ExportMistakeSheetResult>;
+  /** Saves the learner's own one-line 错因 (trimmed server-side). */
+  onSaveCause?: (mistake: PracticeMistake, cause: string) => Promise<PracticeMistake | void>;
+  /** 清空已掌握: moves resolved mistakes to the archive file. */
+  onClearResolved?: () => Promise<{ archived: number } | void>;
+  /** 从归档恢复: lists archived records for the restore picker. */
+  onListArchived?: () => Promise<PracticeMistake[]>;
+  onRestore?: (mistake: PracticeMistake) => Promise<void>;
 };
 
 type MistakeRowProps = {
@@ -35,6 +45,7 @@ type MistakeRowProps = {
   onReview?: (mistake: PracticeMistake) => void;
   onResolve?: (mistake: PracticeMistake) => void;
   onMakeSet?: (mistake: PracticeMistake) => void;
+  onSaveCause?: (mistake: PracticeMistake, cause: string) => Promise<PracticeMistake | void>;
 };
 
 const rowActionClass =
@@ -135,17 +146,121 @@ export function singleQuestionSetInput(
 function sheetFor(
   mistakes: readonly PracticeMistake[],
   workspaceId: string,
-  strict: boolean
+  strict: boolean,
+  subjects?: Readonly<Record<string, string>>
 ): string {
   return buildMistakeSheet({
     workspaceId,
     date: formatLocalDate(new Date()),
     mistakes,
+    ...(subjects !== undefined ? { subjects } : {}),
     strict
   });
 }
 
-function MistakeRow({ mistake, due, onReview, onResolve, onMakeSet }: MistakeRowProps) {
+/**
+ * The 顽疾 mark: a neutral noun about the *question* (it has been missed twice
+ * and has not been answered right twice in a row), never an evaluation of the
+ * learner. Rendered only when `isStubbornMistake` is true, so a record with
+ * `correctStreak >= 2` silently drops it — display only, no data change.
+ */
+function StubbornMark({ mistake }: { mistake: PracticeMistake }) {
+  if (!isStubbornMistake(mistake)) return null;
+  return (
+    <span className="ml-1.5 rounded-full bg-[#ff9f0a]/15 px-1.5 py-0.5 text-[10px] font-medium text-[#8a5a00] dark:text-[#ffb340]">
+      顽疾
+    </span>
+  );
+}
+
+/** Inline 补一句错因 editor: one line, skippable, saved on submit. */
+function CauseEditor({
+  mistake,
+  onSave
+}: {
+  mistake: PracticeMistake;
+  onSave: (mistake: PracticeMistake, cause: string) => Promise<PracticeMistake | void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState(mistake.cause ?? '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        aria-label={`补一句错因：${mistake.prompt}`}
+        onClick={() => {
+          setText(mistake.cause ?? '');
+          setError(null);
+          setOpen(true);
+        }}
+        className={quietActionClass}
+      >
+        补一句错因
+      </button>
+    );
+  }
+
+  async function submit() {
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(mistake, text);
+      setOpen(false);
+    } catch (cause) {
+      setError(friendlyErrorMessage(cause, '保存错因失败，请重试。'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form
+      className="mt-1 flex flex-col gap-1"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void submit();
+      }}
+    >
+      <div className="flex items-center gap-1.5">
+        <input
+          type="text"
+          aria-label={`错因：${mistake.prompt}`}
+          value={text}
+          maxLength={40}
+          placeholder="哪个概念、为什么（例：导数链没拆完）"
+          onChange={(event) => setText(event.target.value)}
+          className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-2 py-1 text-[12px] text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30 dark:border-white/15 dark:bg-[#1c1c1e] dark:text-[#f5f5f7]"
+        />
+        <button
+          type="submit"
+          disabled={saving}
+          className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium text-[#0071e3] disabled:opacity-50 dark:text-[#4da3ff]"
+        >
+          {saving ? '保存中…' : '保存'}
+        </button>
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => setOpen(false)}
+          className="shrink-0 rounded-full px-1 text-[11px] text-gray-400 disabled:opacity-50 dark:text-[#8e8e93]"
+        >
+          跳过
+        </button>
+      </div>
+      {error ? (
+        <p role="alert" className="text-[11px] text-[#d70015] dark:text-[#ff7b72]">
+          {error}
+        </p>
+      ) : null}
+    </form>
+  );
+}
+
+function MistakeRow({ mistake, due, onReview, onResolve, onMakeSet, onSaveCause }: MistakeRowProps) {
   return (
     <li className="flex items-start gap-2">
       <div className="min-w-0 flex-1">
@@ -157,10 +272,19 @@ function MistakeRow({ mistake, due, onReview, onResolve, onMakeSet }: MistakeRow
             参考答案：{mistake.referenceAnswer}
           </p>
         ) : null}
+        {mistake.cause !== undefined && mistake.cause.trim() !== '' ? (
+          <p className="text-[12px] leading-6 text-gray-400 dark:text-[#8e8e93]">
+            错因：{mistake.cause}
+          </p>
+        ) : null}
         <p className="text-[11px] text-gray-400 dark:text-[#8e8e93]">
           {due ? '今天复习 · ' : ''}
           {mistake.due} 复习 · 错 {mistake.wrongCount} 次 · 优先级 {mistake.priority}
+          <StubbornMark mistake={mistake} />
         </p>
+        {onSaveCause ? (
+          <CauseEditor mistake={mistake} onSave={onSaveCause} />
+        ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1">
         {onMakeSet ? (
@@ -204,17 +328,25 @@ export function MistakeBook({
   workspaceId,
   dueIds,
   strict = false,
+  subjects,
   onReview,
   onReviewAll,
   onResolve,
   onMakeSet,
-  onExport
+  onExport,
+  onSaveCause,
+  onClearResolved,
+  onListArchived,
+  onRestore
 }: MistakeBookProps) {
   const [expanded, setExpanded] = useState(false);
   const [savedPath, setSavedPath] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [archived, setArchived] = useState<PracticeMistake[] | null>(null);
+  const [restoreNotice, setRestoreNotice] = useState<string | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -222,6 +354,10 @@ export function MistakeBook({
       if (copyTimer.current !== null) clearTimeout(copyTimer.current);
     };
   }, []);
+
+  // The book lists active mistakes only, so this count is normally zero; it
+  // exists so a caller that passes resolved records still sees the action.
+  const resolvedCount = mistakes.filter((mistake) => mistake.status === 'resolved').length;
 
   if (mistakes.length === 0) return null;
   const dueCount = dueIds ? mistakes.filter((mistake) => dueIds.has(mistake.id)).length : 0;
@@ -241,10 +377,61 @@ export function MistakeBook({
     }
   }
 
+  async function clearResolved() {
+    if (!onClearResolved || clearing) return;
+    setClearing(true);
+    setExportError(null);
+    setRestoreNotice(null);
+    try {
+      const result = await onClearResolved();
+      // The book lists active mistakes only, so a successful clear changes
+      // nothing on screen; say what happened instead of leaving silence.
+      const moved = result !== undefined ? result.archived : undefined;
+      setRestoreNotice(
+        moved !== undefined
+          ? moved > 0
+            ? `已归档 ${moved} 道已掌握错题（可从归档恢复）`
+            : '没有新的已掌握错题可归档'
+          : null
+      );
+    } catch (cause) {
+      setExportError(friendlyErrorMessage(cause, '清空已掌握失败，请重试。'));
+    } finally {
+      setClearing(false);
+    }
+  }
+
+  /** Opens the restore picker, reading the archive through the supplied reader. */
+  async function toggleArchive() {
+    if (!onListArchived) return;
+    if (archived !== null) {
+      setArchived(null);
+      return;
+    }
+    setExportError(null);
+    try {
+      setArchived(await onListArchived());
+    } catch (cause) {
+      setExportError(friendlyErrorMessage(cause, '读取归档失败，请重试。'));
+    }
+  }
+
+  async function restoreOne(mistake: PracticeMistake) {
+    if (!onRestore) return;
+    setExportError(null);
+    try {
+      await onRestore(mistake);
+      setArchived((current) => (current ?? []).filter((entry) => entry.id !== mistake.id));
+      setRestoreNotice(`已恢复到错题本：${singleLineTitle(mistake.prompt)}`);
+    } catch (cause) {
+      setExportError(friendlyErrorMessage(cause, '恢复归档失败，请重试。'));
+    }
+  }
+
   async function copySheet() {
     try {
       await navigator.clipboard?.writeText(
-        sheetFor(mistakes, workspaceId ?? mistakes[0]?.workspaceId ?? '', strict)
+        sheetFor(mistakes, workspaceId ?? mistakes[0]?.workspaceId ?? '', strict, subjects)
       );
       setCopied(true);
       if (copyTimer.current !== null) clearTimeout(copyTimer.current);
@@ -285,6 +472,30 @@ export function MistakeBook({
               {exporting ? '正在导出…' : '导出复习单'}
             </button>
           ) : null}
+          {onClearResolved ? (
+            <button
+              type="button"
+              disabled={clearing}
+              onClick={() => void clearResolved()}
+              className={quietActionClass}
+            >
+              {clearing
+                ? '正在清空…'
+                : resolvedCount > 0
+                  ? `清空已掌握 ${resolvedCount} 道`
+                  : '清空已掌握'}
+            </button>
+          ) : null}
+          {onListArchived ? (
+            <button
+              type="button"
+              aria-expanded={archived !== null}
+              onClick={() => void toggleArchive()}
+              className={quietActionClass}
+            >
+              {archived !== null ? '收起归档' : '从归档恢复'}
+            </button>
+          ) : null}
           <button type="button" onClick={() => void copySheet()} className={quietActionClass}>
             {copied ? '已复制' : '复制清单'}
           </button>
@@ -318,6 +529,52 @@ export function MistakeBook({
           {exportError}
         </p>
       ) : null}
+      {restoreNotice ? (
+        <p
+          role="status"
+          aria-live="polite"
+          className="mt-2 text-[11px] text-gray-400 dark:text-[#8e8e93]"
+        >
+          {restoreNotice}
+        </p>
+      ) : null}
+
+      {archived !== null ? (
+        <div className="mt-3 rounded-2xl bg-white/60 p-3 dark:bg-white/[0.04]">
+          <p className="text-[11px] font-medium text-gray-500 dark:text-[#8e8e93]">
+            归档 · {archived.length} 道已掌握
+          </p>
+          {archived.length === 0 ? (
+            <p className="mt-1 text-[11px] text-gray-400 dark:text-[#8e8e93]">归档里还没有错题。</p>
+          ) : (
+            <ul className="mt-2 space-y-2">
+              {archived.map((mistake) => (
+                <li key={mistake.id} className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[12px] leading-5 text-gray-500 dark:text-[#a1a1a6]">
+                      {mistake.prompt}
+                    </p>
+                    <p className="text-[11px] text-gray-400 dark:text-[#8e8e93]">
+                      {mistake.archivedAt !== undefined ? `${mistake.archivedAt} 归档 · ` : ''}
+                      错 {mistake.wrongCount} 次
+                    </p>
+                  </div>
+                  {onRestore ? (
+                    <button
+                      type="button"
+                      aria-label={`从归档恢复：${mistake.prompt}`}
+                      onClick={() => void restoreOne(mistake)}
+                      className={rowActionClass}
+                    >
+                      恢复
+                    </button>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
 
       <ul className="mt-2 space-y-2.5">
         {(expanded ? mistakes : mistakes.slice(0, 4)).map((mistake) => (
@@ -328,6 +585,7 @@ export function MistakeBook({
             {...(onReview ? { onReview } : {})}
             {...(onResolve ? { onResolve } : {})}
             {...(onMakeSet ? { onMakeSet } : {})}
+            {...(onSaveCause ? { onSaveCause } : {})}
           />
         ))}
       </ul>

@@ -2,10 +2,13 @@ import { promises as fs } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { formatLocalDate } from '../../shared/date';
 import {
+  type ArchiveResolvedMistakesInput,
+  type ArchiveResolvedMistakesResult,
   type CreatePracticeSetInput,
   type DeletePracticeSetInput,
   type ExportMistakeSheetInput,
   type ExportMistakeSheetResult,
+  normalizeCause,
   normalizePracticeDurationMs,
   type PracticeAttempt,
   type PracticeConfidence,
@@ -13,7 +16,9 @@ import {
   type PracticeQuestion,
   type PracticeService,
   type PracticeSet,
+  type RestoreArchivedMistakeInput,
   type ReviewMistakeInput,
+  type SetMistakeCauseInput,
   type SetMistakeResolvedInput,
   type SubmitAnswerInput,
   type SubmitAnswerResult,
@@ -76,6 +81,15 @@ function attemptFile(root: string, workspaceId: string, date: string): string {
 
 function mistakesFile(root: string, workspaceId: string): string {
   return join(practiceDir(root, workspaceId), 'mistakes.md');
+}
+
+/**
+ * 清空已掌握 writes here instead of deleting: same schema as `mistakes.md`
+ * plus `archivedAt`, plaintext inside `workspaces/<id>/practice/` so the
+ * existing whole-workspace backup already covers it (iter34 P0 ④/⑤).
+ */
+function mistakesArchiveFile(root: string, workspaceId: string): string {
+  return join(practiceDir(root, workspaceId), 'mistakes-archive.md');
 }
 
 function reviewSheetsDir(root: string, workspaceId: string): string {
@@ -231,6 +245,9 @@ function applyMistakeAnswer(
       wrongCount,
       correctStreak: 0,
       priority: Math.min(3, (existing?.priority ?? 0) + 1),
+      // The learner's own 错因 survives another wrong answer — it is a note
+      // about the question, not about this attempt. Absent stays absent.
+      ...(existing?.cause !== undefined ? { cause: existing.cause } : {}),
       intervalDays: schedule.intervalDays,
       stabilityDays: schedule.stabilityDays,
       difficulty: schedule.difficulty,
@@ -339,6 +356,15 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
     return raw === null ? [] : parseMistakesFile(raw);
   }
 
+  /**
+   * The archive is read with the same parser and the same schema; only its
+   * location and the extra `archivedAt` field distinguish the records.
+   */
+  async function readArchive(workspaceId: string): Promise<PracticeMistake[]> {
+    const raw = await readFileOrNull(mistakesArchiveFile(vaultRoot, workspaceId));
+    return raw === null ? [] : parseMistakesFile(raw);
+  }
+
   async function findMistake(
     mistakeId: string
   ): Promise<{ workspaceId: string; mistake: PracticeMistake } | null> {
@@ -350,6 +376,22 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
         continue;
       }
       const mistake = (await readMistakes(workspaceId)).find((entry) => entry.id === mistakeId);
+      if (mistake !== undefined) return { workspaceId, mistake };
+    }
+    return null;
+  }
+
+  async function findArchivedMistake(
+    mistakeId: string
+  ): Promise<{ workspaceId: string; mistake: PracticeMistake } | null> {
+    for (const directory of await listDirectories(workspacesDir(vaultRoot))) {
+      let workspaceId: string;
+      try {
+        workspaceId = assertWorkspaceId(directory);
+      } catch {
+        continue;
+      }
+      const mistake = (await readArchive(workspaceId)).find((entry) => entry.id === mistakeId);
       if (mistake !== undefined) return { workspaceId, mistake };
     }
     return null;
@@ -878,15 +920,158 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
               a.due.localeCompare(b.due) ||
               a.questionId.localeCompare(b.questionId)
           );
+        // The subject per mistake comes from the practice set it belongs to;
+        // an unresolvable (or blank) subject becomes `未分类` in the builder.
+        // Counted over this same array, so the summary line can never disagree
+        // with the sections below it.
+        const sets = await readSets(workspaceId);
+        const subjectById = new Map(sets.map((set) => [set.id, set.subject]));
+        const subjects: Record<string, string> = {};
+        for (const mistake of mistakes) {
+          const subject = subjectById.get(mistake.setId);
+          if (subject !== undefined) subjects[mistake.id] = subject;
+        }
         await writeFileAtomic(
           target,
-          buildMistakeSheet({ workspaceId, date: today, mistakes, strict })
+          buildMistakeSheet({ workspaceId, date: today, mistakes, subjects, strict })
         );
         return {
           path: `workspaces/${workspaceId}/practice/review-sheets/${today}.md`,
           count: mistakes.length,
           date: today
         };
+      });
+    },
+
+    async setMistakeCause(input: SetMistakeCauseInput): Promise<PracticeMistake> {
+      if (typeof input !== 'object' || input === null) {
+        throw new Error('Mistake update is required');
+      }
+      const mistakeId = assertSafeSegment(
+        requireString(input.mistakeId, 'mistake id'),
+        'mistake id'
+      );
+      // Trim, and cut to 40 code points; a blank value clears the field.
+      const cause = normalizeCause(input.cause);
+      await ensureSeeded();
+      return runExclusively(async () => {
+        const found = await findMistake(mistakeId);
+        if (found === null) throw new Error(`Mistake not found: ${mistakeId}`);
+        const mistakes = await readMistakes(found.workspaceId);
+        const index = mistakes.findIndex((entry) => entry.id === mistakeId);
+        if (index < 0) throw new Error(`Mistake not found: ${mistakeId}`);
+        const updatedAt = now().toISOString();
+        const { cause: _previous, ...rest } = mistakes[index];
+        const updated: PracticeMistake = {
+          ...rest,
+          ...(cause !== undefined ? { cause } : {}),
+          updatedAt
+        };
+        mistakes[index] = updated;
+        await writeFileAtomic(
+          mistakesFile(vaultRoot, found.workspaceId),
+          serializeMistakesFile(found.workspaceId, mistakes, updatedAt)
+        );
+        return updated;
+      });
+    },
+
+    async archiveResolvedMistakes(
+      input: ArchiveResolvedMistakesInput
+    ): Promise<ArchiveResolvedMistakesResult> {
+      if (typeof input !== 'object' || input === null) {
+        throw new Error('Archive request is required');
+      }
+      const workspaceId = assertWorkspaceId(requireString(input.workspaceId, 'workspace id'));
+      await ensureSeeded();
+      const today = formatLocalDate(now());
+      return runExclusively(async () => {
+        const mistakes = await readMistakes(workspaceId);
+        const resolved = mistakes.filter((entry) => entry.status === 'resolved');
+        const active = mistakes.filter((entry) => entry.status !== 'resolved');
+        if (resolved.length === 0) {
+          return {
+            archived: 0,
+            path: `workspaces/${workspaceId}/practice/mistakes-archive.md`
+          };
+        }
+        // Idempotent by id: a record already in the archive keeps its first
+        // `archivedAt` and is not appended again, so double-clicking the button
+        // never duplicates anything.
+        const archive = await readArchive(workspaceId);
+        const known = new Set(archive.map((entry) => entry.id));
+        const additions = resolved
+          .filter((entry) => !known.has(entry.id))
+          .map((entry) => ({ ...entry, archivedAt: today }));
+        const nextArchive = [...archive, ...additions];
+        const updatedAt = now().toISOString();
+        // Write the archive first: if the second write fails, a retry finds the
+        // records already archived and finishes the move without losing data.
+        await writeFileAtomic(
+          mistakesArchiveFile(vaultRoot, workspaceId),
+          serializeMistakesFile(workspaceId, nextArchive, updatedAt)
+        );
+        await writeFileAtomic(
+          mistakesFile(vaultRoot, workspaceId),
+          serializeMistakesFile(workspaceId, active, updatedAt)
+        );
+        return {
+          archived: additions.length,
+          path: `workspaces/${workspaceId}/practice/mistakes-archive.md`
+        };
+      });
+    },
+
+    async listArchivedMistakes(workspaceId: string): Promise<PracticeMistake[]> {
+      const id = assertWorkspaceId(requireString(workspaceId, 'workspace id'));
+      await ensureSeeded();
+      const archive = await readArchive(id);
+      // Newest archived first, then a stable id order for same-day entries.
+      return archive.sort(
+        (a, b) =>
+          (b.archivedAt ?? '').localeCompare(a.archivedAt ?? '') ||
+          a.id.localeCompare(b.id)
+      );
+    },
+
+    async restoreArchivedMistake(input: RestoreArchivedMistakeInput): Promise<PracticeMistake> {
+      if (typeof input !== 'object' || input === null) {
+        throw new Error('Restore request is required');
+      }
+      const mistakeId = assertSafeSegment(
+        requireString(input.mistakeId, 'mistake id'),
+        'mistake id'
+      );
+      await ensureSeeded();
+      return runExclusively(async () => {
+        const found = await findArchivedMistake(mistakeId);
+        if (found === null) throw new Error(`Archived mistake not found: ${mistakeId}`);
+        const { workspaceId } = found;
+        const archive = await readArchive(workspaceId);
+        const archiveIndex = archive.findIndex((entry) => entry.id === mistakeId);
+        const archived = archive[archiveIndex];
+        // Restoring never re-opens the record: 已掌握 is the learner's verdict
+        // and only they can undo it, so `status` stays `resolved`.
+        const { archivedAt: _archivedAt, ...restored } = archived;
+        const record: PracticeMistake = { ...restored, status: 'resolved' };
+        const mistakes = await readMistakes(workspaceId);
+        const existingIndex = mistakes.findIndex((entry) => entry.id === mistakeId);
+        if (existingIndex >= 0) mistakes[existingIndex] = record;
+        else mistakes.push(record);
+        const updatedAt = now().toISOString();
+        await writeFileAtomic(
+          mistakesFile(vaultRoot, workspaceId),
+          serializeMistakesFile(workspaceId, mistakes, updatedAt)
+        );
+        await writeFileAtomic(
+          mistakesArchiveFile(vaultRoot, workspaceId),
+          serializeMistakesFile(
+            workspaceId,
+            archive.filter((entry) => entry.id !== mistakeId),
+            updatedAt
+          )
+        );
+        return record;
       });
     },
 

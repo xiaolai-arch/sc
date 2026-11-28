@@ -277,6 +277,10 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     reviewPracticeMistake,
     resolvePracticeMistake,
     exportMistakeSheet,
+    savePracticeMistakeCause,
+    archiveResolvedMistakes,
+    listArchivedMistakes,
+    restoreArchivedMistake,
     createTask,
     updateTask,
     deleteTask,
@@ -499,6 +503,9 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
     filteredPracticeSets.find((set) => set.id === practiceSetId) ??
     filteredPracticeSets[0] ??
     null;
+  // The project whose 错题本 is on screen; the archive actions act on it.
+  const mistakeBookProjectId =
+    projectId ?? practiceMistakes[0]?.workspaceId ?? workspaces[0]?.id ?? '';
   const today = formatLocalDate(new Date());
   const dateLabel = formatChineseDate(today);
   // A reminder comes due by the clock, not by a click, so the digest needs a
@@ -2198,6 +2205,16 @@ export function Workspace({ hasApiKey, needsOnboarding = false, onRefresh }: Wor
                   onSubmitAnswer={submitPracticeAnswer}
                   onSubmitShortAnswer={submitPracticeShortAnswer}
                   onExportMistakeSheet={exportMistakeSheet}
+                  onSaveMistakeCause={(mistake, cause) =>
+                    savePracticeMistakeCause({ mistakeId: mistake.id, cause })
+                  }
+                  onClearResolvedMistakes={() =>
+                    archiveResolvedMistakes({ workspaceId: mistakeBookProjectId })
+                  }
+                  onListArchivedMistakes={() => listArchivedMistakes(mistakeBookProjectId)}
+                  onRestoreMistake={(mistake) =>
+                    restoreArchivedMistake({ mistakeId: mistake.id }).then(() => undefined)
+                  }
                   attempts={practiceAttempts.filter(
                     (attempt) =>
                       !projectId || attempt.workspaceId === projectId

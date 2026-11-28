@@ -2,6 +2,7 @@ import type { NoteMeta } from '../../shared/types';
 import { parseNote, serializeNote } from '../vault/note';
 import { isLocalDate } from '../../shared/date';
 import {
+  normalizeCause,
   normalizeCheckpoints,
   normalizePracticeDurationMs,
   type PracticeAttempt,
@@ -302,6 +303,14 @@ function coerceMistake(value: unknown): PracticeMistake | null {
     return null;
   }
   const status: PracticeMistakeStatus = record.status === 'resolved' ? 'resolved' : 'active';
+  // The 错因 is read through the same normalization the write path applies, so
+  // a hand-edited over-long value cannot escape the 40-code-point ceiling and a
+  // blank one reads as 未填 (field absent).
+  const cause = normalizeCause(record.cause);
+  // Archive-only field (`practice/mistakes-archive.md`): a malformed value is
+  // dropped rather than failing the record, exactly like the other optional
+  // schedule fields.
+  const archivedAt = isLocalDate(record.archivedAt) ? record.archivedAt : undefined;
   // `stability` is the stored name; the record exposes it as `stabilityDays`.
   // The in-memory spelling is also accepted so a round-trip never depends on it.
   const stabilityDays =
@@ -322,8 +331,10 @@ function coerceMistake(value: unknown): PracticeMistake | null {
     correctStreak: Math.max(0, asInt(record.correctStreak) ?? 0),
     priority: Math.min(3, Math.max(0, asInt(record.priority) ?? 0)),
     intervalDays: Math.max(1, asInt(record.intervalDays) ?? 1),
+    ...(cause !== undefined ? { cause } : {}),
     ...(stabilityDays !== undefined ? { stabilityDays } : {}),
     ...(difficulty !== undefined ? { difficulty } : {}),
+    ...(archivedAt !== undefined ? { archivedAt } : {}),
     due,
     status,
     createdAt,

@@ -1816,3 +1816,181 @@ describe('FluencyTrend section (用时流畅度呈现, iter33 P1)', () => {
     expect(screen.getByText(/还没有足够的用时记录/)).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// iter34 P0：错因一行 / 顽疾标记 / 清空已掌握 / 从归档恢复
+// ---------------------------------------------------------------------------
+
+describe('iter34 P0 mistake book surfaces', () => {
+  it('shows 错因 only when the record has one', () => {
+    const { rerender } = render(
+      <MistakeBook mistakes={[mistake(1)]} workspaceId="kaoyan" onReview={() => undefined} />
+    );
+    expect(screen.queryByText(/^错因：/)).not.toBeInTheDocument();
+
+    rerender(
+      <MistakeBook
+        mistakes={[{ ...mistake(1), cause: '导数链没拆完' }]}
+        workspaceId="kaoyan"
+        onReview={() => undefined}
+      />
+    );
+    expect(screen.getByText('错因：导数链没拆完')).toBeInTheDocument();
+  });
+
+  it('saves a 错因 through the inline editor, respecting 跳过', async () => {
+    const user = userEvent.setup();
+    const onSaveCause = vi.fn(async (entry: PracticeMistake, cause: string) => ({
+      ...entry,
+      cause
+    }));
+    render(
+      <MistakeBook
+        mistakes={[mistake(1)]}
+        workspaceId="kaoyan"
+        onSaveCause={onSaveCause}
+        onReview={() => undefined}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: '补一句错因：错题 1' }));
+    const input = screen.getByLabelText('错因：错题 1');
+    expect(input).toHaveAttribute('placeholder', '哪个概念、为什么（例：导数链没拆完）');
+    await user.type(input, '导数链没拆完');
+    await user.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(onSaveCause).toHaveBeenCalledTimes(1));
+    expect(onSaveCause.mock.calls[0]![1]).toBe('导数链没拆完');
+
+    // Re-opening, 跳过 closes without another save.
+    await user.click(screen.getByRole('button', { name: '补一句错因：错题 1' }));
+    await user.click(screen.getByRole('button', { name: '跳过' }));
+    expect(onSaveCause).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders 顽疾 only for wrongCount>=2 && correctStreak<2', () => {
+    const { rerender } = render(
+      <MistakeBook
+        mistakes={[{ ...mistake(1), wrongCount: 2, correctStreak: 0 }]}
+        workspaceId="kaoyan"
+        onReview={() => undefined}
+      />
+    );
+    expect(screen.getByText('顽疾')).toBeInTheDocument();
+
+    rerender(
+      <MistakeBook
+        mistakes={[{ ...mistake(1), wrongCount: 2, correctStreak: 2 }]}
+        workspaceId="kaoyan"
+        onReview={() => undefined}
+      />
+    );
+    expect(screen.queryByText('顽疾')).not.toBeInTheDocument();
+
+    rerender(
+      <MistakeBook
+        mistakes={[{ ...mistake(1), wrongCount: 1, priority: 3 }]}
+        workspaceId="kaoyan"
+        onReview={() => undefined}
+      />
+    );
+    expect(screen.queryByText('顽疾')).not.toBeInTheDocument();
+  });
+
+  it('offers 清空已掌握 and 从归档恢复 only when their handlers are supplied', () => {
+    const { rerender } = render(
+      <MistakeBook mistakes={[mistake(1)]} workspaceId="kaoyan" onReview={() => undefined} />
+    );
+    expect(screen.queryByRole('button', { name: /清空已掌握/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '从归档恢复' })).not.toBeInTheDocument();
+
+    rerender(
+      <MistakeBook
+        mistakes={[mistake(1)]}
+        workspaceId="kaoyan"
+        onClearResolved={vi.fn(async () => ({ archived: 0 }))}
+        onListArchived={vi.fn(async () => [])}
+        onRestore={vi.fn(async () => undefined)}
+        onReview={() => undefined}
+      />
+    );
+    expect(screen.getByRole('button', { name: '清空已掌握' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '从归档恢复' })).toBeInTheDocument();
+  });
+
+  it('lists archived records and restores one', async () => {
+    const user = userEvent.setup();
+    const archivedMistake: PracticeMistake = { ...mistake(9), status: 'resolved', archivedAt: '2026-11-05' };
+    const onRestore = vi.fn(async () => undefined);
+    render(
+      <MistakeBook
+        mistakes={[mistake(1)]}
+        workspaceId="kaoyan"
+        onListArchived={vi.fn(async () => [archivedMistake])}
+        onRestore={onRestore}
+        onClearResolved={vi.fn(async () => ({ archived: 0 }))}
+        onReview={() => undefined}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: '从归档恢复' }));
+    expect(await screen.findByText('归档 · 1 道已掌握')).toBeInTheDocument();
+    expect(screen.getByText('2026-11-05 归档 · 错 9 次')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '从归档恢复：错题 9' }));
+    await waitFor(() => expect(onRestore).toHaveBeenCalledTimes(1));
+    // The restored row leaves the picker.
+    await waitFor(() => expect(screen.queryByText('归档 · 1 道已掌握')).not.toBeInTheDocument());
+  });
+
+  it('copies the sheet with the per-subject summary line', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText }
+    });
+
+    render(
+      <MistakeBook
+        mistakes={[mistake(1), mistake(2)]}
+        workspaceId="kaoyan"
+        subjects={{ pm1: '数学', pm2: '英语' }}
+        onReview={() => undefined}
+      />
+    );
+    await user.click(screen.getByRole('button', { name: '复制清单' }));
+    const text = String(writeText.mock.calls[0]?.[0]);
+    expect(text).toContain('\n数学 1 · 英语 1\n');
+  });
+});
+
+describe('iter34 P0 清空已掌握 feedback', () => {
+  it('reports how many records were archived', async () => {
+    const user = userEvent.setup();
+    render(
+      <MistakeBook
+        mistakes={[mistake(1)]}
+        workspaceId="kaoyan"
+        onClearResolved={vi.fn(async () => ({ archived: 2 }))}
+        onReview={() => undefined}
+      />
+    );
+    await user.click(screen.getByRole('button', { name: '清空已掌握' }));
+    expect(await screen.findByText('已归档 2 道已掌握错题（可从归档恢复）')).toBeInTheDocument();
+  });
+
+  it('says so honestly when there was nothing to archive', async () => {
+    const user = userEvent.setup();
+    render(
+      <MistakeBook
+        mistakes={[mistake(1)]}
+        workspaceId="kaoyan"
+        onClearResolved={vi.fn(async () => ({ archived: 0 }))}
+        onReview={() => undefined}
+      />
+    );
+    await user.click(screen.getByRole('button', { name: '清空已掌握' }));
+    expect(await screen.findByText('没有新的已掌握错题可归档')).toBeInTheDocument();
+  });
+});
