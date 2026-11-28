@@ -163,6 +163,9 @@ export function LearningPane({
   // failed export never disturbs the answering state above.
   const [exportingSet, setExportingSet] = useState(false);
   const [setExportPath, setSetExportPath] = useState<string | null>(null);
+  // The service's count (rows actually written), not the on-screen question
+  // count: the two can differ and the message should match the file.
+  const [setExportCount, setSetExportCount] = useState(0);
   const [setExportError, setSetExportError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -624,6 +627,7 @@ export function LearningPane({
     try {
       const result = await onExportAnkiSet({ workspaceId: activeSet.workspaceId, setId: activeSet.id });
       setSetExportPath(result.path);
+      setSetExportCount(result.count);
     } catch (cause) {
       setSetExportError(friendlyErrorMessage(cause, '导出到 Anki 失败，请重试。'));
     } finally {
@@ -650,7 +654,10 @@ export function LearningPane({
           />
         </div>
         <div className="flex items-center gap-2">
-          {onExportAnkiSet ? (
+          {/* Hidden in a mixed session: `mix` is a synthesised set
+              (`mix-<subject>`) with no practice set on disk, so an export
+              would fail every time — a mix is not "one set" to carry away. */}
+          {onExportAnkiSet && mix === null ? (
             <Button
               size="sm"
               variant="secondary"
@@ -669,7 +676,7 @@ export function LearningPane({
       {setExportPath ? (
         <div className="shrink-0 border-b border-gray-200/70 px-4 py-2 dark:border-white/10 md:px-6">
           <p role="status" aria-live="polite" className="text-[11px] text-gray-400 dark:text-[#8e8e93]">
-            已导出 {activeSet.questions.length} 题到 {setExportPath}
+            已导出 {setExportCount} 题到 {setExportPath}
           </p>
           {/* Verbatim spec line: an export is a one-off file, the vault stays the source. */}
           <p className="mt-1 text-[11px] leading-5 text-gray-400 dark:text-[#8e8e93]">
