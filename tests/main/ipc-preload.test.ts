@@ -254,7 +254,9 @@ test('locks the public channel names', () => {
     setPracticeMistakeCause: 'study-coach:practice:set-mistake-cause',
     archiveResolvedPracticeMistakes: 'study-coach:practice:archive-resolved-mistakes',
     listArchivedPracticeMistakes: 'study-coach:practice:list-archived-mistakes',
-    restorePracticeMistake: 'study-coach:practice:restore-mistake'
+    restorePracticeMistake: 'study-coach:practice:restore-mistake',
+    exportAnkiSet: 'study-coach:practice:export-anki-set',
+    exportAnkiMistakes: 'study-coach:practice:export-anki-mistakes'
   });
 });
 
@@ -421,6 +423,9 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
   await bridge.archiveResolvedPracticeMistakes?.({ workspaceId: 'ws-1' });
   await bridge.listArchivedPracticeMistakes?.('ws-1');
   await bridge.restorePracticeMistake?.({ mistakeId: 'pm-1' });
+  // iter34 P2: the Anki export channels ride last, same rule.
+  await bridge.exportAnkiSet?.({ workspaceId: 'ws-1', setId: 'ps-1' });
+  await bridge.exportAnkiMistakes?.({ workspaceId: 'ws-1' });
 
   expect(calls.map((entry) => entry.channel)).toEqual(Object.values(IPC_CHANNELS));
   expect(calls[0]).toEqual({ channel: IPC_CHANNELS.getBootstrap, args: [] });
@@ -458,102 +463,110 @@ test('bridge invokes the expected channel and forwards arguments', async () => {
     args: [{ planId: 'lp-1', weekId: 'w1', itemId: 'w1d1', kind: 'day', done: true }]
   });
   expect(calls[24]).toEqual({ channel: IPC_CHANNELS.deleteLongPlan, args: ['lp-1'] });
-  expect(calls.at(-30)).toEqual({
+  expect(calls.at(-32)).toEqual({
     channel: IPC_CHANNELS.searchAll,
     args: [{ query: '极限', limit: 5 }]
   });
-  expect(calls.at(-29)).toEqual({
+  expect(calls.at(-31)).toEqual({
     channel: IPC_CHANNELS.deleteTask,
     args: [{ taskId: 't1' }]
   });
-  expect(calls.at(-28)).toEqual({
+  expect(calls.at(-30)).toEqual({
     channel: IPC_CHANNELS.deleteReminder,
     args: [{ id: 'r1' }]
   });
-  expect(calls.at(-27)).toEqual({
+  expect(calls.at(-29)).toEqual({
     channel: IPC_CHANNELS.createMemory,
     args: [{ workspaceId: 'ws-1', text: '更喜欢早上学习', kind: 'preference' }]
   });
-  expect(calls.at(-26)).toEqual({
+  expect(calls.at(-28)).toEqual({
     channel: IPC_CHANNELS.deleteWorkspace,
     args: [{ workspaceId: 'ws-1' }]
   });
-  expect(calls.at(-25)).toEqual({
+  expect(calls.at(-27)).toEqual({
     channel: IPC_CHANNELS.updateLongPlan,
     args: [{ planId: 'lp-1', goal: '学会 LangGraph', weeklyHours: 8 }]
   });
-  expect(calls.at(-24)).toEqual({
+  expect(calls.at(-26)).toEqual({
     channel: IPC_CHANNELS.mergeKnowledgeTopics,
     args: [{ sourceId: 'kt-1', targetId: 'kt-2' }]
   });
-  expect(calls.at(-23)).toEqual({
+  expect(calls.at(-25)).toEqual({
     channel: IPC_CHANNELS.deleteNote,
     args: [{ noteId: 'n1' }]
   });
-  expect(calls.at(-22)).toEqual({
+  expect(calls.at(-24)).toEqual({
     channel: IPC_CHANNELS.updatePracticeSet,
     args: [{ setId: 'ps-1', title: '线代冲刺' }]
   });
-  expect(calls.at(-21)).toEqual({
+  expect(calls.at(-23)).toEqual({
     channel: IPC_CHANNELS.deletePracticeSet,
     args: [{ setId: 'ps-1' }]
   });
-  expect(calls.at(-20)).toEqual({
+  expect(calls.at(-22)).toEqual({
     channel: IPC_CHANNELS.reviewPracticeMistake,
     args: [{ mistakeId: 'pm-1', choice: 1 }]
   });
-  expect(calls.at(-19)).toEqual({
+  expect(calls.at(-21)).toEqual({
     channel: IPC_CHANNELS.setPracticeMistakeResolved,
     args: [{ mistakeId: 'pm-1', resolved: true }]
   });
-  expect(calls.at(-18)).toEqual({
+  expect(calls.at(-20)).toEqual({
     channel: IPC_CHANNELS.exportMistakeSheet,
     args: [{ workspaceId: 'ws-1', dueOnly: true }]
   });
-  expect(calls.at(-13)).toEqual({
+  expect(calls.at(-15)).toEqual({
     channel: IPC_CHANNELS.setConversationPermissions,
     args: [{ conversationId: 'c1', permissions: { web: true, write: false, shell: false } }]
   });
-  expect(calls.at(-12)).toEqual({
+  expect(calls.at(-14)).toEqual({
     channel: IPC_CHANNELS.submitPracticeShortAnswer,
     args: [{ questionId: 'q-1', response: '极限是 1', selfCorrect: true }]
   });
-  expect(calls.at(-11)).toEqual({
+  expect(calls.at(-13)).toEqual({
     channel: IPC_CHANNELS.listPendingCommitments,
     args: [{ byDate: '2026-11-01' }]
   });
-  expect(calls.at(-10)).toEqual({ channel: IPC_CHANNELS.listCommitments, args: [undefined] });
-  expect(calls.at(-9)).toEqual({
+  expect(calls.at(-12)).toEqual({ channel: IPC_CHANNELS.listCommitments, args: [undefined] });
+  expect(calls.at(-11)).toEqual({
     channel: IPC_CHANNELS.resolveCommitmentEntry,
     args: [{ id: 'cm-1', action: 'reschedule', due: '2026-11-25' }]
   });
-  expect(calls.at(-8)).toEqual({ channel: IPC_CHANNELS.listWeekAvailability, args: [] });
-  expect(calls.at(-7)).toEqual({
+  expect(calls.at(-10)).toEqual({ channel: IPC_CHANNELS.listWeekAvailability, args: [] });
+  expect(calls.at(-9)).toEqual({
     channel: IPC_CHANNELS.clearWeekAvailability,
     args: [{ weekStart: '2026-11-23' }]
   });
-  // iter34 P0: the four new practice channels are appended; the snapshot pair
-  // sits just before them.
-  expect(calls.at(-4)).toEqual({
+  // iter34 P0/P2: the cause, archive and Anki-export channels ride last, in
+  // this order; the snapshot pair sits just before them.
+  expect(calls.at(-6)).toEqual({
     channel: IPC_CHANNELS.setPracticeMistakeCause,
     args: [{ mistakeId: 'pm-1', cause: '导数链没拆完' }]
   });
-  expect(calls.at(-3)).toEqual({
+  expect(calls.at(-5)).toEqual({
     channel: IPC_CHANNELS.archiveResolvedPracticeMistakes,
     args: [{ workspaceId: 'ws-1' }]
   });
-  expect(calls.at(-2)).toEqual({
+  expect(calls.at(-4)).toEqual({
     channel: IPC_CHANNELS.listArchivedPracticeMistakes,
     args: ['ws-1']
   });
-  expect(calls.at(-1)).toEqual({
+  expect(calls.at(-3)).toEqual({
     channel: IPC_CHANNELS.restorePracticeMistake,
     args: [{ mistakeId: 'pm-1' }]
   });
+  expect(calls.at(-2)).toEqual({
+    channel: IPC_CHANNELS.exportAnkiSet,
+    args: [{ workspaceId: 'ws-1', setId: 'ps-1' }]
+  });
+  expect(calls.at(-1)).toEqual({
+    channel: IPC_CHANNELS.exportAnkiMistakes,
+    args: [{ workspaceId: 'ws-1' }]
+  });
   // iter33 P2b①: the snapshot channels ride just before them, payload whole.
-  expect(calls.at(-6)).toEqual({ channel: IPC_CHANNELS.getFocusSnapshot, args: [] });
-  expect(calls.at(-5)?.channel).toBe(IPC_CHANNELS.setFocusSnapshot);
-  expect((calls.at(-5)?.args as unknown[])[0]).toEqual({
+  expect(calls.at(-8)).toEqual({ channel: IPC_CHANNELS.getFocusSnapshot, args: [] });
+  expect(calls.at(-7)?.channel).toBe(IPC_CHANNELS.setFocusSnapshot);
+  expect((calls.at(-7)?.args as unknown[])[0]).toEqual({
     workspaceId: 'ws-1',
     session: {
       sessionId: 1,

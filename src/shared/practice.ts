@@ -432,6 +432,24 @@ export interface ExportMistakeSheetResult {
   date: string;
 }
 
+/** Anki TSV export of one practice set (iter34 P2). */
+export interface ExportAnkiSetInput {
+  workspaceId: string;
+  setId: string;
+}
+
+/** Anki TSV export of the whole mistake book (iter34 P2). */
+export interface ExportAnkiMistakesInput {
+  workspaceId: string;
+}
+
+export interface ExportAnkiResult {
+  /** Vault-relative POSIX path of the written file. */
+  path: string;
+  count: number;
+  date: string;
+}
+
 /** Main-process contract: vault-backed or test implementation. */
 export interface PracticeService {
   listSets(workspaceId: string): Promise<PracticeSet[]>;
@@ -472,4 +490,8 @@ export interface PracticeService {
    * the same day overwrites; the sheet is never read back as mistakes.
    */
   exportMistakeSheet?(input: ExportMistakeSheetInput): Promise<ExportMistakeSheetResult>;
+  /** Anki-compatible TSV of one practice set (iter34 P2). */
+  exportAnkiSet?(input: ExportAnkiSetInput): Promise<ExportAnkiResult>;
+  /** Anki-compatible TSV of every active mistake (iter34 P2). */
+  exportAnkiMistakes?(input: ExportAnkiMistakesInput): Promise<ExportAnkiResult>;
 }

@@ -6,6 +6,9 @@ import {
   type ArchiveResolvedMistakesResult,
   type CreatePracticeSetInput,
   type DeletePracticeSetInput,
+  type ExportAnkiMistakesInput,
+  type ExportAnkiResult,
+  type ExportAnkiSetInput,
   type ExportMistakeSheetInput,
   type ExportMistakeSheetResult,
   normalizeCause,
@@ -26,6 +29,7 @@ import {
   type UpdatePracticeSetInput
 } from '../../shared/practice';
 import { alignCheckpointHits, normalizeCheckpoints } from '../../shared/practice';
+import { buildAnkiMistakesExport, buildAnkiSetExport } from '../../shared/anki-export';
 import {
   createMutex,
   listDirectories,
@@ -98,6 +102,20 @@ function reviewSheetsDir(root: string, workspaceId: string): string {
 
 function reviewSheetFile(root: string, workspaceId: string, date: string): string {
   return join(reviewSheetsDir(root, workspaceId), `${date}.md`);
+}
+
+/**
+ * Anki TSV exports land here (iter34 P2). Plaintext inside
+ * `workspaces/<id>/practice/`, so the whole-workspace backup already covers
+ * them; the file name carries the day, and re-exporting on the same day
+ * overwrites rather than piling up versions.
+ */
+function exportsDir(root: string, workspaceId: string): string {
+  return join(practiceDir(root, workspaceId), 'exports');
+}
+
+function exportFile(root: string, workspaceId: string, name: string, date: string): string {
+  return join(exportsDir(root, workspaceId), `${name}-${date}.tsv`);
 }
 
 function requireString(value: unknown, label: string): string {
@@ -943,6 +961,82 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
       });
     },
 
+    async exportAnkiSet(input: ExportAnkiSetInput): Promise<ExportAnkiResult> {
+      if (typeof input !== 'object' || input === null) {
+        throw new Error('Anki export is required');
+      }
+      const workspaceId = assertWorkspaceId(requireString(input.workspaceId, 'workspace id'));
+      const setId = assertSafeSegment(requireString(input.setId, 'practice set id'), 'set id');
+      await ensureSeeded();
+      const today = formatLocalDate(now());
+      const target = exportFile(vaultRoot, workspaceId, setId, today);
+      return runExclusively(async () => {
+        const sets = await readSets(workspaceId);
+        const set = sets.find((entry) => entry.id === setId);
+        if (set === undefined) throw new Error(`Practice set not found: ${setId}`);
+        // Anki owns scheduling, so the vault only ever hands over content. The
+        // deck is the set's subject, cleaned by the builder like any cell.
+        const content = buildAnkiSetExport({
+          questions: set.questions,
+          subject: set.subject,
+          deck: set.subject.trim() === '' ? set.title : set.subject
+        });
+        await writeFileAtomic(target, content);
+        return {
+          path: `workspaces/${workspaceId}/practice/exports/${setId}-${today}.tsv`,
+          count: set.questions.length,
+          date: today
+        };
+      });
+    },
+
+    async exportAnkiMistakes(input: ExportAnkiMistakesInput): Promise<ExportAnkiResult> {
+      if (typeof input !== 'object' || input === null) {
+        throw new Error('Anki export is required');
+      }
+      const workspaceId = assertWorkspaceId(requireString(input.workspaceId, 'workspace id'));
+      await ensureSeeded();
+      const today = formatLocalDate(now());
+      const target = exportFile(vaultRoot, workspaceId, 'mistakes', today);
+      return runExclusively(async () => {
+        // Every active mistake, no `dueOnly` window: this is a one-off file the
+        // learner carries away, not the daily review list.
+        const mistakes = await readMistakes(workspaceId);
+        const active = mistakes
+          .filter((entry) => entry.status === 'active')
+          .sort(
+            (a, b) =>
+              b.priority - a.priority ||
+              a.due.localeCompare(b.due) ||
+              a.questionId.localeCompare(b.questionId)
+          );
+        const sets = await readSets(workspaceId);
+        const questions: Record<string, PracticeQuestion | undefined> = {};
+        const subjects: Record<string, string> = {};
+        for (const mistake of active) {
+          const set = sets.find((entry) => entry.id === mistake.setId);
+          const question = set?.questions.find((entry) => entry.id === mistake.questionId);
+          questions[mistake.id] = question;
+          if (set !== undefined && set.subject.trim() !== '') subjects[mistake.id] = set.subject;
+        }
+        const content = buildAnkiMistakesExport({
+          mistakes: active,
+          subjects,
+          questions,
+          deck: '错题'
+        });
+        await writeFileAtomic(target, content);
+        // A mistake whose question vanished contributes no row, so the count is
+        // what actually landed in the file.
+        const rows = content.split('\n').filter((line) => line !== '' && !line.startsWith('#'));
+        return {
+          path: `workspaces/${workspaceId}/practice/exports/mistakes-${today}.tsv`,
+          count: rows.length,
+          date: today
+        };
+      });
+    },
+
     async setMistakeCause(input: SetMistakeCauseInput): Promise<PracticeMistake> {
       if (typeof input !== 'object' || input === null) {
         throw new Error('Mistake update is required');
@@ -1059,6 +1153,11 @@ export function createPracticeService(root: string, options: PracticeServiceOpti
         if (existingIndex >= 0) mistakes[existingIndex] = record;
         else mistakes.push(record);
         const updatedAt = now().toISOString();
+        // Restore writes mistakes first, archive second — the reverse of the
+        // archive path, and deliberately so: if the second write fails, the
+        // record exists in both files. A duplicate is visible and fixable; a
+        // record written to neither would be a silent loss. Re-running restore
+        // finishes the move (the archive entry is removed then).
         await writeFileAtomic(
           mistakesFile(vaultRoot, workspaceId),
           serializeMistakesFile(workspaceId, mistakes, updatedAt)

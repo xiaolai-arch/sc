@@ -21,6 +21,9 @@ import type {
   ArchiveResolvedMistakesResult,
   CreatePracticeSetInput,
   DeletePracticeSetInput,
+  ExportAnkiMistakesInput,
+  ExportAnkiResult,
+  ExportAnkiSetInput,
   ExportMistakeSheetInput,
   ExportMistakeSheetResult,
   PracticeAttempt,
@@ -117,6 +120,10 @@ export interface PracticeApi {
   listArchivedPracticeMistakes?(workspaceId: string): Promise<PracticeMistake[]>;
   /** Moves one archived record back into `mistakes.md`; status stays resolved. */
   restorePracticeMistake?(input: RestoreArchivedMistakeInput): Promise<PracticeMistake>;
+  /** Writes an Anki-importable TSV for one practice set (iter34 P2). */
+  exportAnkiSet?(input: ExportAnkiSetInput): Promise<ExportAnkiResult>;
+  /** Writes an Anki-importable TSV of every active mistake (iter34 P2). */
+  exportAnkiMistakes?(input: ExportAnkiMistakesInput): Promise<ExportAnkiResult>;
 }
 
 /** Renderer-facing memory contract (vault-backed memory + learner profile). */

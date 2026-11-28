@@ -7,6 +7,7 @@ import {
   isStubbornMistake,
   type CreatePracticeQuestionInput,
   type CreatePracticeSetInput,
+  type ExportAnkiResult,
   type ExportMistakeSheetResult,
   type PracticeAttempt,
   type PracticeMistake,
@@ -30,6 +31,8 @@ type MistakeBookProps = {
   onMakeSet?: (mistake: PracticeMistake) => void;
   /** Writes the printable sheet to the vault; its path is shown afterwards. */
   onExport?: () => Promise<ExportMistakeSheetResult>;
+  /** Writes an Anki-importable TSV of every active mistake (iter34 P2). */
+  onExportAnki?: () => Promise<ExportAnkiResult>;
   /** Saves the learner's own one-line 错因 (trimmed server-side). */
   onSaveCause?: (mistake: PracticeMistake, cause: string) => Promise<PracticeMistake | void>;
   /** 清空已掌握: moves resolved mistakes to the archive file. */
@@ -334,6 +337,7 @@ export function MistakeBook({
   onResolve,
   onMakeSet,
   onExport,
+  onExportAnki,
   onSaveCause,
   onClearResolved,
   onListArchived,
@@ -343,6 +347,7 @@ export function MistakeBook({
   const [savedPath, setSavedPath] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [exportingAnki, setExportingAnki] = useState(false);
   const [copied, setCopied] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [archived, setArchived] = useState<PracticeMistake[] | null>(null);
@@ -374,6 +379,21 @@ export function MistakeBook({
       setExportError(friendlyErrorMessage(cause, '导出复习单失败，请重试。'));
     } finally {
       setExporting(false);
+    }
+  }
+
+  async function exportAnki() {
+    if (!onExportAnki || exportingAnki) return;
+    setExportingAnki(true);
+    setExportError(null);
+    setSavedPath(null);
+    try {
+      const result = await onExportAnki();
+      setSavedPath(result.path);
+    } catch (cause) {
+      setExportError(friendlyErrorMessage(cause, '导出到 Anki 失败，请重试。'));
+    } finally {
+      setExportingAnki(false);
     }
   }
 
@@ -472,6 +492,16 @@ export function MistakeBook({
               {exporting ? '正在导出…' : '导出复习单'}
             </button>
           ) : null}
+          {onExportAnki ? (
+            <button
+              type="button"
+              disabled={exportingAnki}
+              onClick={() => void exportAnki()}
+              className={quietActionClass}
+            >
+              {exportingAnki ? '正在导出…' : '导出到 Anki'}
+            </button>
+          ) : null}
           {onClearResolved ? (
             <button
               type="button"
@@ -522,6 +552,13 @@ export function MistakeBook({
           className="mt-2 text-[11px] text-gray-400 dark:text-[#8e8e93]"
         >
           已保存：{savedPath}
+        </p>
+      ) : null}
+      {savedPath && savedPath.endsWith('.tsv') ? (
+        // Verbatim from the spec: an export is a one-off file, and the vault
+        // stays the source of truth. Shown only after a TSV export.
+        <p className="mt-1 text-[11px] leading-5 text-gray-400 dark:text-[#8e8e93]">
+          这是一次性文件，导入 Anki 后不会自动更新；数据仍以 vault 里的 markdown 为准。
         </p>
       ) : null}
       {exportError ? (

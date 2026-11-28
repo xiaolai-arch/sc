@@ -34,6 +34,9 @@ import type {
   ArchiveResolvedMistakesResult,
   CreatePracticeSetInput,
   DeletePracticeSetInput,
+  ExportAnkiMistakesInput,
+  ExportAnkiResult,
+  ExportAnkiSetInput,
   ExportMistakeSheetInput,
   ExportMistakeSheetResult,
   PracticeAttempt,
@@ -134,6 +137,8 @@ export type WorkspaceData = WorkspaceDataState & {
   ) => Promise<ArchiveResolvedMistakesResult>;
   listArchivedMistakes: (workspaceId: string) => Promise<PracticeMistake[]>;
   restoreArchivedMistake: (input: RestoreArchivedMistakeInput) => Promise<PracticeMistake>;
+  exportAnkiSet: (input: ExportAnkiSetInput) => Promise<ExportAnkiResult>;
+  exportAnkiMistakes: (input: ExportAnkiMistakesInput) => Promise<ExportAnkiResult>;
   searchWorkspace: (workspaceId: string, query: string, limit?: number) => Promise<SearchResult[]>;
   searchAll: (query: string, limit?: number) => Promise<SearchResult[]>;
   send: (input: SendMessageInput) => Promise<SendMessageResult>;
@@ -682,6 +687,24 @@ export function useWorkspaceData(): WorkspaceData {
     []
   );
 
+  const exportAnkiSet = useCallback(
+    async (input: ExportAnkiSetInput) => {
+      const api = apiOrThrow();
+      if (!api.exportAnkiSet) throw new Error('当前存储不支持导出到 Anki。');
+      return api.exportAnkiSet(input);
+    },
+    []
+  );
+
+  const exportAnkiMistakes = useCallback(
+    async (input: ExportAnkiMistakesInput) => {
+      const api = apiOrThrow();
+      if (!api.exportAnkiMistakes) throw new Error('当前存储不支持导出到 Anki。');
+      return api.exportAnkiMistakes(input);
+    },
+    []
+  );
+
   const savePracticeMistakeCause = useCallback(
     async (input: SetMistakeCauseInput) => {
       const api = apiOrThrow();
@@ -995,6 +1018,8 @@ export function useWorkspaceData(): WorkspaceData {
     archiveResolvedMistakes,
     listArchivedMistakes,
     restoreArchivedMistake,
+    exportAnkiSet,
+    exportAnkiMistakes,
     searchWorkspace,
     searchAll,
     send,

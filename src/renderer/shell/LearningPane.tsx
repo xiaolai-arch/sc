@@ -11,6 +11,8 @@ import type { Workspace, WorkspaceNote } from '../../shared/workspace';
 import type {
   CreatePracticeSetInput,
   ExportMistakeSheetInput,
+  ExportAnkiResult,
+  ExportAnkiSetInput,
   ExportMistakeSheetResult,
   PracticeAttempt,
   PracticeConfidence,
@@ -72,6 +74,10 @@ type LearningPaneProps = {
   onExportMistakeSheet?: (
     input: ExportMistakeSheetInput
   ) => Promise<ExportMistakeSheetResult>;
+  /** Writes an Anki-importable TSV of every active mistake (iter34 P2). */
+  onExportAnkiMistakes?: () => Promise<ExportAnkiResult>;
+  /** Writes an Anki-importable TSV of one practice set (iter34 P2). */
+  onExportAnkiSet?: (input: ExportAnkiSetInput) => Promise<ExportAnkiResult>;
   /** Saves the learner's own one-line 错因 on a mistake. */
   onSaveMistakeCause?: (mistake: PracticeMistake, cause: string) => Promise<PracticeMistake>;
   /** 清空已掌握: moves resolved mistakes into the archive file. */
@@ -124,6 +130,7 @@ export function LearningPane({
   onCreateSet,
   onReviewSet,
   onExportMistakeSheet,
+  onExportAnkiMistakes,
   onSaveMistakeCause,
   onClearResolvedMistakes,
   onListArchivedMistakes,
@@ -374,6 +381,7 @@ export function LearningPane({
               onExportMistakeSheet({ workspaceId: mistakeBookWorkspaceId, dueOnly: false })
           }
         : {})}
+      {...(onExportAnkiMistakes ? { onExportAnki: onExportAnkiMistakes } : {})}
       {...(onSaveMistakeCause ? { onSaveCause: onSaveMistakeCause } : {})}
       {...(onClearResolvedMistakes ? { onClearResolved: onClearResolvedMistakes } : {})}
       {...(onListArchivedMistakes ? { onListArchived: onListArchivedMistakes } : {})}
