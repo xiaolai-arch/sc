@@ -34,10 +34,12 @@ import {
 } from './commitments/service';
 import { ProactiveCheckInService } from './check-ins/proactive-check-in-service';
 import type {
+  PendingPhaseAsk,
   ResumeFacts,
   ReviewRecoveryLike,
   TomorrowBridgeLike
 } from './check-ins/prompt';
+import { pendingPhaseAsk } from './check-ins/prompt';
 import {
   projectResolvedCommitment,
   weeklyAccuracyBySubject,
@@ -805,6 +807,20 @@ export async function createAppContext(options: CreateAppContextOptions): Promis
       // The one-time scope sentence (iter34 P1): recorded once its message has
       // landed, so the next Sunday review stays quiet about the new scope.
       markWeeklyScopeNoted: () => settings.markWeeklyScopeNoted(),
+      // The stage acceptance question (iter34 P3 ②): peeked from the first
+      // exam project whose stage has not been asked about yet, and recorded on
+      // that project only after the review carrying it has landed.
+      getPendingPhaseAsk: async (): Promise<PendingPhaseAsk | null> => {
+        try {
+          return pendingPhaseAsk(await workspace.listWorkspaces());
+        } catch {
+          return null;
+        }
+      },
+      markPhaseAsked: async (workspaceId: string, date: string): Promise<void> => {
+        if (!workspace.updateWorkspace) return;
+        await workspace.updateWorkspace({ workspaceId, phaseAskedAt: date });
+      },
       // The sidebar refresh: the entry point broadcasts it to open windows.
       ...(options.onConversationChanged
         ? { onConversationChanged: options.onConversationChanged }

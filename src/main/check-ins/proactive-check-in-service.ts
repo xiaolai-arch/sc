@@ -23,6 +23,8 @@ import {
   commitmentCheckInLine,
   freshStartCheckInLine,
   morningRecoveryLine,
+  pendingPhaseAsk,
+  phaseAcceptanceQuestion,
   resumeCheckInLine,
   tomorrowCheckInLine,
   weekAvailabilityQuestion,
@@ -31,6 +33,7 @@ import {
   type BackupStatusLike,
   type CheckInTrigger,
   type CommitmentLike,
+  type PendingPhaseAsk,
   type ResumeFacts,
   type ReviewRecoveryLike,
   type TomorrowBridgeLike,
@@ -112,6 +115,19 @@ export interface ProactiveCheckInOptions {
    * it has landed, so the three-layer copy is said exactly once.
    */
   consumeBackupError?: () => Promise<void>;
+  /**
+   * The first exam stage that has not had its acceptance question yet, plus
+   * the workspace it belongs to (iter34 P3 ②). Read-only: absent, null or
+   * failing leaves every message byte-identical.
+   */
+  getPendingPhaseAsk?: () => Promise<PendingPhaseAsk | null>;
+  /**
+   * Records `phaseAskedAt` on the workspace whose stage question just went
+   * out, so that stage is asked about once. Called only after the message has
+   * durably landed; absent leaves the workspace file alone (the question then
+   * repeats next Sunday — the honest failure mode of an unrecorded write).
+   */
+  markPhaseAsked?: (workspaceId: string, date: string) => Promise<void>;
   /**
    * Fires after a check-in message has durably landed in a conversation the
    * main process created (or appended to), so the renderer's sidebar can
@@ -207,6 +223,10 @@ export class ProactiveCheckInService {
   private readonly autoBackup: AutoBackupRunner | null;
   private readonly markWeeklyScopeNoted: (() => Promise<void>) | undefined;
   private readonly consumeBackupError: (() => Promise<void>) | undefined;
+  private readonly getPendingPhaseAsk: (() => Promise<PendingPhaseAsk | null>) | undefined;
+  private readonly markPhaseAsked:
+    | ((workspaceId: string, date: string) => Promise<void>)
+    | undefined;
   private readonly onConversationChanged: ((conversationId: string) => void) | undefined;
   private readonly now: () => Date;
 
@@ -227,6 +247,8 @@ export class ProactiveCheckInService {
     this.autoBackup = options.autoBackup ?? null;
     this.markWeeklyScopeNoted = options.markWeeklyScopeNoted;
     this.consumeBackupError = options.consumeBackupError;
+    this.getPendingPhaseAsk = options.getPendingPhaseAsk;
+    this.markPhaseAsked = options.markPhaseAsked;
     this.onConversationChanged = options.onConversationChanged;
     this.now = options.now ?? (() => new Date());
   }
@@ -283,6 +305,10 @@ export class ProactiveCheckInService {
       trigger === 'weekly'
         ? weeklyScopeNoteFor(weeklyStats, settings.weeklyScopeNoted)
         : '';
+    // The stage acceptance question (iter34 P3 ②) rides the Sunday review at
+    // most once per stage. Peeked here, before composing; recorded only after
+    // the message lands, so a stage is never marked asked without its question.
+    const phaseAsk = trigger === 'weekly' ? await this.pendingPhaseAskFor() : null;
     // The honest receipt is read next to the numbers, keyed to the same date.
     const weeklyHonest = trigger === 'weekly' ? await this.weeklyHonestFor(date) : null;
     // The promise revisit belongs to the morning only; a day without one keeps
@@ -308,7 +334,8 @@ export class ProactiveCheckInService {
       settings.backup ?? null,
       reviewRecovery,
       tomorrowBridgeFacts,
-      scopeNote
+      scopeNote,
+      phaseAsk ? phaseAcceptanceQuestion(phaseAsk.phase, undefined) : ''
     );
     // The due-mistake digest is a deterministic line on the morning message
     // only; it is computed once here so text and the surfaced body agree.
@@ -342,6 +369,12 @@ export class ProactiveCheckInService {
       // The sentence landed: record it so no later review repeats it. A failed
       // write would say it once more — the honest failure mode, like resume.
       await this.markWeeklyScopeNoted().catch(() => undefined);
+    }
+    if (phaseAsk && this.markPhaseAsked) {
+      // The question landed: record the day on its workspace so that stage is
+      // asked about once. A failed write repeats it next Sunday — the honest
+      // failure mode for a write that could not be recorded.
+      await this.markPhaseAsked(phaseAsk.workspaceId, date).catch(() => undefined);
     }
     if (trigger === 'weekly') {
       // The failure copy landed: clear the pending reason so the next review
@@ -434,7 +467,8 @@ export class ProactiveCheckInService {
     backup: BackupStatusLike | null = null,
     reviewRecovery: ReviewRecoveryLike | null = null,
     tomorrowBridge: TomorrowBridgeLike | null = null,
-    scopeNote: string = ''
+    scopeNote: string = '',
+    phaseAsk: string = ''
   ): Promise<string> {
     const composed = await this.composeBase(
       trigger,
@@ -446,7 +480,8 @@ export class ProactiveCheckInService {
       backup,
       reviewRecovery,
       tomorrowBridge,
-      scopeNote
+      scopeNote,
+      phaseAsk
     );
     // The mute-resume sentence is deterministic and never handed to the model,
     // so it appears exactly once by construction: appended here, to whichever
@@ -466,20 +501,22 @@ export class ProactiveCheckInService {
     backup: BackupStatusLike | null = null,
     reviewRecovery: ReviewRecoveryLike | null = null,
     tomorrowBridge: TomorrowBridgeLike | null = null,
-    scopeNote: string = ''
+    scopeNote: string = '',
+    phaseAsk: string = ''
   ): Promise<string> {
-    const template = buildCheckInTemplate(
+    const template = buildCheckInTemplate({
       context,
       trigger,
       date,
-      weeklyStats,
-      weeklyHonest,
+      stats: weeklyStats,
+      honest: weeklyHonest,
       commitment,
       backup,
       reviewRecovery,
       tomorrowBridge,
-      scopeNote
-    );
+      weeklyScopeNote: scopeNote,
+      phaseAsk
+    });
     if (!this.modelClient) return template;
     try {
       const composed = await this.composeWithModel(
@@ -511,6 +548,10 @@ export class ProactiveCheckInService {
           ...(age && !composed.includes('上次备份') ? [age] : []),
           ...failures,
           ...(scopeNote ? [scopeNote] : []),
+          // The stage question is code-owned like the rest: the model never
+          // saw it, so it is appended after the scope sentence, before the
+          // availability question — the same slot the template uses.
+          ...(phaseAsk ? [phaseAsk] : []),
           ...(availability ? [availability] : [])
         ];
         return tail.length === 0 ? composed : `${composed}\n${tail.join('\n')}`;
@@ -646,6 +687,26 @@ export class ProactiveCheckInService {
     if (!provider) return null;
     try {
       return await provider(parseLocalDate(date));
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The first exam stage whose acceptance question has not gone out yet, for
+   * the Sunday review. One ask per review at most: when several projects carry
+   * an unasked stage, the first in the provider's order speaks and the rest
+   * wait for later weeks. Any provider failure yields null and the review is
+   * unchanged.
+   */
+  private async pendingPhaseAskFor(): Promise<PendingPhaseAsk | null> {
+    const provider = this.getPendingPhaseAsk;
+    if (!provider) return null;
+    try {
+      const pending = await provider();
+      if (!pending) return null;
+      // A stage with no wording (impossible today, kept total) asks nothing.
+      return phaseAcceptanceQuestion(pending.phase, undefined) === '' ? null : pending;
     } catch {
       return null;
     }

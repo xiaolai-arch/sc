@@ -2221,6 +2221,17 @@ export function createMockApi(
       }
       if (input.targetDate === null) delete workspace.targetDate;
       else if (input.targetDate !== undefined) workspace.targetDate = input.targetDate;
+      // Exam stage (iter34 P3): exam projects only; a change forgets the
+      // recorded ask so the new stage asks its own question once.
+      if (input.phase === null) {
+        delete workspace.phase;
+        delete workspace.phaseAskedAt;
+      } else if (input.phase !== undefined) {
+        if (workspace.kind !== 'exam') throw new Error('只有备考项目可以设置阶段');
+        if (input.phase !== workspace.phase) delete workspace.phaseAskedAt;
+        workspace.phase = input.phase;
+      }
+      if (input.phaseAskedAt !== undefined) workspace.phaseAskedAt = input.phaseAskedAt;
       workspace.updatedAt = new Date().toISOString();
       persist();
       return structuredClone(workspace);

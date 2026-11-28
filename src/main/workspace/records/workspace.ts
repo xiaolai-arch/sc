@@ -2,6 +2,7 @@ import type { NoteMeta } from '../../../shared/types';
 import {
   MAX_DAILY_AVAILABLE_MINUTES,
   MIN_DAILY_AVAILABLE_MINUTES,
+  isExamPhase,
   isTargetDate,
   type Workspace,
   type WorkspaceKind
@@ -50,6 +51,10 @@ export function parseWorkspaceFile(raw: string, workspaceId: string): Workspace 
       ? { availableMinutes: Math.round(meta.availableMinutes) }
       : {}),
     ...(isTargetDate(meta.targetDate) ? { targetDate: meta.targetDate } : {}),
+    // A phase outside the three labels (or a hand-edited file) reads as unset;
+    // an unreadable asked-on date is dropped the same way.
+    ...(isExamPhase(meta.phase) ? { phase: meta.phase } : {}),
+    ...(isTargetDate(meta.phaseAskedAt) ? { phaseAskedAt: meta.phaseAskedAt } : {}),
     createdAt: asString(meta.createdAt),
     updatedAt: asString(meta.updatedAt)
   };
@@ -71,6 +76,10 @@ export function serializeWorkspaceFile(workspace: Workspace): string {
       ? { availableMinutes: workspace.availableMinutes }
       : {}),
     ...(workspace.targetDate !== undefined ? { targetDate: workspace.targetDate } : {}),
+    ...(workspace.phase !== undefined ? { phase: workspace.phase } : {}),
+    ...(workspace.phaseAskedAt !== undefined
+      ? { phaseAskedAt: workspace.phaseAskedAt }
+      : {}),
     createdAt: workspace.createdAt,
     updatedAt: workspace.updatedAt
   };

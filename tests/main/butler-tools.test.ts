@@ -930,6 +930,77 @@ test('updates workspace metadata', async () => {
   });
 });
 
+// --- the exam stage parameter (iter34 P3, 验收 24) --------------------------
+
+function phaseService(kind: 'exam' | 'study'): {
+  service: WorkspaceService;
+  update: ReturnType<typeof vi.fn>;
+} {
+  const update = vi.fn(async (input: Record<string, unknown>) => ({
+    id: String(input.workspaceId),
+    name: '考研',
+    kind,
+    color: '#ef4444',
+    goal: '2027 上岸',
+    description: '',
+    ...(input.phase !== undefined ? { phase: input.phase } : {})
+  }));
+  const service = {
+    ...workspaceService,
+    getWorkspaceSnapshot: async (workspaceId: string) => ({
+      workspace: {
+        id: workspaceId,
+        name: '考研',
+        kind,
+        color: '#ef4444',
+        goal: '',
+        description: ''
+      },
+      tasks: [],
+      notes: [],
+      memory: [],
+      reminders: []
+    }),
+    updateWorkspace: update
+  } as unknown as WorkspaceService;
+  return { service, update };
+}
+
+test('update_workspace forwards a phase on an exam project (验收 24)', async () => {
+  const { service, update } = phaseService('exam');
+  const result = await executeButlerTool(
+    { id: 'c-phase', name: 'update_workspace', arguments: { phase: '强化' } },
+    tools,
+    { workspace: service, workspaceId: 'ws-exam', now: () => new Date() }
+  );
+  expect(result.ok).toBe(true);
+  expect(update).toHaveBeenCalledWith({ workspaceId: 'ws-exam', phase: '强化' });
+});
+
+test('update_workspace refuses a phase on a non-exam project (验收 24)', async () => {
+  const { service, update } = phaseService('study');
+  const result = await executeButlerTool(
+    { id: 'c-phase', name: 'update_workspace', arguments: { phase: '基础' } },
+    tools,
+    { workspace: service, workspaceId: 'ws-study', now: () => new Date() }
+  );
+  expect(result.ok).toBe(false);
+  expect(JSON.parse(result.content)).toMatchObject({ ok: false });
+  expect(JSON.parse(result.content).error).toContain('备考项目');
+  expect(update).not.toHaveBeenCalled();
+});
+
+test('update_workspace refuses a label outside the three stages (验收 24)', async () => {
+  const { service, update } = phaseService('exam');
+  const result = await executeButlerTool(
+    { id: 'c-phase', name: 'update_workspace', arguments: { phase: '预习' } },
+    tools,
+    { workspace: service, workspaceId: 'ws-exam', now: () => new Date() }
+  );
+  expect(result.ok).toBe(false);
+  expect(update).not.toHaveBeenCalled();
+});
+
 test('does not start a tool after generation was stopped', async () => {
   const controller = new AbortController();
   controller.abort();

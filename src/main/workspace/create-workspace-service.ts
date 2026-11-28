@@ -10,6 +10,7 @@ import type {
   DeleteNoteInput,
   DeleteReminderInput,
   DeleteTaskInput,
+  ExamPhase,
   MemoryItem,
   Reminder,
   ReminderStatePatch,
@@ -32,6 +33,7 @@ import {
   normalizeTaskCue,
   normalizeTaskNextStep,
   REMINDER_STATES,
+  isExamPhase,
   isTargetDate,
   taskCueLength
 } from '../../shared/workspace';
@@ -379,18 +381,44 @@ export function createWorkspaceService(
         else if (isTargetDate(rawTarget)) targetDate = rawTarget;
         else throw new Error('Invalid target date: expected a YYYY-MM-DD date');
       }
+      // undefined keeps the stage, null clears it; only the three labels are
+      // accepted, and only on an exam project (checked against the stored kind
+      // inside the exclusive section below).
+      const rawPhase = (input as { phase?: unknown } | undefined)?.phase;
+      let phase: ExamPhase | null | undefined;
+      if (rawPhase !== undefined) {
+        if (rawPhase === null) phase = null;
+        else if (isExamPhase(rawPhase)) phase = rawPhase;
+        else throw new Error('Invalid exam phase: expected one of 基础 / 强化 / 冲刺');
+      }
+      // The one-time ask marker is written by the main process right after a
+      // review carries the question; a bad value is refused like the phase.
+      const rawPhaseAskedAt = (input as { phaseAskedAt?: unknown } | undefined)
+        ?.phaseAskedAt;
+      if (rawPhaseAskedAt !== undefined && !isTargetDate(rawPhaseAskedAt)) {
+        throw new Error('Invalid phaseAskedAt: expected a YYYY-MM-DD date');
+      }
+      const phaseAskedAt = rawPhaseAskedAt as string | undefined;
       if (
         name === undefined &&
         goal === undefined &&
         description === undefined &&
         checkIn === undefined &&
         availableMinutes === undefined &&
-        targetDate === undefined
+        targetDate === undefined &&
+        phase === undefined &&
+        phaseAskedAt === undefined
       ) {
         throw new Error('No workspace fields to update');
       }
       return runExclusively(async () => {
         const current = await readWorkspaceOrThrow(workspaceId);
+        if (phase !== undefined && phase !== null && current.kind !== 'exam') {
+          throw new Error('Exam phase can only be set on an exam project');
+        }
+        if (phaseAskedAt !== undefined && current.kind !== 'exam') {
+          throw new Error('Exam phase can only be set on an exam project');
+        }
         const nextGoal = goal !== undefined ? goal : current.goal;
         const next: Workspace = {
           ...current,
@@ -408,6 +436,19 @@ export function createWorkspaceService(
         }
         if (targetDate === null) delete next.targetDate;
         else if (targetDate !== undefined) next.targetDate = targetDate;
+        // A new stage asks its own acceptance question once, so switching
+        // (or clearing) the phase forgets the recorded ask. Re-setting the
+        // same stage keeps it — nothing changed, nothing to re-ask.
+        if (phase === null) {
+          delete next.phase;
+          delete next.phaseAskedAt;
+        } else if (phase !== undefined) {
+          next.phase = phase;
+          if (phase !== current.phase) delete next.phaseAskedAt;
+        }
+        // The question landed: record the day. Only meaningful on a stage; a
+        // review never asks for a project without one.
+        if (phaseAskedAt !== undefined) next.phaseAskedAt = phaseAskedAt;
         await writeFileAtomic(
           workspaceFile(vaultRoot, workspaceId),
           serializeWorkspaceFile(next)
